@@ -48,7 +48,7 @@ One person can send 60 list and page requests in one minute. Each control plane 
 
 1. Select the files and directories that you need in the tree. If you select nothing, the restore uses the whole snapshot.
 2. Click **Restore…**.
-3. Select the target host ("Target host"). The default is the host of the snapshot when that host is active. Otherwise it is the maintenance agent of the repository.
+3. Select the target host ("Target host"). The default is the host of the snapshot when that host is active. Otherwise it is the maintenance host of the repository.
 4. Check the target path. The screen suggests a new folder in the first restore root of the agent, for example `/var/lib/restichub-restore/a1b2c3d4`. The path must be absolute and must lie inside a restore root. On a Windows host, the path has the Windows format, for example `C:\ProgramData\ResticHub-Restore\a1b2c3d4`. The button at the end of the field returns the suggested path. If the agent has more than one restore root, click a root below the field to use it.
 5. If you selected no path, you can enter paths to exclude. Use restic patterns, one pattern on each line.
 6. Select what to do with a file that exists in the target. For "Replace every file", the screen shows a warning.

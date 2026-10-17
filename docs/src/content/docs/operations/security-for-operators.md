@@ -20,7 +20,7 @@ Apply all controls that your storage supports.
 1. **Bucket versioning.** Turn on versioning on an S3 repository. A deleted object stays as an older version.
 2. **Lifecycle rules.** Set a rule that keeps old versions for a fixed time. A deletion then does not remove the data at once.
 3. **Separate credentials for each host group.** Create backend credentials for each group of hosts. A compromised host reaches only the repository of its group.
-4. **A dedicated maintenance agent.** Only the maintenance host runs `forget`, `prune` and `check`. Use a dedicated host for this role. See [Repositories](/restichub/concepts/repositories/). Do not use a host with user software.
+4. **A dedicated maintenance host.** Only the maintenance host runs `forget`, `prune` and `check`. Use a dedicated host for this role. See [Repositories](/restichub/concepts/repositories/). Do not use a host with user software.
 5. **A secondary copy.** Copy important repositories with `restic copy` to a repository that no agent can reach. Run the copy from a host that only you control.
 
 ## Other actions
