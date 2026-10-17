@@ -6,12 +6,21 @@
 		$props();
 
 	const filters = queryFilters(['q', 'host', 'state', 'sort', 'order', 'page', 'size'] as const);
+	const label = 'Probe';
+	const actions = [
+		{ name: 'search', run: () => filters.update({ q: 'text', page: '2' }) },
+		{
+			name: 'view',
+			run: () => filters.update({ state: 'failed', size: '50', sort: 'host', order: 'desc' })
+		},
+		{ name: 'host', run: () => filters.update({ host: 'h2' }) }
+	];
 </script>
 
 <output data-testid="state">{JSON.stringify(filters.value)}</output>
 <output data-testid="restored">{filters.restored}</output>
 <FilterBar
-	label="Probe"
+	{label}
 	value={filters.value}
 	onchange={filters.update}
 	onreset={filters.reset}
@@ -38,10 +47,6 @@
 		}
 	]}
 />
-<button onclick={() => filters.update({ q: 'text', page: '2' })}>search</button>
-<button
-	onclick={() => filters.update({ state: 'failed', size: '50', sort: 'host', order: 'desc' })}
->
-	view
-</button>
-<button onclick={() => filters.update({ host: 'h2' })}>host</button>
+{#each actions as action (action.name)}
+	<button onclick={action.run}>{action.name}</button>
+{/each}

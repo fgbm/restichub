@@ -50,7 +50,7 @@ export function queryFilters<K extends string>(keys: readonly K[]): QueryFilters
 		}
 	}
 	const restored = Object.keys(kept).length > 0;
-	const restoredKeys = new Set<string>(Object.keys(kept));
+	let restoredKeys = Object.keys(kept) as string[];
 
 	let state = $state({ ...readQuery(page.url.searchParams, keys), ...kept });
 	// The address changes after the goto call, so the effect must not read the old one meanwhile.
@@ -100,7 +100,7 @@ export function queryFilters<K extends string>(keys: readonly K[]): QueryFilters
 
 	setContext<KeptFilters>(KEPT_FILTERS, {
 		prune(key, allowed) {
-			if (!restoredKeys.has(key)) return;
+			if (!restoredKeys.includes(key)) return;
 			const current = state[key as K];
 			if (!current) return;
 			const values = splitList(current).filter((item) => allowed.includes(item));
@@ -124,7 +124,7 @@ export function queryFilters<K extends string>(keys: readonly K[]): QueryFilters
 			if ((keys as readonly string[]).includes('page') && !('page' in patch)) {
 				(next as Record<string, string>).page = '';
 			}
-			for (const key of Object.keys(patch)) restoredKeys.delete(key);
+			restoredKeys = restoredKeys.filter((key) => !(key in patch));
 			state = next;
 			sync();
 			if (mounted) persist();
@@ -134,7 +134,7 @@ export function queryFilters<K extends string>(keys: readonly K[]): QueryFilters
 			for (const key of keys) {
 				if (VIEW_KEYS.includes(key)) next[key] = state[key];
 			}
-			restoredKeys.clear();
+			restoredKeys = [];
 			state = next;
 			sync();
 			if (mounted) persist();
