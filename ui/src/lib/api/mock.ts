@@ -1010,9 +1010,17 @@ export class MockApiService {
 		return this.me();
 	}
 
-	async changePassword(_request: ChangePasswordRequest): Promise<void> {
-		void _request;
-		return undefined;
+	async changePassword(request: ChangePasswordRequest): Promise<void> {
+		// The e2e tests sign in with this password; the mock sign-in accepts any password.
+		if (request.current_password !== 'secret') {
+			throw new ApiError({
+				status: 400,
+				code: 'invalid_argument',
+				title: 'Bad Request',
+				field: 'current_password',
+				reason: 'invalid_credentials'
+			});
+		}
 	}
 
 	async setupStatus(): Promise<SetupStatus> {
@@ -2226,13 +2234,18 @@ export class MockApiService {
 				(user) => user.username.toLowerCase() === request.username.toLowerCase()
 			)
 		) {
-			throw new Error('username_taken');
+			throw new ApiError({
+				status: 409,
+				code: 'username_taken',
+				title: 'Conflict',
+				field: 'username'
+			});
 		}
 		if (
 			request.email &&
 			this.platformUsers.some((user) => user.email?.toLowerCase() === request.email?.toLowerCase())
 		) {
-			throw new Error('email_taken');
+			throw new ApiError({ status: 409, code: 'email_taken', title: 'Conflict', field: 'email' });
 		}
 		const memberships = (request.memberships ?? []).map((membership) => ({
 			tenant_id: membership.tenant_id,

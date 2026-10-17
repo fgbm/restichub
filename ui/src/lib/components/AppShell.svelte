@@ -25,6 +25,7 @@
 	import type { MenuItem } from './ui/index.ts';
 	import Brandmark from './Brandmark.svelte';
 	import TenantSwitcher from './TenantSwitcher.svelte';
+	import ChangePasswordDialog from './ChangePasswordDialog.svelte';
 
 	let { children }: { children: Snippet } = $props();
 
@@ -115,6 +116,8 @@
 		setTheme(dark ? 'light' : 'dark');
 	}
 
+	let passwordOpen = $state(false);
+
 	const accountItems = $derived<MenuItem[]>([
 		...(settingsTab
 			? [
@@ -126,11 +129,16 @@
 				]
 			: []),
 		{
+			label: t('account.password.title'),
+			icon: 'lock',
+			onSelect: () => (passwordOpen = true)
+		},
+		{
 			label: t('topbar.theme.light'),
 			group: 'theme',
 			groupLabel: t('topbar.theme'),
 			checked: theme === 'light',
-			separatorBefore: !!settingsTab,
+			separatorBefore: true,
 			onSelect: () => setTheme('light')
 		},
 		{
@@ -258,6 +266,8 @@
 		{/key}
 	</main>
 </div>
+
+<ChangePasswordDialog bind:open={passwordOpen} />
 
 <ToastRegion />
 

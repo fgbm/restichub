@@ -37,10 +37,29 @@ pub enum BackendSettings {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         region: Option<String>,
     },
-    /// A rest-server. The backend credential is optional.
-    Rest { endpoint: String },
+    /// A rest-server. The user name and the password are optional; the user name is not a secret.
+    Rest {
+        endpoint: String,
+        /// In an update, an absent field keeps the stored user name; `null` or an empty string
+        /// clears it.
+        #[serde(
+            default,
+            deserialize_with = "present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        #[schema(value_type = Option<String>, nullable)]
+        username: Option<Option<String>>,
+    },
     /// A path on the host of the agent that runs the job.
     Local { path: String },
+}
+
+/// Tells an explicit `null` (`Some(None)`) from an absent field (`None`, through `default`).
+fn present<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer).map(Some)
 }
 
 /// The write-only secret fields of a repository create.
@@ -168,6 +187,7 @@ impl RepositoryView {
             },
             BackendKind::Rest => BackendSettings::Rest {
                 endpoint: repository.rest_endpoint.clone().unwrap_or_default(),
+                username: repository.rest_username.clone().map(Some),
             },
             BackendKind::Local => BackendSettings::Local {
                 path: repository.local_path.clone().unwrap_or_default(),
@@ -217,6 +237,7 @@ pub(super) struct ValidatedBackend {
     s3_prefix: Option<String>,
     s3_region: Option<String>,
     rest_endpoint: Option<String>,
+    pub(super) rest_username: Option<String>,
     local_path: Option<String>,
 }
 
@@ -228,6 +249,7 @@ impl ValidatedBackend {
             s3_prefix: self.s3_prefix.as_deref(),
             s3_region: self.s3_region.as_deref(),
             rest_endpoint: self.rest_endpoint.as_deref(),
+            rest_username: self.rest_username.as_deref(),
             local_path: self.local_path.as_deref(),
         }
     }
@@ -242,6 +264,7 @@ pub(super) fn validate_backend(backend: BackendSettings) -> Result<ValidatedBack
         s3_prefix: None,
         s3_region: None,
         rest_endpoint: None,
+        rest_username: None,
         local_path: None,
     };
     match backend {
@@ -263,12 +286,16 @@ pub(super) fn validate_backend(backend: BackendSettings) -> Result<ValidatedBack
             )?;
             validated.s3_region = validate_region(region.as_deref())?;
         }
-        BackendSettings::Rest { endpoint } => {
+        BackendSettings::Rest { endpoint, username } => {
             validated.kind = BackendKind::Rest;
             validated.rest_endpoint = Some(validation::validate_endpoint(
                 "backend.endpoint",
                 &endpoint,
             )?);
+            validated.rest_username = validation::validate_rest_username(
+                "backend.username",
+                username.flatten().as_deref().unwrap_or_default(),
+            )?;
         }
         BackendSettings::Local { path } => {
             validated.kind = BackendKind::Local;
@@ -288,6 +315,7 @@ pub(super) fn validated_from_row(repository: &Repository, kind: BackendKind) -> 
         s3_prefix: repository.s3_prefix.clone(),
         s3_region: repository.s3_region.clone(),
         rest_endpoint: repository.rest_endpoint.clone(),
+        rest_username: repository.rest_username.clone(),
         local_path: repository.local_path.clone(),
     }
 }
@@ -623,7 +651,7 @@ pub(super) fn current_diff(repository: &Repository) -> serde_json::Value {
         "name": repository.name,
         "backend": match repository.backend {
             BackendKind::S3 => json!({"kind": "s3", "endpoint": repository.s3_endpoint, "bucket": repository.s3_bucket, "prefix": repository.s3_prefix, "region": repository.s3_region}),
-            BackendKind::Rest => json!({"kind": "rest", "endpoint": repository.rest_endpoint}),
+            BackendKind::Rest => json!({"kind": "rest", "endpoint": repository.rest_endpoint, "username": repository.rest_username}),
             BackendKind::Local => json!({"kind": "local", "path": repository.local_path}),
         },
         "maintenance_agent_id": repository.maintenance_agent_id.map(|id| id.to_string()),
@@ -659,7 +687,9 @@ fn backend_value(backend: &ValidatedBackend) -> serde_json::Value {
         BackendKind::S3 => {
             json!({"kind": "s3", "endpoint": backend.s3_endpoint, "bucket": backend.s3_bucket, "prefix": backend.s3_prefix, "region": backend.s3_region})
         }
-        BackendKind::Rest => json!({"kind": "rest", "endpoint": backend.rest_endpoint}),
+        BackendKind::Rest => {
+            json!({"kind": "rest", "endpoint": backend.rest_endpoint, "username": backend.rest_username})
+        }
         BackendKind::Local => json!({"kind": "local", "path": backend.local_path}),
     }
 }

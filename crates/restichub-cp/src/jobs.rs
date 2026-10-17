@@ -974,7 +974,7 @@ pub(crate) async fn repository_access(
             .await?
             .unwrap_or_default();
             access.backend_credentials = Some(BackendCredentials::Rest(RestCredentials {
-                username: String::new(),
+                username: repository.rest_username.clone().unwrap_or_default(),
                 password: rest_password,
             }));
         }

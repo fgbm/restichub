@@ -1,0 +1,41 @@
+---
+title: Status and reason codes
+description: The step statuses, the reason codes of failed jobs and their texts in the web interface.
+---
+
+import UiTable from '../../../components/UiTable.astro';
+
+This page lists the codes that the control plane stores for a job and its steps. For the job states, see [Job lifecycle](/restichub/concepts/job-lifecycle/#job-states).
+
+The build of this site reads the texts from the message catalogs of the web interface, so they match the release of the site.
+
+## Step statuses
+
+<UiTable prefix="jobDetail.stepStatus." code="Code" text="Text in the web interface" />
+
+## Refused jobs
+
+If the control plane cannot build a job, the job fails with a reason code:
+
+| Reason | Meaning |
+|---|---|
+| `compile_failed` | The profile no longer compiles for the agent. |
+| `agent_facts_invalid` | The facts of the agent are not usable. |
+| `agent_capability_missing` | The agent is too old for the step. It does not know a field that the step needs. |
+| `forget_without_tags` | The retention step has no tag filter. The control plane does not send it. |
+| `step_missing` | The profile no longer holds the step of the job. |
+| `agent_revoked` | The agent is revoked. |
+| `plan_missing`, `plan_changed` | The plan is deleted, or it moved to another agent. |
+| `profile_missing`, `repository_missing`, `repository_changed` | An object of the job is deleted or changed. |
+| `secret_unavailable` | A secret of the repository cannot be read. |
+| `signing_failed` | The control plane could not sign the job. |
+
+## Reasons and result codes
+
+A failed or refused job shows a reason under its title on the page of the job. These are the texts:
+
+<UiTable prefix="jobs.reason." code="Code" text="Text in the web interface" />
+
+An alert about a failed job uses a short text of the code:
+
+<UiTable prefix="jobs.errorCode." code="Code" text="Text in the alert" />

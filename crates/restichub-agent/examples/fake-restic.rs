@@ -3,7 +3,9 @@
 //! The agent runs a step with the repository location in `RESTIC_REPOSITORY`. The double reads a
 //! sibling file `<location>.restichub-fake` that holds two exit codes: the `test_access` code and
 //! the `init` code. It appends its own arguments to `<location>.restichub-argv`, so a test can prove
-//! that no repository secret reaches an argument (AC-AG-04). It exits with the code of the step.
+//! that no repository secret reaches an argument (AC-AG-04). It appends the names of the rest-server
+//! credential variables that it gets to `<location>.restichub-env`, never their values. It exits
+//! with the code of the step.
 //!
 //! Two optional sibling files change the timing:
 //!
@@ -43,6 +45,7 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let command = args.first().cloned().unwrap_or_default();
     record(&format!("{repository}.restichub-argv"), &args);
+    record_credential_names(&format!("{repository}.restichub-env"));
     record_priority(&format!("{repository}.restichub-state"));
     ignore_interrupt(&format!("{repository}.restichub-ignore"));
     if command == "ls" {
@@ -226,6 +229,18 @@ fn sleep_for(path: &str) {
     };
     if let Ok(millis) = text.trim().parse::<u64>() {
         std::thread::sleep(Duration::from_millis(millis));
+    }
+}
+
+/// Appends the names of the rest-server credential variables that hold a value.
+fn record_credential_names(path: &str) {
+    let names: Vec<String> = ["RESTIC_REST_USERNAME", "RESTIC_REST_PASSWORD"]
+        .into_iter()
+        .filter(|name| std::env::var_os(name).is_some_and(|value| !value.is_empty()))
+        .map(str::to_owned)
+        .collect();
+    if !names.is_empty() {
+        record(path, &names);
     }
 }
 

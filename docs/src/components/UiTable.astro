@@ -1,0 +1,22 @@
+---
+// A table of codes and their texts in the web interface, from the UI catalogs at build time.
+import { pageLang, uiTexts } from '../lib/ui-text';
+
+interface Props {
+	prefix: string;
+	code: string;
+	text: string;
+}
+
+const { prefix, code, text } = Astro.props;
+const rows = uiTexts(pageLang(Astro.locals), prefix);
+---
+
+<table>
+	<thead>
+		<tr><th>{code}</th><th>{text}</th></tr>
+	</thead>
+	<tbody>
+		{rows.map(([key, value]) => <tr><td><code>{key}</code></td><td>{value}</td></tr>)}
+	</tbody>
+</table>

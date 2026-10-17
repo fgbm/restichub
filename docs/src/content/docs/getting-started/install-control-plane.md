@@ -138,63 +138,11 @@ Do not pass the key in the environment variable `RESTICHUB_KEK`. `docker inspect
 
 ## Upgrade
 
-:::caution
-Read the upgrade notes of the new release before you start. A release can change the files of the stack or the environment file.
-:::
-
-1. Verify the new release and read its image digest, as in [Get the image digest](#get-the-image-digest).
-2. Make a [backup](#backup) of the database.
-3. Go to the checkout:
-
-   ```sh
-   cd /opt/restichub
-   ```
-
-4. Get the new release tag, for example `v0.1.0`:
-
-   ```sh
-   git fetch --depth 1 origin tag v0.1.0
-   ```
-
-5. Check out the tag:
-
-   ```sh
-   git checkout v0.1.0
-   ```
-
-6. In the file `deploy/reference/.env`, set `RESTICHUB_IMAGE` to the new image reference with the digest.
-7. Go to the directory of the reference stack:
-
-   ```sh
-   cd deploy/reference
-   ```
-
-8. Pull the image and restart the stack:
-
-   ```sh
-   docker compose pull
-   docker compose up -d
-   ```
-
-The `migrate` service applies the new migrations before the control plane starts. Make sure that `docker compose ps cp` shows `(healthy)`.
+See [Upgrade](/restichub/guides/upgrade/). Make a backup before each upgrade.
 
 ## Backup
 
-The control plane keeps the repository passwords in the database, wrapped with the key encryption key. The installation CA is in the database too, so one database copy holds the whole installation.
-
-1. Back up the database:
-
-   ```sh
-   docker compose exec -T postgres pg_dump -U restichub_owner restichub > restichub.sql
-   ```
-
-2. Copy the file to another host.
-3. Copy the key encryption key to a different location, for example a password manager. The key is in the file `secrets/restichub_kek`.
-4. Do not keep the key with the database copy. If an attacker gets the copy and the key together, all secrets are disclosed.
-
-:::danger
-Losing the database or the key encryption key loses the repository passwords and the installation CA. Restic cannot open a repository without its password. Keep the copies on another host.
-:::
+Back up the database and the key encryption key, and keep them apart. See [Back up the control plane](/restichub/operations/back-up-the-control-plane/).
 
 ## The agent listener
 

@@ -610,3 +610,80 @@ async fn db_the_list_fields_migration_backfills_the_last_delivery_attempt() -> T
     db.cleanup().await;
     Ok(())
 }
+
+/// The migration 0052 turns a blank email into NULL, so the unique email index lets any number of
+/// accounts have no email.
+#[tokio::test]
+async fn db_the_blank_email_migration_writes_null() -> TestResult {
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let admin = admin_pool(&db).await?;
+    let name = format!("restichub_mig_{}", uuid::Uuid::now_v7().simple());
+    admin_query(&admin, &format!("CREATE DATABASE \"{name}\"")).await?;
+    let pool = PgPoolOptions::new()
+        .max_connections(2)
+        .connect_with(db.admin_options().database(name.as_str()))
+        .await?;
+
+    let before: Vec<_> = MIGRATOR
+        .iter()
+        .filter(|migration| migration.version < 52)
+        .cloned()
+        .collect();
+    Migrator {
+        migrations: Cow::Owned(before),
+        ignore_missing: false,
+        locking: true,
+        no_tx: false,
+        table_name: Cow::Borrowed("_sqlx_migrations"),
+        create_schemas: Cow::Owned(Vec::new()),
+    }
+    .run(&pool)
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO users (id, tenant_id, username, password_hash, display_name, email) \
+         VALUES ($1, '00000000-0000-7000-8000-000000000000', 'blank', 'phc', 'Blank', ' '), \
+                ($2, '00000000-0000-7000-8000-000000000000', 'mail', 'phc', 'Mail', 'a@b.example')",
+    )
+    .bind(uuid::Uuid::now_v7())
+    .bind(uuid::Uuid::now_v7())
+    .execute(&pool)
+    .await?;
+
+    let sql = MIGRATOR
+        .iter()
+        .find(|migration| migration.version == 52)
+        .expect("the blank email migration is present")
+        .sql
+        .as_str()
+        .to_owned();
+    sqlx::raw_sql(AssertSqlSafe(sql)).execute(&pool).await?;
+
+    let rows: Vec<(String, Option<String>)> =
+        sqlx::query_as("SELECT username, email FROM users ORDER BY username")
+            .fetch_all(&pool)
+            .await?;
+    assert_eq!(
+        rows,
+        [
+            ("blank".to_owned(), None),
+            ("mail".to_owned(), Some("a@b.example".to_owned())),
+        ]
+    );
+    let blank = sqlx::query("UPDATE users SET email = '' WHERE username = 'blank'")
+        .execute(&pool)
+        .await;
+    assert!(blank.is_err(), "the check must refuse a blank email");
+
+    pool.close().await;
+    admin_query(
+        &admin,
+        &format!("DROP DATABASE IF EXISTS \"{name}\" WITH (FORCE)"),
+    )
+    .await?;
+    admin.close().await;
+    db.cleanup().await;
+    Ok(())
+}

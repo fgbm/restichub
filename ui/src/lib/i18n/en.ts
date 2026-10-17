@@ -46,6 +46,13 @@ export const en = {
 	'topbar.noOrganizations': 'No organizations',
 	'topbar.switched': 'You switched to {name}.',
 	'topbar.breadcrumb': 'Breadcrumb',
+	'account.password.title': 'Change password',
+	'account.password.hint': 'Your other sessions stop. This session continues.',
+	'account.password.current': 'Current password',
+	'account.password.new': 'New password',
+	'account.password.submit': 'Change password',
+	'account.password.wrongCurrent': 'The current password is not correct.',
+	'account.password.done': 'The password is changed.',
 	'settings.title': 'Settings',
 	'settings.sections': 'Settings sections',
 	'settings.group.access': 'Access',
@@ -579,6 +586,9 @@ export const en = {
 		'ResticHub shows this value never again after you save it. You can only replace it.',
 	'repositories.s3AccessKey': 'S3 access key',
 	'repositories.s3SecretKey': 'S3 secret key',
+	'repositories.restUsername': 'User name',
+	'repositories.restUsernameHint':
+		'Optional. The account in the .htpasswd file of the rest-server. It is not a secret.',
 	'repositories.restPassword': 'REST server password',
 	'repositories.restPasswordHint':
 		'Optional. The control plane sends it to the agent with each job.',

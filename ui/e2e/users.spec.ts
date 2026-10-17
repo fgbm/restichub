@@ -87,3 +87,28 @@ test('an organization member opens as a page with its role', async ({ page }) =>
 	await expect(page.getByText('The role is changed.')).toBeVisible();
 	await expect(page.getByText('Read only, including the organization audit log.')).toBeVisible();
 });
+
+test('ac_au_10 a taken name or email marks only the field that the server names', async ({
+	page
+}) => {
+	await signIn(page);
+	await openPlatformUsers(page);
+	await page.getByRole('button', { name: 'Create user' }).click();
+	const dialog = page.getByRole('dialog');
+	const username = dialog.locator('#platform-user-username');
+	const email = dialog.locator('#platform-user-email');
+	await username.fill('boris');
+	await dialog.locator('#platform-user-display-name').fill('Boris Again');
+	await dialog.locator('#platform-user-password').fill('a long enough password');
+	await dialog.getByRole('button', { name: 'Create user' }).click();
+	await expect(username).toHaveAttribute('aria-invalid', 'true');
+	await expect(dialog.getByText('This user name is taken.')).toBeVisible();
+	await expect(email).not.toHaveAttribute('aria-invalid', 'true');
+
+	await username.fill('carol');
+	await email.fill('anna@example.com');
+	await dialog.getByRole('button', { name: 'Create user' }).click();
+	await expect(email).toHaveAttribute('aria-invalid', 'true');
+	await expect(dialog.getByText('This email is taken.')).toBeVisible();
+	await expect(username).not.toHaveAttribute('aria-invalid', 'true');
+});

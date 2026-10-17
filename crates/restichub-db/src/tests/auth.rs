@@ -316,3 +316,54 @@ async fn db_the_platform_password_write_needs_the_platform_scope() -> TestResult
     db.cleanup().await;
     Ok(())
 }
+
+/// AC-AU-10 support: only the two unique account indexes name a field. A rename of an index or
+/// another unique violation must not name a wrong field.
+#[tokio::test]
+async fn db_only_the_account_unique_indexes_name_a_field() -> TestResult {
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let insert = |id: Uuid, username: &'static str, email: &'static str| {
+        let owner = db.owner_pool().clone();
+        async move {
+            let mut tx = owner.begin().await.map_err(crate::DbError::Query)?;
+            sqlx::query("SELECT set_config('restichub.tenant_id', $1, true)")
+                .bind(crate::PLATFORM_TENANT_ID.to_string())
+                .execute(&mut *tx)
+                .await
+                .map_err(crate::DbError::Query)?;
+            sqlx::query(
+                "INSERT INTO users (id, tenant_id, username, password_hash, display_name, email) \
+                 VALUES ($1, $2, $3, 'phc', 'Name', $4)",
+            )
+            .bind(id)
+            .bind(crate::PLATFORM_TENANT_ID)
+            .bind(username)
+            .bind(email)
+            .execute(&mut *tx)
+            .await
+            .map_err(crate::DbError::Query)?;
+            tx.commit().await.map_err(crate::DbError::Query)
+        }
+    };
+    let field = |result: Result<_, crate::DbError>| {
+        users::AccountField::of_unique_violation(&result.expect_err("the insert must fail"))
+    };
+
+    let id = Uuid::now_v7();
+    insert(id, "alice", "alice@example.net").await?;
+    assert_eq!(
+        field(insert(Uuid::now_v7(), "ALICE", "other@example.net").await),
+        Some(users::AccountField::Username)
+    );
+    assert_eq!(
+        field(insert(Uuid::now_v7(), "bob", "Alice@Example.net").await),
+        Some(users::AccountField::Email)
+    );
+    assert_eq!(field(insert(id, "carol", "carol@example.net").await), None);
+    assert_eq!(field(insert(Uuid::now_v7(), "dave", " ").await), None);
+
+    db.cleanup().await;
+    Ok(())
+}

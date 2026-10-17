@@ -13,9 +13,9 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use restichub_db::audit::{Actor, AuditAction, diff};
 use restichub_db::tenants as tenant_repo;
-use restichub_db::users::{CreateAccountStatus, NewPlatformAccount, WriteStatus};
+use restichub_db::users::{AccountField, CreateAccountStatus, NewPlatformAccount, WriteStatus};
 use restichub_db::{
-    DbError, PLATFORM_TENANT_ID, Role, TenantId, TenantStatus, UserId, auth, memberships, users,
+    PLATFORM_TENANT_ID, Role, TenantId, TenantStatus, UserId, auth, memberships, users,
 };
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -50,7 +50,7 @@ pub struct CreateAccountRequest {
     pub display_name: String,
     /// At least 12 characters.
     pub password: String,
-    /// Unique in the installation when it is set (ADR-0028).
+    /// Unique in the installation when it is set (ADR-0028). An empty value means no email.
     #[serde(default)]
     pub email: Option<String>,
     /// Grants the installation-wide right at the create (ADR-0029).
@@ -70,7 +70,7 @@ pub struct SetRoleRequest {
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct UpdateAccountRequest {
     pub disabled: Option<bool>,
-    /// Written by the update; the MVP treats it as unverified.
+    /// Written by the update; the MVP treats it as unverified. An empty value removes the email.
     pub email: Option<String>,
     /// True when the account holds the installation-wide right (ADR-0029).
     pub platform_admin: Option<bool>,
@@ -131,7 +131,8 @@ pub async fn list_accounts(
 /// Creates an installation account with optional memberships (Platform Admin only).
 ///
 /// The username and the email are unique in the installation. A clash gives HTTP 409
-/// `username_taken` or `email_taken`. The account create and each membership commit together.
+/// `username_taken` or `email_taken` with `field` set to the request field. The account create and
+/// each membership commit together.
 #[utoipa::path(
     post,
     path = "/api/v1/platform/users",
@@ -155,9 +156,9 @@ pub async fn create_account(
     let username = validation::validate_username("username", &body.username)?;
     let display_name = validation::validate_display_name("display_name", &body.display_name)?;
     validation::validate_password("password", &body.password)?;
-    let email = match &body.email {
+    let email = match body.email.as_deref().map(str::trim) {
+        Some("") | None => None,
         Some(value) => Some(validation::validate_email("email", value)?),
-        None => None,
     };
     // A membership names a real organization role. The platform right is enough to grant any of
     // them, whatever the role of the caller in its current organization (ADR-0029).
@@ -204,11 +205,13 @@ pub async fn create_account(
         },
     )
     .await
-    .map_err(map_account_unique)?;
+    .map_err(ApiError::account_write)?;
     match status {
         CreateAccountStatus::Ok => {}
-        CreateAccountStatus::UsernameTaken => return Err(ApiError::username_taken()),
-        CreateAccountStatus::EmailTaken => return Err(ApiError::email_taken()),
+        CreateAccountStatus::UsernameTaken => {
+            return Err(ApiError::taken(AccountField::Username));
+        }
+        CreateAccountStatus::EmailTaken => return Err(ApiError::taken(AccountField::Email)),
         CreateAccountStatus::Forbidden => return Err(ApiError::forbidden()),
     }
     for (tenant_id, _, role) in &resolved {
@@ -543,9 +546,10 @@ pub async fn update_account(
     {
         return Err(ApiError::forbidden());
     }
-    let email = match &body.email {
-        Some(value) => Some(validation::validate_email("email", value)?),
+    let email = match body.email.as_deref().map(str::trim) {
         None => None,
+        Some("") => Some(None),
+        Some(value) => Some(Some(validation::validate_email("email", value)?)),
     };
 
     let mut tx = state.db().begin_tenant(PLATFORM_TENANT_ID).await?;
@@ -577,9 +581,9 @@ pub async fn update_account(
         }
     }
     if let Some(email) = &email {
-        match users::platform_set_email(&mut tx, user_id, email)
+        match users::platform_set_email(&mut tx, user_id, email.as_deref())
             .await
-            .map_err(map_email_taken)?
+            .map_err(ApiError::account_write)?
         {
             WriteStatus::Ok => {}
             WriteStatus::NotFound => return Err(ApiError::not_found()),
@@ -602,7 +606,8 @@ pub async fn update_account(
         None,
         Some(&serde_json::json!({
             "disabled": body.disabled,
-            "email": email,
+            "email": email.as_ref().and_then(Option::as_deref),
+            "email_removed": (email == Some(None)).then_some(true),
             "platform_admin": body.platform_admin,
             "password": if grant { Some("<grant>") } else { None },
         })),
@@ -611,27 +616,6 @@ pub async fn update_account(
     restichub_db::audit::insert(&mut tx, &event).await?;
     tx.commit().await?;
     Ok(StatusCode::NO_CONTENT)
-}
-
-/// A duplicate email is HTTP 409 `email_taken` (ADR-0028).
-fn map_email_taken(error: DbError) -> ApiError {
-    if error.is_unique_violation() {
-        ApiError::email_taken()
-    } else {
-        ApiError::from(error)
-    }
-}
-
-/// A concurrent account create races on the unique username or email index. The constraint name
-/// tells the two apart (ADR-0028).
-fn map_account_unique(error: DbError) -> ApiError {
-    if !error.is_unique_violation() {
-        return ApiError::from(error);
-    }
-    match error.unique_constraint().as_deref() {
-        Some("users_email_lower_unique") => ApiError::email_taken(),
-        _ => ApiError::username_taken(),
-    }
 }
 
 pub(crate) fn parse_uuid(value: &str) -> Result<UserId, ApiError> {

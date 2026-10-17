@@ -862,7 +862,8 @@ export interface paths {
         /**
          * Creates an installation account with optional memberships (Platform Admin only).
          * @description The username and the email are unique in the installation. A clash gives HTTP 409
-         *     `username_taken` or `email_taken`. The account create and each membership commit together.
+         *     `username_taken` or `email_taken` with `field` set to the request field. The account create and
+         *     each membership commit together.
          */
         post: operations["create_account"];
         delete?: never;
@@ -1825,6 +1826,11 @@ export interface components {
             endpoint: string;
             /** @enum {string} */
             kind: "rest";
+            /**
+             * @description In an update, an absent field keeps the stored user name; `null` or an empty string
+             *     clears it.
+             */
+            username?: string | null;
         } | {
             /** @enum {string} */
             kind: "local";
@@ -1970,7 +1976,7 @@ export interface components {
         };
         CreateAccountRequest: {
             display_name: string;
-            /** @description Unique in the installation when it is set (ADR-0028). */
+            /** @description Unique in the installation when it is set (ADR-0028). An empty value means no email. */
             email?: string | null;
             /** @description The organizations of the account with the role in each one. */
             memberships?: components["schemas"]["MembershipInput"][];
@@ -2891,7 +2897,7 @@ export interface components {
         ProblemBody: {
             /** @description In snake_case. */
             code: components["schemas"]["ErrorCode"];
-            /** @description Only `invalid_argument` sets it. */
+            /** @description Set by `invalid_argument`, `username_taken` and `email_taken`. */
             field?: string | null;
             /** @description In snake_case; only `invalid_argument` sets it. */
             reason?: string | null;
@@ -3502,7 +3508,7 @@ export interface components {
         /** @description Absent fields leave the value unchanged. */
         UpdateAccountRequest: {
             disabled?: boolean | null;
-            /** @description Written by the update; the MVP treats it as unverified. */
+            /** @description Written by the update; the MVP treats it as unverified. An empty value removes the email. */
             email?: string | null;
             /**
              * @description The new secret of a grant. It is required when `platform_admin` is true and it is not used

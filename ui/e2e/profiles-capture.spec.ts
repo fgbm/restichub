@@ -29,7 +29,7 @@ const RU: Labels = {
 	repositories: 'Репозитории',
 	profiles: 'Профили',
 	addProfile: 'Добавить профиль',
-	moreActions: (name) => `Другие действия для ${name}`
+	moreActions: (name) => `Другие действия: ${name}`
 };
 
 async function signIn(page: Page, labels: Labels): Promise<void> {

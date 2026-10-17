@@ -1,13 +1,15 @@
 //! The agent-side repository jobs against the real restic and real network backends (AC-RP-01,
 //! AC-AG-10).
 //!
-//! The CI job `backends` starts a MinIO service container and a rest-server 0.14 and sets the
+//! The CI job `backends` starts an S3 server and two rest-server 0.14 instances and sets the
 //! variables below. Without the variables the tests skip, unless `RESTICHUB_REQUIRE_BACKENDS` asks
 //! them to fail.
 //!
 //! - `RESTICHUB_TEST_S3_ENDPOINT`, `RESTICHUB_TEST_S3_ACCESS_KEY`, `RESTICHUB_TEST_S3_SECRET_KEY`,
 //!   `RESTICHUB_TEST_S3_BUCKET`: an S3 account with an existing bucket.
 //! - `RESTICHUB_TEST_REST_ENDPOINT`: the base URL of a rest-server without authentication.
+//! - `RESTICHUB_TEST_REST_AUTH_ENDPOINT`, `RESTICHUB_TEST_REST_AUTH_USERNAME`,
+//!   `RESTICHUB_TEST_REST_AUTH_PASSWORD`: a rest-server with an `--htpasswd-file` and one account.
 
 #![allow(clippy::expect_used)]
 
@@ -17,7 +19,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use restichub_proto::agent::v1::{
-    BackupStep, JobStatus, RepositoryAccess, RestCredentials,
+    BackupStep, JobStatus, RepositoryAccess, RestCredentials, StepStatus,
     repository_access::BackendCredentials, step, step_result::Output,
 };
 use serde_json::{Value, json};
@@ -72,6 +74,35 @@ fn rest_backend() -> Option<Backend> {
             "endpoint": format!("{}/ci-{}", endpoint.trim_end_matches('/'), Uuid::now_v7()),
         }),
         credentials: json!({}),
+    })
+}
+
+/// The base URL and the account of the rest-server with authentication.
+fn rest_auth_server() -> Option<(String, String, String)> {
+    let (Some(endpoint), Some(username), Some(password)) = (
+        variable("RESTICHUB_TEST_REST_AUTH_ENDPOINT"),
+        variable("RESTICHUB_TEST_REST_AUTH_USERNAME"),
+        variable("RESTICHUB_TEST_REST_AUTH_PASSWORD"),
+    ) else {
+        skip_or_fail("rest-server with authentication");
+        return None;
+    };
+    Some((
+        endpoint.trim_end_matches('/').to_owned(),
+        username,
+        password,
+    ))
+}
+
+fn rest_auth_backend() -> Option<Backend> {
+    let (endpoint, username, password) = rest_auth_server()?;
+    Some(Backend {
+        settings: json!({
+            "kind": "rest",
+            "endpoint": format!("{endpoint}/ci-{}", Uuid::now_v7()),
+            "username": username,
+        }),
+        credentials: json!({"rest_password": password}),
     })
 }
 
@@ -283,4 +314,92 @@ async fn ac_rp_01_the_real_restic_works_against_rest_server() {
     if let Some(backend) = rest_backend() {
         exercise("agent-backend-rest", backend).await;
     }
+}
+
+/// AC-RP-01: the control plane gives restic the user name and the password of a rest-server with
+/// an `--htpasswd-file`: init and test-access succeed, and a wrong repository password gives
+/// `config_error`.
+#[tokio::test(flavor = "multi_thread")]
+async fn ac_rp_01_the_real_restic_works_against_rest_server_with_auth() {
+    if let Some(backend) = rest_auth_backend() {
+        exercise("agent-backend-rest-auth", backend).await;
+    }
+}
+
+/// AC-RP-01, AC-AG-04: the real restic runs init, backup and snapshots on a rest-server with
+/// authentication; without the rest-server password the same repository refuses the access.
+#[tokio::test(flavor = "multi_thread")]
+async fn ac_rp_01_the_real_restic_backs_up_to_rest_server_with_auth() {
+    let Some(restic) = common::real_restic_or_skip() else {
+        return;
+    };
+    let Some((endpoint, username, rest_password)) = rest_auth_server() else {
+        return;
+    };
+    let agent_dir = common::temp_config_dir("rest-auth-agent");
+    let data = common::temp_config_dir("rest-auth-data");
+    for dir in [&agent_dir, &data] {
+        std::fs::create_dir_all(dir).expect("cannot create the directory");
+    }
+    std::fs::write(data.join("file.txt"), b"rest-server data").expect("cannot write the file");
+    let data_path = data.to_string_lossy().into_owned();
+
+    let jobs = common::real_jobs(&agent_dir, &restic);
+    let access = RepositoryAccess {
+        repository_id: "repo-1".to_owned(),
+        location: format!("rest:{endpoint}/ci-{}", Uuid::now_v7()),
+        password: format!("CANARY-{}", Uuid::now_v7()),
+        backend_credentials: Some(BackendCredentials::Rest(RestCredentials {
+            username: username.clone(),
+            password: rest_password.clone(),
+        })),
+    };
+    let result = common::run(
+        &jobs,
+        &common::job(
+            "job-rest-auth",
+            vec![access.clone()],
+            vec![
+                common::test_access("repo-1"),
+                common::init("repo-1"),
+                common::backup_step("repo-1", &[&data_path]),
+                common::snapshots_step("repo-1"),
+            ],
+        ),
+    )
+    .await;
+    assert_eq!(
+        result.result().outcome,
+        JobStatus::Succeeded as i32,
+        "{}",
+        result.log_text()
+    );
+    let Some(Output::SnapshotList(list)) = result.step("snapshots").output.clone() else {
+        panic!("snapshots must give a list");
+    };
+    assert_eq!(list.snapshots.len(), 1);
+    assert!(!result.log_text().contains(&rest_password));
+
+    let anonymous = RepositoryAccess {
+        backend_credentials: Some(BackendCredentials::Rest(RestCredentials::default())),
+        ..access
+    };
+    let result = common::run(
+        &jobs,
+        &common::job(
+            "job-rest-anonymous",
+            vec![anonymous],
+            vec![common::snapshots_step("repo-1")],
+        ),
+    )
+    .await;
+    assert_ne!(
+        result.step("snapshots").status,
+        StepStatus::Success as i32,
+        "{}",
+        result.log_text()
+    );
+
+    let _ = std::fs::remove_dir_all(&agent_dir);
+    let _ = std::fs::remove_dir_all(&data);
 }

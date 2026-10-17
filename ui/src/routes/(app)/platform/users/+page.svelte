@@ -54,9 +54,6 @@
 	const activeAdmins = $derived(activePlatformAdmins(accounts));
 
 	const createFields = ['username', 'display_name', 'email', 'password'];
-	const emailTaken = $derived(
-		createProblem?.code === 'email_taken' || createProblem?.code === 'username_taken'
-	);
 
 	const roleKeys = $derived<Record<Role, string>>({
 		platform_admin: t('users.role.platformAdmin'),
@@ -260,7 +257,7 @@
 			await service.createPlatformUser({
 				username: newUsername,
 				display_name: newDisplayName,
-				email: newEmail.trim() === '' ? null : newEmail,
+				email: newEmail.trim() === '' ? undefined : newEmail.trim(),
 				password: newPassword,
 				platform_admin: newPlatformAdmin,
 				memberships: newTenantId ? [{ tenant_id: newTenantId, role: newRole }] : []
@@ -270,8 +267,7 @@
 			await load();
 		} catch (problem) {
 			createProblem = problem instanceof ApiError ? problem.problem : null;
-			createError =
-				emailTaken || namesField(createProblem, createFields) ? null : messageOf(problem);
+			createError = namesField(createProblem, createFields) ? null : messageOf(problem);
 		} finally {
 			creating = false;
 		}
@@ -328,8 +324,7 @@
 	<TextField
 		id="platform-user-username"
 		label={t('platformUsers.username')}
-		error={emptyError(createSubmitted, newUsername) ??
-			(emailTaken ? tErrorCode('username_taken') : fieldError(createProblem, 'username'))}
+		error={emptyError(createSubmitted, newUsername) ?? fieldError(createProblem, 'username')}
 		bind:value={newUsername}
 		mono
 		autocomplete="off"
@@ -347,7 +342,7 @@
 		id="platform-user-email"
 		label={t('platformUsers.email')}
 		help={t('platformUsers.emailHint')}
-		error={emailTaken ? tErrorCode('email_taken') : fieldError(createProblem, 'email')}
+		error={fieldError(createProblem, 'email')}
 		bind:value={newEmail}
 		type="email"
 		autocomplete="off"
