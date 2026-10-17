@@ -831,7 +831,6 @@ export const ru: Record<MessageKey, string> = {
 	'jobs.reason.unsupported_kind':
 		'Очередь не выполняет задания этого вида. Обновите сервер управления или агент.',
 	'jobDetail.notFound': 'Такого задания нет.',
-	'jobDetail.live': 'в реальном времени',
 	'jobDetail.refresh': 'Обновить',
 	'jobDetail.summary': 'Итоги',
 	'jobDetail.summaryHint': 'Статистика из итогов restic',
