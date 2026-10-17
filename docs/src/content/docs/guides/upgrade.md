@@ -101,7 +101,7 @@ If a job runs, the command cannot stop the service. Wait for the job, then run t
 The command cannot move an open `%ProgramFiles%\ResticHub` while a process keeps a file or a directory in it open. Do not go to a folder in `%ProgramFiles%\ResticHub` in PowerShell. If another process keeps the folder open, the command repairs the folder in place and starts the service. Then it prints a warning that names that process. That process can add a file to the folder until the restart. Thus the service starts only by hand until you do these steps:
 
 1. Close that process, or remove it from the programs that start when you sign in.
-2. Restart the computer. After the restart, the service does not start automatically.
+2. Restart the computer with "Restart", not "Shut down". After the restart, the service does not start automatically.
 3. Run `install-service` again as Administrator.
 4. Make sure that the output does not show a line that starts with `repaired` or `moved`. This run sets the automatic start of the service again.
 
@@ -126,11 +126,29 @@ Upgrade the agents only after the new control plane works.
 
 ## Upgrade notes since 0.1.0-rc.4
 
-- Names may now contain any text. The name of a profile, a plan or an alert channel is 1 to 100 characters, with any letters, spaces and emoji. It is unique in the tenant, and the letter case does not matter. A migration replaces the old unique keys. The names that you made before stay valid.
-- Three database migrations run at the first start. They add indexes and fields of the lists, and the password reset of a platform account.
-- On Windows, `install-service` and `register` repair the access control of `%ProgramData%\ResticHub`. Read the output: it prints one line for each top-level directory, and one line for each removal and each warning. Add `--verbose` to print each repaired item. An open `%ProgramFiles%\ResticHub` is moved aside and made again, so run the command from the unpacked package. If a process keeps that folder open, the command repairs it in place and prints a warning. Until you restart the computer and run the command again, the service starts only by hand.
+### Control plane
+
+- Make the backup of the database as the PostgreSQL superuser of the stack, as [Back up the control plane](/restichub/operations/back-up-the-control-plane/#back-up-the-database) shows. The command of the 0.1.0-rc.4 documentation, `pg_dump -U restichub_owner`, does not work. The tables have row-level security, so the dump stops with `query would be affected by row-level security policy`.
+- Seven database migrations (0049 to 0055) run at the first start. They add the indexes and the fields of the lists, and the password reset of a platform account. They also add the user name of a rest-server and the stream state of a host. A blank email of an account becomes no email. The last migration replaces the unique keys of the names.
+- Names may now contain any text. The name of a profile, a plan or an alert channel is 1 to 100 characters, with any letters, spaces and emoji. It is unique in the tenant, and the letter case does not matter. The names that you made before stay valid.
+- The comparison of names uses the function `lower()` of PostgreSQL, so it follows the `LC_CTYPE` of the database. The reference stack uses `en_US.utf8`. With the locale `C`, only the ASCII letters fold. Then the names "Ночной" and "НОЧНОЙ" can both exist.
+- One location holds one repository. The control plane refuses a new or changed repository with the location of another repository of the tenant. It does not delete a duplicate that exists. It logs a warning, and the list of repositories shows the mark "Shared location". Delete the duplicate records in ResticHub. A delete never deletes restic data. See [Add a repository](/restichub/guides/add-a-repository/).
+- A local repository is bound to its host. The control plane refuses a job of a local repository on another host with the reason `not_repository_host`. If several hosts used one shared network disk (NFS or SMB) as a local repository, move this repository to rest-server or SFTP. To find and correct the old plans, see [Repositories saved before this rule](/restichub/guides/add-a-repository/#repositories-saved-before-this-rule).
+- For each REST server repository with a password, enter the user name of the account in the field "User name". See [User name of a rest-server](/restichub/reference/agent-version-compatibility/#user-name-of-a-rest-server).
+- Scripts and other API clients get new error codes. A refused delete returns a code with the reason instead of `conflict`, for example `repository_in_use` or `profile_in_use`. A new local repository needs `maintenance_agent_id`. A taken user name or email returns `username_taken` or `email_taken`. See [Status and reason codes](/restichub/reference/status-codes/).
+
+### All agents
+
+- The service stops with the exit code 78 when its identity, its program or its restic is not safe. A restic that is missing or that differs from its record also stops the service. The service checks the identity again at each new connection. It does not restart after the exit code 78. `restichub-agent status` shows the cause. For a missing restic, run `install-service --restic-archive <ARCHIVE>`.
+
+### Windows agents
+
+- `install-service` and `register` repair the access control of `%ProgramData%\ResticHub`. Read the output: it prints one line for each top-level directory, and one line for each removal and each warning. Add `--verbose` to print each repaired item. An open `%ProgramFiles%\ResticHub` is moved aside and made again, so run the command from the unpacked package. If a process keeps that folder open, the command repairs it in place and prints a warning. Until you restart the computer and run the command again, the service starts only by hand.
+- To restart the computer, select "Restart", not "Shut down". With the fast startup of Windows, "Shut down" keeps the system session, and the agent does not see a restart.
 - The Windows service restarts after each failure, after 5, 30 and then 60 seconds. It does not restart after the exit code 78, as on Linux.
 - A Windows service with an identity that another account could change does not start. It writes the cause to the event log `ResticHub`, and `status` shows it. Before this release such a service connected, and each job failed with "restic did not start".
+- The Windows service writes its log to rotated files in `%ProgramData%\ResticHub\Agent-logs` and to the event log `ResticHub`. See [Agent logs](/restichub/reference/agent-logs/).
+- Before a restore into a directory that is not empty, the agent checks the paths that the restore writes. A link that leads out of the target stops the restore step. A file with more than one name also stops it. Remove the link, or restore into an empty directory. See [Restore roots](/restichub/guides/restore/#restore-roots).
 
 ### Windows hosts that need a new registration
 
@@ -145,8 +163,10 @@ On such a host, do these steps one time:
 5. After the restart, run `install-service` again. Its output must not show a line that starts with `repaired`. If it shows such a line, a program with administrator rights changes the rights of the directory. An example is a management tool or a sync tool. Find that program and stop it. Then do the steps 4 and 5 again.
 
 A host that you registered first with 0.1.0-rc.2 or a later release on a clean computer does not need these steps. `install-service` alone is sufficient there.
-- The Windows service writes its log to rotated files in `%ProgramData%\ResticHub\Agent-logs` and to the event log `ResticHub`. See [Agent logs](/restichub/reference/agent-logs/).
-- A local repository is bound to its host. The control plane refuses a job of a local repository on another host with the reason `not_repository_host`. If several hosts used one shared network disk (NFS or SMB) as a local repository, move this repository to rest-server or SFTP. To find and correct the old plans, see [Repositories saved before this rule](/restichub/guides/add-a-repository/#repositories-saved-before-this-rule).
+
+### Linux agents
+
+`install-service` writes the systemd unit again and removes a change that you made by hand. The new unit has a system call filter (`SystemCallFilter=@system-service`) and hides the other processes (`ProtectProc=invisible`). A system call outside the filter fails with the error `EPERM`. Thus a server script cannot use a debug tool such as `strace` or `perf`. See [Server scripts](/restichub/guides/scripts/).
 
 ### Local repositories on Linux
 
