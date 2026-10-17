@@ -10,7 +10,7 @@ A plan assigns one profile to one agent with a schedule. The control plane keeps
 | Field | Meaning |
 |---|---|
 | Name | The name of the plan. It is unique in the tenant. |
-| Profile | The backup definition that the control plane compiles for each job. |
+| Profile | The backup definition that the control plane compiles for each job. The field shows the repository of each profile and the backend kind. For a local repository, it also shows the repository host. The search finds a profile by its name or by its repository. |
 | Host | The agent that runs the plan. |
 | Cron expression | Five fields: minute, hour, day of month, month, day of week. |
 | Time zone | An IANA name, for example `Europe/Berlin`. |

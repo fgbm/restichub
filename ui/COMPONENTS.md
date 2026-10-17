@@ -169,7 +169,7 @@ To keep the filters in the query string, use `queryFilters(keys)` from `$lib/sto
 
 `SelectOption` does not have a secondary line, because a native `<select>` cannot show one. A facet of `FilterBar` takes the same secondary line in `FilterOption.description`. Set `search: true` on the facet to show the search field when the facet has fewer than seven values.
 
-`ProfilePicker` (`$lib/components`) is a `RecordPicker` for a profile. It makes the options from the profiles, the repositories and the hosts: the profile name, the repository name, a chip with the backend kind and, for a local repository, the host of the repository. `profileDescription` in `$lib/profile-picker.ts` gives the same secondary line for a facet.
+`ProfilePicker` (`$lib/components`) is a `RecordPicker` for a profile. It makes the options from the profiles, the repositories and the hosts. An option shows the profile name, the repository name and a chip with the backend kind. For a local repository, it also shows the repository host. `profileDescription` in `$lib/profile-picker.ts` gives the same secondary line for a facet.
 
 ## Forms
 

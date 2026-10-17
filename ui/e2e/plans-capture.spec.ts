@@ -82,7 +82,8 @@ async function capture(
 	// The new plan page with the next runs of the form schedule.
 	await page.getByRole('button', { name: labels.addPlan, exact: true }).click();
 	await page.locator('#plan-name').fill('nightly-db');
-	await page.locator('#plan-profile').selectOption({ index: 1 });
+	await page.locator('#plan-profile').click();
+	await page.getByRole('listbox').getByRole('option').nth(1).click();
 	await page.locator('#plan-cron').fill('30 3 * * *');
 	await page.locator('#plan-time-zone').fill('Europe/Berlin');
 	await page.locator('.runs li').first().waitFor();
