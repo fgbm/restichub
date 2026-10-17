@@ -5,8 +5,16 @@
 	import { ApiError, NetworkError, fieldError, namesField, service } from '#lib/api/index.ts';
 	import type { ApiProblem } from '#lib/api/index.ts';
 	import AuthCard from '#lib/components/AuthCard.svelte';
-	import { Alert, Button, PasswordField, TextField } from '#lib/components/ui/index.ts';
+	import {
+		Alert,
+		Button,
+		NewPasswordField,
+		PasswordField,
+		TextField
+	} from '#lib/components/ui/index.ts';
+	import { emptyError, focusFirstInvalid } from '#lib/form.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
+	import { passwordProblem } from '#lib/password-policy.ts';
 	import { getSetupRequired, isSingleTenant, loadInstance } from '#lib/stores/instance.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
@@ -16,6 +24,7 @@
 	let password = $state('');
 	let confirmPassword = $state('');
 	let submitting = $state(false);
+	let submitted = $state(false);
 	let errorCode = $state<string | undefined>();
 	let errorTitle = $state<string | undefined>();
 	let problem = $state<ApiProblem | null>(null);
@@ -27,13 +36,8 @@
 	// Single mode creates the tenant `default` and its first Admin. Both modes need
 	// the one-time setup token, so the field stays (ADR-0024).
 	const single = $derived(isSingleTenant());
-	const passwordTooShort = $derived(password.length > 0 && password.length < 12);
-	const passwordMismatch = $derived(confirmPassword.length > 0 && password !== confirmPassword);
-	const canSubmit = $derived(
-		setupToken.length > 0 &&
-			username.length > 0 &&
-			password.length >= 12 &&
-			password === confirmPassword
+	const passwordMismatch = $derived(
+		(submitted || confirmPassword.length > 0) && password !== confirmPassword
 	);
 
 	// A configured installation offers no setup. The screen would disclose the state
@@ -47,6 +51,17 @@
 
 	async function onSubmit(event: SubmitEvent): Promise<void> {
 		event.preventDefault();
+		submitted = true;
+		if (
+			focusFirstInvalid([
+				['setup-token', setupToken === ''],
+				['setup-username', username === ''],
+				['setup-display-name', displayName === ''],
+				['setup-password', passwordProblem(password) !== null],
+				['setup-confirm', passwordMismatch]
+			])
+		)
+			return;
 		submitting = true;
 		errorCode = undefined;
 		errorTitle = undefined;
@@ -99,7 +114,7 @@
 			id="setup-token"
 			label={t('setup.setupToken')}
 			help={t('setup.tokenHint')}
-			error={fieldError(problem, 'setup_token')}
+			error={emptyError(submitted, setupToken) ?? fieldError(problem, 'setup_token')}
 			bind:value={setupToken}
 			mono
 			autocomplete="off"
@@ -108,7 +123,7 @@
 		<TextField
 			id="setup-username"
 			label={t('setup.username')}
-			error={fieldError(problem, 'username')}
+			error={emptyError(submitted, username) ?? fieldError(problem, 'username')}
 			bind:value={username}
 			autocomplete="username"
 			required
@@ -116,19 +131,17 @@
 		<TextField
 			id="setup-display-name"
 			label={t('setup.displayName')}
-			error={fieldError(problem, 'display_name')}
+			error={emptyError(submitted, displayName) ?? fieldError(problem, 'display_name')}
 			bind:value={displayName}
 			autocomplete="name"
 			required
 		/>
-		<PasswordField
+		<NewPasswordField
 			id="setup-password"
 			label={t('setup.password')}
-			help={t('setup.passwordHint')}
-			error={passwordTooShort ? t('setup.passwordHint') : fieldError(problem, 'password')}
+			error={fieldError(problem, 'password')}
+			{submitted}
 			bind:value={password}
-			autocomplete="new-password"
-			required
 		/>
 		<PasswordField
 			id="setup-confirm"
@@ -138,7 +151,7 @@
 			autocomplete="new-password"
 			required
 		/>
-		<Button type="submit" variant="primary" full loading={submitting} disabled={!canSubmit}>
+		<Button type="submit" variant="primary" full loading={submitting}>
 			{t(single ? 'setup.submitSingle' : 'setup.submit')}
 		</Button>
 	</form>

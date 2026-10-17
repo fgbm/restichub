@@ -15,6 +15,7 @@
 	} from '#lib/components/ui/index.ts';
 	import type { KeyValueItem, ListMeta, RowAction } from '#lib/components/ui/index.ts';
 	import { matchesSearch } from '#lib/filters.ts';
+	import { emptyError, focusFirstInvalid } from '#lib/form.ts';
 	import { plural } from '#lib/list-format.ts';
 	import { iconOf, pillOf, tenantState } from '#lib/vocabulary.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
@@ -28,6 +29,7 @@
 	let createOpen = $state(false);
 	let newName = $state('');
 	let creating = $state(false);
+	let createSubmitted = $state(false);
 	let createError = $state<string | null>(null);
 	let createProblem = $state<ApiProblem | null>(null);
 
@@ -174,11 +176,13 @@
 		newName = '';
 		createError = null;
 		createProblem = null;
+		createSubmitted = false;
 		createOpen = true;
 	}
 
 	async function createTenant(): Promise<void> {
-		if (!newName) return;
+		createSubmitted = true;
+		if (focusFirstInvalid([['tenant-name', newName === '']])) return;
 		creating = true;
 		createError = null;
 		createProblem = null;
@@ -284,7 +288,7 @@
 	<TextField
 		id="tenant-name"
 		label={t('tenants.name')}
-		error={fieldError(createProblem, 'name')}
+		error={emptyError(createSubmitted, newName) ?? fieldError(createProblem, 'name')}
 		bind:value={newName}
 		placeholder={t('tenants.namePlaceholder')}
 		mono
@@ -292,7 +296,7 @@
 	/>
 	{#snippet footer()}
 		<Button onclick={() => (createOpen = false)}>{t('common.cancel')}</Button>
-		<Button type="submit" variant="primary" loading={creating} disabled={!newName}>
+		<Button type="submit" variant="primary" loading={creating}>
 			{t('tenants.create')}
 		</Button>
 	{/snippet}

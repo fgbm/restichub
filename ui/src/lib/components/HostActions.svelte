@@ -4,6 +4,7 @@
 	import type { Agent, ApiProblem, EnrollmentTokenCreated } from '#lib/api/index.ts';
 	import { Alert, Button, ConfirmDialog, CopyField, Dialog, TextField } from './ui/index.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
+	import { focusFirstInvalid } from '#lib/form.ts';
 	import { relativeTime } from '#lib/format.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
@@ -15,6 +16,7 @@
 	let renameTarget = $state<Agent | null>(null);
 	let renameOpen = $state(false);
 	let renaming = $state(false);
+	let renameSubmitted = $state(false);
 	let renameName = $state('');
 	let renameError = $state<string | null>(null);
 	let renameProblem = $state<ApiProblem | null>(null);
@@ -47,7 +49,9 @@
 	const renameFieldError = $derived(
 		renameLength > HOSTNAME_MAX_LENGTH
 			? t('hosts.renameTooLong')
-			: fieldError(renameProblem, 'hostname')
+			: renameSubmitted && renameLength === 0
+				? t('reason.empty')
+				: fieldError(renameProblem, 'hostname')
 	);
 
 	function messageOf(problem: unknown): string {
@@ -60,6 +64,7 @@
 		renameName = agent.hostname;
 		renameError = null;
 		renameProblem = null;
+		renameSubmitted = false;
 		renameOpen = true;
 	}
 
@@ -79,7 +84,9 @@
 	}
 
 	async function renameHost(): Promise<void> {
-		if (!renameTarget || !renameValid) return;
+		if (!renameTarget) return;
+		renameSubmitted = true;
+		if (focusFirstInvalid([['host-rename', !renameValid]])) return;
 		renaming = true;
 		renameError = null;
 		renameProblem = null;
@@ -212,7 +219,7 @@
 	/>
 	{#snippet footer()}
 		<Button onclick={() => (renameOpen = false)}>{t('common.cancel')}</Button>
-		<Button type="submit" variant="primary" loading={renaming} disabled={!renameValid}>
+		<Button type="submit" variant="primary" loading={renaming}>
 			{t('hosts.rename')}
 		</Button>
 	{/snippet}
