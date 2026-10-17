@@ -437,7 +437,7 @@
 			label={t('plans.cron')}
 			help={t('plans.cronHint')}
 			error={fieldError(formProblem, 'cron')}
-			placeholder="0 2 * * *"
+			placeholder={t('common.example', { value: '0 2 * * *' })}
 			bind:value={cron}
 			required
 		/>
@@ -503,7 +503,7 @@
 				: t('plans.rpoHint')}
 			error={fieldError(formProblem, 'rpo_seconds')}
 			inputmode="decimal"
-			placeholder="26"
+			placeholder={t('common.example', { value: '26' })}
 			bind:value={rpoHours}
 		/>
 	</ProfileSection>
