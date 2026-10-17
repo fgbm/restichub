@@ -22,7 +22,8 @@ macro_rules! agent_columns {
         "a.id, a.hostname, a.os, a.arch, a.agent_version, a.restic_version, a.labels, \
          a.capabilities, a.restore_roots, a.server_scripts, \
          a.script_interpreters, a.certificate_serial, a.certificate_expires_at, \
-         a.status, a.last_seen_at, a.first_connected_at, a.created_at, a.revoked_at, \
+         a.status, a.last_seen_at, a.first_connected_at, a.stream_id IS NOT NULL AS stream_open, \
+         a.created_at, a.revoked_at, \
          a.revoked_by_user_id, a.pending_certificate_serial, \
          a.pending_certificate_expires_at, a.last_certificate_rotation_at, \
          a.last_rotation_request_at, a.previous_certificate_serial, \
@@ -76,6 +77,8 @@ pub struct Agent {
     pub last_seen_at: Option<OffsetDateTime>,
     /// The time of the first stream open. `None` while the host waits for its first connection.
     pub first_connected_at: Option<OffsetDateTime>,
+    /// A control plane instance holds a stream of the agent that passed the hello.
+    pub stream_open: bool,
     pub created_at: OffsetDateTime,
     pub revoked_at: Option<OffsetDateTime>,
     pub revoked_by_user_id: Option<UserId>,
@@ -539,6 +542,38 @@ pub async fn touch_last_seen_batch(
     Ok(rows.into_iter().map(|(id,)| id).collect())
 }
 
+/// Records that a stream of an active agent passed the hello. A newer stream replaces the value,
+/// so the close of an older stream clears nothing (FR-ID-08).
+pub async fn set_stream_open(
+    tx: &mut TenantTx<'_>,
+    id: AgentId,
+    stream: Uuid,
+) -> Result<bool, DbError> {
+    let result =
+        sqlx::query("UPDATE agents SET stream_id = $2 WHERE id = $1 AND status = 'active'")
+            .bind(id)
+            .bind(stream)
+            .execute(tx.as_conn())
+            .await
+            .map_err(DbError::Query)?;
+    Ok(result.rows_affected() == 1)
+}
+
+/// Clears the stream of an agent, unless another stream replaced it.
+pub async fn set_stream_closed(
+    tx: &mut TenantTx<'_>,
+    id: AgentId,
+    stream: Uuid,
+) -> Result<bool, DbError> {
+    let result = sqlx::query("UPDATE agents SET stream_id = NULL WHERE id = $1 AND stream_id = $2")
+        .bind(id)
+        .bind(stream)
+        .execute(tx.as_conn())
+        .await
+        .map_err(DbError::Query)?;
+    Ok(result.rows_affected() == 1)
+}
+
 /// Stores the facts that the agent announced in its `AgentHello` (FR-PR-09, FR-RS-03).
 pub async fn set_hello_facts(
     tx: &mut TenantTx<'_>,
@@ -629,6 +664,7 @@ pub(crate) struct AgentRow {
     status: AgentStatus,
     last_seen_at: Option<OffsetDateTime>,
     first_connected_at: Option<OffsetDateTime>,
+    stream_open: bool,
     created_at: OffsetDateTime,
     revoked_at: Option<OffsetDateTime>,
     revoked_by_user_id: Option<Uuid>,
@@ -679,6 +715,7 @@ impl From<AgentRow> for Agent {
             status: row.status,
             last_seen_at: row.last_seen_at,
             first_connected_at: row.first_connected_at,
+            stream_open: row.stream_open,
             created_at: row.created_at,
             revoked_at: row.revoked_at,
             revoked_by_user_id: row.revoked_by_user_id.map(UserId::from_uuid),

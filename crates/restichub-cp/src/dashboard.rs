@@ -4,8 +4,9 @@
 //! the time of its last successful backup and its RPO state, the repositories with the state of
 //! their lock, the recent failed jobs and the open alerts.
 //!
-//! A host counts as online when the control plane saw it within [`ONLINE_WINDOW`]. The test reads
-//! `agents.last_seen_at`, not the stream registry of one instance, so each instance answers alike.
+//! A host counts as online while a control plane instance holds its stream (`agents.stream_id`),
+//! the same fact that the dispatcher uses. The test reads the database, not the stream registry of
+//! one instance, so each instance answers alike.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -25,8 +26,9 @@ use crate::context::{Operation, RequestContext};
 use crate::error::ApiError;
 use crate::server::AppState;
 
-/// The time within which a host counts as online. The agent streams flush `last_seen_at` every 30
-/// seconds, so the window holds three flushes.
+/// The open stream counts only within this time after `last_seen_at`: an instance that crashed
+/// cannot clear the streams it held. The agent streams flush `last_seen_at` every 30 seconds, so
+/// the window holds three flushes.
 pub const ONLINE_WINDOW: Duration = Duration::seconds(90);
 
 /// Failed jobs older than this stay out of the list.
@@ -40,14 +42,17 @@ const FAILED_JOBS: i64 = 10;
 const OPEN_ALERTS: usize = 10;
 const LIST_LIMIT: usize = 50;
 
-/// Whether the host counts as online: it opened a stream and the control plane saw it within
+/// Whether the host counts as online: its stream is open and the control plane saw it within
 /// [`ONLINE_WINDOW`].
 pub fn is_online(
     first_connected_at: Option<OffsetDateTime>,
+    stream_open: bool,
     last_seen_at: Option<OffsetDateTime>,
     now: OffsetDateTime,
 ) -> bool {
-    first_connected_at.is_some() && last_seen_at.is_some_and(|seen| now - seen <= ONLINE_WINDOW)
+    first_connected_at.is_some()
+        && stream_open
+        && last_seen_at.is_some_and(|seen| now - seen <= ONLINE_WINDOW)
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -183,6 +188,12 @@ impl DashboardCache {
         let mut entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
         entries.insert(tenant, (now, facts));
     }
+
+    /// Drops the facts of a tenant, so the next read shows a host state change at once.
+    pub fn forget(&self, tenant: TenantId) {
+        let mut entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
+        entries.remove(&tenant);
+    }
 }
 
 impl Default for DashboardCache {
@@ -246,7 +257,12 @@ pub async fn dashboard(
         .map(|agent| DashboardHost {
             id: agent.id.to_string(),
             hostname: agent.hostname.clone(),
-            online: is_online(agent.first_connected_at, agent.last_seen_at, now),
+            online: is_online(
+                agent.first_connected_at,
+                agent.stream_open,
+                agent.last_seen_at,
+                now,
+            ),
             waiting: agent.first_connected_at.is_none(),
             last_seen_at: agent.last_seen_at.map(format_time),
         })

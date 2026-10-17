@@ -65,6 +65,7 @@ async fn seed_hosts(db: &TestDatabase, tenant: TenantId) -> [AgentId; 4] {
         db,
         tenant,
         "UPDATE agents SET first_connected_at = now() - interval '1 day', last_seen_at = now(), \
+         stream_id = gen_random_uuid(), \
          labels = ARRAY['web','prod'], agent_version = '0.4.2', server_scripts = 'enabled' \
          WHERE id = $1",
         web.as_uuid(),

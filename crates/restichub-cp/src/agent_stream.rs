@@ -872,6 +872,8 @@ async fn run_stream(
     ) {
         return;
     }
+    let stream = Uuid::now_v7();
+    let mut stream_recorded = record_stream(&state, identity.tenant, agent, stream, true).await;
     state.events().host(identity.tenant, agent, true);
     // An older agent sends no list, so its silence says nothing about its jobs (ADR-0039).
     if AgentCapability::JobLimitsV1.is_listed(&hello.capabilities) {
@@ -936,6 +938,13 @@ async fn run_stream(
                 }
             }
             _ = last_seen.tick() => {
+                if !stream_recorded {
+                    stream_recorded =
+                        record_stream(&state, identity.tenant, agent, stream, true).await;
+                    if stream_recorded {
+                        state.events().host(identity.tenant, agent, true);
+                    }
+                }
                 if active {
                     state.agent_registry().mark_last_seen(
                         identity.tenant,
@@ -960,7 +969,37 @@ async fn run_stream(
     crate::refusal_audit::flush_summaries(&state, identity.tenant, agent).await;
     // The removal drops the last outbound sender, so the response stream ends (FR-ID-04).
     state.agent_registry().remove(agent, generation);
+    record_stream(&state, identity.tenant, agent, stream, false).await;
     state.events().host(identity.tenant, agent, false);
+}
+
+/// Writes the stream fact that the host screens, the list filter and the dashboard read, so they
+/// agree with the dispatcher of every instance. `false` when the write failed.
+async fn record_stream(
+    state: &AppState,
+    tenant: TenantId,
+    agent: AgentId,
+    stream: Uuid,
+    open: bool,
+) -> bool {
+    let written = async {
+        let mut tx = state.db().begin_tenant(tenant).await?;
+        if open {
+            agent_repo::set_stream_open(&mut tx, agent, stream).await?;
+        } else {
+            agent_repo::set_stream_closed(&mut tx, agent, stream).await?;
+        }
+        tx.commit().await
+    }
+    .await;
+    state.dashboard_cache().forget(tenant);
+    match written {
+        Ok(()) => true,
+        Err(error) => {
+            tracing::warn!(%agent, open, cause = ?error, "cannot record the stream state");
+            false
+        }
+    }
 }
 
 /// Waits for a rotation event. It never resolves when the task is not subscribed or the sender
