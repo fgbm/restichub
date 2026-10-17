@@ -90,6 +90,11 @@ test('a restore asks for the target, warns about a system path and opens the job
 	await dialog.getByLabel('Target path').fill('relative');
 	await expect(dialog.getByText('Enter an absolute path.')).toBeVisible();
 	await expect(dialog.getByRole('button', { name: 'Start restore' })).toBeDisabled();
+	// An empty target does not disable the action silently: the attempt names the field.
+	await dialog.getByLabel('Target path').fill('');
+	await dialog.getByRole('button', { name: 'Start restore' }).click();
+	await expect(dialog.getByText('This field is required.')).toBeVisible();
+	await expect(dialog.getByLabel('Target path')).toBeFocused();
 	await dialog.getByLabel('Target path').fill('/var/lib/restichub-restore/job-1');
 	await expect(dialog.getByText('System path', { exact: true })).toHaveCount(0);
 	await dialog.getByLabel('Existing files').selectOption({ label: 'Replace a file that differs' });

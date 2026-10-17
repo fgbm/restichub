@@ -1,7 +1,9 @@
 <script lang="ts">
 	import { ApiError, service } from '#lib/api/index.ts';
 	import type { PlatformUser } from '#lib/api/index.ts';
-	import { Alert, Button, ConfirmDialog, Dialog, PasswordField } from './ui/index.ts';
+	import { Alert, Button, ConfirmDialog, Dialog, NewPasswordField } from './ui/index.ts';
+	import { focusFirstInvalid } from '#lib/form.ts';
+	import { passwordProblem } from '#lib/password-policy.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
@@ -13,6 +15,7 @@
 	let resetOpen = $state(false);
 	let resetPassword = $state('');
 	let resetting = $state(false);
+	let resetSubmitted = $state(false);
 	let resetError = $state<string | null>(null);
 
 	// A grant of the right asks for a new password: the old password may be known to a tenant Admin
@@ -20,6 +23,7 @@
 	let grantOpen = $state(false);
 	let grantPassword = $state('');
 	let granting = $state(false);
+	let grantSubmitted = $state(false);
 	let grantError = $state<string | null>(null);
 
 	let revokeOpen = $state(false);
@@ -37,6 +41,7 @@
 		target = user;
 		resetPassword = '';
 		resetError = null;
+		resetSubmitted = false;
 		resetOpen = true;
 	}
 
@@ -44,6 +49,7 @@
 		target = user;
 		grantPassword = '';
 		grantError = null;
+		grantSubmitted = false;
 		grantOpen = true;
 	}
 
@@ -69,7 +75,12 @@
 	}
 
 	async function submitReset(): Promise<void> {
-		if (!target || resetPassword.length < 12) return;
+		if (!target) return;
+		resetSubmitted = true;
+		if (
+			focusFirstInvalid([['platform-user-reset-password', passwordProblem(resetPassword) !== null]])
+		)
+			return;
 		resetting = true;
 		resetError = null;
 		try {
@@ -85,7 +96,12 @@
 	}
 
 	async function submitGrant(): Promise<void> {
-		if (!target || grantPassword.length < 12) return;
+		if (!target) return;
+		grantSubmitted = true;
+		if (
+			focusFirstInvalid([['platform-user-grant-password', passwordProblem(grantPassword) !== null]])
+		)
+			return;
 		granting = true;
 		grantError = null;
 		try {
@@ -140,22 +156,15 @@
 		<Alert variant="inline" tone="danger" title={resetError} />
 	{/if}
 	<p>{t('users.resetHint', { name })}</p>
-	<PasswordField
+	<NewPasswordField
 		id="platform-user-reset-password"
 		label={t('setup.password')}
-		help={t('setup.passwordHint')}
+		submitted={resetSubmitted}
 		bind:value={resetPassword}
-		autocomplete="new-password"
-		required
 	/>
 	{#snippet footer()}
 		<Button onclick={() => (resetOpen = false)}>{t('common.cancel')}</Button>
-		<Button
-			type="submit"
-			variant="primary"
-			loading={resetting}
-			disabled={resetPassword.length < 12}
-		>
+		<Button type="submit" variant="primary" loading={resetting}>
 			{t('users.resetPassword')}
 		</Button>
 	{/snippet}
@@ -171,17 +180,15 @@
 		<Alert variant="inline" tone="danger" title={grantError} />
 	{/if}
 	<p>{t('platformUsers.grantHint', { name })}</p>
-	<PasswordField
+	<NewPasswordField
 		id="platform-user-grant-password"
 		label={t('setup.password')}
-		help={t('setup.passwordHint')}
+		submitted={grantSubmitted}
 		bind:value={grantPassword}
-		autocomplete="new-password"
-		required
 	/>
 	{#snippet footer()}
 		<Button onclick={() => (grantOpen = false)}>{t('common.cancel')}</Button>
-		<Button type="submit" variant="primary" loading={granting} disabled={grantPassword.length < 12}>
+		<Button type="submit" variant="primary" loading={granting}>
 			{t('platformUsers.grantAdmin')}
 		</Button>
 	{/snippet}

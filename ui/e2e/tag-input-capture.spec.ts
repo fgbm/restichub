@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 
 // Captures the tag input in its dialogs for a review. It runs only with CAPTURE and CAPTURE_DIR
-// set, so CI skips it (design/style/ui-principles.md, 3.10).
+// set, so CI skips it (design/style/ui-principles.md, 3.11).
 const dir = process.env.CAPTURE_DIR;
 test.skip(!process.env.CAPTURE || !dir, 'set CAPTURE and CAPTURE_DIR to write the screenshots');
 

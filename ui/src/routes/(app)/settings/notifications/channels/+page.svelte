@@ -26,6 +26,7 @@
 	import { ago, changedAt } from '#lib/list-format.ts';
 	import { channelState, iconOf, pillOf } from '#lib/vocabulary.ts';
 	import { facetCounts, matchesSearch, splitList } from '#lib/filters.ts';
+	import { emptyError, focusFirstInvalid } from '#lib/form.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { t, tChannelError, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
@@ -44,6 +45,7 @@
 	let formOpen = $state(false);
 	let editing = $state<NotificationChannel | null>(null);
 	let saving = $state(false);
+	let formSubmitted = $state(false);
 	let formError = $state<string | null>(null);
 	let formProblem = $state<ApiProblem | null>(null);
 	let name = $state('');
@@ -195,6 +197,7 @@
 		url = '';
 		formError = null;
 		formProblem = null;
+		formSubmitted = false;
 	}
 
 	function openCreate(): void {
@@ -229,6 +232,8 @@
 	});
 
 	async function save(): Promise<void> {
+		formSubmitted = true;
+		if (focusFirstInvalid([['channel-name', name === '']])) return;
 		saving = true;
 		formError = null;
 		formProblem = null;
@@ -415,7 +420,7 @@
 		id="channel-name"
 		label={t('channels.name')}
 		placeholder={t('channels.namePlaceholder')}
-		error={fieldError(formProblem, 'name')}
+		error={emptyError(formSubmitted, name) ?? fieldError(formProblem, 'name')}
 		bind:value={name}
 		required
 	/>
@@ -465,7 +470,7 @@
 			</span>
 		{/if}
 		<Button onclick={() => (formOpen = false)}>{t('common.cancel')}</Button>
-		<Button type="submit" variant="primary" loading={saving} disabled={!name}>
+		<Button type="submit" variant="primary" loading={saving}>
 			{t('common.save')}
 		</Button>
 	{/snippet}

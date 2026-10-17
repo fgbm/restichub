@@ -129,7 +129,7 @@ To keep the filters in the query string, use `queryFilters(keys)` from `$lib/sto
 
 ## TagInput
 
-`TagInput` (`$lib/components/ui`) is the field for a set of values: labels, tags, host names and email addresses. Each value shows as a chip with a × button. Do not ask for one text with separators (UI principles 3.10). A list of paths or patterns stays a text area with one value on each line, because a path can hold a comma or a space.
+`TagInput` (`$lib/components/ui`) is the field for a set of values: labels, tags, host names and email addresses. Each value shows as a chip with a × button. Do not ask for one text with separators (UI principles 3.11). A list of paths or patterns stays a text area with one value on each line, because a path can hold a comma or a space.
 
 | Property                                      | Function                                                                                    |
 | --------------------------------------------- | ------------------------------------------------------------------------------------------- |
@@ -146,6 +146,12 @@ To keep the filters in the query string, use `queryFilters(keys)` from `$lib/sto
 - A value that is not valid stays in the field. The field shows the value and the reason, for example "Bad_label: Use only the letters a-z, the digits 0-9 and the hyphen." When the text changes, the reason goes away.
 - The × button of a chip removes the value. Backspace in an empty field removes the last value. Enter in an empty field sends the form.
 - Each × button has the accessible name "Remove <value>". The field has `aria-invalid` and refers to the reason with `aria-describedby`. The reason has the `alert` role.
+
+## Forms
+
+`NewPasswordField` (`$lib/components/ui`) is the field for each new password. Use it for the initial setup, a new user, a password reset and the grant of the Platform Admin right. Below the field, it shows the password rule of the server from `$lib/password-policy.ts` and the progress, for example "6 of 12 characters" (UI principles 5.1). The text is in the danger tone after the person leaves the field or after a submit attempt (`submitted`). A value that is too long shows the danger tone at once. An `error` from the server replaces the text.
+
+A form does not disable its primary action for a value that is not correct (UI principles 5.4). The submit handler sets `submitted`, calls `focusFirstInvalid` from `$lib/form.ts` and stops when it returns `true`. `emptyError(submitted, value)` gives the error of an empty required field.
 
 ## Lint rules
 

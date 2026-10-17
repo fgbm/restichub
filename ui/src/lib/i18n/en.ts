@@ -147,7 +147,13 @@ export const en = {
 	'setup.displayName': 'Display name',
 	'setup.password': 'Password',
 	'setup.confirmPassword': 'Confirm password',
-	'setup.passwordHint': 'Use 12 characters or more.',
+	'password.rule': 'At least {min} characters.',
+	'password.progress': '{count} of {min} characters',
+	'password.enough.one': '{n} character — long enough',
+	'password.enough.few': '{n} characters — long enough',
+	'password.enough.many': '{n} characters — long enough',
+	'password.enough.other': '{n} characters — long enough',
+	'password.tooLong': 'The password is too long: {max} bytes at most.',
 	'setup.passwordMismatch': 'The passwords do not match.',
 	'setup.submit': 'Create the Platform Admin',
 	'setup.submitSingle': 'Create the administrator',
@@ -276,7 +282,7 @@ export const en = {
 	'platformUsers.username': 'User name',
 	'platformUsers.displayName': 'Display name',
 	'platformUsers.email': 'Email',
-	'platformUsers.emailHint': 'Optional. The invitations of 1.0 use it.',
+	'platformUsers.emailHint': 'Optional.',
 	'platformUsers.password': 'Password',
 	'platformUsers.organizations': 'Organizations',
 	'platformUsers.noOrganizations': 'No organization',
@@ -560,8 +566,7 @@ export const en = {
 	'repositories.passwordHint':
 		'Keep a copy of this password outside ResticHub. If the control plane is lost, you cannot open the snapshots without the password.',
 	'repositories.passwordKeepHint': 'Leave the field empty to keep the current value.',
-	'repositories.passwordLocked':
-		'The repository password cannot be replaced in this version. Rotation arrives in a later release.',
+	'repositories.passwordLocked': 'The repository password cannot be replaced.',
 	'repositories.secretHint':
 		'ResticHub shows this value never again after you save it. You can only replace it.',
 	'repositories.s3AccessKey': 'S3 access key',
@@ -620,7 +625,7 @@ export const en = {
 		'The repository is not at this location on this host. Check the path, the mount and the host.',
 	'repositories.jobExpired': 'The job expired before the host answered. Start it again.',
 	'repositories.locationLocked':
-		'The location of an initialized repository cannot change in this version. It holds the stored snapshots.',
+		'The location of an initialized repository cannot change. It holds the stored snapshots.',
 
 	// Profiles
 	'profiles.title': 'Profiles',
@@ -823,7 +828,6 @@ export const en = {
 	'jobs.reason.unsupported_kind':
 		'The queue does not run this kind of job. Update the control plane or the agent.',
 	'jobDetail.notFound': 'This job does not exist.',
-	'jobDetail.live': 'live',
 	'jobDetail.refresh': 'Refresh',
 	'jobDetail.summary': 'Summary',
 	'jobDetail.summaryHint': 'Statistics from the restic summary',

@@ -21,6 +21,7 @@ export { default as PageHeader } from './PageHeader.svelte';
 export { default as Pagination } from './Pagination.svelte';
 export { default as Panel } from './Panel.svelte';
 export { default as PasswordField } from './PasswordField.svelte';
+export { default as NewPasswordField } from './NewPasswordField.svelte';
 export { default as Popover } from './Popover.svelte';
 export { default as Select } from './Select.svelte';
 export { default as SidePanel } from './SidePanel.svelte';
