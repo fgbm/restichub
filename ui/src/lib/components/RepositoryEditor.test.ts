@@ -194,6 +194,22 @@ describe('the repository page', () => {
 		);
 	});
 
+	it('fr_rp_01 says "Not set" for the empty prefix of an initialized S3 repository', async () => {
+		mocks.listRepositories.mockResolvedValue([
+			repository({
+				backend: { kind: 's3', endpoint: 'https://s3.example.net', bucket: 'backups' }
+			})
+		]);
+		render(RepositoryEditor, { repositoryId: 'r_1' });
+
+		const prefix = await screen.findByLabelText('Prefix');
+		expect(prefix).toBeDisabled();
+		expect(prefix).toHaveValue('');
+		expect(prefix).not.toHaveAttribute('placeholder');
+		expect(prefix).toHaveAccessibleDescription('Not set');
+		expect(screen.getByLabelText(/Bucket/)).toHaveValue('backups');
+	});
+
 	it('fr_rp_01 reports a repository that does not exist', async () => {
 		render(RepositoryEditor, { repositoryId: 'r_9' });
 

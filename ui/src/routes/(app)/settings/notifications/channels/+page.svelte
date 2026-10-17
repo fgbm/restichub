@@ -437,7 +437,7 @@
 				id="channel-recipients"
 				class="rh-textarea rh-input--mono"
 				rows="3"
-				placeholder="ops@example.com"
+				placeholder={t('common.example', { value: 'ops@example.com' })}
 				bind:value={recipients}></textarea>
 		</Field>
 	{:else}
@@ -446,7 +446,7 @@
 			label={t('channels.url')}
 			help={editing ? t('channels.urlEditHint') : t('channels.urlHint')}
 			error={urlError}
-			placeholder="https://hooks.example.com/…"
+			placeholder={t('common.example', { value: 'https://hooks.example.com/…' })}
 			bind:value={url}
 			required={!editing}
 		/>
