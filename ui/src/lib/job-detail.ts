@@ -105,7 +105,29 @@ export function stepProgress(job: JobDetail, rows: StepRow[] = stepRows(job)): S
 	};
 }
 
-export type StepMarker = 'success' | 'warning' | 'running' | 'failed' | 'skipped' | 'idle';
+export type StepMarker = 'success' | 'warning' | 'running' | 'failed' | 'skipped' | 'idle' | 'info';
+
+/** restic exit code 10: no repository at the location. */
+const NO_REPOSITORY = 10;
+
+/**
+ * The access test of an init job that found no repository. It is the expected answer before the
+ * init step, not a failure (FR-RP-02).
+ */
+export function isInitProbe(job: Pick<JobDetail, 'kind'>, step: JobStep): boolean {
+	return job.kind === 'init' && step.step_id === 'test-access' && step.exit_code === NO_REPOSITORY;
+}
+
+/**
+ * The error code of a step. An older agent sends `step_config_error` for an access test that
+ * found no repository, so the exit code decides.
+ */
+export function stepErrorCode(step: JobStep): string | null | undefined {
+	if (step.step_id === 'test-access' && step.exit_code === NO_REPOSITORY) {
+		return 'repository_missing';
+	}
+	return step.error_code;
+}
 
 export function markerOf(status: JobStep['status']): StepMarker {
 	switch (status) {

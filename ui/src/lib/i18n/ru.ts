@@ -803,6 +803,8 @@ export const ru: Record<MessageKey, string> = {
 	'jobs.errorCode.forget_selected_nothing': 'forget не выбрал ни одного снимка',
 	'jobs.errorCode.agent_capability_missing': 'агент слишком старый для задания',
 	'jobs.errorCode.restore_target_denied': 'цель восстановления запрещена',
+	'jobs.errorCode.repository_path_denied': 'путь репозитория не разрешён на хосте',
+	'jobs.errorCode.repository_read_only': 'путь репозитория доступен агенту только для чтения',
 	'jobs.errorCode.forget_without_tags': 'forget без тегов',
 	'jobs.errorCode.step_missing': 'в профиле нет шага',
 	'jobs.errorCode.job_invalid': 'задание некорректно',
@@ -832,13 +834,17 @@ export const ru: Record<MessageKey, string> = {
 	'jobs.reason.plan_missing': 'План удалён.',
 	'jobs.reason.plan_changed': 'План перенесён на другой хост.',
 	'jobs.reason.profile_missing': 'Профиль удалён.',
-	'jobs.reason.repository_missing': 'Репозиторий удалён.',
+	'jobs.reason.repository_missing': 'Репозиторий не найден по этому пути.',
 	'jobs.reason.repository_changed': 'Профиль теперь использует другой репозиторий.',
 	'jobs.reason.agent_facts_invalid': 'Сведения о хосте непригодны. Перезапустите агент.',
 	'jobs.reason.forget_selected_nothing': 'forget не выбрал ни одного снимка',
 	'jobs.reason.agent_capability_missing': 'Агент слишком старый для этого задания. Обновите агент.',
 	'jobs.reason.restore_target_denied':
 		'Хост отклонил путь назначения. Он вне корней восстановления или содержит файл агента.',
+	'jobs.reason.repository_path_denied':
+		'Хост отклонил путь локального репозитория. Добавьте его корень в /etc/restichub-agent-repository-roots.txt на хосте и выполните install-service.',
+	'jobs.reason.repository_read_only':
+		'Агент не может писать по пути локального репозитория. Добавьте его корень в /etc/restichub-agent-repository-roots.txt на хосте и выполните install-service.',
 	'jobs.reason.forget_without_tags':
 		'У политики хранения нет фильтра по тегам. Задание не отправлено. Добавьте фильтр по тегам в правила хранения.',
 	'jobs.reason.step_missing': 'В профиле больше нет этого шага.',
@@ -912,6 +918,11 @@ export const ru: Record<MessageKey, string> = {
 		'restic завершился с предупреждением. Данные есть в репозитории.',
 	'jobDetail.stepError.repository_locked': 'Другой процесс держит блокировку репозитория.',
 	'jobDetail.stepError.step_config_error': 'Пароль репозитория или ключи доступа неверны.',
+	'jobDetail.stepError.repository_missing': 'Репозиторий не найден по этому пути.',
+	'jobDetail.stepError.repository_read_only':
+		'Агент не может писать по пути локального репозитория. Добавьте его корень в /etc/restichub-agent-repository-roots.txt на хосте и выполните install-service.',
+	'jobDetail.probe.absent': 'Репозитория нет',
+	'jobDetail.probe.willCreate': 'Репозитория нет — он будет создан.',
 	'jobDetail.stepError.step_failed': 'restic остановился с ошибкой. Прочитайте журнал задания.',
 	'jobDetail.stepError.step_cancelled': 'Шаг отменён.',
 	'jobDetail.stepError.step_timeout': 'Шаг выполнялся дольше своего тайм-аута.',
