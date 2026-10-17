@@ -67,6 +67,8 @@ pub enum Reason {
     Removed,
     /// A number or a time range is outside the allowed bounds.
     OutOfRange,
+    NotRepositoryHost,
+    PlanOnOtherHost,
 }
 
 impl Reason {
@@ -91,6 +93,8 @@ impl Reason {
             Self::ServerScriptsDisabled => "server_scripts_disabled",
             Self::Removed => "removed",
             Self::OutOfRange => "out_of_range",
+            Self::NotRepositoryHost => "not_repository_host",
+            Self::PlanOnOtherHost => "plan_on_other_host",
         }
     }
 }

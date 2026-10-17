@@ -546,6 +546,12 @@ export const en = {
 	'repositories.maintenanceHostHint': 'This host runs forget, prune and check for the repository.',
 	'repositories.maintenanceHostNone': 'None',
 	'repositories.maintenanceMissing': 'No maintenance host',
+	'repositories.hostPlaceholder': 'Select a host',
+	'repositories.repositoryHost': 'Repository host',
+	'repositories.repositoryHostHint':
+		'The local path is on the disk of this host. Every job of the repository runs on this host.',
+	'repositories.repositoryHostLocked':
+		'The host of an initialized local repository cannot change. The snapshots are on the disk of this host.',
 	'repositories.maintenance.description':
 		'The maintenance host runs these tasks on a schedule. A backup host never runs them.',
 	'repositories.maintenance.noHostTitle': 'No maintenance host',
@@ -808,6 +814,7 @@ export const en = {
 	'jobs.errorCode.signing_failed': 'the job could not be signed',
 	'jobs.errorCode.plan_missing': 'the plan is deleted',
 	'jobs.errorCode.plan_changed': 'the plan moved to another host',
+	'jobs.errorCode.not_repository_host': 'not the host of the local repository',
 	'jobs.errorCode.profile_missing': 'the profile is deleted',
 	'jobs.errorCode.repository_changed': 'the profile uses another repository',
 	'jobs.errorCode.agent_facts_invalid': 'the facts of the host are not usable',
@@ -841,6 +848,8 @@ export const en = {
 		'The control plane could not sign the job. Ask the administrator to check the signing key.',
 	'jobs.reason.plan_missing': 'The plan is deleted.',
 	'jobs.reason.plan_changed': 'The plan moved to another host.',
+	'jobs.reason.not_repository_host':
+		'The repository is local, and its path is on another host. Move the plan to the repository host.',
 	'jobs.reason.profile_missing': 'The profile is deleted.',
 	'jobs.reason.repository_missing': 'The repository is deleted.',
 	'jobs.reason.repository_changed': 'The profile now uses another repository.',
@@ -1031,6 +1040,10 @@ export const en = {
 	'pl.section.source': 'What to back up',
 	'pl.section.objective': 'Recovery point objective',
 	'pl.source.repository': 'The profile writes to the repository {name}.',
+	'pl.source.localHost':
+		'The repository {name} is local. Its path is on the host {host} only, so the plan runs on that host.',
+	'pl.source.localNoHost':
+		'The repository {name} is local and has no host. Set the repository host first.',
 	'pl.side.repository': 'Repository',
 	'pl.summary.noName': 'No name',
 	'pl.summary.noSource': 'Choose the profile and the host',
@@ -1150,6 +1163,10 @@ export const en = {
 		'The host runs an older agent that cannot do this. Update the agent package and try again.',
 	'error.restore_target_denied':
 		'The host does not restore to this path. Use a restore root of the host. An administrator adds a root on the host.',
+	'error.repository_host_locked':
+		'The host of an initialized local repository cannot change. The snapshots are on the disk of this host.',
+	'error.not_repository_host':
+		'The plan runs on another host than its local repository. Open the plan and select the repository host.',
 	'error.internal_error':
 		'The control plane has an internal problem. Try again later. If the problem stays, ask the administrator to read the log.',
 	'error.network': 'The control plane did not answer. Check the network and try again.',
@@ -1486,6 +1503,10 @@ export const en = {
 	'reason.unavailable': 'This setting is not available yet.',
 	'reason.mismatch': 'The value does not match.',
 	'reason.out_of_range': 'The value is out of range.',
+	'reason.not_repository_host':
+		'The repository is local. Select the repository host: its path is on that host only.',
+	'reason.plan_on_other_host':
+		'A plan of the repository runs on another host. A local repository works on its own host only.',
 	'scripts.title': 'Scripts',
 	'scripts.description':
 		'Scripts run on the host as the agent account. They run before and after the backup, in the order of the lists. Each script is a step of the job with its own log.',

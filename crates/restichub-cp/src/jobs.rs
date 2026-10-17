@@ -850,14 +850,32 @@ pub(crate) fn resolve_agent(
         let maintenance = repository
             .maintenance_agent_id
             .ok_or_else(|| ApiError::invalid_field("agent_id", Reason::Empty))?;
-        if explicit.is_some_and(|agent| agent != maintenance) {
-            return Err(ApiError::invalid_field("agent_id", Reason::Unknown));
+        if let Some(agent) = explicit {
+            ensure_repository_host(repository, agent)?;
+            if agent != maintenance {
+                return Err(ApiError::invalid_field("agent_id", Reason::Unknown));
+            }
         }
         return Ok(maintenance);
     }
     explicit
         .or(repository.maintenance_agent_id)
         .ok_or_else(|| ApiError::invalid_field("agent_id", Reason::Empty))
+}
+
+/// Refuses an agent other than the host of a local repository: restic reads the path on the disk
+/// of that host only, so a backup, a restore or a browse elsewhere cannot work.
+pub(crate) fn ensure_repository_host(
+    repository: &Repository,
+    agent: AgentId,
+) -> Result<(), ApiError> {
+    if repository.backend == BackendKind::Local && repository.maintenance_agent_id != Some(agent) {
+        return Err(ApiError::invalid_field(
+            "agent_id",
+            Reason::NotRepositoryHost,
+        ));
+    }
+    Ok(())
 }
 
 /// A hex SHA-256 of the repository location. It holds no secret.

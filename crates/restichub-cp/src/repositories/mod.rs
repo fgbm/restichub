@@ -18,12 +18,12 @@ mod settings;
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use restichub_db::RepositoryId;
 use restichub_db::audit::{AuditAction, diff};
 use restichub_db::repositories::{
     self as repo, NewRepository, RepositorySecrets, RepositoryUpdate,
 };
 use restichub_db::repository_health as health_repo;
+use restichub_db::{BackendKind, RepositoryId};
 use restichub_secrets::SecretPurpose;
 
 use crate::context::{Operation, RequestContext};
@@ -147,6 +147,12 @@ pub async fn create_repository(
     let credentials =
         validate_credentials(&backend.kind, s3_access_key, s3_secret_key, rest_password)?;
     let maintenance_agent_id = parse_optional_agent_id(maintenance_agent_id.as_deref())?;
+    if backend.kind == BackendKind::Local && maintenance_agent_id.is_none() {
+        return Err(ApiError::invalid_field(
+            "maintenance_agent_id",
+            Reason::Empty,
+        ));
+    }
     let created_by = actor_user(&context.actor);
 
     let provider = state
@@ -227,7 +233,8 @@ pub async fn create_repository(
         (status = 200, description = "The updated repository.", body = RepositoryView),
         (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The repository is not found.", body = crate::error::ProblemBody)
+        (status = 404, description = "The repository is not found.", body = crate::error::ProblemBody),
+        (status = 409, description = "The location of an initialized repository cannot change, and neither can the host of an initialized local repository (`repository_host_locked`).", body = crate::error::ProblemBody)
     )
 )]
 pub async fn update_repository(
@@ -297,15 +304,36 @@ pub async fn update_repository(
     // A local path lives on one host, so a maintenance agent change is a location change for the
     // local backend. The location of an initialized repository cannot change in this version, and
     // neither can the location of a repository with an active job.
-    let location_changed = new_location != stored_location(&current)
-        || (current.backend == restichub_db::BackendKind::Local
-            && agent != current.maintenance_agent_id);
+    let host_changed =
+        current.backend == BackendKind::Local && agent != current.maintenance_agent_id;
+    let location_changed = new_location != stored_location(&current) || host_changed;
     if location_changed {
+        if host_changed && current.initialized {
+            return Err(ApiError::repository_host_locked());
+        }
         if current.initialized {
             return Err(ApiError::conflict());
         }
         if restichub_db::jobs::has_active_for_repository(&mut tx, repository_id).await? {
             return Err(ApiError::conflict());
+        }
+    }
+    if host_changed {
+        let Some(host) = agent else {
+            return Err(ApiError::invalid_field(
+                "maintenance_agent_id",
+                Reason::Empty,
+            ));
+        };
+        // The plan save locks this row too, so no plan for the old host slips in. A repository
+        // stored without a host may get one first, so its old plans can then move to that host.
+        if current.maintenance_agent_id.is_some()
+            && restichub_db::plans::has_plan_off_host(&mut tx, repository_id, host).await?
+        {
+            return Err(ApiError::invalid_field(
+                "maintenance_agent_id",
+                Reason::PlanOnOtherHost,
+            ));
         }
     }
 
