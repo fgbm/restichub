@@ -67,20 +67,60 @@ describe('RecordPage', () => {
 		expect(getPageMeta()?.crumbs).toEqual([{ label: 'db-01' }]);
 	});
 
-	it('makes the sections and the footer one form', async () => {
+	it('makes the sections and the save bar one form', async () => {
 		const onsubmit = vi.fn();
+		const oncancel = vi.fn();
 		const { container } = render(RecordPage, {
 			props: {
-				title: 'New profile',
+				title: 'db-profile',
 				onsubmit,
-				footer: html('<button type="submit">Save</button>'),
+				save: { dirty: true, oncancel },
 				children: html('<section>Basics</section>')
 			}
 		});
-		const form = container.querySelector('form');
-		expect(form).not.toBeNull();
-		await fireEvent.submit(form as HTMLFormElement);
+		expect(container.querySelector('.record__bar')).toHaveTextContent('The changes are not saved');
+		await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+		expect(oncancel).toHaveBeenCalledOnce();
+		await fireEvent.submit(container.querySelector('form') as HTMLFormElement);
 		expect(onsubmit).toHaveBeenCalledOnce();
+	});
+
+	it('disables Save without changes and says why', () => {
+		render(RecordPage, {
+			props: {
+				title: 'db-profile',
+				onsubmit: vi.fn(),
+				save: { dirty: false, note: 'Used by 2 plans', oncancel: vi.fn() },
+				children: html('<section>Basics</section>')
+			}
+		});
+		const save = screen.getByRole('button', { name: 'Save' });
+		expect(save).toBeDisabled();
+		expect(save).toHaveAccessibleDescription(/No changes.*Used by 2 plans/);
+		expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull();
+	});
+
+	it('keeps Save enabled for a new record and shows the reason of a read-only page', () => {
+		const { unmount } = render(RecordPage, {
+			props: {
+				title: 'New profile',
+				onsubmit: vi.fn(),
+				save: { dirty: false, create: true, oncancel: vi.fn() },
+				children: html('<section>Basics</section>')
+			}
+		});
+		expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
+		unmount();
+
+		render(RecordPage, {
+			props: {
+				title: 'db-profile',
+				save: { dirty: false, readonly: 'Your role cannot change a profile.', oncancel: vi.fn() },
+				children: html('<section>Basics</section>')
+			}
+		});
+		expect(screen.getByText('Your role cannot change a profile.')).toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: 'Save' })).toBeNull();
 	});
 });
 

@@ -165,7 +165,8 @@ test('the repository maintenance shows the warning, edits the schedules and runs
 	await page.getByRole('button', { name: 'Add repository' }).click();
 	const zone = await page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone);
 	await expect(page.locator('#maintenance-time-zone')).toHaveValue(zone);
-	await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+	// Without a change the bar has no Cancel button.
+	await page.goBack();
 
 	await addRepository(page, 'repo-m', 'nas-backup');
 	await addRepository(page, 'repo-nohost', null);

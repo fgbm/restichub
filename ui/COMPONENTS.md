@@ -29,15 +29,24 @@ The top bar (`AppShell`) shows the section levels from the navigation, then the 
 
 `RecordPage` is a `Page` for one record, with the route `/<list>/<id>`. It has the sections on the left and a sticky side panel on the right. Below 1024 px, the side panel moves above the sections and does not stick.
 
-| Property   | Function                                                                              |
-| ---------- | ------------------------------------------------------------------------------------- |
-| `side`     | A snippet for the side panel. Put one or more `SummaryPanel` components in it.        |
-| `banners`  | A snippet for the notices about the full record, above the sections.                  |
-| `footer`   | A snippet for a sticky bar below the sections, for example the save bar of an editor. |
-| `onsubmit` | When it is set, the sections and the footer are one form.                             |
-| `crumbs`   | By default, the title is the only level.                                              |
+| Property   | Function                                                                       |
+| ---------- | ------------------------------------------------------------------------------ |
+| `side`     | A snippet for the side panel. Put one or more `SummaryPanel` components in it. |
+| `banners`  | A snippet for the notices about the full record, above the sections.           |
+| `save`     | `SaveBar`: the save bar of an editor. See below.                               |
+| `onsubmit` | When it is set, the sections and the save bar are one form.                    |
+| `crumbs`   | By default, the title is the only level.                                       |
 
 The other properties are the same as in `Page`.
+
+The save bar is a strip below the sections column. It is at the bottom edge of the window while the sections scroll under it, and then it has a light shadow at the top. At the end of the page, the bar is below the last section and does not cover it. The side panel stays fully visible above the level of the bar. Below 1024 px, the bar uses the full width. `SaveBar` (`$lib/components/layout`) has these properties:
+
+- `dirty`: the form has changes. The bar shows a yellow dot, "The changes are not saved", "Cancel" and "Save".
+- Without changes, the bar shows "No changes" and "Save" is disabled. The text is the accessible description of "Save" (UI principles 5.5).
+- `create`: a new record. "Save" stays enabled before the first change.
+- `readonly`: the reason why the person cannot save, for example the role. The bar shows the reason and no buttons.
+- `note`: a short fact after the state, for example the number of plans that use the profile.
+- `saving` and `oncancel`: the progress of the save and the action of "Cancel".
 
 ## SummaryPanel
 

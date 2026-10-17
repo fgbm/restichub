@@ -372,6 +372,7 @@ describe('the plan page', () => {
 
 		await screen.findByRole('heading', { level: 1, name: 'nightly-web' });
 		// A collapsed section opens when the server names its field.
+		await user.type(input('#plan-name'), '-2');
 		await user.click(screen.getByRole('button', { name: 'Collapse all' }));
 		await user.click(screen.getByRole('button', { name: 'Save' }));
 

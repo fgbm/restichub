@@ -359,6 +359,13 @@
 	{loading}
 	error={loadError}
 	onsubmit={() => void save()}
+	save={{
+		dirty,
+		saving,
+		create: !planId,
+		readonly: canWrite ? null : t('pl.save.readonly'),
+		oncancel: () => goto(resolve('/(app)/plans'))
+	}}
 >
 	{#snippet actions()}
 		<Button size="sm" onclick={() => setAll(true)} disabled={allOpen}>{t('pe.expandAll')}</Button>
@@ -382,21 +389,6 @@
 	{/snippet}
 	{#snippet side()}
 		<SummaryPanel title={t('rp.side.result')} items={resultItems} />
-	{/snippet}
-	{#snippet footer()}
-		<div class="savebar">
-			<span class="muted savebar__text">
-				{#if !canWrite}
-					{t('pl.save.readonly')}
-				{:else if dirty}
-					{t('rp.save.dirty')}
-				{/if}
-			</span>
-			<Button onclick={() => goto(resolve('/(app)/plans'))}>{t('common.cancel')}</Button>
-			{#if canWrite}
-				<Button type="submit" variant="primary" loading={saving}>{t('common.save')}</Button>
-			{/if}
-		</div>
 	{/snippet}
 
 	<ProfileSection
@@ -588,20 +580,6 @@
 	.runs li {
 		width: fit-content;
 		cursor: help;
-	}
-
-	.savebar {
-		display: flex;
-		align-items: center;
-		gap: var(--rh-space-3);
-		padding: var(--rh-space-3) var(--rh-space-4);
-		border: var(--rh-border-width) solid var(--rh-color-border);
-		border-radius: var(--rh-radius-lg);
-		background-color: var(--rh-color-surface);
-	}
-
-	.savebar__text {
-		flex: 1;
 	}
 
 	@media (max-width: 720px) {
