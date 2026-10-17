@@ -1059,11 +1059,17 @@ export const ru: Record<MessageKey, string> = {
 	'pl.section.basics': 'Основное',
 	'pl.section.source': 'Что копировать',
 	'pl.section.objective': 'Допустимая потеря данных',
-	'pl.source.repository': 'Профиль пишет копии в репозиторий {name}.',
 	'pl.source.localHost':
 		'Репозиторий {name} локальный. Его путь есть только на хосте {host}, поэтому план выполняется на этом хосте.',
 	'pl.source.localNoHost':
 		'Репозиторий {name} локальный, и у него нет хоста. Сначала задайте хост репозитория.',
+	'profilePicker.search': 'Профиль или репозиторий',
+	'profilePicker.none': 'Профилей нет.',
+	'profilePicker.backend.s3': 'S3',
+	'profilePicker.backend.rest': 'REST',
+	'profilePicker.backend.local': 'Локальный',
+	'profilePicker.host': 'хост {name}',
+	'profilePicker.noHost': 'хост не задан',
 	'pl.side.repository': 'Репозиторий',
 	'pl.summary.noName': 'Имя не задано',
 	'pl.summary.noSource': 'Выберите профиль и хост',

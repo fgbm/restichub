@@ -13,6 +13,9 @@ import Plans from './+page.svelte';
 
 const mocks = vi.hoisted(() => ({
 	listPlans: vi.fn(),
+	listProfiles: vi.fn(),
+	listRepositories: vi.fn(),
+	listAgents: vi.fn(),
 	deletePlan: vi.fn(),
 	runPlan: vi.fn(),
 	updatePlan: vi.fn(),
@@ -47,6 +50,9 @@ vi.mock('#lib/api/index.ts', async (importOriginal) => {
 		service: {
 			...actual.service,
 			listPlans: mocks.listPlans,
+			listProfiles: mocks.listProfiles,
+			listRepositories: mocks.listRepositories,
+			listAgents: mocks.listAgents,
 			deletePlan: mocks.deletePlan,
 			runPlan: mocks.runPlan,
 			updatePlan: mocks.updatePlan
@@ -86,6 +92,39 @@ describe('the Plans screen', () => {
 		vi.clearAllMocks();
 		session.role = 'admin';
 		mocks.listPlans.mockResolvedValue([]);
+		mocks.listProfiles.mockResolvedValue([
+			{ id: 'p_1', name: 'web-daily', repository_id: 'r_1' },
+			{ id: 'p_2', name: 'nas-files', repository_id: 'r_2' }
+		]);
+		mocks.listRepositories.mockResolvedValue([
+			{ id: 'r_1', name: 'test-s3-yandex', backend: { kind: 's3', bucket: 'b' } },
+			{
+				id: 'r_2',
+				name: 'nas-local',
+				backend: { kind: 'local', path: '/srv/restic' },
+				maintenance_agent_id: 'a_2'
+			}
+		]);
+		mocks.listAgents.mockResolvedValue([{ id: 'a_2', hostname: 'MINDCORE' }]);
+	});
+
+	it('shows the repository of each profile in the profile facet and finds it', async () => {
+		const user = userEvent.setup();
+		mocks.listPlans.mockResolvedValue([
+			plan(),
+			plan({ id: 'pl_2', name: 'nas-nightly', profile_id: 'p_2', profile_name: 'nas-files' })
+		]);
+		render(Plans);
+
+		await screen.findByText('nas-nightly');
+		await user.click(screen.getByRole('button', { name: /^Profile/ }));
+		const nas = await screen.findByLabelText('nas-files');
+		expect(document.getElementById(nas.getAttribute('aria-describedby') ?? '')).toHaveTextContent(
+			/nas-local\s*Local\s*·\s*host MINDCORE/
+		);
+		await user.type(screen.getByPlaceholderText('Find: Profile'), 'yandex');
+		expect(screen.queryByLabelText('nas-files')).not.toBeInTheDocument();
+		expect(screen.getByLabelText('web-daily')).toBeInTheDocument();
 	});
 
 	it('lists a plan with its host and its schedule', async () => {

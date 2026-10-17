@@ -1052,11 +1052,17 @@ export const en = {
 	'pl.section.basics': 'Basics',
 	'pl.section.source': 'What to back up',
 	'pl.section.objective': 'Recovery point objective',
-	'pl.source.repository': 'The profile writes to the repository {name}.',
 	'pl.source.localHost':
 		'The repository {name} is local. Its path is on the host {host} only, so the plan runs on that host.',
 	'pl.source.localNoHost':
 		'The repository {name} is local and has no host. Set the repository host first.',
+	'profilePicker.search': 'Profile or repository',
+	'profilePicker.none': 'There are no profiles.',
+	'profilePicker.backend.s3': 'S3',
+	'profilePicker.backend.rest': 'REST',
+	'profilePicker.backend.local': 'Local',
+	'profilePicker.host': 'host {name}',
+	'profilePicker.noHost': 'no host',
 	'pl.side.repository': 'Repository',
 	'pl.summary.noName': 'No name',
 	'pl.summary.noSource': 'Choose the profile and the host',
