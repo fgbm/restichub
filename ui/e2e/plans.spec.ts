@@ -87,3 +87,36 @@ test('the plan page shows the next runs of an existing plan', async ({ page }) =
 	await expect(page.getByText('Next 5 runs')).toBeVisible();
 	await expect(page.locator('.runs li')).toHaveCount(5);
 });
+
+test('the switch in the schedule header turns a plan off and shows the pill', async ({ page }) => {
+	await seed(page);
+	await page.addInitScript(() => localStorage.setItem('restichub.mock.plans', 'sample'));
+	await signIn(page);
+	await page
+		.getByRole('navigation', { name: 'Primary navigation' })
+		.getByRole('link', { name: 'Plans', exact: true })
+		.click();
+	await expect(page.getByRole('heading', { level: 1, name: 'Plans' })).toBeVisible();
+	await page
+		.getByRole('list', { name: 'Plans' })
+		.getByRole('link', { name: 'nightly-web' })
+		.click();
+	await expect(page.getByRole('heading', { level: 1, name: 'nightly-web' })).toBeVisible();
+
+	// "What to back up" comes before "Basics"; the state has no checkbox.
+	const sections = page.locator('[data-section]');
+	await expect(sections.first()).toHaveAttribute('data-section', 'source');
+	await expect(page.getByRole('checkbox', { name: 'Enabled' })).toHaveCount(0);
+
+	const toggle = page.getByRole('switch', { name: 'Run on schedule' });
+	await expect(toggle).toHaveAttribute('data-state', 'checked');
+	await toggle.click();
+	await expect(page.getByText(/The scheduler does not run this plan/)).toBeVisible();
+	await expect(page.locator('.status', { hasText: 'Disabled' })).toBeVisible();
+
+	await page.getByRole('button', { name: 'Save' }).click();
+	await expect(page.getByText('The plan is updated.')).toBeVisible();
+	await expect(page.locator('li.item').filter({ hasText: 'nightly-web' })).toContainText(
+		'Disabled'
+	);
+});

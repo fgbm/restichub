@@ -17,7 +17,7 @@
 	import ProfilePicker from './ProfilePicker.svelte';
 	import ProfileSection from './ProfileSection.svelte';
 	import { RecordPage, SummaryPanel } from './layout/index.ts';
-	import { Alert, Button, Checkbox, ConfirmDialog, Select, TextField } from './ui/index.ts';
+	import { Alert, Button, ConfirmDialog, Select, StatusPill, TextField } from './ui/index.ts';
 	import type { KeyValueItem, SelectOption } from './ui/index.ts';
 	import { formatLocalTime, formatTimeInZone } from '#lib/format.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
@@ -36,7 +36,7 @@
 	let { planId = null }: { planId?: string | null } = $props();
 
 	type SectionKey = 'basics' | 'source' | 'schedule' | 'objective';
-	const SECTIONS: SectionKey[] = ['basics', 'source', 'schedule', 'objective'];
+	const SECTIONS: SectionKey[] = ['source', 'basics', 'schedule', 'objective'];
 
 	const POLICIES: MissedRunPolicy[] = ['run_all', 'latest_only', 'skip'];
 	// The number of fire times that the preview requests (FR-SC-01).
@@ -133,9 +133,7 @@
 	}
 
 	const summaries = $derived<Record<SectionKey, { text: string; state: SummaryState }>>({
-		basics: name
-			? { text: `${name} · ${t(enabled ? 'plans.enabled' : 'plans.disabled')}`, state: 'on' }
-			: { text: t('pl.summary.noName'), state: 'warn' },
+		basics: name ? { text: name, state: 'on' } : { text: t('pl.summary.noName'), state: 'warn' },
 		source:
 			profileName && hostName
 				? { text: `${profileName} · ${hostName}`, state: 'on' }
@@ -371,6 +369,9 @@
 		oncancel: () => goto(resolve('/(app)/plans'))
 	}}
 >
+	{#snippet status()}
+		{#if !loading && !enabled}<StatusPill>{t('plans.disabled')}</StatusPill>{/if}
+	{/snippet}
 	{#snippet actions()}
 		<Button size="sm" onclick={() => setAll(true)} disabled={allOpen}>{t('pe.expandAll')}</Button>
 		<Button size="sm" onclick={() => setAll(false)}>{t('pe.collapseAll')}</Button>
@@ -394,24 +395,6 @@
 	{#snippet side()}
 		<SummaryPanel title={t('rp.side.result')} items={resultItems} />
 	{/snippet}
-
-	<ProfileSection
-		id="basics"
-		title={t(titles.basics)}
-		summary={summaries.basics.text}
-		state={summaries.basics.state}
-		required
-		bind:open={open.basics}
-	>
-		<TextField
-			id="plan-name"
-			label={t('plans.plan')}
-			error={fieldError(formProblem, 'name')}
-			bind:value={name}
-			required
-		/>
-		<Checkbox label={t('plans.enabled')} bind:checked={enabled} />
-	</ProfileSection>
 
 	<ProfileSection
 		id="source"
@@ -451,11 +434,32 @@
 	</ProfileSection>
 
 	<ProfileSection
+		id="basics"
+		title={t(titles.basics)}
+		summary={summaries.basics.text}
+		state={summaries.basics.state}
+		required
+		bind:open={open.basics}
+	>
+		<TextField
+			id="plan-name"
+			label={t('plans.plan')}
+			error={fieldError(formProblem, 'name')}
+			bind:value={name}
+			required
+		/>
+	</ProfileSection>
+
+	<ProfileSection
 		id="schedule"
 		title={t(titles.schedule)}
 		summary={summaries.schedule.text}
 		state={summaries.schedule.state}
 		required
+		switchable
+		switchLabel={t('plans.runOnSchedule')}
+		note={enabled ? undefined : t('plans.offNote')}
+		bind:enabled
 		bind:open={open.schedule}
 	>
 		<TextField
