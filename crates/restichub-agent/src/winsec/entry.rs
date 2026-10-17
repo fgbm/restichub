@@ -16,7 +16,7 @@ use windows_sys::Win32::Storage::FileSystem::{
     BY_HANDLE_FILE_INFORMATION, CreateFileW, FILE_ATTRIBUTE_DIRECTORY,
     FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
     FILE_READ_DATA, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
-    GetFileInformationByHandle, OPEN_EXISTING, READ_CONTROL, WRITE_DAC,
+    GetFileInformationByHandle, OPEN_EXISTING, READ_CONTROL, WRITE_DAC, WRITE_OWNER,
 };
 
 use super::{
@@ -66,6 +66,11 @@ impl Entry {
     /// Opens the entry at `path`, or returns `None` when the path does not exist.
     pub(crate) fn open(path: &Path) -> Result<Option<Self>> {
         Self::open_with(path, READ_CONTROL | WRITE_DAC)
+    }
+
+    /// Opens the entry for [`Entry::own_and_protect`] too.
+    pub(crate) fn open_to_own(path: &Path) -> Result<Option<Self>> {
+        Self::open_with(path, READ_CONTROL | WRITE_DAC | WRITE_OWNER)
     }
 
     /// Opens the entry for [`Entry::exposure`] only, so a process without elevation can check it.
@@ -160,11 +165,24 @@ impl Entry {
 
     /// Sets the protected DACL of SYSTEM and Administrators on this entry only.
     pub(crate) fn protect(&self) -> Result<()> {
+        self.set(DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION)
+    }
+
+    /// Sets Administrators as the owner too. Needs an entry from [`Entry::open_to_own`].
+    pub(crate) fn own_and_protect(&self) -> Result<()> {
+        self.set(
+            OWNER_SECURITY_INFORMATION
+                | DACL_SECURITY_INFORMATION
+                | PROTECTED_DACL_SECURITY_INFORMATION,
+        )
+    }
+
+    fn set(&self, info: u32) -> Result<()> {
         let descriptor = descriptor(if self.is_dir() { DIR_SDDL } else { FILE_SDDL })?;
-        let info = DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION;
         // `SetSecurityInfo` would flow the DACL into the children, past a junction among them, so
         // the low-level call sets this object alone and the caller walks the children itself.
-        // SAFETY: the handle is open with WRITE_DAC and the descriptor stays alive for the call.
+        // SAFETY: the handle is open with the rights that `info` needs and the descriptor stays
+        // alive for the call.
         let ok = unsafe { SetKernelObjectSecurity(self.handle, info, descriptor.0) };
         if ok == 0 {
             bail!(

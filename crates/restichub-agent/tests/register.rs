@@ -316,6 +316,56 @@ async fn fr_in_07_a_failed_preflight_makes_no_enrollment_request() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[tokio::test]
+async fn fr_in_07_a_failed_restic_install_says_that_the_token_is_not_used() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("cannot bind the listener");
+    listener
+        .set_nonblocking(true)
+        .expect("cannot set the listener non-blocking");
+    let port = listener.local_addr().expect("no local address").port();
+    let dir = common::temp_config_dir("register-no-restic");
+    std::fs::create_dir_all(&dir).expect("cannot create the test directory");
+    let options = RegisterOptions {
+        url: Some(format!("http://127.0.0.1:{port}")),
+        token: Some("one-time-token".to_owned()),
+        no_service: true,
+        ..RegisterOptions::default()
+    };
+    let installer = restichub_agent::restic_install::Installer {
+        layout: restichub_agent::restic_store::Layout::new(dir.join("bin"), dir.join("Agent")),
+        platform: restichub_agent::restic_release::Platform::host().expect("a restic platform"),
+        key: restichub_agent::restic_release::release_key().expect("the release key"),
+        probe: &|_| Ok("0.19.1".to_owned()),
+    };
+    let missing = dir.join("missing");
+    let supply = restichub_agent::restic_release::Supply::Files {
+        archive: missing.join("restic_0.19.1_linux_amd64.bz2"),
+        sums: missing.join("SHA256SUMS"),
+        sums_signature: missing.join("SHA256SUMS.asc"),
+    };
+
+    let error = commands::provision_and_register(
+        &options,
+        &dir.join("Agent"),
+        &dir.join("cache"),
+        &installer,
+        &supply,
+    )
+    .await
+    .expect_err("restic cannot be installed");
+
+    assert!(
+        format!("{error:#}").contains("the token is not used"),
+        "unexpected error: {error:#}"
+    );
+    let accepted = listener.accept();
+    assert!(
+        matches!(&accepted, Err(e) if e.kind() == std::io::ErrorKind::WouldBlock),
+        "the agent connected without restic"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[cfg(unix)]
 #[test]
 fn the_key_file_is_owner_only() {

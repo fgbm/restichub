@@ -640,3 +640,229 @@ jobs:
             Sort-Object Name | Select-Object -Last 1 | Get-Content -Tail 80
           Write-Host '--- control plane log'
           bash scripts/install-smoke.sh cp-logs
+
+  # The path of a real host: an old agent copied by hand into Program Files, its data directory
+  # open to Users, and a process that keeps a file of the old copy open. The new package from a
+  # download folder must end with a working host without a manual repair (T20, FR-IN-07).
+  windows-manual-copy:
+    name: Install smoke (AC-IN-03) / Windows manual copy of an old agent (T20)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    env:
+      OLD_AGENT_TAG: v0.1.0-rc.4
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set the state directory
+        run: echo "SMOKE_DIR=$(cygpath -m "$RUNNER_TEMP")/smoke" >> "$GITHUB_ENV"
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
+      # The old agent comes from its source tag: the published Windows package of that release does
+      # not start. The build shares the target directory, so it reuses the dependencies.
+      - name: Build the old agent
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth 1 origin "refs/tags/$OLD_AGENT_TAG:refs/tags/$OLD_AGENT_TAG"
+          git worktree add "$RUNNER_TEMP/old-src" "$OLD_AGENT_TAG"
+          cargo build -p restichub-agent --manifest-path "$RUNNER_TEMP/old-src/Cargo.toml" --target-dir target
+          mkdir -p "$RUNNER_TEMP/old-package"
+          cp target/debug/restichub-agent.exe "$RUNNER_TEMP/old-package/restichub-agent.exe"
+          "$RUNNER_TEMP/old-package/restichub-agent.exe" --version
+      - name: Build the control plane and the new agent
+        run: cargo build -p restichub-cp -p restichub-agent
+      - name: Start PostgreSQL
+        run: |
+          set -euo pipefail
+          pg_bin="$(ls -d "/c/Program Files/PostgreSQL/"*/bin | sort -V | tail -n1)"
+          echo "$pg_bin" >> "$GITHUB_PATH"
+          export PATH="$pg_bin:$PATH"
+          pg_data="$(cygpath -w "$RUNNER_TEMP/pgdata")"
+          initdb -D "$pg_data" -U restichub -A trust -E UTF8
+          pg_ctl -D "$pg_data" -l "$RUNNER_TEMP/pg.log" -o "-p 5432 -c listen_addresses=127.0.0.1" -w start
+          createdb -h 127.0.0.1 -U restichub restichub
+      - name: Prepare the database
+        env:
+          PGHOST: 127.0.0.1
+          PGUSER: restichub
+          CP_BIN: target/debug/restichub-cp.exe
+        run: scripts/install-smoke.sh db-prepare
+      - name: Start the control plane and create the token
+        env:
+          CP_BIN: target/debug/restichub-cp.exe
+          SMOKE_KEK: /wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+        run: |
+          set -euo pipefail
+          scripts/install-smoke.sh cp-up
+          OPENSSL="$(cygpath -u "$PROGRAMFILES")/Git/usr/bin/openssl.exe" scripts/install-smoke.sh ca
+      - name: (1, 2) The old agent registers, then the copy and the data directory are left open
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $old = Join-Path $env:RUNNER_TEMP 'old-package\restichub-agent.exe'
+          Set-Location (Split-Path $old)
+          Write-Host "--- old agent: register"
+          $output = & $old register --url 'https://localhost:8443' --token-file "$env:SMOKE_DIR/enrollment-token" --ca-file "$env:SMOKE_DIR/ca.pem" 2>&1 | Out-String
+          Write-Host $output
+          Write-Host "exit code $LASTEXITCODE"
+          $tree = Join-Path $env:ProgramFiles 'ResticHub'
+          $agentDir = Join-Path $tree 'Agent'
+          $data = Join-Path $env:ProgramData 'ResticHub'
+          if (-not (Test-Path (Join-Path $data 'Agent\identity.json'))) { throw 'the old agent wrote no identity' }
+          if (-not (Test-Path (Join-Path $agentDir 'restichub-agent.exe'))) { throw 'the old agent is not in Program Files' }
+          Get-CimInstance Win32_Service -Filter "Name='restichub-agent'" | Format-List Name, State, StartMode, PathName
+          # A manual copy of the unpacked package: the agent, the license texts and the hashes, with
+          # the access that Program Files gives to a new folder, and the account of the
+          # administrator with Modify, as a client edition gives through CREATOR OWNER.
+          Copy-Item (Join-Path $env:GITHUB_WORKSPACE 'LICENSE') $agentDir
+          Copy-Item (Join-Path $env:GITHUB_WORKSPACE 'packaging\THIRD_PARTY_NOTICES') $agentDir
+          # The downloaded archive, left beside the copy.
+          Set-Content (Join-Path $agentDir 'restichub-agent-old-windows-amd64.zip') 'zip'
+          Get-ChildItem $agentDir -File | Get-FileHash | ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path -Leaf $_.Path)" } | Set-Content (Join-Path $agentDir 'SHA256SUMS')
+          $user = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          icacls $tree /reset /T /Q
+          if ($LASTEXITCODE -ne 0) { throw "icacls /reset exit code $LASTEXITCODE" }
+          icacls $tree /grant "*${user}:(OI)(CI)(M)" /T /Q
+          if ($LASTEXITCODE -ne 0) { throw "icacls /grant exit code $LASTEXITCODE" }
+          icacls (Join-Path $agentDir 'restichub-agent.exe') /grant "*${user}:(M)"
+          if ($LASTEXITCODE -ne 0) { throw "icacls exe exit code $LASTEXITCODE" }
+          # An older build left the data directory open: Users may create files and folders.
+          icacls $data /grant '*S-1-5-32-545:(OI)(CI)(WD,AD)' /T /Q
+          if ($LASTEXITCODE -ne 0) { throw "icacls data exit code $LASTEXITCODE" }
+          Write-Host "--- the access before the new package runs"
+          icacls $tree
+          icacls $agentDir
+          icacls (Join-Path $agentDir 'restichub-agent.exe')
+          icacls (Join-Path $data 'Agent')
+          Get-ChildItem -Recurse $tree | Format-Table -AutoSize FullName, Length
+      - name: (3-6) The new package from a download folder ends with a working host
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $tree = Join-Path $env:ProgramFiles 'ResticHub'
+          $agentDir = Join-Path $tree 'Agent'
+          $installed = Join-Path $agentDir 'restichub-agent.exe'
+          $config = Join-Path $env:ProgramData 'ResticHub\Agent'
+          $marker = 'HKLM:\SOFTWARE\ResticHub\Agent'
+          $user = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          $userAce = { param($path) (Get-Acl $path).GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) | Where-Object { $_.IdentityReference.Value -eq $user } }
+          $service = { Get-CimInstance Win32_Service -Filter "Name='restichub-agent'" }
+          $failures = [Collections.Generic.List[string]]::new()
+          $expect = { param($ok, $what) if ($ok) { Write-Host "ok: $what" } else { Write-Host "FAILED: $what"; $failures.Add($what) } }
+          $run = {
+            param($title, [string[]]$arguments, $stdin)
+            Write-Host "=== $title"
+            Write-Host "> restichub-agent.exe $($arguments -join ' ')"
+            if ($stdin) { $text = $stdin | & .\restichub-agent.exe @arguments 2>&1 | Out-String }
+            else { $text = & .\restichub-agent.exe @arguments 2>&1 | Out-String }
+            $code = $LASTEXITCODE
+            Write-Host $text
+            Write-Host "exit code $code"
+            return @{ Text = $text; Code = $code }
+          }
+          $package = Join-Path $env:USERPROFILE 'Downloads\restichub-agent-new'
+          New-Item -ItemType Directory -Force $package | Out-Null
+          Copy-Item (Join-Path $env:GITHUB_WORKSPACE 'target\debug\restichub-agent.exe') $package
+          Copy-Item (Join-Path $env:GITHUB_WORKSPACE 'LICENSE') $package
+          Set-Location $package
+
+          Write-Host "=== (3) another process keeps a file of the old copy open without FileShare.Delete"
+          $license = Join-Path $agentDir 'LICENSE'
+          $ready = Join-Path $env:RUNNER_TEMP 'holder.ready'
+          $holder = Start-Process pwsh -PassThru -WindowStyle Hidden -ArgumentList '-NoProfile', '-Command', "`$f = [IO.File]::Open('$license', 'Open', 'Read', 'Read'); Set-Content '$ready' 'open'; Start-Sleep -Seconds 3600"
+          for ($i = 0; $i -lt 60 -and -not (Test-Path $ready); $i++) { Start-Sleep -Seconds 1 }
+          & $expect (Test-Path $ready) "the holder (PID $($holder.Id)) keeps $license open"
+
+          $before = & $service
+          Write-Host "the old service: $($before.State), $($before.StartMode)"
+          $first = & $run '(4) install-service' @('install-service')
+          $text = $first.Text
+          & $expect ($first.Code -ne 0) 'install-service refuses the identity of the old agent'
+          & $expect ($text -match 'repaired the access control of \d+ entr(y|ies) under') 'the repair of ProgramData prints summary lines'
+          & $expect ($text -match 'repairs it in place') 'the held tree is repaired in place'
+          & $expect ($text -match 'removed .*restichub-agent-old-windows-amd64\.zip') 'the file that the agent does not know is removed'
+          & $expect ($text -match "warning: a process kept .*\(PID $($holder.Id)\).*starts only by hand") 'the warning names the holder and the manual start'
+          & $expect ($text -match 'could be changed by another account') 'the identity is refused'
+          & $expect ($text -match 'register --force') 'the next step is named'
+          & $expect ($text -notmatch 'is not intact|restic update|icacls|does not know') 'no other refusal and no manual repair'
+          & $expect ($text.IndexOf('warning: a process kept') -ge 0 -and $text.IndexOf('warning: a process kept') -lt $text.IndexOf('could be changed by another account')) 'the warning comes before the refusal'
+          $state = & $service
+          & $expect ($state.StartMode -eq 'Manual') "the service starts by hand (start mode $($state.StartMode), state $($state.State))"
+          & $expect ($null -ne (Get-ItemProperty $marker -ErrorAction SilentlyContinue).ProgramRepairedInPlaceAt) 'the record of the repair in place exists'
+          & $expect ((Test-Path $installed) -and -not (& $userAce $installed)) 'the new agent is in place and protected'
+          & $expect (-not (& $userAce $tree) -and -not (& $userAce $agentDir) -and -not (& $userAce $license)) 'each level and the held file are protected'
+          & $expect ((Get-Acl $installed).Owner -match 'Administrators') "the owner of the agent is $((Get-Acl $installed).Owner)"
+
+          $token = "$env:SMOKE_DIR/enrollment-token-mindcore"
+          Push-Location $env:GITHUB_WORKSPACE; bash scripts/install-smoke.sh token $token; Pop-Location
+          $planted = Join-Path $agentDir 'version.dll'
+          Set-Content $planted 'x'
+          # An administrator owns it, so only the check before the start can refuse it.
+          icacls $planted /setowner '*S-1-5-32-544' | Out-Null
+          $refused = & $run '(4) register --force with a file that the agent does not know' @('register', '--force', '--url', 'https://localhost:8443', '--token-stdin', '--ca-file', "$env:SMOKE_DIR/ca.pem") (Get-Content $token)
+          & $expect ($refused.Code -ne 0 -and $refused.Text -match 'version\.dll') 'register refuses the planted file and names it'
+          & $expect (Test-Path (Join-Path $config 'identity.json')) 'the refusal keeps the old identity'
+          Remove-Item $planted
+          $since = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+          $registered = & $run '(4) register --force with the same token' @('register', '--force', '--url', 'https://localhost:8443', '--token-stdin', '--ca-file', "$env:SMOKE_DIR/ca.pem") (Get-Content $token)
+          & $expect ($registered.Code -eq 0) 'register --force succeeds, so the refused run did not spend the token'
+          & $expect ($registered.Text -match 'waits for a restart|starts only by hand') 'register repeats the warning'
+
+          Write-Host "=== (5) the host works"
+          $state = & $service
+          $state | Format-List Name, State, StartMode, StartName, PathName
+          & $expect ($state.State -eq 'Running') 'the service runs'
+          & $expect ($state.StartMode -eq 'Manual') 'the service still starts by hand'
+          Push-Location $env:GITHUB_WORKSPACE
+          bash scripts/install-smoke.sh connected $since 60
+          & $expect ($LASTEXITCODE -eq 0) 'the agent is connected'
+          $source = [IO.Path]::GetFullPath((Join-Path $env:SMOKE_DIR 'mindcore-source'))
+          New-Item -ItemType Directory -Force $source | Out-Null
+          Set-Content (Join-Path $source 'file.txt') 'backup after the repair'
+          bash scripts/install-smoke.sh backup "$env:SMOKE_DIR/mindcore" $source windows
+          & $expect ($LASTEXITCODE -eq 0) 'a backup job succeeded'
+          Pop-Location
+          $restic = Join-Path $agentDir 'restic.exe'
+          $record = Get-Content (Join-Path $config 'restic.json') -ErrorAction SilentlyContinue | ConvertFrom-Json
+          & $expect ((Test-Path $restic) -and $record -and (Get-FileHash $restic -Algorithm SHA256).Hash -eq $record.sha256.ToUpper()) "restic.exe matches its record ($($record.version))"
+          & $installed status 2>&1 | Out-String | Write-Host
+
+          Write-Host "=== (6) the holder ends, but the computer did not restart"
+          Stop-Process -Id $holder.Id
+          $holder.WaitForExit()
+          $since = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+          $same = & $run '(6) install-service before the restart' @('install-service')
+          & $expect ($same.Code -eq 0) 'install-service succeeds'
+          & $expect ($same.Text -notmatch '(?m)^(repaired|moved) ') 'it repairs nothing'
+          & $expect ($same.Text -match 'waits for a restart') 'it still waits for the restart'
+          & $expect ((& $service).StartMode -eq 'Manual') 'the service still starts by hand'
+          Write-Host "=== (6) restart simulation: the record says that the repair was before the last boot"
+          Set-ItemProperty $marker -Name ProgramRepairedInPlaceAt -Value 1 -Type QWord
+          $since = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+          $after = & $run '(6) install-service after the restart' @('install-service')
+          & $expect ($after.Code -eq 0) 'install-service succeeds'
+          & $expect ($after.Text -notmatch '(?m)^(repaired|moved) ') 'it prints no repaired or moved line'
+          & $expect ($after.Text -match 'passed the check after the restart') 'it reports the clean check'
+          $state = & $service
+          & $expect ($state.StartMode -eq 'Auto' -and $state.State -eq 'Running') "the automatic start is back (start mode $($state.StartMode), state $($state.State))"
+          & $expect (-not (Test-Path $marker)) 'the record is removed'
+          Push-Location $env:GITHUB_WORKSPACE
+          bash scripts/install-smoke.sh connected $since 60
+          & $expect ($LASTEXITCODE -eq 0) 'the agent is connected'
+          Pop-Location
+
+          if ($failures.Count -gt 0) { throw "failed expectations:`n$($failures -join "`n")" }
+      - name: Diagnostics
+        if: failure()
+        shell: pwsh
+        run: |
+          Get-CimInstance Win32_Service -Filter "Name='restichub-agent'" | Format-List *
+          Get-Item 'HKLM:\SOFTWARE\ResticHub\Agent' -ErrorAction SilentlyContinue | Format-List *
+          Get-ChildItem -Recurse (Join-Path $env:ProgramFiles 'ResticHub') -ErrorAction SilentlyContinue | Format-Table -AutoSize FullName, Length
+          Get-WinEvent -LogName ResticHub -MaxEvents 50 -ErrorAction SilentlyContinue | Format-List TimeCreated, ProviderName, Message
+          Get-ChildItem (Join-Path $env:ProgramData 'ResticHub\Agent-logs') -Filter 'agent-*.log' -ErrorAction SilentlyContinue |
+            Sort-Object Name | Select-Object -Last 1 | Get-Content -Tail 80
+          Write-Host '--- control plane log'
+          bash scripts/install-smoke.sh cp-logs
