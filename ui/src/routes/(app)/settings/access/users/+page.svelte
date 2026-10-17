@@ -44,9 +44,6 @@
 	// general alert instead of the message next to an input.
 	const createFields = ['username', 'display_name', 'role', 'password'];
 
-	// The create endpoint answers HTTP 409 `username_taken` without a field name.
-	const usernameTaken = $derived(createProblem?.code === 'username_taken');
-
 	let newUsername = $state('');
 	let newDisplayName = $state('');
 	let newRole = $state<Role>('viewer');
@@ -269,9 +266,7 @@
 			await load();
 		} catch (problem) {
 			createProblem = problem instanceof ApiError ? problem.problem : null;
-			// A taken username is a problem of the username field (ADR-0025).
-			createError =
-				usernameTaken || namesField(createProblem, createFields) ? null : messageOf(problem);
+			createError = namesField(createProblem, createFields) ? null : messageOf(problem);
 		} finally {
 			creating = false;
 		}
@@ -327,8 +322,7 @@
 	<TextField
 		id="user-username"
 		label={t('users.username')}
-		error={emptyError(createSubmitted, newUsername) ??
-			(usernameTaken ? tErrorCode('username_taken') : fieldError(createProblem, 'username'))}
+		error={emptyError(createSubmitted, newUsername) ?? fieldError(createProblem, 'username')}
 		bind:value={newUsername}
 		mono
 		autocomplete="off"

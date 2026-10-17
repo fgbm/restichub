@@ -14,6 +14,7 @@ use axum::Json;
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use restichub_db::DbError;
+use restichub_db::users::AccountField;
 use restichub_secrets::{CryptoError, KekError};
 use serde::Serialize;
 use utoipa::ToSchema;
@@ -280,23 +281,26 @@ impl ApiError {
         Self::new(StatusCode::FORBIDDEN, ErrorCode::SharedAccount, "Forbidden")
     }
 
-    /// The username exists in the installation. The create endpoint of a tenant Admin answers with
-    /// it (ADR-0025).
-    pub fn username_taken() -> Self {
-        Self::new(StatusCode::CONFLICT, ErrorCode::UsernameTaken, "Conflict")
-    }
-
-    /// The same, with the request field that holds the taken name.
-    pub fn username_taken_field(field: impl Into<String>) -> Self {
-        let mut error = Self::username_taken();
-        error.field = Some(field.into());
+    /// The username or the email exists in the installation (ADR-0025, ADR-0028).
+    ///
+    /// `field` names the request field of the taken value, so a form marks only that input.
+    pub fn taken(field: AccountField) -> Self {
+        let (code, name) = match field {
+            AccountField::Username => (ErrorCode::UsernameTaken, "username"),
+            AccountField::Email => (ErrorCode::EmailTaken, "email"),
+        };
+        let mut error = Self::new(StatusCode::CONFLICT, code, "Conflict");
+        error.field = Some(name.to_owned());
         error
     }
 
-    /// The email exists in the installation. The platform account create and update answer with it
-    /// (ADR-0028).
-    pub fn email_taken() -> Self {
-        Self::new(StatusCode::CONFLICT, ErrorCode::EmailTaken, "Conflict")
+    /// A write of an account row that violates a unique index is HTTP 409 for the field of that
+    /// index. A concurrent write gets there after the check of the caller.
+    pub fn account_write(error: DbError) -> Self {
+        match AccountField::of_unique_violation(&error) {
+            Some(field) => Self::taken(field),
+            None => Self::from(error),
+        }
     }
 
     /// The target agent holds no open stream, so the control plane refuses an on-demand job at
@@ -514,7 +518,7 @@ pub struct ProblemBody {
     /// In snake_case.
     pub code: ErrorCode,
     pub request_id: String,
-    /// Only `invalid_argument` sets it.
+    /// Set by `invalid_argument`, `username_taken` and `email_taken`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub field: Option<String>,
     /// In snake_case; only `invalid_argument` sets it.
