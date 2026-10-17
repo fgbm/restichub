@@ -341,10 +341,7 @@ impl Repair<'_> {
             .with_context(|| format!("cannot check {}", level.display()))?
         {
             // The owner can change the access at any time, also of a level below it through a link.
-            Exposure::ForeignOwner => bail!(
-                "{} is owned by an account that is not SYSTEM or Administrators, so the agent does not repair it; an administrator checks it and makes Administrators its owner, then runs the command again",
-                level.display()
-            ),
+            Exposure::ForeignOwner => bail!("{}", crate::winsec::foreign_owner_advice(level)),
             Exposure::ForeignGrant => true,
             Exposure::Clean => false,
         };
@@ -1367,12 +1364,11 @@ mod tests {
         )
         .expect("cannot set the owner");
         let (result, actions) = repair(&config, &root);
-        result.expect("the repair leaves the refusal to the normal check");
-        assert!(actions.is_empty());
         let error = format!(
             "{:#}",
-            create_protected_tree(&config, &root).expect_err("a foreign owner must be refused")
+            result.expect_err("the repair refuses a foreign owner")
         );
+        assert!(actions.is_empty());
         assert!(error.contains("/setowner *S-1-5-32-544"), "{error}");
         assert!(
             error.contains("O:BAG:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"),

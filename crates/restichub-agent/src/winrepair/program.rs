@@ -110,10 +110,7 @@ fn open_level(program: &Path, root: &Path) -> Result<Option<PathBuf>> {
             .with_context(|| format!("cannot check {}", level.display()))?
         {
             // The owner can change the access at any time, also of a level below it.
-            Exposure::ForeignOwner => bail!(
-                "{} is owned by an account that is not SYSTEM or Administrators, so the agent does not use it; an administrator checks it and makes Administrators its owner, then runs the command again",
-                level.display()
-            ),
+            Exposure::ForeignOwner => bail!("{}", crate::winsec::foreign_owner_advice(level)),
             Exposure::ForeignGrant => return Ok(Some(level.to_path_buf())),
             Exposure::Clean => {}
         }

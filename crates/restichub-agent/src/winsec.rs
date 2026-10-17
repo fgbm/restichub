@@ -424,7 +424,7 @@ fn check_owner(path: &Path, owner: PSID) -> Result<()> {
 /// The advice for a path that another account owns. The agent never repairs it: the owner can
 /// change the access control and may have put files there. Deleting a directory would also delete
 /// the agent identity, so the text asks for a check of the files, then a reset.
-fn foreign_owner_advice(path: &Path) -> String {
+pub(crate) fn foreign_owner_advice(path: &Path) -> String {
     let shown = path.display();
     if path.is_dir() {
         format!(
