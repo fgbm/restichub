@@ -105,7 +105,7 @@ The command cannot move an open `%ProgramFiles%\ResticHub` while a process keeps
 3. Run `install-service` again as Administrator.
 4. Make sure that the output does not show a line that starts with `repaired` or `moved`. This run sets the automatic start of the service again.
 
-If an open folder holds a file that the agent does not know, the command stops before it stops the service. The message names each such file. Examine these files and remove them. Then run the command again.
+The command removes each file that the agent does not know from an open folder, as it does when it moves the folder. The output shows one line for each removed file.
 
 ## Check the agents
 

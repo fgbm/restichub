@@ -33,8 +33,8 @@ const MAX_HOLDER_DEPTH: usize = 32;
 /// repairs it in place when another process keeps it open (FR-IN-07).
 ///
 /// The open level nearest to `root` goes, or `program` when only an entry in it is open. A level
-/// of another owner is open too. A name that the agent does not know is refused before
-/// `stop_service`, which runs before the move: a running agent or restic keeps the tree in use.
+/// of another owner is open too. `stop_service` runs before the move: a running agent or restic
+/// keeps the tree in use.
 /// The restic record in `record` goes first. `running` is the image of this process and
 /// `current_dir` its current directory; neither lets the tree move.
 pub(crate) fn rebuild_open_program_tree(
@@ -62,12 +62,6 @@ pub(crate) fn rebuild_open_program_tree(
             open.display()
         );
     }
-    // The repair in place cannot take a name that the agent does not know, and the move can still
-    // fail, so the refusal comes while the service runs.
-    in_place::refuse_unknown(
-        program,
-        "the command does not stop the service and changes nothing",
-    )?;
     stop_service().context("cannot stop the service before the program directory is replaced")?;
     // The record goes first, so a failure below never leaves it beside a removed restic.
     if record.exists() {
@@ -594,25 +588,41 @@ mod tests {
     }
 
     #[test]
-    fn fr_in_07_unknown_files_in_an_open_tree_stop_the_command_before_the_service_stops() {
+    fn fr_in_07_the_repair_in_place_removes_each_name_that_the_agent_does_not_know() {
         let tree = tree("program-held-unknown");
         grant(&tree.program, "(OI)(CI)(M)").expect("cannot add the entry");
-        std::fs::write(tree.program.join("version.dll"), b"x").expect("cannot plant");
-        std::fs::create_dir(tree.program.join("restichub-agent-1.0")).expect("cannot plant");
+        let planted = [
+            tree.program.join("version.dll"),
+            tree.program.join("restichub-agent-1.0"),
+            tree.program.join("bin").join("restic.cmd"),
+        ];
+        std::fs::write(&planted[0], b"x").expect("cannot plant");
+        std::fs::create_dir(&planted[1]).expect("cannot plant");
+        std::fs::write(planted[1].join("restichub-agent.exe"), b"x").expect("cannot plant");
         std::fs::create_dir(tree.program.join("bin")).expect("cannot make bin");
-        std::fs::write(tree.program.join("bin").join("restic.cmd"), b"x").expect("cannot plant");
+        std::fs::write(&planted[2], b"x").expect("cannot plant");
         let held = hold(&tree.program.join("LICENSE"));
         let run = rebuild(&tree, &elsewhere(&tree));
-        let error = format!("{:#}", run.result.expect_err("unknown files"));
-        for name in ["version.dll", "restichub-agent-1.0", "restic.cmd"] {
-            assert!(error.contains(name), "{name}: {error}");
+        assert!(
+            matches!(
+                run.result.expect("the repair in place must succeed"),
+                ProgramRebuild::RepairedInPlace { .. }
+            ),
+            "{:?}",
+            run.actions
+        );
+        for path in &planted {
+            assert!(!path.exists(), "{} must go", path.display());
+            assert!(
+                run.actions.contains(&Action::RemovedUnused(path.clone())),
+                "{}: {:?}",
+                path.display(),
+                run.actions
+            );
         }
-        assert!(error.contains("does not stop the service"), "{error}");
-        assert!(!error.contains("restart"), "{error}");
-        assert_eq!(run.stops, 0, "the service keeps running");
-        assert!(run.actions.is_empty(), "{:?}", run.actions);
-        assert!(tree.program.join("restic.exe").exists());
-        assert!(tree.record.exists());
+        crate::winsec::create_protected_file(&tree.program.join("restichub-agent.exe"), b"x")
+            .expect("cannot copy the agent");
+        check_program_tree(&tree.program, &tree.root).expect("the repaired tree passes");
         drop(held);
     }
 

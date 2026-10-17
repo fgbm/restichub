@@ -3,12 +3,13 @@
 //! An open handle below a directory stops its move, so the repair gives each level from the open
 //! one down to the program directory, and each entry in it, the access control of a new tree with
 //! Administrators as the owner. Each program is deleted, or renamed when its image is mapped, so
-//! the caller writes a new file that no old handle reaches. A name that the agent does not know
-//! stops the repair: it can be a library that the service would load. A handle opened before keeps
-//! its access until it closes and can still add a file, so the caller checks the tree before the
-//! service starts until a clean run after a restart of the computer.
+//! the caller writes a new file that no old handle reaches. A name that the agent does not know can
+//! be a library that the service would load, so it goes too, as it goes with a moved tree. A handle
+//! opened before keeps its access until it closes and can still add a file, so the caller checks
+//! the tree before the service starts until a clean run after a restart of the computer.
 
-use std::path::{Path, PathBuf};
+use std::os::windows::fs::FileTypeExt as _;
+use std::path::Path;
 
 use anyhow::{Context as _, Result, bail};
 
@@ -42,53 +43,6 @@ pub(super) fn repair(open: &Path, program: &Path, log: &mut dyn FnMut(Action)) -
     repair_dir(program, false, log)
 }
 
-/// Refuses each name in `program` and its old `bin` that the agent does not know, all in one
-/// error; `state` tells what the refusal left as it was.
-pub(super) fn refuse_unknown(program: &Path, state: &str) -> Result<()> {
-    let mut unknown = Vec::new();
-    collect_unknown(program, false, &mut unknown)?;
-    if unknown.is_empty() {
-        return Ok(());
-    }
-    bail!(
-        "{} holds {}, which the agent does not know, so the agent does not repair {}; {state}; an administrator checks these files and removes them (the files, not the directory), then runs the command again",
-        program.display(),
-        list(&unknown),
-        program.display()
-    )
-}
-
-fn collect_unknown(dir: &Path, in_bin: bool, unknown: &mut Vec<PathBuf>) -> Result<()> {
-    let listing = match std::fs::read_dir(dir) {
-        Ok(listing) => listing,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(error).with_context(|| format!("cannot list {}", dir.display())),
-    };
-    for item in listing {
-        let path = item
-            .with_context(|| format!("cannot list {}", dir.display()))?
-            .path();
-        match kind_of(&path, in_bin) {
-            None => unknown.push(path),
-            Some(Kind::LegacyBin) if is_plain_dir(&path) => collect_unknown(&path, true, unknown)?,
-            Some(_) => {}
-        }
-    }
-    Ok(())
-}
-
-fn is_plain_dir(path: &Path) -> bool {
-    std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_dir())
-}
-
-fn list(paths: &[PathBuf]) -> String {
-    paths
-        .iter()
-        .map(|path| path.display().to_string())
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
 /// The access comes before the listing, so only a handle opened before can add an entry.
 fn own_dir(dir: &Path, log: &mut dyn FnMut(Action)) -> Result<()> {
     let entry = Entry::open_to_own(dir)?
@@ -108,25 +62,17 @@ fn own_dir(dir: &Path, log: &mut dyn FnMut(Action)) -> Result<()> {
 
 fn repair_dir(dir: &Path, in_bin: bool, log: &mut dyn FnMut(Action)) -> Result<()> {
     let mut entries = Vec::new();
-    let mut unknown = Vec::new();
     for item in std::fs::read_dir(dir).with_context(|| format!("cannot list {}", dir.display()))? {
         let path = item
             .with_context(|| format!("cannot list {}", dir.display()))?
             .path();
-        match kind_of(&path, in_bin) {
-            Some(kind) => entries.push((path, kind)),
-            None => unknown.push(path),
-        }
+        entries.push((kind_of(&path, in_bin), path));
     }
-    if !unknown.is_empty() {
-        bail!(
-            "{} holds {}, which the agent does not know, so the agent does not repair {}; an administrator checks these files and removes them (the files, not the directory), then runs the command again",
-            dir.display(),
-            list(&unknown),
-            dir.display()
-        );
-    }
-    for (path, kind) in entries {
+    for (kind, path) in entries {
+        let Some(kind) = kind else {
+            discard(&path, log)?;
+            continue;
+        };
         match kind {
             Kind::Agent => replace(&path, Action::RemovedAgent, log)?,
             Kind::Restic => replace(&path, Action::RemovedRestic, log)?,
@@ -140,6 +86,39 @@ fn repair_dir(dir: &Path, in_bin: bool, log: &mut dyn FnMut(Action)) -> Result<(
         }
     }
     Ok(())
+}
+
+/// A link goes as a link, and `remove_dir_all` never follows one.
+fn discard(path: &Path, log: &mut dyn FnMut(Action)) -> Result<()> {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(error).with_context(|| format!("cannot read {}", path.display()));
+        }
+    };
+    let file_type = metadata.file_type();
+    if file_type.is_symlink_dir() || file_type.is_symlink_file() {
+        let removed = if file_type.is_symlink_dir() {
+            std::fs::remove_dir(path)
+        } else {
+            std::fs::remove_file(path)
+        };
+        removed.with_context(|| format!("cannot remove the link {}", path.display()))?;
+        log(Action::RemovedUnused(path.to_path_buf()));
+        return Ok(());
+    }
+    if metadata.is_dir() {
+        std::fs::remove_dir_all(path).with_context(|| {
+            format!(
+                "cannot remove {}, which the agent does not know; a process keeps a file in it open; close that process or restart the computer, then run the command again",
+                path.display()
+            )
+        })?;
+        log(Action::RemovedUnused(path.to_path_buf()));
+        return Ok(());
+    }
+    replace(path, Action::RemovedUnused, log)
 }
 
 /// A program image that runs can be renamed but not deleted, and a rename keeps it out of the
