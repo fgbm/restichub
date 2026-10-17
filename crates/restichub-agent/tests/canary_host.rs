@@ -174,7 +174,7 @@ async fn ac_ag_04_windows_no_process_argument_holds_the_canary_during_a_backup()
     let scanner = Scanner::new(&[Canary::parse(&canary)]);
     let dir = directory("cim-agent");
     let path = directory("cim-repo");
-    script_sleep(&path, 8_000);
+    script_sleep(&path, 30_000);
     let jobs = program_jobs(&dir);
     let (tx, mut rx) = tokio::sync::mpsc::channel(64);
     jobs.attach(&tx);
@@ -189,23 +189,32 @@ async fn ac_ag_04_windows_no_process_argument_holds_the_canary_during_a_backup()
         wait_for_run(&path, "backup").await,
         "the backup must be running"
     );
-    let listing = command_output(
-        "powershell",
-        &[
-            "-NoProfile",
-            "-Command",
-            "Get-CimInstance Win32_Process | ForEach-Object { $_.CommandLine }",
-        ],
-    );
     let program = fake_restic();
     let name = program
         .file_stem()
         .and_then(|name| name.to_str())
         .expect("the program name");
-    assert!(
-        String::from_utf8_lossy(&listing).contains(name),
-        "the query must list the process of the backup"
-    );
+    // The query takes seconds on a loaded runner. It can also run before the OS lists the new
+    // process, so the test repeats it until the listing holds the backup, and the backup outlives
+    // the repeats.
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    let listing = loop {
+        let listing = command_output(
+            "powershell",
+            &[
+                "-NoProfile",
+                "-Command",
+                "Get-CimInstance Win32_Process | ForEach-Object { $_.CommandLine }",
+            ],
+        );
+        if String::from_utf8_lossy(&listing).contains(name) {
+            break listing;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the query must list the process of the backup"
+        );
+    };
     let findings = scanner.scan("Win32_Process", &listing);
     assert!(findings.is_empty(), "a process argument holds the canary");
     let finished = collect(&mut rx).await;
