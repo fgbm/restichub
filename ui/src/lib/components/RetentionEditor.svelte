@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { ApiProblem } from '#lib/api/index.ts';
 	import { fieldError } from '#lib/api/index.ts';
-	import { Button, Checkbox, Field, Icon, TextField } from './ui/index.ts';
+	import { Button, Checkbox, Disclosure, Field, TextField } from './ui/index.ts';
 	import RichText from './RichText.svelte';
 	import TagInput from './ui/TagInput.svelte';
 	import { t } from '#lib/i18n/index.ts';
@@ -170,12 +170,7 @@
 	</div>
 </div>
 
-<details class="filter">
-	<summary>
-		<Icon name="filter" size="xs" />
-		{t('pe.filter.title')}
-		<span class="muted">— {filterSummary}</span>
-	</summary>
+<Disclosure label={t('pe.filter.title')} hint={filterSummary}>
 	<div class="filter__body">
 		<p class="muted">{t('pe.filter.hint')}</p>
 		<div class="grid3">
@@ -209,7 +204,7 @@
 			</Field>
 		</div>
 	</div>
-</details>
+</Disclosure>
 
 <div class="preview">
 	<div class="preview__head">
@@ -367,24 +362,10 @@
 		gap: var(--rh-space-4);
 	}
 
-	.filter {
-		border: var(--rh-border-width) solid var(--rh-color-border);
-		border-radius: var(--rh-radius-md);
-	}
-
-	.filter summary {
-		display: flex;
-		align-items: center;
-		gap: var(--rh-space-2);
-		padding: var(--rh-space-2) var(--rh-space-3);
-		cursor: pointer;
-	}
-
 	.filter__body {
 		display: flex;
 		flex-direction: column;
 		gap: var(--rh-space-3);
-		padding: var(--rh-space-2) var(--rh-space-3) var(--rh-space-3);
 	}
 
 	.grid3 {

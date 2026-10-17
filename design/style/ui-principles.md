@@ -51,6 +51,7 @@ Use the shared components of [ui/COMPONENTS.md](../../ui/COMPONENTS.md). They ap
 1. Use Lucide icons only. Do not draw an SVG by hand.
 2. Do not put a colored stripe at the left edge of a panel, a callout or a row.
 3. Use one duration token for each spinner (`--rh-spin-duration`). A spinner shows the status of work that runs now, thus it is not decoration. When the reduced-motion setting is on, a spinner continues to turn at half speed (`--rh-spin-duration-reduced`). All other motion stops: a skeleton shows a static block and a transition is almost instant. Each spinner has the `rh-spinner` class.
+4. A section never holds a framed box. Put a secondary or rare field under a `Disclosure`, a toggle line without a frame. Do not use a native `<details>` with a border or a nested card for this.
 
 ## 5. Forms
 

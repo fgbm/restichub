@@ -244,8 +244,10 @@ describe('Profile editor sections', () => {
 	it('folds the exclude list file until it holds a value', async () => {
 		render(ProfileEditor, { profileId: 'p_1' });
 		await expand(user(), /^Exclusions/);
-		const more = (await screen.findByText('More: a list file on the host')).closest('details');
-		expect(more).not.toHaveAttribute('open');
+		const more = await screen.findByRole('button', { name: 'More: a list file on the host' });
+		expect(more).toHaveAttribute('aria-expanded', 'false');
+		expect(screen.queryByLabelText('Exclude list file on the host')).not.toBeInTheDocument();
+		expect(screen.queryByText(/Patterns such as/)).not.toBeInTheDocument();
 		expect(screen.getByLabelText('Patterns')).toBeInTheDocument();
 	});
 
@@ -253,8 +255,8 @@ describe('Profile editor sections', () => {
 		mocks.listProfiles.mockResolvedValue([profile({ exclude_files: ['/etc/excludes.txt'] })]);
 		render(ProfileEditor, { profileId: 'p_1' });
 		await expand(user(), /^Exclusions/);
-		const more = (await screen.findByText('More: a list file on the host')).closest('details');
-		await waitFor(() => expect(more).toHaveAttribute('open'));
+		const more = await screen.findByRole('button', { name: 'More: a list file on the host' });
+		await waitFor(() => expect(more).toHaveAttribute('aria-expanded', 'true'));
 		expect(screen.getByLabelText('Exclude list file on the host')).toHaveValue('/etc/excludes.txt');
 	});
 
@@ -322,6 +324,18 @@ describe('Profile editor retention', () => {
 		}
 		expect(screen.getByTestId('keep-line')).toHaveTextContent('nothing is deleted');
 		expect(screen.getByText('No rules: nothing is deleted')).toBeInTheDocument();
+	});
+
+	it('keeps the snapshot filter under a borderless disclosure', async () => {
+		const u = user();
+		render(ProfileEditor);
+		await screen.findByLabelText(/^Profile/);
+		await expand(u, /^Retention/);
+		const toggle = screen.getByRole('button', { name: /Limit the rules to some snapshots/ });
+		expect(toggle).toHaveAttribute('aria-expanded', 'false');
+		expect(document.querySelector('details')).toBeNull();
+		await u.click(toggle);
+		expect(screen.getByLabelText('Paths')).toBeInTheDocument();
 	});
 
 	it('shows an error for a period that does not parse', async () => {

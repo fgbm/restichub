@@ -203,6 +203,10 @@ A form does not disable its primary action for a value that is not correct (UI p
 
 `TextField` takes an `action`: `{ icon, label, onclick }`. The field shows an icon button at its end, for example "Reset to the default path". The label is the tooltip and the accessible name of the button. Do not put a separate button next to the field for this. Give the action only when it can change the value, for example when the value is not the default. A locked field does not show the action.
 
+## Disclosure
+
+`Disclosure` (`$lib/components/ui`) hides a secondary or rare field. It is a toggle line without a frame: a Lucide `chevron-right` icon that turns down when open, then the `label` in the link tone. `hint` adds a short muted state after the label. The toggle is a button with `aria-expanded` and `aria-controls`, so Enter and Space work. The content shows below the toggle at the same level as the other fields, with no frame, background or inset. `open` is bindable: set it when the value is not empty, so the person does not miss it. Do not use a native `<details>` for this (UI principles 4.4).
+
 ## Dialog
 
 `Dialog` (`$lib/components/ui`) is the centered modal for a small form or a confirmation (UI principles 1.5). The `size` property sets the width: `sm` 400 px, `md` 440 px, `lg` 480 px and `xl` 920 px. Each width is at most the window width less 32 px. Use `xl` only for a form with two columns, for example the restore dialog: the fields at the left and the summary at the right. Below 900 px, put the summary below the fields.

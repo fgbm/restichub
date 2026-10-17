@@ -1828,8 +1828,7 @@ export const ru: Record<MessageKey, string> = {
 	'pe.section.limits': 'Лимиты выполнения',
 	'pe.paths.lead':
 		'Что копировать. По одному пути в строке. Пути «Для всех систем» берутся на любом хосте, остальные только на своей системе.',
-	'pe.excludes.lead':
-		'Что пропустить. Шаблоны вида <code>*.tmp</code> или пути. По одной записи в строке.',
+	'pe.excludes.lead': 'Что не копировать. По одной записи в строке.',
 	'pe.excludes.filesHelp':
 		'Путь к файлу на хосте, где лежит список шаблонов. restic --exclude-file.',
 	'pe.excludes.patternsHelp': 'Шаблон вида *.tmp, имя или путь. Как в restic --exclude.',

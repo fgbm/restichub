@@ -7,6 +7,7 @@ export { default as Combobox } from './Combobox.svelte';
 export { default as ConfirmDialog } from './ConfirmDialog.svelte';
 export { default as CopyField } from './CopyField.svelte';
 export { default as DataTable } from './DataTable.svelte';
+export { default as Disclosure } from './Disclosure.svelte';
 export { default as Dialog } from './Dialog.svelte';
 export { default as DropdownMenu } from './DropdownMenu.svelte';
 export { default as EmptyState } from './EmptyState.svelte';
