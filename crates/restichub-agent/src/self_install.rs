@@ -136,15 +136,19 @@ pub fn migrate_restic(placement: &Placement) -> Result<bool> {
     Ok(true)
 }
 
-/// Runs [`migrate_restic`] at the start of the service. A failure is only logged: the hash check
-/// against the record still stops the start when no valid restic is in place.
-pub fn migrate_restic_at_start(placement: &Placement) {
-    if let Err(error) = migrate_restic(placement) {
+/// Runs [`migrate_restic`] at the start of the service and logs a failure. The start goes on: the
+/// hash check against the record still stops it when no valid restic is in place.
+///
+/// # Errors
+///
+/// Returns the error of the move, so that the start can tell a transient failure.
+pub fn migrate_restic_at_start(placement: &Placement) -> Result<()> {
+    migrate_restic(placement).map(|_| ()).inspect_err(|error| {
         tracing::warn!(
             error = format!("{error:#}"),
             "restic cannot move from an old location"
         );
-    }
+    })
 }
 
 fn move_legacy(placement: &Placement, legacy: &Legacy) -> Result<()> {
@@ -782,7 +786,7 @@ mod tests {
         let removable = std::fs::File::create(legacy.join("probe")).is_ok();
 
         let result = migrate_restic(&placement);
-        migrate_restic_at_start(&placement);
+        let _ = migrate_restic_at_start(&placement);
 
         std::fs::set_permissions(&legacy, std::fs::Permissions::from_mode(0o755)).expect("unlock");
         if !removable {

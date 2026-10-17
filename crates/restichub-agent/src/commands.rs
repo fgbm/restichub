@@ -729,9 +729,14 @@ pub fn run(dir: &Path, shutdown: Option<Receiver<()>>) -> Result<()> {
     // An update can replace the agent without a new `register`, so a restic in the Windows
     // location of an earlier version moves first (ADR-0038).
     #[cfg(windows)]
-    crate::self_install::migrate_restic_at_start(&crate::self_install::Placement::host());
+    let migration =
+        crate::self_install::migrate_restic_at_start(&crate::self_install::Placement::host());
+    #[cfg(not(windows))]
+    let migration = Ok(());
     // The service never downloads restic; an absent or changed binary stops the start (ADR-0038).
-    let restic = installed_restic(&Layout::host())?;
+    let restic = installed_restic(&Layout::host(), migration, || {
+        std::thread::sleep(std::time::Duration::from_secs(2));
+    })?;
     let restic_version = restic.version().unwrap_or_default();
     // The job journal lives in the configuration directory; the runner uses the verified restic
     // binary (ADR-0020, ADR-0038).
@@ -771,19 +776,42 @@ fn is_missing_or_damaged(error: &anyhow::Error) -> bool {
 }
 
 /// A restart cannot bring restic back, so its absence stops the service for good (FR-AG-01).
-fn installed_restic(layout: &Layout) -> Result<ResticBinary> {
-    ResticBinary::installed(layout)
-        .and_then(|restic| restic.verify().map(|()| restic))
-        .map_err(|error| {
-            if !is_missing_or_damaged(&error) {
-                return error;
-            }
-            let no_restic = NoRestic {
-                cause: format!("{error:#}"),
-            };
-            tracing::error!("{no_restic}");
-            anyhow::Error::new(no_restic)
+///
+/// `restic update` renames the new binary before it writes the record, so a start in between
+/// sees a mismatch: `pause` waits, and a second reading decides. A move from an old location that
+/// failed for a transient reason leaves the restart to the service manager, which moves again.
+fn installed_restic(
+    layout: &Layout,
+    migration: Result<()>,
+    pause: impl FnOnce(),
+) -> Result<ResticBinary> {
+    let read = || {
+        ResticBinary::installed(layout).and_then(|restic| {
+            crate::restic::check_hash(restic.path(), restic.expected_sha256()).map(|()| restic)
         })
+    };
+    let restic = match read() {
+        Err(error) if is_missing_or_damaged(&error) => {
+            pause();
+            read()
+        }
+        first => first,
+    };
+    restic.map_err(|error| {
+        if !is_missing_or_damaged(&error) {
+            return error;
+        }
+        if let Err(moving) = migration
+            && !is_missing_or_damaged(&moving)
+        {
+            return moving.context(format!("restic is not in place: {error:#}"));
+        }
+        let no_restic = NoRestic {
+            cause: format!("{error:#}"),
+        };
+        tracing::error!("{no_restic}");
+        anyhow::Error::new(no_restic)
+    })
 }
 
 fn restic_version(restic: &dyn Restic) -> Result<String> {
@@ -1151,16 +1179,67 @@ mod tests {
         let layout = Layout::new(base.join("bin"), base.join("config"));
         std::fs::create_dir_all(layout.bin_dir()).expect("bin");
         std::fs::create_dir_all(base.join("config")).expect("config");
-        let refused = |state: &str| {
-            let error = installed_restic(&layout).expect_err(state);
+        let refused = |state: &str, cause: String| {
+            let error = installed_restic(&layout, Ok(()), || {}).expect_err(state);
             assert!(needs_administrator(&error), "{state}: {error:#}");
-            let text = format!("{error:#}");
-            assert!(text.contains("the service stays stopped"), "{text}");
-            assert!(text.contains("install-service"), "{text}");
-            assert!(text.contains("--restic-archive <ARCHIVE>"), "{text}");
+            assert_eq!(
+                format!("{error:#}"),
+                format!(
+                    "restic is not installed or differs from its record: {cause}; the service stays stopped until an administrator runs `restichub-agent install-service`, which installs restic and starts the service; on a host without the restic download, add `--restic-archive <ARCHIVE>` with the restic release archive for this host"
+                ),
+                "{state}"
+            );
         };
+        let hash = |bytes: &[u8]| crate::restic_release::hex(&sha2::Sha256::digest(bytes));
 
-        refused("no record");
+        refused(
+            "no record",
+            format!(
+                "restic is not installed: cannot read {}; run `restichub-agent restic update`: {}",
+                layout.record_path().display(),
+                std::io::Error::from_raw_os_error(2)
+            ),
+        );
+        let record = |bytes: &[u8]| {
+            std::fs::write(
+                layout.record_path(),
+                format!(r#"{{"version":"0.19.1","sha256":"{}"}}"#, hash(bytes)),
+            )
+            .expect("record");
+        };
+        record(b"restic");
+        refused(
+            "no binary",
+            format!(
+                "the restic binary {} is missing; run `restichub-agent restic update`",
+                layout.binary_path().display()
+            ),
+        );
+        std::fs::write(layout.binary_path(), b"changed").expect("restic");
+        refused(
+            "a changed binary",
+            format!(
+                "the restic binary does not match the recorded SHA-256: expected {}, got {}",
+                hash(b"restic"),
+                hash(b"changed")
+            ),
+        );
+        record(b"changed");
+        installed_restic(&layout, Ok(()), || {}).expect("the recorded binary passes");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn fr_ag_01_a_start_during_the_restic_swap_reads_restic_again() {
+        use sha2::Digest as _;
+        let base = std::env::temp_dir().join(format!(
+            "restichub-agent-swap-window-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&base);
+        let layout = Layout::new(base.join("bin"), base.join("config"));
+        std::fs::create_dir_all(layout.bin_dir()).expect("bin");
+        std::fs::create_dir_all(base.join("config")).expect("config");
         let record = |bytes: &[u8]| {
             let hash = crate::restic_release::hex(&sha2::Sha256::digest(bytes));
             std::fs::write(
@@ -1169,12 +1248,41 @@ mod tests {
             )
             .expect("record");
         };
-        record(b"restic");
-        refused("no binary");
-        std::fs::write(layout.binary_path(), b"changed").expect("restic");
-        refused("a changed binary");
-        record(b"changed");
-        installed_restic(&layout).expect("the recorded binary passes");
+        record(b"old");
+        std::fs::write(layout.binary_path(), b"new").expect("the renamed binary");
+
+        installed_restic(&layout, Ok(()), || record(b"new"))
+            .expect("the record that the update writes next passes");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn fr_ag_01_a_transient_failure_to_move_an_old_restic_restarts_the_service() {
+        let base = std::env::temp_dir().join(format!(
+            "restichub-agent-move-failed-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&base);
+        let layout = Layout::new(base.join("bin"), base.join("config"));
+        let failed_move = |kind: std::io::ErrorKind| {
+            Err(anyhow::Error::new(std::io::Error::from(kind))
+                .context("cannot copy the old restic"))
+        };
+
+        let locked = installed_restic(
+            &layout,
+            failed_move(std::io::ErrorKind::PermissionDenied),
+            || {},
+        )
+        .expect_err("restic is not in place");
+        assert!(!needs_administrator(&locked), "{locked:#}");
+        assert!(
+            format!("{locked:#}").starts_with("restic is not in place: "),
+            "{locked:#}"
+        );
+        let gone = installed_restic(&layout, failed_move(std::io::ErrorKind::NotFound), || {})
+            .expect_err("restic is not in place");
+        assert!(needs_administrator(&gone), "{gone:#}");
         let _ = std::fs::remove_dir_all(&base);
     }
 

@@ -10,9 +10,11 @@ use std::os::windows::io::AsRawHandle as _;
 use std::path::Path;
 
 use anyhow::{Context as _, Result, bail};
+use windows_sys::Win32::Foundation::{ERROR_INVALID_PARAMETER, ERROR_NOT_SUPPORTED};
 use windows_sys::Win32::Storage::FileSystem::{
-    FILE_ID_INFO, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
-    FileIdInfo, GetFileInformationByHandleEx,
+    BY_HANDLE_FILE_INFORMATION, FILE_ID_INFO, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE,
+    FILE_SHARE_READ, FILE_SHARE_WRITE, FileIdInfo, GetFileInformationByHandle,
+    GetFileInformationByHandleEx,
 };
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::ProcessStatus::K32GetMappedFileNameW;
@@ -32,7 +34,7 @@ pub(crate) fn open_running_image(path: &Path) -> Result<std::fs::File> {
         .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
         .open(mapped_image_name()?)
         .context("cannot open the image of the agent that runs")?;
-    if file_id(&file)? != file_id(&image)? {
+    if file_key(&file)? != file_key(&image)? {
         bail!(
             "{} is not the file that runs, so another process may have replaced it after the start; the agent does not copy it; put the release package in a folder that only administrators can change and run the command again",
             path.display()
@@ -62,7 +64,39 @@ fn mapped_image_name() -> Result<String> {
     ))
 }
 
-fn file_id(file: &std::fs::File) -> Result<(u64, [u8; 16])> {
+/// Two keys of different kinds never match, so a mix refuses the copy.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum FileKey {
+    Id { volume: u64, file: [u8; 16] },
+    Index { volume: u32, file: u64 },
+}
+
+fn file_key(file: &std::fs::File) -> Result<FileKey> {
+    key_or_index(|| id_key(file), || index_key(file))
+}
+
+/// FAT, exFAT and some SMB servers do not answer `FileIdInfo`. The older file index stays unique
+/// on the volume while the file is open, and a rename that changes it only refuses the copy.
+fn key_or_index(
+    id: impl FnOnce() -> std::io::Result<FileKey>,
+    index: impl FnOnce() -> std::io::Result<FileKey>,
+) -> Result<FileKey> {
+    match id() {
+        Err(error)
+            if matches!(
+                error
+                    .raw_os_error()
+                    .and_then(|code| u32::try_from(code).ok()),
+                Some(ERROR_INVALID_PARAMETER | ERROR_NOT_SUPPORTED)
+            ) =>
+        {
+            index().context("cannot read the file index")
+        }
+        key => key.context("cannot read the file ID"),
+    }
+}
+
+fn id_key(file: &std::fs::File) -> std::io::Result<FileKey> {
     let mut info = FILE_ID_INFO::default();
     // SAFETY: the handle is open and the buffer is a local of the given size.
     let ok = unsafe {
@@ -74,9 +108,24 @@ fn file_id(file: &std::fs::File) -> Result<(u64, [u8; 16])> {
         )
     };
     if ok == 0 {
-        return Err(std::io::Error::last_os_error()).context("cannot read the file ID");
+        return Err(std::io::Error::last_os_error());
     }
-    Ok((info.VolumeSerialNumber, info.FileId.Identifier))
+    Ok(FileKey::Id {
+        volume: info.VolumeSerialNumber,
+        file: info.FileId.Identifier,
+    })
+}
+
+fn index_key(file: &std::fs::File) -> std::io::Result<FileKey> {
+    let mut info = BY_HANDLE_FILE_INFORMATION::default();
+    // SAFETY: the handle is open and the buffer is a local.
+    if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &raw mut info) } == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(FileKey::Index {
+        volume: info.dwVolumeSerialNumber,
+        file: (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow),
+    })
 }
 
 #[cfg(test)]
@@ -99,5 +148,37 @@ mod tests {
         );
         assert!(error.contains("is not the file that runs"), "{error}");
         let _ = std::fs::remove_file(&swapped);
+    }
+
+    #[test]
+    fn fr_in_07_a_volume_without_file_ids_compares_the_file_index() {
+        let os_error = |code: u32| {
+            std::io::Error::from_raw_os_error(i32::try_from(code).expect("a Windows error code"))
+        };
+        let indexed = FileKey::Index { volume: 7, file: 9 };
+        for unsupported in [ERROR_INVALID_PARAMETER, ERROR_NOT_SUPPORTED] {
+            let key = key_or_index(|| Err(os_error(unsupported)), || Ok(indexed.clone()))
+                .expect("the index answers");
+            assert_eq!(key, indexed);
+        }
+        let denied = key_or_index(
+            || {
+                Err(os_error(
+                    windows_sys::Win32::Foundation::ERROR_ACCESS_DENIED,
+                ))
+            },
+            || panic!("another error must not fall back"),
+        )
+        .expect_err("access denied");
+        assert!(format!("{denied:#}").contains("cannot read the file ID"));
+
+        let running = std::env::current_exe().expect("cannot find the test executable");
+        let open = |path: &Path| std::fs::File::open(path).expect("cannot open the file");
+        let copy = super::super::tests::temp("indexed-image.exe");
+        std::fs::copy(&running, &copy).expect("cannot copy the image");
+        let first = index_key(&open(&running)).expect("index");
+        assert_eq!(first, index_key(&open(&running)).expect("index"));
+        assert_ne!(first, index_key(&open(&copy)).expect("index"));
+        let _ = std::fs::remove_file(&copy);
     }
 }
