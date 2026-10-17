@@ -696,7 +696,7 @@ async fn ac_id_07_an_idle_stream_closes_after_three_ping_intervals() {
     let Some(db) = common::test_db().await else {
         return;
     };
-    let (listener, _tenant, token) = setup(&db).await;
+    let (listener, tenant, token) = setup(&db).await;
     let identity = listener.enroll(&token).await;
 
     let mut client = listener.channel(&identity).await;
@@ -705,6 +705,16 @@ async fn ac_id_07_an_idle_stream_closes_after_three_ping_intervals() {
         .expect("the stream must open");
     read_handshake(&mut inbound).await;
     // Let the stream task process the hello before the clock is frozen.
+    let agent = Uuid::parse_str(&identity.agent_id).expect("the agent id");
+    let mut attempts = 0;
+    while !stream_recorded(&db, tenant, agent).await {
+        attempts += 1;
+        assert!(
+            attempts < 200,
+            "the stream must be recorded within ten seconds"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     // Freeze time after the setup, so the database calls above use the real clock.
@@ -862,6 +872,20 @@ async fn set_last_seen(
         .await
         .expect("cannot set last_seen_at");
     tx.commit().await.expect("cannot commit last_seen_at");
+}
+
+async fn stream_recorded(db: &TestDatabase, tenant: TenantId, agent: Uuid) -> bool {
+    let mut tx = db.owner_pool().begin().await.expect("cannot begin");
+    sqlx::query("SELECT set_config('restichub.tenant_id', $1, true)")
+        .bind(tenant.to_string())
+        .execute(&mut *tx)
+        .await
+        .expect("cannot set the tenant scope");
+    sqlx::query_scalar("SELECT stream_id IS NOT NULL FROM agents WHERE id = $1")
+        .bind(agent)
+        .fetch_one(&mut *tx)
+        .await
+        .expect("cannot read the stream state")
 }
 
 /// A refused connection must not close the active stream of the same agent.

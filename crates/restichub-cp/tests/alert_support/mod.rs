@@ -469,7 +469,8 @@ pub async fn set_last_seen(
     seen: Option<OffsetDateTime>,
 ) {
     let mut tx = scoped(db, tenant).await;
-    sqlx::query("UPDATE agents SET last_seen_at = $2, first_connected_at = COALESCE(first_connected_at, $2) WHERE id = $1")
+    // A seen host holds a stream, as a live agent does; the online window still applies.
+    sqlx::query("UPDATE agents SET last_seen_at = $2, first_connected_at = COALESCE(first_connected_at, $2), stream_id = CASE WHEN $2::timestamptz IS NULL THEN NULL ELSE gen_random_uuid() END WHERE id = $1")
         .bind(agent.as_uuid())
         .bind(seen)
         .execute(&mut *tx)

@@ -872,7 +872,8 @@ async fn run_stream(
     ) {
         return;
     }
-    state.events().host(identity.tenant, agent, true);
+    let stream = Uuid::now_v7();
+    let mut open_pending = open_stream(&state, identity.tenant, agent, stream).await;
     // An older agent sends no list, so its silence says nothing about its jobs (ADR-0039).
     if AgentCapability::JobLimitsV1.is_listed(&hello.capabilities) {
         crate::queue::stale::fail_unlisted_running(
@@ -936,6 +937,9 @@ async fn run_stream(
                 }
             }
             _ = last_seen.tick() => {
+                if open_pending {
+                    open_pending = open_stream(&state, identity.tenant, agent, stream).await;
+                }
                 if active {
                     state.agent_registry().mark_last_seen(
                         identity.tenant,
@@ -958,9 +962,66 @@ async fn run_stream(
         }
     }
     crate::refusal_audit::flush_summaries(&state, identity.tenant, agent).await;
-    // The removal drops the last outbound sender, so the response stream ends (FR-ID-04).
+    // The removal and this drop release the outbound senders, so the response stream ends before
+    // the database write (FR-ID-04).
     state.agent_registry().remove(agent, generation);
-    state.events().host(identity.tenant, agent, false);
+    drop(tx);
+    if record_stream(&state, identity.tenant, agent, stream, false).await == StreamWrite::Written {
+        state.events().host(identity.tenant, agent, false);
+    }
+}
+
+/// Records the open stream and announces the host once the row holds it. `true` while the write
+/// must be retried.
+async fn open_stream(state: &AppState, tenant: TenantId, agent: AgentId, stream: Uuid) -> bool {
+    match record_stream(state, tenant, agent, stream, true).await {
+        StreamWrite::Written => {
+            state.events().host(tenant, agent, true);
+            false
+        }
+        StreamWrite::Superseded => false,
+        StreamWrite::Failed => true,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StreamWrite {
+    Written,
+    /// A newer stream holds the row, or the agent is no longer active.
+    Superseded,
+    Failed,
+}
+
+/// Writes the stream fact that the host screens, the list filter and the dashboard read (ADR-0044).
+async fn record_stream(
+    state: &AppState,
+    tenant: TenantId,
+    agent: AgentId,
+    stream: Uuid,
+    open: bool,
+) -> StreamWrite {
+    let written = async {
+        let mut tx = state.db().begin_tenant(tenant).await?;
+        let changed = if open {
+            agent_repo::set_stream_open(&mut tx, agent, stream).await?
+        } else {
+            agent_repo::set_stream_closed(&mut tx, agent, stream).await?
+        };
+        tx.commit().await?;
+        Ok::<_, restichub_db::DbError>(changed)
+    }
+    .await;
+    match written {
+        Ok(true) => {
+            state.dashboard_cache().forget(tenant);
+            StreamWrite::Written
+        }
+        Ok(false) => StreamWrite::Superseded,
+        Err(error) => {
+            tracing::warn!(%agent, open, cause = ?error, "cannot record the stream state");
+            StreamWrite::Failed
+        }
+    }
 }
 
 /// Waits for a rotation event. It never resolves when the task is not subscribed or the sender

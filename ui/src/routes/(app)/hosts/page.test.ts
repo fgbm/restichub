@@ -53,6 +53,20 @@ vi.mock('#lib/stores/session.svelte.ts', () => ({
 
 vi.mock('#lib/stores/toasts.svelte.ts', () => ({ pushToast: mocks.pushToast }));
 
+const stream = vi.hoisted(() => ({
+	listeners: [] as ((event: { type: string; agent_id?: string }) => void)[]
+}));
+
+vi.mock('#lib/stores/events.svelte.ts', () => ({
+	isStreamConnected: () => false,
+	onEvent: (listener: (event: { type: string; agent_id?: string }) => void) => {
+		stream.listeners.push(listener);
+		return () => {
+			stream.listeners = stream.listeners.filter((item) => item !== listener);
+		};
+	}
+}));
+
 vi.mock('#lib/api/index.ts', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('#lib/api/index.ts')>();
 	return {
@@ -435,6 +449,19 @@ describe('the Hosts screen', () => {
 		expect(container.querySelectorAll('.status')).toHaveLength(1);
 		const item = pill.closest('li') as HTMLElement;
 		expect(item.querySelector('.item__lead')?.className).toMatch(/tone--danger/);
+	});
+
+	it('fr_ui_02 a host event reads the list again and shows the host offline', async () => {
+		mocks.hostRows
+			.mockResolvedValueOnce([agent({ id: 'a_01', hostname: 'host-stopped' })])
+			.mockResolvedValue([agent({ id: 'a_01', hostname: 'host-stopped', online: false })]);
+		render(Hosts);
+
+		await screen.findByText('host-stopped');
+		expect(screen.queryByText('Offline', { selector: '.status' })).not.toBeInTheDocument();
+		for (const listener of stream.listeners) listener({ type: 'host.offline', agent_id: 'a_01' });
+
+		expect(await screen.findByText('Offline', { selector: '.status' })).toBeInTheDocument();
 	});
 
 	it('shows a host that never connected as waiting (FR-ID-04)', async () => {
