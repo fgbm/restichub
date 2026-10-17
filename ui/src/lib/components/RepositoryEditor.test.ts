@@ -207,7 +207,7 @@ describe('the repository page', () => {
 		render(RepositoryEditor);
 
 		await user.type(await screen.findByLabelText(/^Repository\b/, { selector: '#repo-name' }), 'x');
-		expect(screen.getByText('The changes are not saved.')).toBeInTheDocument();
+		expect(screen.getByText('The changes are not saved')).toBeInTheDocument();
 		await user.selectOptions(screen.getByLabelText('Backend kind'), 'local');
 		await user.type(screen.getByLabelText(/Path/), '/srv/x');
 		await user.type(screen.getByLabelText(/Repository password/), 'pw');

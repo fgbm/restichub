@@ -468,7 +468,8 @@
 		min-width: 0;
 		max-width: var(--rh-layout-content-max-width);
 		margin: 0 auto;
-		padding: var(--rh-space-6) var(--rh-space-4) var(--rh-space-12);
+		padding: var(--rh-space-6) var(--rh-space-4) var(--rh-page-padding-bottom);
+		--rh-page-padding-bottom: var(--rh-space-12);
 	}
 
 	@media (max-width: 640px) {
@@ -487,7 +488,8 @@
 		}
 
 		.page {
-			padding: var(--rh-space-4) var(--rh-space-3) var(--rh-space-8);
+			padding: var(--rh-space-4) var(--rh-space-3) var(--rh-page-padding-bottom);
+			--rh-page-padding-bottom: var(--rh-space-8);
 		}
 	}
 </style>

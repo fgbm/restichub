@@ -61,8 +61,11 @@ test('the profiles screen creates, previews, edits and deletes a profile', async
 	await page.locator('#profile-tags').fill('daily, web ');
 	await expect(page.getByRole('button', { name: 'Remove daily' })).toBeVisible();
 	await expect(page.getByRole('button', { name: 'Remove web' })).toBeVisible();
-	// The side panel shows the command of the profile as it is typed.
-	await expect(page.getByText('--tag daily')).toBeVisible();
+	// The restic commands panel shows the command of the profile as it is typed (FR-PF-04).
+	await page.getByRole('button', { name: 'Restic commands' }).click();
+	const commands = page.getByRole('dialog', { name: 'Restic commands' });
+	await expect(commands.getByText('--tag daily')).toBeVisible();
+	await page.keyboard.press('Escape');
 	await page.getByRole('button', { name: 'Save' }).click();
 
 	await expect(page.getByText('The profile is created.')).toBeVisible();

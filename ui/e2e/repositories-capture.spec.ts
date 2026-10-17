@@ -15,7 +15,6 @@ type Labels = {
 	repositories: string;
 	addRepository: string;
 	save: string;
-	cancel: string;
 	edit: string;
 	initialize: string;
 	start: string;
@@ -29,7 +28,6 @@ const EN: Labels = {
 	repositories: 'Repositories',
 	addRepository: 'Add repository',
 	save: 'Save',
-	cancel: 'Cancel',
 	edit: 'Edit',
 	initialize: 'Initialize',
 	start: 'Start',
@@ -43,7 +41,6 @@ const RU: Labels = {
 	repositories: 'Репозитории',
 	addRepository: 'Добавить репозиторий',
 	save: 'Сохранить',
-	cancel: 'Отмена',
 	edit: 'Изменить',
 	initialize: 'Инициализировать',
 	start: 'Запустить',
@@ -104,7 +101,8 @@ async function capture(page: Page, labels: Labels, suffix: string): Promise<void
 		.evaluate((element) => element.scrollIntoView({ block: 'start' }));
 	await page.waitForTimeout(150);
 	await shot(page, `new-repository-maintenance${suffix}`);
-	await page.getByRole('button', { name: labels.cancel, exact: true }).click();
+	// Without a change the bar has no Cancel button, so the page goes back to the list.
+	await page.goBack();
 
 	await addRepository(page, labels, 'backups-prod', labels.hostName);
 	await addRepository(page, labels, 'scratch-remote', null);
@@ -137,7 +135,8 @@ async function capture(page: Page, labels: Labels, suffix: string): Promise<void
 		.evaluate((element) => element.scrollIntoView({ block: 'end' }));
 	await page.waitForTimeout(150);
 	await shot(page, `repository-maintenance-check${suffix}`);
-	await page.getByRole('button', { name: labels.cancel, exact: true }).click();
+	// Without a change the bar has no Cancel button, so the page goes back to the list.
+	await page.goBack();
 
 	await page.getByRole('button', { name: labels.moreActions('scratch-remote') }).click();
 	await page.getByRole('menuitem', { name: labels.edit }).click();
