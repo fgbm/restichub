@@ -134,3 +134,44 @@ pub async fn ensure_kek_check(
     tx.commit().await?;
     Ok(())
 }
+
+/// Logs each local repository without a host and each plan of one that runs on another host.
+///
+/// The check changes no row: the data stays, the plan save refuses the old binding, and the job
+/// builder refuses a job on another host with `not_repository_host`.
+pub async fn report_local_repository_hosts(db: &Database) -> Result<(), restichub_db::DbError> {
+    let tenant_list = {
+        let mut tx = db.begin_platform().await?;
+        let list = tenants::list(&mut tx).await?;
+        tx.commit().await?;
+        list
+    };
+    for tenant in tenant_list {
+        let mut tx = db.begin_tenant(tenant.id).await?;
+        let problems = restichub_db::plans::local_host_problems(&mut tx).await?;
+        tx.commit().await?;
+        for problem in problems {
+            let plans: Vec<String> = problem
+                .plans_off_host
+                .iter()
+                .map(ToString::to_string)
+                .collect();
+            match problem.host {
+                None => tracing::warn!(
+                    tenant = %tenant.id,
+                    repository = %problem.repository_id,
+                    plans = ?plans,
+                    "a local repository has no host; set its host, then move its plans to that host"
+                ),
+                Some(host) => tracing::warn!(
+                    tenant = %tenant.id,
+                    repository = %problem.repository_id,
+                    host = %host,
+                    plans = ?plans,
+                    "plans of a local repository run on another host; their jobs fail with not_repository_host"
+                ),
+            }
+        }
+    }
+    Ok(())
+}

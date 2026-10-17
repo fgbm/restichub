@@ -11,7 +11,7 @@
 use restichub_compiler::{JobLimits, ValidatedJob, compile};
 use restichub_db::jobs::Job;
 use restichub_db::{
-    AgentStatus, JobKind, JobResultCode, RepositoryId, SecretId, TenantTx, agents as agents_repo,
+    AgentStatus, BackendKind, JobKind, JobResultCode, RepositoryId, SecretId, TenantTx, agents as agents_repo,
     plans as plans_repo, profiles as profiles_repo, repositories as repo,
 };
 use restichub_proto::AgentCapability;
@@ -48,6 +48,8 @@ pub enum Refusal {
     RepositoryMissing,
     RepositoryChanged,
     NotMaintenanceAgent,
+    /// The agent is not the host of the local repository.
+    NotRepositoryHost,
     RequestMissing,
     AgentCapabilityMissing,
     ForgetWithoutTags,
@@ -72,6 +74,7 @@ impl Refusal {
             Self::RepositoryMissing => "repository_missing",
             Self::RepositoryChanged => "repository_changed",
             Self::NotMaintenanceAgent => "not_maintenance_agent",
+            Self::NotRepositoryHost => "not_repository_host",
             Self::RequestMissing => "request_missing",
             Self::AgentCapabilityMissing => "agent_capability_missing",
             Self::ForgetWithoutTags => "forget_without_tags",
@@ -144,6 +147,13 @@ pub async fn build(
     let Some(repository) = repo::get(tx, repository_id).await? else {
         return Err(BuildError::Refused(Refusal::RepositoryMissing));
     };
+    // Save-time checks refuse this too; this one also covers older rows and queued jobs, so no job
+    // reaches a host that cannot see the local path.
+    if repository.backend == BackendKind::Local
+        && repository.maintenance_agent_id != Some(job.agent_id)
+    {
+        return Err(BuildError::Refused(Refusal::NotRepositoryHost));
+    }
 
     let mut limits = JobLimits::default();
     let mut steps = match job.kind {

@@ -397,6 +397,10 @@ pub async fn run_plan(
     let Some(profile) = profiles_repo::get(&mut tx, plan.profile_id).await? else {
         return Err(ApiError::conflict());
     };
+    let Some(repository) = repo::get(&mut tx, plan.repository_id).await? else {
+        return Err(ApiError::conflict());
+    };
+    crate::jobs::ensure_repository_host(&repository, plan.agent_id)?;
     // The job builder compiles again at send time. The early check gives the user the field error.
     crate::profiles::compile_for_agent(&profile, &agent, now)?;
     if queue_repo::has_queued_manual_run(&mut tx, plan_id).await? {

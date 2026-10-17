@@ -688,8 +688,8 @@ pub(crate) fn next_run_at(
         .map_err(|error| schedule_error_to_api("cron", error))
 }
 
-/// Refuses a profile or an agent that is not in the tenant, or an agent that is revoked
-/// (FR-TN-01, FR-ID-04).
+/// Refuses a profile or an agent that is not in the tenant, an agent that is revoked
+/// (FR-TN-01, FR-ID-04), and an agent other than the host of a local repository.
 async fn check_references(
     tx: &mut restichub_db::TenantTx<'_>,
     profile_id: ProfileId,
@@ -706,6 +706,13 @@ async fn check_references(
     if agent.status != AgentStatus::Active {
         return Err(ApiError::invalid_field("agent_id", Reason::Unknown));
     }
+    // The lock orders this save after a concurrent change of the repository host.
+    let Some(repository) =
+        restichub_db::repositories::get_for_update(tx, profile.repository_id).await?
+    else {
+        return Err(ApiError::invalid_field("profile_id", Reason::Unknown));
+    };
+    crate::jobs::ensure_repository_host(&repository, agent_id)?;
     // The stored profile must compile for the operating system of the agent (FR-PF-05). The compile
     // refuses a missing path for that operating system with a field error.
     crate::profiles::compile_for_agent(&profile, &agent, now)?;

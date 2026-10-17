@@ -56,6 +56,7 @@ pub enum ErrorCode {
     AgentRecentlyOnline,
     SetupAlreadyDone,
     InvalidSetupToken,
+    RepositoryHostLocked,
 }
 
 impl ErrorCode {
@@ -89,6 +90,7 @@ impl ErrorCode {
             Self::AgentRecentlyOnline => "agent_recently_online",
             Self::SetupAlreadyDone => "setup_already_done",
             Self::InvalidSetupToken => "invalid_setup_token",
+            Self::RepositoryHostLocked => "repository_host_locked",
         }
     }
 }
@@ -377,6 +379,18 @@ impl ApiError {
             ErrorCode::AgentRecentlyOnline,
             "Conflict",
         )
+    }
+
+    /// Creates a `409 repository_host_locked` error on `maintenance_agent_id`: the data of an
+    /// initialized local repository lives on the disk of its host, so the host cannot change.
+    pub fn repository_host_locked() -> Self {
+        let mut error = Self::new(
+            StatusCode::CONFLICT,
+            ErrorCode::RepositoryHostLocked,
+            "Conflict",
+        );
+        error.field = Some("maintenance_agent_id".to_owned());
+        error
     }
 
     /// Creates a `409 already_queued` error: the plan already holds a queued manual run.
