@@ -317,7 +317,7 @@ pub async fn create_plan(
     let created_by = crate::secrets::actor_user(&context.actor);
 
     let mut tx = state.db().begin_tenant(context.tenant_id).await?;
-    check_references(&mut tx, input.profile_id, input.agent_id, now).await?;
+    check_references(&mut tx, input.profile_id, input.agent_id, None, now).await?;
     let next_run_at = next_run_at(&schedule, input.enabled, now)?;
     repo::create(
         &mut tx,
@@ -396,7 +396,14 @@ pub async fn update_plan(
     )?;
     input.rpo_seconds = validate_rpo(body.rpo_seconds)?;
     let schedule = parse_schedule(&input.cron, &input.time_zone)?;
-    check_references(&mut tx, input.profile_id, input.agent_id, now).await?;
+    check_references(
+        &mut tx,
+        input.profile_id,
+        input.agent_id,
+        Some(current.agent_id),
+        now,
+    )
+    .await?;
     // A rename or a policy change keeps the pending fire time. The schedule is recomputed only when
     // the cron, the time zone or the enabled flag changes (FR-SC-01).
     let schedule_changed = input.cron != current.cron
@@ -694,19 +701,28 @@ async fn check_references(
     tx: &mut restichub_db::TenantTx<'_>,
     profile_id: ProfileId,
     agent_id: AgentId,
+    current_agent: Option<AgentId>,
     now: time::OffsetDateTime,
 ) -> Result<(), ApiError> {
-    let profile = match profiles_repo::get(tx, profile_id).await? {
+    // Lock order plan -> profile -> agent -> repository. The profile update locks profile ->
+    // repository, so a concurrent repoint of the profile to a local repository cannot pass the
+    // host check with the old repository. A replace locks agent -> plans -> repositories, so the
+    // agent that the write binds is locked before the repository.
+    let profile = match profiles_repo::get_for_share(tx, profile_id).await? {
         Some(profile) => profile,
         None => return Err(ApiError::invalid_field("profile_id", Reason::Unknown)),
     };
-    let Some(agent) = agents_repo::get(tx, agent_id).await? else {
+    let agent = if current_agent == Some(agent_id) {
+        agents_repo::get(tx, agent_id).await?
+    } else {
+        agents_repo::get_for_key_share(tx, agent_id).await?
+    };
+    let Some(agent) = agent else {
         return Err(ApiError::invalid_field("agent_id", Reason::Unknown));
     };
     if agent.status != AgentStatus::Active {
         return Err(ApiError::invalid_field("agent_id", Reason::Unknown));
     }
-    // The lock orders this save after a concurrent change of the repository host.
     let Some(repository) =
         restichub_db::repositories::get_for_update(tx, profile.repository_id).await?
     else {
