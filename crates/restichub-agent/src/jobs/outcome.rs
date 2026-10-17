@@ -24,6 +24,8 @@ pub(super) struct Progress {
     pub(super) limit: Option<StepError>,
     /// A restic step failed before the process started.
     pub(super) restic_not_started: bool,
+    /// A restic step could not write the local repository (ADR-0044).
+    pub(super) repository_read_only: bool,
 }
 
 /// Maps the step results to the typed outcome of a job (FR-AG-09, AC-RP-01).
@@ -99,6 +101,7 @@ pub(super) fn job_error(outcome: JobStatus, progress: &Progress) -> Option<Error
         JobStatus::ConfigError => "wrong_password",
         JobStatus::NotInitialized => "repository_missing",
         JobStatus::Failed if progress.restic_not_started => "step_not_started",
+        JobStatus::Failed if progress.repository_read_only => "repository_read_only",
         JobStatus::Failed => "step_failed",
         JobStatus::Cancelled => "cancelled",
         JobStatus::RepositoryLocked => "repository_locked",

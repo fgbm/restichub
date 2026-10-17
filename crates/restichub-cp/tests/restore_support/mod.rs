@@ -10,6 +10,7 @@ use std::time::Duration;
 use axum::http::StatusCode;
 use prost::Message as _;
 use restichub_agent::jobs::Jobs;
+use restichub_agent::repository_roots::RepositoryAccess;
 use restichub_agent::restore_roots::RestoreAccess;
 use restichub_db::AgentId;
 use restichub_proto::agent::v1::{AgentMessage, agent_message};
@@ -127,7 +128,8 @@ impl RealAgent {
                     .expect("cannot resolve the temporary directory"),
             ],
             Vec::new(),
-        ));
+        ))
+        .with_repository_access(RepositoryAccess::unrestricted());
         let (tx, rx) = tokio::sync::mpsc::channel(256);
         jobs.attach(&tx);
         jobs.greeted(false);

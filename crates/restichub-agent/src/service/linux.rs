@@ -25,12 +25,12 @@ fn unit_path() -> PathBuf {
 /// The systemd unit text for the running agent (FR-AG-01, AC-IN-03).
 ///
 /// `ProtectSystem=strict` makes the whole file system read-only except the identity directory, the
-/// cache directory and the restore roots (FR-RS-03). A read of a backup source stays possible. A
-/// write to a local repository fails, so the operator adds every local repository path to
-/// `ReadWritePaths`. `ProtectHome` stays off, because a backup source is often below `/home`.
+/// cache directory and `writable_roots`: the restore roots (FR-RS-03) and the repository roots
+/// (ADR-0044). A read of a backup source stays possible. `ProtectHome` stays off, because a backup
+/// source is often below `/home`.
 #[must_use]
-pub fn unit_contents(exe: &Path, config_dir: &Path, restore_roots: &[PathBuf]) -> String {
-    let restore_paths: String = restore_roots
+pub fn unit_contents(exe: &Path, config_dir: &Path, writable_roots: &[PathBuf]) -> String {
+    let writable_paths: String = writable_roots
         .iter()
         .map(|root| format!(" \"{}\"", root.display()))
         .collect();
@@ -68,7 +68,7 @@ pub fn unit_contents(exe: &Path, config_dir: &Path, restore_roots: &[PathBuf]) -
          RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX\n\
          CacheDirectory=restichub-agent\n\
          Environment=RESTIC_CACHE_DIR={cache}\n\
-         ReadWritePaths=\"{config}\"{restore_paths}\n\
+         ReadWritePaths=\"{config}\"{writable_paths}\n\
          \n\
          [Install]\n\
          WantedBy=multi-user.target\n",
@@ -77,12 +77,12 @@ pub fn unit_contents(exe: &Path, config_dir: &Path, restore_roots: &[PathBuf]) -
         capabilities = CAPABILITIES,
         cache = CACHE_DIR,
         config = config_dir.display(),
-        restore_paths = restore_paths,
+        writable_paths = writable_paths,
     )
 }
 
-/// The restore roots that the installed unit cannot write, because the operator added them after
-/// `install-service` (FR-RS-03). Restic fails with `EROFS` on such a root.
+/// The roots that the installed unit cannot write, because the operator added them after
+/// `install-service` (FR-RS-03, ADR-0044). Restic fails with `EROFS` on such a root.
 #[must_use]
 pub fn roots_missing_from_installed_unit(roots: &[PathBuf]) -> Vec<PathBuf> {
     match std::fs::read_to_string(unit_path()) {
@@ -132,8 +132,15 @@ pub fn install(restic: &Path) -> Result<()> {
             );
         }
     }
+    let repository_roots = repository_roots(&config)?;
+    let writable: Vec<PathBuf> = access
+        .roots()
+        .iter()
+        .chain(&repository_roots)
+        .cloned()
+        .collect();
     let path = unit_path();
-    std::fs::write(&path, unit_contents(&exe, &config, access.roots()))
+    std::fs::write(&path, unit_contents(&exe, &config, &writable))
         .with_context(|| format!("cannot write {}", path.display()))?;
     systemctl(&["daemon-reload"])?;
     systemctl(&["enable", SERVICE_NAME])?;
@@ -187,6 +194,28 @@ fn refuse_rejected_roots(config: &Path) -> Result<()> {
         bail!("the restore root {} is not safe: {reason}", root.display());
     }
     Ok(())
+}
+
+/// The repository roots of the host, each created with the access of root only when it is missing
+/// (ADR-0044). A root that another account can change stops the install.
+fn repository_roots(config: &Path) -> Result<Vec<PathBuf>> {
+    let file = crate::repository_roots::roots_file_for(config);
+    if let Some((root, reason)) = crate::restore_roots::rejected_roots_in(&file)
+        .into_iter()
+        .next()
+    {
+        bail!(
+            "the repository root {} is not safe: {reason}",
+            root.display()
+        );
+    }
+    let roots = crate::restore_roots::load_roots_file(&file);
+    for root in &roots {
+        if !root.is_dir() {
+            crate::paths::create_protected_dir(root)?;
+        }
+    }
+    Ok(roots)
 }
 
 /// Restarts the unit when it is installed.
@@ -320,6 +349,28 @@ mod tests {
             ],
         );
         assert!(unit.contains("ReadWritePaths=\"/etc/restichub-agent\" \"/var/lib/restichub-restore\" \"/srv/restore\"\n"));
+    }
+
+    #[test]
+    fn adr_0044_the_unit_can_write_every_repository_root() {
+        let unit = unit_contents(
+            Path::new("/opt/restichub-agent/restichub-agent"),
+            Path::new("/etc/restichub-agent"),
+            &[
+                PathBuf::from("/var/lib/restichub-restore"),
+                PathBuf::from("/var/spool/restichub"),
+            ],
+        );
+        assert!(unit.contains("ReadWritePaths=\"/etc/restichub-agent\" \"/var/lib/restichub-restore\" \"/var/spool/restichub\"\n"));
+        assert!(unit.contains("ProtectSystem=strict"));
+        assert_eq!(
+            roots_missing_from_unit(&unit, &[PathBuf::from("/var/spool/restichub/local-test")]),
+            Vec::<PathBuf>::new()
+        );
+        assert_eq!(
+            roots_missing_from_unit(&unit, &[PathBuf::from("/srv/repos")]),
+            vec![PathBuf::from("/srv/repos")]
+        );
     }
 
     #[test]

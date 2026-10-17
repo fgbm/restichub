@@ -51,6 +51,7 @@ use tokio::sync::mpsc;
 
 use crate::journal::{FileJournal, JOURNAL_FILE, JournalSnapshot};
 use crate::log_spool::LogSpool;
+use crate::repository_roots::RepositoryAccess;
 use crate::restic_store::Layout;
 use crate::restore_roots::RestoreAccess;
 use crate::scripts::ScriptStore;
@@ -132,6 +133,8 @@ pub struct Jobs {
     /// The roots where a restore may write and the files of the agent that it may never touch
     /// (FR-RS-03, ADR-0035).
     restore: Arc<RestoreAccess>,
+    /// The roots where a local repository may lie (ADR-0044).
+    repository: Arc<RepositoryAccess>,
     /// The agent reads it again at each job (FR-HK-08).
     scripts: Arc<ScriptStore>,
     /// The log chunks that the control plane did not acknowledge yet (FR-LG-07).
@@ -160,6 +163,8 @@ impl Jobs {
         journal.persist()?;
         let restore = RestoreAccess::for_host(dir, &cache, &program);
         crate::service::warn_about_read_only_roots(restore.roots());
+        let repository = RepositoryAccess::for_host(dir, &cache, &program);
+        crate::service::warn_about_read_only_roots(repository.roots());
         let scripts = ScriptStore::for_config_dir(dir, &cache);
         scripts.clean_leftovers();
         Ok(Self {
@@ -176,6 +181,7 @@ impl Jobs {
             stop_grace: STOP_GRACE,
             cleanup_grace: CLEANUP_GRACE,
             restore: Arc::new(restore),
+            repository: Arc::new(repository),
             scripts: Arc::new(scripts),
             log_spool: Arc::new(LogSpool::open(dir, LogSpool::max_bytes_from_env())),
             log_mode: Arc::new(AtomicU8::new(LogMode::Direct as u8)),
@@ -230,6 +236,13 @@ impl Jobs {
     #[must_use]
     pub fn with_restore_access(mut self, access: RestoreAccess) -> Self {
         self.restore = Arc::new(access);
+        self
+    }
+
+    /// Replaces the roots of the local repositories (ADR-0044).
+    #[must_use]
+    pub fn with_repository_access(mut self, access: RepositoryAccess) -> Self {
+        self.repository = Arc::new(access);
         self
     }
 
@@ -323,6 +336,19 @@ impl Jobs {
         {
             let _ = self
                 .send(rejected(job_id, RejectReason::RestoreTargetDenied))
+                .await;
+            return;
+        }
+        // The sandbox of the service would stop restic with a read-only error (ADR-0044).
+        if let Some((location, reason)) = self.repository.denied(validated.job()) {
+            tracing::warn!(
+                %reason,
+                location,
+                file = %crate::repository_roots::roots_file().display(),
+                "a local repository is refused; add its root to the file and run install-service"
+            );
+            let _ = self
+                .send(rejected(job_id, RejectReason::RepositoryPathDenied))
                 .await;
             return;
         }
@@ -741,6 +767,9 @@ impl Jobs {
             }
             if outcome.error == Some(StepError::NotStarted) {
                 progress.restic_not_started = true;
+            }
+            if outcome.error == Some(StepError::ReadOnly) {
+                progress.repository_read_only = true;
             }
             match outcome.status {
                 StepStatus::Success => {

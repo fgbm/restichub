@@ -17,6 +17,7 @@ use restichub_agent::commands;
 use restichub_agent::identity::StoredIdentity;
 use restichub_agent::jobs::Jobs;
 use restichub_agent::keys::KeyState;
+use restichub_agent::repository_roots::RepositoryAccess;
 use restichub_agent::restic::Restic;
 use restichub_agent::restore_roots::RestoreAccess;
 use restichub_agent::stream::{self, Backoff, StreamOptions};
@@ -110,6 +111,7 @@ pub fn program_jobs(dir: &Path) -> Jobs {
     Jobs::open(program, expected, dir.join("cache"), dir)
         .expect("the job journal must open")
         .with_restore_access(temp_roots())
+        .with_repository_access(RepositoryAccess::unrestricted())
 }
 
 /// A job runner with the restore roots of a production host: the temporary directory is outside
@@ -156,6 +158,7 @@ pub fn real_jobs(dir: &Path, program: &Path) -> Jobs {
     Jobs::open(program.to_path_buf(), expected, dir.join("cache"), dir)
         .expect("the job journal must open")
         .with_restore_access(temp_roots())
+        .with_repository_access(RepositoryAccess::unrestricted())
 }
 
 /// Runs the connect loop of the real agent until the test stops it.

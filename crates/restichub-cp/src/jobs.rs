@@ -626,6 +626,7 @@ fn reject_reason_code(reason: i32) -> &'static str {
         Ok(RejectReason::RestoreTargetDenied) => "restore_target_denied",
         Ok(RejectReason::ServerScriptsDisabled) => "server_scripts_disabled",
         Ok(RejectReason::InvalidScript) => "invalid_script",
+        Ok(RejectReason::RepositoryPathDenied) => "repository_path_denied",
         Ok(RejectReason::Unspecified) | Err(_) => "rejected",
     }
 }

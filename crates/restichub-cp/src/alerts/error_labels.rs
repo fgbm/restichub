@@ -143,6 +143,16 @@ pub(super) const LABELS: &[(&str, &str, &str)] = &[
         "цель восстановления запрещена",
     ),
     (
+        "repository_path_denied",
+        "the repository path is not allowed on the host",
+        "путь репозитория не разрешён на хосте",
+    ),
+    (
+        "repository_read_only",
+        "the repository path is read-only for the agent",
+        "путь репозитория доступен агенту только для чтения",
+    ),
+    (
         "forget_without_tags",
         "forget without tags",
         "forget без тегов",

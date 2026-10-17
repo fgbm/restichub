@@ -152,16 +152,17 @@ pub fn check_install_location(restic: &Path) -> Result<()> {
     location::check(&crate::paths::agent_exe(), restic)
 }
 
-/// Logs a warning for each restore root that the installed service cannot write (FR-RS-03).
+/// Logs a warning for each restore or repository root that the installed service cannot write
+/// (FR-RS-03, ADR-0044).
 ///
-/// A root added to the roots file after `install-service` stays read-only for the service until
+/// A root added to a roots file after `install-service` stays read-only for the service until
 /// the operator runs `install-service` again.
 pub fn warn_about_read_only_roots(roots: &[std::path::PathBuf]) {
     #[cfg(target_os = "linux")]
     for root in linux::roots_missing_from_installed_unit(roots) {
         tracing::warn!(
             root = %root.display(),
-            "the restore root is read-only for the service; run install-service again"
+            "the root is read-only for the service; run install-service again"
         );
     }
     #[cfg(not(target_os = "linux"))]

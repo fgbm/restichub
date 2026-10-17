@@ -108,6 +108,20 @@ jobs:
           sudo systemctl restart restichub-agent
           test "$(systemctl is-active restichub-agent)" = active
           scripts/install-smoke.sh connected "$since" 60
+      - name: A local repository below a repository root inits and backs up (ADR-0044)
+        run: |
+          set -euo pipefail
+          root=/var/lib/restichub-smoke-repositories
+          echo "$root" | sudo tee /etc/restichub-agent-repository-roots.txt >/dev/null
+          sudo chmod 0644 /etc/restichub-agent-repository-roots.txt
+          since="$(date -u +%s)"
+          sudo /opt/restichub-agent/bin/restichub-agent install-service
+          test "$(sudo stat -c '%U %a' "$root")" = "root 700"
+          grep -q "\"$root\"" /etc/systemd/system/restichub-agent.service
+          scripts/install-smoke.sh connected "$since" 60
+          mkdir -p "$SMOKE_DIR/source"
+          echo "local repository smoke" >"$SMOKE_DIR/source/file.txt"
+          scripts/install-smoke.sh local-repository "$root" "$SMOKE_DIR/source" /var/tmp/restichub-outside/local-test
       # The service writes its log to journald. The scan reads the entries of all units.
       - name: journald holds no canary after ten jobs (AC-AG-03)
         run: |
@@ -118,7 +132,7 @@ jobs:
           scripts/install-smoke.sh connected "$since" 60
           canaries="$SMOKE_DIR/canaries"
           for _ in 1 2 3; do echo "CANARY-$(cat /proc/sys/kernel/random/uuid)"; done >"$canaries"
-          scripts/install-smoke.sh canary-jobs "$canaries" "$SMOKE_DIR/canary"
+          scripts/install-smoke.sh canary-jobs "$canaries" /var/lib/restichub-smoke-repositories/canary
           control="CANARY-$(cat /proc/sys/kernel/random/uuid)"
           echo "control line $control" | systemd-cat --identifier restichub-canary-control
           journal="$SMOKE_DIR/journal.export"

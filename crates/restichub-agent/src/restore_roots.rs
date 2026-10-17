@@ -58,10 +58,10 @@ pub enum TargetDenied {
 impl fmt::Display for TargetDenied {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            Self::NotAbsolute => "the restore target is not a plain absolute path",
-            Self::Unresolvable => "the restore target cannot be resolved",
-            Self::ProtectedPath => "the restore target overlaps a file of the agent",
-            Self::OutsideRoots => "the restore target is outside the restore roots",
+            Self::NotAbsolute => "the path is not a plain absolute path",
+            Self::Unresolvable => "the path cannot be resolved",
+            Self::ProtectedPath => "the path overlaps a file of the agent",
+            Self::OutsideRoots => "the path is outside the configured roots",
         })
     }
 }
@@ -86,21 +86,10 @@ impl RestoreAccess {
     /// downloaded restic binary. The directory of `program` joins the protected paths (ADR-0038).
     #[must_use]
     pub fn for_host(config_dir: &Path, cache_dir: &Path, program: &Path) -> Self {
-        let mut protected = vec![config_dir.to_path_buf(), cache_dir.to_path_buf()];
-        protected.push(roots_file_for(config_dir));
-        protected.push(crate::paths::program_dir());
-        protected.push(crate::paths::data_dir());
-        protected.push(crate::scripts::mode_file_for(config_dir));
-        if let Some(dir) = program.parent() {
-            protected.push(dir.to_path_buf());
-        }
-        if let Some(dir) = std::env::current_exe()
-            .ok()
-            .and_then(|exe| exe.parent().map(Path::to_path_buf))
-        {
-            protected.push(dir);
-        }
-        Self::new(load_roots(&roots_file_for(config_dir)), protected)
+        Self::new(
+            load_roots(&roots_file_for(config_dir)),
+            protected_paths(config_dir, cache_dir, program),
+        )
     }
 
     /// Text form for `AgentHello`. A root that is not UTF-8 is left out.
@@ -123,37 +112,69 @@ impl RestoreAccess {
     ///
     /// Returns the reason when the agent must refuse the target.
     pub fn check(&self, target: &str) -> Result<(), TargetDenied> {
-        let flavor = PathFlavor::host();
-        if components(flavor, target).is_none() {
-            return Err(TargetDenied::NotAbsolute);
+        check_path(&self.roots, &self.protected, target)
+    }
+}
+
+/// The files of the agent that no restore and no local repository may touch (T31).
+///
+/// `program` is the downloaded restic binary; its directory is protected too (ADR-0038).
+pub(crate) fn protected_paths(config_dir: &Path, cache_dir: &Path, program: &Path) -> Vec<PathBuf> {
+    let mut protected = vec![config_dir.to_path_buf(), cache_dir.to_path_buf()];
+    protected.push(roots_file_for(config_dir));
+    protected.push(crate::repository_roots::roots_file_for(config_dir));
+    protected.push(crate::paths::program_dir());
+    protected.push(crate::paths::data_dir());
+    protected.push(crate::scripts::mode_file_for(config_dir));
+    if let Some(dir) = program.parent() {
+        protected.push(dir.to_path_buf());
+    }
+    if let Some(dir) = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf))
+    {
+        protected.push(dir);
+    }
+    protected
+}
+
+/// Accepts a path below one of `roots` that does not overlap a protected path. Links are resolved
+/// first, so a link cannot lead out of a root or into a file of the agent.
+pub(crate) fn check_path(
+    roots: &[PathBuf],
+    protected: &[PathBuf],
+    target: &str,
+) -> Result<(), TargetDenied> {
+    let flavor = PathFlavor::host();
+    if components(flavor, target).is_none() {
+        return Err(TargetDenied::NotAbsolute);
+    }
+    let resolved = resolve(Path::new(target)).map_err(|_| TargetDenied::Unresolvable)?;
+    let resolved = resolved.to_str().ok_or(TargetDenied::NotAbsolute)?;
+    for protected in protected {
+        let Some(path) = protected.to_str() else {
+            continue;
+        };
+        let real = resolve(protected).ok();
+        let real = real.as_deref().and_then(Path::to_str);
+        if overlaps(flavor, target, path)
+            || overlaps(flavor, resolved, path)
+            || real.is_some_and(|real| overlaps(flavor, resolved, real))
+        {
+            return Err(TargetDenied::ProtectedPath);
         }
-        let resolved = resolve(Path::new(target)).map_err(|_| TargetDenied::Unresolvable)?;
-        let resolved = resolved.to_str().ok_or(TargetDenied::NotAbsolute)?;
-        for protected in &self.protected {
-            let Some(path) = protected.to_str() else {
-                continue;
-            };
-            let real = resolve(protected).ok();
-            let real = real.as_deref().and_then(Path::to_str);
-            if overlaps(flavor, target, path)
-                || overlaps(flavor, resolved, path)
-                || real.is_some_and(|real| overlaps(flavor, resolved, real))
-            {
-                return Err(TargetDenied::ProtectedPath);
-            }
-        }
-        let inside = self.roots.iter().any(|root| {
-            let Some(root) = resolve(root).ok() else {
-                return false;
-            };
-            root.to_str()
-                .is_some_and(|root| is_within(flavor, resolved, root))
-        });
-        if inside {
-            Ok(())
-        } else {
-            Err(TargetDenied::OutsideRoots)
-        }
+    }
+    let inside = roots.iter().any(|root| {
+        let Some(root) = resolve(root).ok() else {
+            return false;
+        };
+        root.to_str()
+            .is_some_and(|root| is_within(flavor, resolved, root))
+    });
+    if inside {
+        Ok(())
+    } else {
+        Err(TargetDenied::OutsideRoots)
     }
 }
 
@@ -190,6 +211,13 @@ fn resolve(path: &Path) -> io::Result<PathBuf> {
 /// so a local user cannot widen the roots.
 fn load_roots(file: &Path) -> Vec<PathBuf> {
     let mut roots = vec![default_root()];
+    roots.extend(load_roots_file(file));
+    roots
+}
+
+/// The safe roots of a roots file. An absent file holds no root.
+pub(crate) fn load_roots_file(file: &Path) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
     match std::fs::symlink_metadata(file) {
         Ok(_) => match read_trusted(file) {
             Ok(text) => {
@@ -198,16 +226,17 @@ fn load_roots(file: &Path) -> Vec<PathBuf> {
                     tracing::warn!(
                         file = %file.display(),
                         skipped,
-                        "the restore roots file holds lines that are not absolute paths"
+                        "the roots file holds lines that are not absolute paths"
                     );
                 }
                 for root in extra {
                     match check_root(&root) {
                         Ok(()) => roots.push(root),
                         Err(error) => tracing::warn!(
+                            file = %file.display(),
                             root = %root.display(),
                             error = %format!("{error:#}"),
-                            "the restore root is ignored"
+                            "the root is ignored"
                         ),
                     }
                 }
@@ -215,11 +244,11 @@ fn load_roots(file: &Path) -> Vec<PathBuf> {
             Err(error) => tracing::warn!(
                 file = %file.display(),
                 error = %format!("{error:#}"),
-                "the restore roots file is ignored"
+                "the roots file is ignored"
             ),
         },
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-        Err(error) => tracing::warn!(%error, "cannot read the restore roots file"),
+        Err(error) => tracing::warn!(file = %file.display(), %error, "cannot read the roots file"),
     }
     roots
 }
@@ -228,7 +257,11 @@ fn load_roots(file: &Path) -> Vec<PathBuf> {
 /// refuses to continue while this list is not empty, so the administrator learns about the root.
 #[must_use]
 pub fn rejected_roots(config_dir: &Path) -> Vec<(PathBuf, String)> {
-    let Ok(text) = read_trusted(&roots_file_for(config_dir)) else {
+    rejected_roots_in(&roots_file_for(config_dir))
+}
+
+pub(crate) fn rejected_roots_in(file: &Path) -> Vec<(PathBuf, String)> {
+    let Ok(text) = read_trusted(file) else {
         return Vec::new();
     };
     parse_roots(&text)

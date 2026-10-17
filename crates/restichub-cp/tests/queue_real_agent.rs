@@ -73,7 +73,8 @@ async fn run_backup(
         work.join("cache"),
         &work,
     )
-    .expect("the job journal must open");
+    .expect("the job journal must open")
+    .with_repository_access(restichub_agent::repository_roots::RepositoryAccess::unrestricted());
     let (captured_tx, mut captured) = tokio::sync::mpsc::channel(64);
     jobs.attach(&captured_tx);
     jobs.greeted(false);

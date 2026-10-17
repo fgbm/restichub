@@ -355,6 +355,9 @@ enum RejectReason {
   // A script step breaks a rule: empty or too long body, unknown interpreter
   // for this operating system, or a bad variable name (FR-HK-09).
   REJECT_REASON_INVALID_SCRIPT = 19;
+  // A local repository of the job is outside the repository roots of the
+  // host, or it holds the files of the agent itself (ADR-0044).
+  REJECT_REASON_REPOSITORY_PATH_DENIED = 20;
 }
 
 // Pong answers a Ping from the control plane (FR-ID-07).

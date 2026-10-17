@@ -8,6 +8,8 @@
 #   install-smoke.sh token FILE   write a new enrollment token to FILE
 #   install-smoke.sh connected    wait until the control plane lists the agent as connected
 #   install-smoke.sh canary-jobs  run ten jobs on three repositories whose passwords are canaries
+#   install-smoke.sh local-repository ROOT SOURCE OUTSIDE
+#                                 back up into a local repository below ROOT; refuse OUTSIDE
 #   install-smoke.sh cp-logs      print the log of the control plane
 #
 # The state lives in $SMOKE_DIR. The values are for a throw-away control plane on the loopback
@@ -188,6 +190,54 @@ canary_jobs() {
 	echo "ten canary jobs succeeded"
 }
 
+# Prints the id of a new local repository $1 at the path $2 with the maintenance agent $3.
+create_local_repository() {
+	printf '%s' "smoke-local-password" |
+		jq -Rc --arg name "$1" --arg path "$2" --arg agent "$3" \
+			'{name: $name, backend: {kind: "local", path: $path}, password: ., maintenance_agent_id: $agent}' |
+		curl -fsS "${csrf[@]}" -b "$jar" -H 'content-type: application/json' \
+			"$web/api/v1/repositories" --data-binary @- | jq -r .id
+}
+
+# Waits for job $1 to fail with the result message $2.
+wait_refused() {
+	local id="$1" expected="$2" body status=""
+	for _ in $(seq 1 60); do
+		body="$(curl -fsS -b "$jar" "$web/api/v1/jobs/$id")"
+		status="$(printf '%s' "$body" | jq -r .status)"
+		[ "$status" = failed ] && break
+		sleep 1
+	done
+	if [ "$(printf '%s' "$body" | jq -r .result_message)" != "$expected" ]; then
+		echo "job $id must fail with '$expected': $body" >&2
+		return 1
+	fi
+}
+
+# The installed service inits a local repository below the repository root $1 and backs up the
+# directory $2 into it. A repository at $3, outside the roots, gets the refusal of the host
+# (ADR-0044).
+local_repository() {
+	local root="$1" source="$2" outside="$3" agent repository profile plan id
+	agent="$(agent_json | jq -r '.items[0].id')"
+	repository="$(create_local_repository local-test "$root/local-test" "$agent")"
+	run_job "$repository" init
+	profile="$(jq -nc --arg repository "$repository" --arg path "$source" \
+		'{name: "local-test", repository_id: $repository, paths: {linux: [$path]}}' |
+		curl -fsS "${csrf[@]}" -b "$jar" -H 'content-type: application/json' \
+			"$web/api/v1/profiles" --data-binary @- | jq -r .profile.id)"
+	plan="$(jq -nc --arg profile "$profile" --arg agent "$agent" \
+		'{name: "local-test", profile_id: $profile, agent_id: $agent, cron: "0 3 1 1 *", time_zone: "UTC", missed_run_policy: "skip"}' |
+		curl -fsS "${csrf[@]}" -b "$jar" -H 'content-type: application/json' \
+			"$web/api/v1/plans" --data-binary @- | jq -r .plan.id)"
+	id="$(curl -fsS "${csrf[@]}" -b "$jar" -X POST "$web/api/v1/plans/$plan/run" | jq -r .id)"
+	wait_job "$id"
+	repository="$(create_local_repository outside "$outside" "$agent")"
+	id="$(start_job "$repository" init)"
+	wait_refused "$id" repository_path_denied
+	echo "the local repository inits and backs up below its root; a path outside is refused"
+}
+
 case "${1:-}" in
 db-prepare) db_prepare ;;
 cp-up) cp_up ;;
@@ -195,6 +245,7 @@ ca) ca ;;
 token) shift; token "$@" ;;
 connected) shift; connected "$@" ;;
 canary-jobs) shift; canary_jobs "$@" ;;
+local-repository) shift; local_repository "$@" ;;
 cp-logs) cat "$smoke_dir/cp.log" ;;
 *) echo "unknown command: ${1:-}" >&2; exit 2 ;;
 esac
