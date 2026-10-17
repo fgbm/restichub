@@ -164,10 +164,7 @@ describe('the Hosts screen', () => {
 		);
 		expect(screen.getByText('Showing 1 to 1 of 1')).toBeInTheDocument();
 		// The tabs count the hosts on the server, also the hidden revoked ones.
-		expect(screen.getByRole('button', { name: 'All 3' })).toHaveAttribute(
-			'aria-pressed',
-			'true'
-		);
+		expect(screen.getByRole('button', { name: 'All 3' })).toHaveAttribute('aria-pressed', 'true');
 		expect(screen.getByRole('button', { name: 'Offline 2' })).toBeInTheDocument();
 		await user.click(screen.getByRole('button', { name: 'Revoked 3' }));
 		await waitFor(() =>
