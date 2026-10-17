@@ -226,7 +226,7 @@ describe('the Jobs screen', () => {
 		});
 		render(Jobs);
 
-		const pill = await screen.findByText('Succeeded', { selector: '.status' });
+		const pill = await screen.findByText('With warnings', { selector: '.status' });
 		expect(pill).toHaveClass('status--warning');
 		expect(pill).toHaveAttribute('title', 'Succeeded with warnings');
 		expect(pill).toHaveAttribute('aria-label', 'Succeeded with warnings');
@@ -239,7 +239,7 @@ describe('the Jobs screen', () => {
 		expect(screen.queryByText('Forget selected no snapshots')).not.toBeInTheDocument();
 	});
 
-	it('shows a successful job without a pill and a grey icon', async () => {
+	it('shows a successful job without a pill and a green icon', async () => {
 		mocks.listJobs.mockResolvedValue({
 			items: [job({ status: 'succeeded', finished_at: '2026-10-14T10:02:00Z' })],
 			next_cursor: null,
@@ -249,7 +249,7 @@ describe('the Jobs screen', () => {
 
 		await screen.findByText('nightly-web');
 		expect(container.querySelector('.status')).toBeNull();
-		expect(container.querySelector('.item__lead')?.className).not.toMatch(/tone--/);
+		expect(container.querySelector('.item__lead')).toHaveClass('tone--success');
 	});
 
 	it('opens the job page from the row link', async () => {

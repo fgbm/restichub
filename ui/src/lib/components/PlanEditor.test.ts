@@ -447,6 +447,17 @@ describe('the plan page', () => {
 		expect(runs[0].getAttribute('title')).toMatch(/UTC/);
 	});
 
+	it('fr_sc_01 says there is no next run while the plan is off', async () => {
+		const user = userEvent.setup();
+		mocks.previewSchedule.mockResolvedValue({ time_zone: 'UTC', runs: ['2999-01-01T02:00:00Z'] });
+		render(PlanEditor, { planId: 'pl_1' });
+
+		await screen.findByRole('heading', { level: 1, name: 'nightly-web' });
+		await user.click(screen.getByRole('switch', { name: 'Run on schedule' }));
+
+		expect(await screen.findByText('None — the plan is off')).toBeInTheDocument();
+	});
+
 	it('lets a Viewer read the plan without a save button', async () => {
 		session.role = 'viewer';
 		render(PlanEditor, { planId: 'pl_1' });

@@ -178,7 +178,11 @@
 		{
 			key: 'next',
 			label: t('plans.nextRun'),
-			value: runs && runs.length > 0 ? formatTimeInZone(runs[0], timeZone) : t('common.none')
+			value: !enabled
+				? t('plans.nextRunOff')
+				: runs && runs.length > 0
+					? formatTimeInZone(runs[0], timeZone)
+					: t('common.none')
 		}
 	]);
 

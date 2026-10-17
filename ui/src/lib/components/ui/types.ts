@@ -98,11 +98,11 @@ export interface RowAction {
 }
 
 /** The tones that color a list item; the usual state has no tone. */
-export type ListTone = 'danger' | 'warning' | 'running' | 'neutral';
+export type ListTone = 'danger' | 'warning' | 'running' | 'success' | 'neutral';
 
 export interface ListIcon {
 	name: IconName;
-	/** Only `danger`, `warning` and `running` color the icon. */
+	/** Only `danger`, `warning`, `running` and `success` color the icon. */
 	tone?: ListTone;
 	spin?: boolean;
 	/** The state that the icon shows, for the tooltip and the accessible name. */

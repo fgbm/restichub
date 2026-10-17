@@ -105,7 +105,7 @@
 		const factor = filters.value.order === 'desc' ? -1 : 1;
 		// A plan that never succeeded is the oldest.
 		const key = (plan: Plan) => {
-			if (filters.value.sort === 'next') return plan.next_run_at ?? '9999';
+			if (filters.value.sort === 'next') return (plan.enabled && plan.next_run_at) || '9999';
 			if (filters.value.sort === 'success') return plan.last_success_at ?? '';
 			return plan.name;
 		};

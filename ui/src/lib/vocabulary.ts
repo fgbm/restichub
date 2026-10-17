@@ -2,8 +2,8 @@
  * The one status vocabulary of the lists (design/style/ui-principles.md, 3 and 4): the label, the
  * tone and the Lucide icon of each entity state, and the type icon of each entity.
  *
- * Color marks only the states that need an action. A usual state, success included, has no pill
- * and a grey icon.
+ * Color marks danger (red), warning (yellow), running (blue) and success (green). A success and a
+ * usual state have no pill; a usual state has a grey icon.
  */
 import type {
 	Agent,
@@ -45,7 +45,7 @@ function state(key: string, label: MessageKey, tone: Tone, icon: IconName): Enti
 	return { key, label: t(label), tone, icon };
 }
 
-/** The icon of the state, colored only for the danger, warning and running tones. */
+/** The icon of the state, colored for every tone except the usual one. */
 export function iconOf(entity: EntityState): ListIcon {
 	return {
 		name: entity.icon,
@@ -55,9 +55,9 @@ export function iconOf(entity: EntityState): ListIcon {
 	};
 }
 
-/** The pill of the state; a usual state has none. */
+/** The pill of the state; a usual state and a success have none, the green icon is enough. */
 export function pillOf(entity: EntityState): ListPill | null {
-	if (entity.tone === 'normal') return null;
+	if (entity.tone === 'normal' || entity.tone === 'success') return null;
 	return { tone: entity.tone, label: entity.label, full: entity.full };
 }
 
@@ -109,7 +109,7 @@ export function jobState(job: Pick<Job, 'status' | 'result_code'>): EntityState 
 		case 'running':
 			return { ...state('running', 'jobs.status.running', 'running', 'loader-circle'), spin: true };
 		case 'succeeded':
-			return state('succeeded', 'jobs.status.succeeded', 'normal', 'check-circle');
+			return state('succeeded', 'jobs.status.succeeded', 'success', 'check-circle');
 		case 'expired':
 			return state('expired', 'jobs.status.expired', 'warning', 'clock-alert');
 		case 'dead_letter':
@@ -144,7 +144,7 @@ export function hostState(agent: Agent, now = Date.now()): EntityState {
 	if (agent.version_status === 'unsupported') {
 		return state('outdated', 'hosts.status.outdated', 'warning', 'host');
 	}
-	return state('online', 'hosts.status.online', 'normal', 'host');
+	return state('online', 'hosts.status.online', 'success', 'host');
 }
 
 /** A disabled plan raises no alert, so its pill is "Disabled" whatever its recovery point. */
@@ -218,7 +218,7 @@ export function lockState(lock: LockState): EntityState {
 export function overviewHostState(host: { online: boolean; waiting: boolean }): EntityState {
 	if (host.waiting) return state('waiting', 'hosts.status.waiting', 'neutral', 'hourglass');
 	if (!host.online) return state('offline', 'hosts.status.offline', 'warning', 'monitor-off');
-	return state('online', 'hosts.status.online', 'normal', 'host');
+	return state('online', 'hosts.status.online', 'success', 'host');
 }
 
 export function channelState(channel: Pick<NotificationChannel, 'enabled' | 'kind'>): EntityState {
