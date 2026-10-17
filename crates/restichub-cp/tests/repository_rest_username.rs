@@ -11,7 +11,7 @@ use axum::Router;
 use axum::http::StatusCode;
 use serde_json::{Value, json};
 
-use common::{app_with_kek, create_tenant_with_key, request, seed_session, send};
+use common::{app_with_kek, create_tenant_with_key, request, seed_agent, seed_session, send};
 
 const ENDPOINT: &str = "https://rest.example.net/main";
 
@@ -186,6 +186,217 @@ async fn ac_tn_01_another_tenant_cannot_read_or_change_the_rest_username() {
 
     let (_, view) = call(&app, "GET", &path, &cookie_b, None).await;
     assert_eq!(view["backend"]["username"], "globex-backup");
+
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn ac_rp_01_an_update_without_the_user_name_keeps_it_and_null_clears_it() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant_with_key(db.database(), "acme").await;
+    let app = app_with_kek(db.database());
+    let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
+
+    let (status, body) = create(
+        &app,
+        &cookie,
+        json!({"kind": "rest", "endpoint": ENDPOINT, "username": "backup"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let path = format!("/api/v1/repositories/{}", id_of(&body));
+    let other_endpoint = "https://rest.example.net/other";
+
+    let (status, response) = call(
+        &app,
+        "PATCH",
+        &path,
+        &cookie,
+        Some(json!({"backend": {"kind": "rest", "endpoint": other_endpoint}})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{response}");
+    let (_, view) = call(&app, "GET", &path, &cookie, None).await;
+    assert_eq!(
+        view["backend"],
+        json!({"kind": "rest", "endpoint": other_endpoint, "username": "backup"})
+    );
+
+    let (status, response) = call(
+        &app,
+        "PATCH",
+        &path,
+        &cookie,
+        Some(json!({"backend": {"kind": "rest", "endpoint": ENDPOINT, "username": null}})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{response}");
+    let (_, view) = call(&app, "GET", &path, &cookie, None).await;
+    assert_eq!(
+        view["backend"],
+        json!({"kind": "rest", "endpoint": ENDPOINT})
+    );
+
+    let (status, _) = call(
+        &app,
+        "PATCH",
+        &path,
+        &cookie,
+        Some(json!({"backend": {"kind": "rest", "endpoint": ENDPOINT, "username": "archive"}})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = call(
+        &app,
+        "PATCH",
+        &path,
+        &cookie,
+        Some(json!({"backend": {"kind": "rest", "endpoint": ENDPOINT, "username": ""}})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, view) = call(&app, "GET", &path, &cookie, None).await;
+    assert!(view["backend"].get("username").is_none(), "{view}");
+
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn ac_au_01_the_repository_audit_holds_the_rest_username_and_no_password() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant_with_key(db.database(), "acme").await;
+    let app = app_with_kek(db.database());
+    let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
+
+    let (status, body) = create(
+        &app,
+        &cookie,
+        json!({"kind": "rest", "endpoint": ENDPOINT, "username": "backup"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let path = format!("/api/v1/repositories/{}", id_of(&body));
+    let (status, response) = call(
+        &app,
+        "PATCH",
+        &path,
+        &cookie,
+        Some(json!({
+            "backend": {"kind": "rest", "endpoint": ENDPOINT, "username": "archive"},
+            "rest_password": "rest-new-password",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{response}");
+
+    let (status, page) = call(
+        &app,
+        "GET",
+        "/api/v1/audit?action=repository_update",
+        &cookie,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{page}");
+    let items = page["items"].as_array().expect("the items");
+    assert_eq!(items.len(), 1, "{page}");
+    let diff = items[0]["diff"].to_string();
+    assert!(diff.contains("archive"), "{diff}");
+    let (_, all) = call(&app, "GET", "/api/v1/audit", &cookie, None).await;
+    let all = all.to_string();
+    assert!(all.contains("backup"), "{all}");
+    for password in [
+        "repository-password",
+        "rest-canary-password",
+        "rest-new-password",
+    ] {
+        assert!(!all.contains(password), "{all}");
+    }
+
+    db.cleanup().await;
+}
+
+/// The preview shows the real user name, which is not a secret, and only when it is set.
+#[tokio::test]
+async fn ac_pf_01_the_preview_shows_the_rest_username_and_masks_the_password() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant_with_key(db.database(), "acme").await;
+    let app = app_with_kek(db.database());
+    let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
+    let agent = seed_agent(db.database(), tenant, "web-1").await;
+
+    let (status, body) = create(
+        &app,
+        &cookie,
+        json!({"kind": "rest", "endpoint": ENDPOINT, "username": "backup"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let repository_id = id_of(&body);
+    let (status, profile) = call(
+        &app,
+        "POST",
+        "/api/v1/profiles",
+        &cookie,
+        Some(json!({
+            "name": "web-daily",
+            "repository_id": repository_id,
+            "paths": {"all": ["/srv"]},
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{profile}");
+    let preview_path = format!("/api/v1/profiles/{}/preview", id_of(&profile["profile"]));
+    let backup_env = |preview: &Value| -> Vec<(String, String)> {
+        let steps = preview["steps"].as_array().expect("the steps");
+        let backup = steps
+            .iter()
+            .find(|step| step["kind"] == "backup")
+            .expect("the backup step");
+        backup["environment"]
+            .as_array()
+            .expect("the environment")
+            .iter()
+            .map(|entry| {
+                (
+                    entry["name"].as_str().expect("the name").to_owned(),
+                    entry["value"].as_str().expect("the value").to_owned(),
+                )
+            })
+            .collect()
+    };
+    let agent_body = Some(json!({"agent_id": agent.to_string()}));
+
+    let (status, preview) = call(&app, "POST", &preview_path, &cookie, agent_body.clone()).await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    let env = backup_env(&preview);
+    assert!(env.contains(&("RESTIC_REST_USERNAME".to_owned(), "backup".to_owned())));
+    assert!(env.contains(&("RESTIC_REST_PASSWORD".to_owned(), "***".to_owned())));
+    assert!(!preview.to_string().contains("rest-canary-password"));
+
+    let (status, _) = call(
+        &app,
+        "PATCH",
+        &format!("/api/v1/repositories/{repository_id}"),
+        &cookie,
+        Some(json!({"backend": {"kind": "rest", "endpoint": ENDPOINT, "username": null}})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, preview) = call(&app, "POST", &preview_path, &cookie, agent_body).await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    let env = backup_env(&preview);
+    assert!(
+        env.iter().all(|(name, _)| name != "RESTIC_REST_USERNAME"),
+        "{env:?}"
+    );
+    assert!(env.contains(&("RESTIC_REST_PASSWORD".to_owned(), "***".to_owned())));
 
     db.cleanup().await;
 }

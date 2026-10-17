@@ -40,11 +40,26 @@ pub enum BackendSettings {
     /// A rest-server. The user name and the password are optional; the user name is not a secret.
     Rest {
         endpoint: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        username: Option<String>,
+        /// In an update, an absent field keeps the stored user name; `null` or an empty string
+        /// clears it.
+        #[serde(
+            default,
+            deserialize_with = "present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        #[schema(value_type = Option<String>, nullable)]
+        username: Option<Option<String>>,
     },
     /// A path on the host of the agent that runs the job.
     Local { path: String },
+}
+
+/// Tells an explicit `null` (`Some(None)`) from an absent field (`None`, through `default`).
+fn present<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer).map(Some)
 }
 
 /// The write-only secret fields of a repository create.
@@ -172,7 +187,7 @@ impl RepositoryView {
             },
             BackendKind::Rest => BackendSettings::Rest {
                 endpoint: repository.rest_endpoint.clone().unwrap_or_default(),
-                username: repository.rest_username.clone(),
+                username: repository.rest_username.clone().map(Some),
             },
             BackendKind::Local => BackendSettings::Local {
                 path: repository.local_path.clone().unwrap_or_default(),
@@ -222,7 +237,7 @@ pub(super) struct ValidatedBackend {
     s3_prefix: Option<String>,
     s3_region: Option<String>,
     rest_endpoint: Option<String>,
-    rest_username: Option<String>,
+    pub(super) rest_username: Option<String>,
     local_path: Option<String>,
 }
 
@@ -279,7 +294,7 @@ pub(super) fn validate_backend(backend: BackendSettings) -> Result<ValidatedBack
             )?);
             validated.rest_username = validation::validate_rest_username(
                 "backend.username",
-                username.as_deref().unwrap_or_default(),
+                username.flatten().as_deref().unwrap_or_default(),
             )?;
         }
         BackendSettings::Local { path } => {

@@ -35,7 +35,7 @@ impl NamePattern {
         Self {
             forms: [
                 (Zeroizing::new(format!("://{name}:")), format!("://{MASK}:")),
-                (Zeroizing::new(format!("{name}@")), format!("{MASK}@")),
+                (Zeroizing::new(format!("://{name}@")), format!("://{MASK}@")),
             ],
         }
     }
@@ -285,7 +285,16 @@ mod tests {
         );
         assert_eq!(
             scrubber.scrub("see https://backup:other@elsewhere/x and backup@mail.example"),
-            "see https://***:other@elsewhere/x and ***@mail.example"
+            "see https://***:other@elsewhere/x and backup@mail.example"
+        );
+        let rest = BackendCredentials::Rest(RestCredentials {
+            username: "backup".to_owned(),
+            password: "CANARY-rest-pass".to_owned(),
+        });
+        let scrubber = self::scrubber("rest:https://host/", Some(rest));
+        assert_eq!(
+            scrubber.scrub("mail backup@host.example, ssh://backup@host and https://backup:x@host"),
+            "mail backup@host.example, ssh://***@host and https://***:x@host"
         );
         let rest = BackendCredentials::Rest(RestCredentials {
             username: "bob".to_owned(),

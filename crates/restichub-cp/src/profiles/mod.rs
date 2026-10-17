@@ -504,7 +504,7 @@ fn parse_labels(labels: &[String]) -> BTreeMap<String, String> {
 }
 
 /// The connection details that the preview renders. The secret values are placeholders: the
-/// preview masks them (AC-PF-01).
+/// preview masks them (AC-PF-01). The rest-server user name is not a secret, so it is real.
 fn repository_access(repository: &Repository) -> RepositoryAccess {
     let location = repository_location(repository);
     let backend_credentials = match repository.backend {
@@ -515,7 +515,7 @@ fn repository_access(repository: &Repository) -> RepositoryAccess {
             region: repository.s3_region.clone().unwrap_or_default(),
         })),
         BackendKind::Rest => Some(BackendCredentials::Rest(RestCredentials {
-            username: "secret".to_owned(),
+            username: repository.rest_username.clone().unwrap_or_default(),
             password: "secret".to_owned(),
         })),
         BackendKind::Local => None,

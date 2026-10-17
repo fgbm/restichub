@@ -345,7 +345,7 @@
 					region: region || undefined
 				};
 			case 'rest':
-				return { kind: 'rest', endpoint, username: restUsername.trim() || undefined };
+				return { kind: 'rest', endpoint, username: restUsername.trim() || null };
 			case 'local':
 				return { kind: 'local', path };
 		}

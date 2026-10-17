@@ -23,7 +23,7 @@ const RETRY_LOCK: &str = "--retry-lock=5m";
 
 /// Environment variables that the preview shows without a mask. Every other
 /// value is masked, so a new secret variable is masked by default (AC-PF-01).
-const SAFE_ENV: &[&str] = &["AWS_DEFAULT_REGION"];
+const SAFE_ENV: &[&str] = &["AWS_DEFAULT_REGION", "RESTIC_REST_USERNAME"];
 
 /// The restic commands whose output the agent parses as JSON (ADR-0011).
 const JSON_COMMANDS: &[&str] = &[
