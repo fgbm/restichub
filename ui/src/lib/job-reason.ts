@@ -42,7 +42,7 @@ export function notStartedReason(step: StepSource | null | undefined): string | 
 export function jobDetailReason(job: ReasonSource & { steps: StepSource[] }): string | null {
 	if (job.result_message === 'step_not_started') {
 		const reason = job.steps.map(notStartedReason).find((cause) => cause !== null);
-		if (reason) return t('jobs.reason.notStartedBecause', { reason });
+		if (reason) return t('jobs.notStartedBecause', { reason });
 	}
 	return jobReason(job);
 }

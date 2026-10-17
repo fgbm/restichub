@@ -777,7 +777,7 @@ export const en = {
 		'The repository password or the access keys are wrong. Correct them in the repository.',
 	'jobs.reason.step_failed': 'restic stopped with an error. Read the job log.',
 	'jobs.reason.step_not_started': 'restic did not start. Read the job log.',
-	'jobs.reason.notStartedBecause': 'restic did not start: {reason}',
+	'jobs.notStartedBecause': 'restic did not start: {reason}',
 	'jobs.reason.hook_failed': 'A script ended with an error. Read the log of the script.',
 	'jobs.reason.cancelled': 'The job was cancelled.',
 	'jobs.reason.succeeded_with_warnings': 'Finished with warnings.',

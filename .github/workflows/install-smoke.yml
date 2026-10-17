@@ -470,9 +470,10 @@ jobs:
           $data = Join-Path $env:ProgramData 'ResticHub\Agent'
           $user = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
           $userAce = { param($path) (Get-Acl $path).GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) | Where-Object { $_.IdentityReference.Value -eq $user } }
-          $cacheFiles = @(Get-ChildItem (Join-Path $data 'cache') -Recurse -File).Count
-          Write-Host "cache files: $cacheFiles"
-          if ($cacheFiles -lt 1) { throw 'the cache holds no file for the summary check' }
+          # Many cache files, as a restic cache of a real repository holds.
+          $blobs = Join-Path $data 'cache\smoke\data'
+          New-Item -ItemType Directory -Force $blobs | Out-Null
+          1..200 | ForEach-Object { Set-Content (Join-Path $blobs "blob-$_") 'x' }
           icacls $program /grant "*${user}:(OI)(CI)(M)" | Out-Null
           icacls $data /grant "*${user}:(OI)(CI)(M)" | Out-Null
           if (-not (& $userAce $program) -or -not (& $userAce $data)) { throw 'the test did not loosen the access' }

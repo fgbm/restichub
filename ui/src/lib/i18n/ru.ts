@@ -784,7 +784,7 @@ export const ru: Record<MessageKey, string> = {
 		'Пароль репозитория или ключи доступа неверны. Исправьте их в настройках репозитория.',
 	'jobs.reason.step_failed': 'restic остановился с ошибкой. Прочитайте журнал задания.',
 	'jobs.reason.step_not_started': 'restic не запустился. Прочитайте журнал задания.',
-	'jobs.reason.notStartedBecause': 'restic не запустился: {reason}',
+	'jobs.notStartedBecause': 'restic не запустился: {reason}',
 	'jobs.reason.hook_failed': 'Скрипт завершился ошибкой. Прочитайте журнал скрипта.',
 	'jobs.reason.cancelled': 'Задание отменено.',
 	'jobs.reason.succeeded_with_warnings': 'Завершено с предупреждениями.',
