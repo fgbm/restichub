@@ -27,7 +27,9 @@ async function openSnapshot(page: Page, text: Text): Promise<void> {
 	const snapshot = page.getByRole('link', { name: openSnapshotName(text) }).first();
 	await tick(page, () => snapshot.isVisible());
 	await snapshot.click();
-	const expand = page.getByRole('button', { name: text('restore.expand').replace('{name}', 'srv') });
+	const expand = page.getByRole('button', {
+		name: text('restore.expand').replace('{name}', 'srv')
+	});
 	await tick(page, () => expand.isVisible());
 	await expand.click();
 	const child = page.getByRole('button', { name: text('restore.expand').replace('{name}', 'www') });

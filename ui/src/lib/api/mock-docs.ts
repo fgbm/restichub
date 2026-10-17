@@ -83,7 +83,11 @@ function agent(id: string, hostname: string, os: string, seenMinutes: number): A
 }
 
 export function docsAgents(): Agent[] {
-	return [agent('1', 'fs-01', 'windows', 0.4), agent('2', 'db-01', 'linux', 0.3), agent('3', 'web-01', 'linux', 0.6)];
+	return [
+		agent('1', 'fs-01', 'windows', 0.4),
+		agent('2', 'db-01', 'linux', 0.3),
+		agent('3', 'web-01', 'linux', 0.6)
+	];
 }
 
 export function docsRepositories(): Repository[] {
@@ -232,9 +236,33 @@ export function docsPlans(nextFireTime: (cron: string, timeZone: string) => stri
 		updated_at: iso(DAY * 2 + 31)
 	});
 	return [
-		plan('pl_1', 'file-shares-nightly', ['p_1', 'file-shares'], 'r_1', ['1', 'fs-01'], '0 1 * * *', 431),
-		plan('pl_2', 'postgres-hourly', ['p_2', 'postgres-dumps'], 'r_1', ['2', 'db-01'], '15 * * * *', 23),
-		plan('pl_3', 'web-content-daily', ['p_3', 'web-content'], 'r_2', ['3', 'web-01'], '30 3 * * *', 318)
+		plan(
+			'pl_1',
+			'file-shares-nightly',
+			['p_1', 'file-shares'],
+			'r_1',
+			['1', 'fs-01'],
+			'0 1 * * *',
+			431
+		),
+		plan(
+			'pl_2',
+			'postgres-hourly',
+			['p_2', 'postgres-dumps'],
+			'r_1',
+			['2', 'db-01'],
+			'15 * * * *',
+			23
+		),
+		plan(
+			'pl_3',
+			'web-content-daily',
+			['p_3', 'web-content'],
+			'r_2',
+			['3', 'web-01'],
+			'30 3 * * *',
+			318
+		)
 	];
 }
 
@@ -294,12 +322,36 @@ export function docsJobs(): DocsJob[] {
 		job('0199e1c4-9a37-7d10-b3c2-6f1e2a9d4b01', 'pl_2', 'running', null, null, 2.6, null),
 		job('0199e18e-31f2-7b44-8e19-2c7d5a3f9b02', 'pl_2', 'succeeded', 'succeeded', null, 62.4, 1.9),
 		job('0199e157-d0a8-7c6b-a4f3-91be6c2d7e03', 'pl_2', 'succeeded', 'succeeded', null, 122.1, 2.3),
-		job('0199e0a9-6e14-7f28-9b57-d3a1c8e4f604', 'pl_3', 'succeeded', 'succeeded_with_warnings', null, 331.7, 6.4),
+		job(
+			'0199e0a9-6e14-7f28-9b57-d3a1c8e4f604',
+			'pl_3',
+			'succeeded',
+			'succeeded_with_warnings',
+			null,
+			331.7,
+			6.4
+		),
 		job('0199e035-2b7c-7e91-85d6-4a0f9c3b1e05', 'pl_1', 'succeeded', 'succeeded', null, 469.5, 3.2),
 		job(FAILED_JOB, 'pl_2', 'failed', 'failed', 'step_failed', 182.8, 0.7),
 		job('0199e0e8-c35b-7d82-9f4a-1b6e7c2d8a07', 'pl_2', 'succeeded', 'succeeded', null, 242.3, 2.1),
-		job('0199dad1-58f6-7b19-a2e7-6c4d3f9b0e08', 'pl_1', 'succeeded', 'succeeded', null, DAY + 471.2, 3.7),
-		job('0199db5e-e9a3-7c57-8d1b-f2a6e4c7b309', 'pl_3', 'succeeded', 'succeeded', null, DAY + 329.9, 5.8)
+		job(
+			'0199dad1-58f6-7b19-a2e7-6c4d3f9b0e08',
+			'pl_1',
+			'succeeded',
+			'succeeded',
+			null,
+			DAY + 471.2,
+			3.7
+		),
+		job(
+			'0199db5e-e9a3-7c57-8d1b-f2a6e4c7b309',
+			'pl_3',
+			'succeeded',
+			'succeeded',
+			null,
+			DAY + 329.9,
+			5.8
+		)
 	];
 }
 
