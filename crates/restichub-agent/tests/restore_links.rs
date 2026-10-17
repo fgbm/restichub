@@ -1,10 +1,10 @@
-//! A restore into a target that already holds links to outside the restore root, with the real
-//! restic (FR-RS-03, threat T31).
+//! A restore into a target that already holds links to outside the target, with the real restic
+//! (FR-RS-03, threat T31).
 //!
 //! An earlier restore or a local user can leave a link in the target where the snapshot holds a
-//! directory or a file. Restic replaces the link and does not write through it. The tests skip with
-//! a message when no restic runs on the machine, unless `RESTICHUB_REQUIRE_RESTIC` asks them to
-//! fail.
+//! directory or a file. Restic on Windows writes a file through such a link, so the agent refuses
+//! the step before restic starts. The tests skip with a message when no restic runs on the
+//! machine, unless `RESTICHUB_REQUIRE_RESTIC` asks them to fail.
 
 #![allow(clippy::expect_used)]
 
@@ -13,7 +13,7 @@ mod common;
 use std::path::{Path, PathBuf};
 
 use common::*;
-use restichub_proto::agent::v1::{Job, JobStatus, RestoreStep, step, step_result};
+use restichub_proto::agent::v1::{Job, JobStatus, RestoreStep, StepStatus, step, step_result};
 
 const PASSWORD: &str = "restore-links-password";
 
@@ -127,15 +127,70 @@ async fn fr_rs_03_a_link_in_the_target_does_not_carry_the_restore_outside_the_ro
     let outside = directory("restore-links-outside");
     let outside_file = outside.join("victim.txt");
     std::fs::write(&outside_file, b"OUTSIDE").expect("cannot write");
-    let target = directory("restore-links-target");
-    let planted = target.join(&relative);
-    std::fs::create_dir_all(&planted).expect("cannot create the planted tree");
-    link_dir(&outside, &planted.join("sub"));
-    link_file(&outside_file, &planted.join("a.txt"));
+    for (link, original) in [("sub", &outside), ("a.txt", &outside_file)] {
+        let target = directory(&format!("restore-links-target-{link}"));
+        let planted = target.join(&relative);
+        std::fs::create_dir_all(&planted).expect("cannot create the planted tree");
+        if original.is_dir() {
+            link_dir(original, &planted.join(link));
+        } else {
+            link_file(original, &planted.join(link));
+        }
 
+        let result = run(
+            &restorer,
+            &restore_job(&format!("job-link-{link}"), &repository, &snapshot, &target),
+        )
+        .await;
+        assert_eq!(
+            result.result().outcome,
+            JobStatus::Failed as i32,
+            "{link}: {}",
+            result.log_text()
+        );
+        let step = result.step("restore");
+        assert_eq!(step.status, StepStatus::Failed as i32, "{link}");
+        let reason = step
+            .error
+            .as_ref()
+            .and_then(|error| error.params.iter().find(|param| param.key == "reason"))
+            .map(|param| param.value.clone())
+            .unwrap_or_default();
+        assert!(
+            reason.contains("a link that leads out of the target"),
+            "{link}: {reason}"
+        );
+        assert!(reason.contains(link), "{link}: {reason}");
+        let names: Vec<String> = std::fs::read_dir(&outside)
+            .expect("the outside directory")
+            .map(|entry| {
+                entry
+                    .expect("an entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+        assert_eq!(
+            names,
+            vec!["victim.txt".to_owned()],
+            "{link}: a file went out"
+        );
+        assert_eq!(
+            std::fs::read(&outside_file).expect("the outside file"),
+            b"OUTSIDE",
+            "{link}"
+        );
+    }
+
+    // A link that stays in the target does not stop the restore.
+    let target = directory("restore-links-target-inside");
+    let planted = target.join(&relative);
+    std::fs::create_dir_all(planted.join("elsewhere")).expect("cannot create the planted tree");
+    link_dir(&planted.join("elsewhere"), &planted.join("sub"));
     let result = run(
         &restorer,
-        &restore_job("job-links", &repository, &snapshot, &target),
+        &restore_job("job-link-inside", &repository, &snapshot, &target),
     )
     .await;
     assert_eq!(
@@ -143,35 +198,6 @@ async fn fr_rs_03_a_link_in_the_target_does_not_carry_the_restore_outside_the_ro
         JobStatus::Succeeded as i32,
         "{}",
         result.log_text()
-    );
-    let names: Vec<String> = std::fs::read_dir(&outside)
-        .expect("the outside directory")
-        .map(|entry| {
-            entry
-                .expect("an entry")
-                .file_name()
-                .to_string_lossy()
-                .into_owned()
-        })
-        .collect();
-    assert_eq!(names, vec!["victim.txt".to_owned()], "a file went outside");
-    assert_eq!(
-        std::fs::read(&outside_file).expect("the outside file"),
-        b"OUTSIDE"
-    );
-    for (path, kind) in [
-        (planted.join("sub"), "directory"),
-        (planted.join("a.txt"), "file"),
-    ] {
-        let metadata = std::fs::symlink_metadata(&path).expect("the restored entry");
-        assert!(
-            !metadata.file_type().is_symlink(),
-            "the {kind} is still a link"
-        );
-    }
-    assert_eq!(
-        std::fs::read(planted.join("sub").join("f.txt")).expect("the restored file"),
-        b"SNAPSHOT"
     );
     assert_eq!(
         std::fs::read(planted.join("a.txt")).expect("the restored file"),

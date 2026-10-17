@@ -188,6 +188,48 @@ pub(crate) fn check_path(
     }
 }
 
+/// Finds a link or a junction below `target` that leads out of `target` or nowhere (T31).
+///
+/// Restic on Windows writes a file of the snapshot through an existing file link, so such a link
+/// would carry the restore out of the roots. Restic on Linux replaces the link, and the agent
+/// refuses it there too, so one rule holds for both systems. The walk does not follow a link.
+///
+/// # Errors
+///
+/// Returns the error of a directory or an entry that the walk cannot read.
+pub fn outward_link(target: &Path) -> io::Result<Option<PathBuf>> {
+    let flavor = PathFlavor::host();
+    let base = match resolve(target) {
+        Ok(base) if base.is_dir() => base,
+        _ => return Ok(None),
+    };
+    let inside = base
+        .to_str()
+        .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidData))?
+        .to_owned();
+    let mut pending = vec![base];
+    while let Some(dir) = pending.pop() {
+        for entry in std::fs::read_dir(&dir)? {
+            let entry = entry?;
+            let kind = entry.file_type()?;
+            let path = entry.path();
+            if kind.is_symlink() {
+                let leads_inside = resolve(&path).ok().is_some_and(|destination| {
+                    destination
+                        .to_str()
+                        .is_some_and(|destination| is_within(flavor, destination, &inside))
+                });
+                if !leads_inside {
+                    return Ok(Some(path));
+                }
+            } else if kind.is_dir() {
+                pending.push(path);
+            }
+        }
+    }
+    Ok(None)
+}
+
 /// Resolves the links of the deepest existing ancestor and appends the missing names.
 ///
 /// A link that points nowhere is an error: the restore would create the file behind it.

@@ -716,6 +716,18 @@ impl Jobs {
                 );
                 break;
             }
+            if let Some(reason) = restore_link_refusal(step).await {
+                tracing::warn!(%reason, "a restore target is refused");
+                failed += 1;
+                let outcome = StepOutcome::not_started_because(&reason);
+                progress.stopped_code = Some(outcome.exit_code);
+                stopped_status = Some(StepStatus::Failed);
+                step_results.push(
+                    self.send_step_result(&job_id, step, &outcome, started_at, started_at)
+                        .await,
+                );
+                break;
+            }
             let mut max = step_timeout(step.timeout_seconds, job.timeout_seconds);
             if let Some(deadline) = job_deadline {
                 let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
@@ -1109,6 +1121,29 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Why a restore step must not start because its target holds a link out of it (T31).
+///
+/// The walk runs right before restic, because a link can appear after the admission.
+async fn restore_link_refusal(step: &Step) -> Option<String> {
+    let Some(step::Kind::Restore(restore)) = step.kind.as_ref() else {
+        return None;
+    };
+    let target = PathBuf::from(&restore.target);
+    match tokio::task::spawn_blocking(move || crate::restore_roots::outward_link(&target)).await {
+        Ok(Ok(None)) => None,
+        Ok(Ok(Some(link))) => Some(format!(
+            "the restore target holds {}, a link that leads out of the target or nowhere; remove the link or restore into an empty directory",
+            link.display()
+        )),
+        Ok(Err(error)) => Some(format!(
+            "cannot check the links in the restore target: {error}"
+        )),
+        Err(error) => Some(format!(
+            "cannot check the links in the restore target: {error}"
+        )),
+    }
 }
 
 #[cfg(test)]
