@@ -31,6 +31,7 @@ export default defineConfig({
 			],
 			sidebar: [
 				group('Getting started', 'Начало работы', [
+					'about',
 					'operations/install-control-plane',
 					'operations/register-an-agent',
 					'operations/migrate-from-resticprofile',
