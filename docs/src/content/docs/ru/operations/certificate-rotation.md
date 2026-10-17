@@ -64,5 +64,5 @@ the agent certificate is expired and cannot rotate; register the agent again wit
 
 ## Связанные страницы
 
-- [Регистрация агента](register-an-agent.md)
-- [Отзыв агента](agent-revocation.md)
+- [Регистрация агента](/restichub/ru/operations/register-an-agent/)
+- [Отзыв агента](/restichub/ru/operations/agent-revocation/)
