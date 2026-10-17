@@ -311,11 +311,20 @@ export const en = {
 	'platformUsers.lastAdminHint': 'This is the last Platform Admin',
 	'platformUsers.roleIn': 'Role in the organization {name}',
 	'platformUsers.removeFrom': 'Remove from the organization {name}',
-	'platformUsers.removeSelfHint': 'You cannot remove your own membership',
+	'platformUsers.removeSelfHint':
+		'You cannot remove your own membership in the organization of this session',
 	'platformUsers.removeTitle': 'Remove from the organization?',
 	'platformUsers.removeBody':
 		'{name} loses the access to the organization {org}. The account stays; you can add the membership again.',
 	'platformUsers.removeConfirm': 'Remove',
+	'platformUsers.removeSelfBody':
+		'You lose the access to the organization {org}. You can add the membership again on this page.',
+	'platformUsers.lowerSelfTitle': 'Lower your own role?',
+	'platformUsers.lowerSelfBody':
+		'Your role in the organization {org} becomes "{role}". You can raise it again on this page.',
+	'platformUsers.lowerSelfConfirm': 'Lower the role',
+	'platformUsers.revokeSelfHint': 'You cannot remove your own Platform Admin right',
+	'platformUsers.disableSelfHint': 'You cannot disable your own account',
 	'platformUsers.revokeTitle': 'Remove the Platform Admin right?',
 	'platformUsers.revokeBody':
 		'{name} can no longer manage the organizations and the users of the installation. The memberships do not change.',
