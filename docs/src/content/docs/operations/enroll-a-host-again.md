@@ -7,7 +7,7 @@ A computer can enroll twice. For example, a person installs the agent again and 
 
 ## Hosts that wait for a connection
 
-An agent that enrolled but did not open a stream yet has the status "Waiting for connection". The host is not online and not offline. The Overview counts it apart as "Hosts waiting for connection". The status changes to "Active" when the agent connects for the first time.
+An agent that enrolled but did not open a stream yet has the status "Waiting for connection". The host is not online and not offline. The Overview counts it apart as "Hosts waiting for connection". The status changes to "Online" when the agent connects for the first time.
 
 A host stays in this status when the service does not start or cannot reach the control plane. Run `restichub-agent status` on the host to read the last error (see [Register an agent](/restichub/operations/register-an-agent/#troubleshooting)).
 
@@ -16,7 +16,7 @@ A host stays in this status when the service does not start or cannot reach the 
 Use this procedure when the agent lost its identity, or when you must move the agent to a new installation. The host keeps its identifier, plans, maintenance host references and labels.
 
 1. Open the Hosts screen as an Admin.
-2. Open the menu of the host and select "Re-register".
+2. Open the menu "…" of the host row and select "Re-register". The host page has the same button in the section "Dangerous actions".
 3. Select "Create token". The screen shows the token one time.
 4. Run the shown command as `root` or Administrator on the computer of the host: `restichub-agent register --force --url <url> --token <token>`. You can run it from any folder.
 
@@ -30,12 +30,12 @@ The host shows "Waiting for connection" until the new agent connects. It raises 
 
 The agent sends a digest of a stable identifier of the computer when it enrolls: the `MachineGuid` on Windows and the file `/etc/machine-id` on Linux. The raw identifier stays on the computer. The control plane keeps only a keyed hash of the digest. The key comes from the KEK and the tenant. A tenant cannot learn that a computer is enrolled in another tenant. A database dump does not confirm that a computer is enrolled. Virtual machines that were cloned from one image can share an identifier. The warning is a hint, and you decide.
 
-When an enrollment token that is not bound to a host enrolls a computer with a known identifier, both records show the badge "Duplicate". Its tooltip reads "Possible duplicate of <hostname>: another active host reported the same computer."
+An enrollment token that is not bound to a host can enroll a computer with a known identifier. Then both records show the status "Possible duplicate" in the list of hosts. The page of the newer record shows the banner "This record may duplicate the older record "<hostname>". The old record was last seen <time>."
 
 To merge the records:
 
-1. Open the menu of the newer record. Only the newer record offers the replacement.
-2. Select "Replace the old record". The dialog shows the last contact of both records.
+1. Open the menu "…" of the newer record, or open the page of the newer record. Only the newer record offers the replacement.
+2. Select "Replace the old record". On the page, the button is in the banner. The dialog shows the last contact of both records.
 3. Select "Replace".
 
 The control plane moves the plans, the maintenance host references, the queued jobs and the labels of the old record to the newer record. It then revokes the old record and cancels its running jobs, as for a revoke. The audit log gets the actions `agent_replace` and `agent_revoke`. The screen shows "The old record is replaced" and the number of plans that moved.
