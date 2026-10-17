@@ -10,7 +10,7 @@ fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("restichub-agent: {error:#}");
-            if error.downcast_ref::<commands::NoIdentity>().is_some() {
+            if commands::needs_administrator(&error) {
                 return ExitCode::from(commands::EXIT_NO_IDENTITY);
             }
             ExitCode::FAILURE

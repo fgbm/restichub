@@ -17,6 +17,10 @@ use anyhow::{Context as _, Result, bail};
 use crate::paths::UntrustedIdentity;
 use crate::winsec::{Entry, Exposure, Rights};
 
+mod program;
+
+pub(crate) use program::repair_program_tree;
+
 /// The directory that an older build used as the default restore root. The repair never reads
 /// inside it.
 const OLD_RESTORE_ROOT: &str = "Restore";
@@ -29,11 +33,16 @@ pub(crate) enum Action {
     Protected(PathBuf),
     RemovedStaged(PathBuf),
     RemovedTrustMode(PathBuf),
-    MovedRestoreRoots { from: PathBuf, to: PathBuf },
+    MovedRestoreRoots {
+        from: PathBuf,
+        to: PathBuf,
+    },
     IdentityExposed(PathBuf),
     RemovedIdentity(PathBuf),
     RemovedTemporary(PathBuf),
     RemovedLock(PathBuf),
+    /// A restic binary or its record in a directory that another account could change.
+    RemovedRestic(PathBuf),
 }
 
 impl std::fmt::Display for Action {
@@ -79,6 +88,69 @@ impl std::fmt::Display for Action {
                 "removed {}: another account could change it or hold it; the agent creates the identity lock again",
                 path.display()
             ),
+            Self::RemovedRestic(path) => write!(
+                f,
+                "removed {}: another account could change restic, so the agent downloads and verifies restic again",
+                path.display()
+            ),
+        }
+    }
+}
+
+/// Prints the actions of a repair. Without `verbose`, the access control repairs give one line for
+/// each top-level directory below `root`, because a restic cache holds thousands of files.
+pub(crate) struct Report<'a> {
+    root: PathBuf,
+    verbose: bool,
+    groups: Vec<(PathBuf, usize)>,
+    print: &'a mut dyn FnMut(&str),
+}
+
+impl<'a> Report<'a> {
+    pub(crate) fn new(root: &Path, verbose: bool, print: &'a mut dyn FnMut(&str)) -> Self {
+        Self {
+            root: root.to_path_buf(),
+            verbose,
+            groups: Vec::new(),
+            print,
+        }
+    }
+
+    pub(crate) fn action(&mut self, action: Action) {
+        match action {
+            Action::Protected(path) if !self.verbose => {
+                let group = self.group_of(&path);
+                match self.groups.iter_mut().find(|(dir, _)| *dir == group) {
+                    Some((_, count)) => *count += 1,
+                    None => self.groups.push((group, 1)),
+                }
+            }
+            action => (self.print)(&action.to_string()),
+        }
+    }
+
+    /// Prints the summary lines. The caller runs it after a failed repair too, because the access
+    /// control of the entries before the failure is already changed.
+    pub(crate) fn finish(self) {
+        for (dir, count) in self.groups {
+            let entries = if count == 1 { "entry" } else { "entries" };
+            (self.print)(&format!(
+                "repaired the access control of {count} {entries} under {}",
+                dir.display()
+            ));
+        }
+    }
+
+    fn group_of(&self, path: &Path) -> PathBuf {
+        let Ok(relative) = path.strip_prefix(&self.root) else {
+            return path.to_path_buf();
+        };
+        let mut components = relative.components();
+        match (components.next(), components.next()) {
+            (None, _) => self.root.clone(),
+            (Some(first), Some(_)) => self.root.join(first),
+            (Some(first), None) if path.is_dir() => self.root.join(first),
+            (Some(_), None) => self.root.clone(),
         }
     }
 }
@@ -144,6 +216,59 @@ pub(crate) fn repair_agent_tree(
         repair.level(level)?;
     }
     Ok(repair.changeable)
+}
+
+/// Refuses an identity that another account could change, through its files or a level that holds
+/// them (FR-AG-04, T20).
+///
+/// The service runs it before it loads the identity. It never repairs: an open level stays a
+/// refusal until an administrator runs the repair. A missing entry passes, so the load reports it.
+pub(crate) fn check_identity(config: &Path, root: &Path) -> Result<()> {
+    let mut levels: Vec<&Path> = config
+        .ancestors()
+        .take_while(|level| *level == config || level.starts_with(root))
+        .collect();
+    levels.reverse();
+    for level in levels {
+        let Some(entry) = Entry::open(level)? else {
+            continue;
+        };
+        if entry.is_reparse_point() {
+            bail!("{} is a reparse point", level.display());
+        }
+        refuse_exposure(&entry, level)?;
+    }
+    for file in crate::identity::IDENTITY_FILES {
+        let path = config.join(file);
+        let Some(entry) = Entry::open(&path)? else {
+            continue;
+        };
+        if entry.is_reparse_point() || entry.links() > 1 {
+            bail!(
+                "{} is a link, so another path can carry its content",
+                path.display()
+            );
+        }
+        refuse_exposure(&entry, &path)?;
+    }
+    Ok(())
+}
+
+fn refuse_exposure(entry: &Entry, path: &Path) -> Result<()> {
+    match entry
+        .exposure(Rights::Change)
+        .with_context(|| format!("cannot check {}", path.display()))?
+    {
+        Exposure::Clean => Ok(()),
+        Exposure::ForeignGrant => bail!(
+            "{} grants a write access to an account that is not SYSTEM or Administrators",
+            path.display()
+        ),
+        Exposure::ForeignOwner => bail!(
+            "{} is owned by an account that is not SYSTEM or Administrators",
+            path.display()
+        ),
+    }
 }
 
 struct Repair<'a> {
@@ -462,13 +587,7 @@ fn root_entries(config: &Path, root: &Path) -> Vec<(String, Kind)> {
 }
 
 fn config_entries() -> Vec<(String, Kind)> {
-    let identity = [
-        crate::identity::KEY_FILE,
-        crate::identity::CERT_FILE,
-        crate::identity::CA_CHAIN_FILE,
-        crate::identity::METADATA_FILE,
-        crate::identity::SIGNING_KEYS_FILE,
-    ];
+    let identity = crate::identity::IDENTITY_FILES;
     let other = [
         crate::keys::KEY_UPDATES_FILE,
         crate::connection::STATUS_FILE,

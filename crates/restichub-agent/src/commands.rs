@@ -7,7 +7,7 @@ use std::sync::mpsc::Receiver;
 use anyhow::{Context, Result, bail};
 use time::OffsetDateTime;
 
-use crate::cli::{RegisterOptions, ResticFileOptions, UpdateOptions};
+use crate::cli::{InstallOptions, RegisterOptions, ResticFileOptions, UpdateOptions};
 use crate::enroll::{Client, Facts};
 use crate::identity::{StoredIdentity, StoredSigningKeys, generate_key_and_csr};
 use crate::machine_id::MachineId;
@@ -20,9 +20,15 @@ use crate::restic_store::Layout;
 use crate::service::{HostService, ServiceManager};
 use crate::setup::{SetupReport, WaitOptions};
 
-/// The exit code of a service start without a usable identity. The systemd unit does not restart
-/// on it, because a restart cannot create the identity (FR-AG-01).
+/// The exit code of a service start without a usable identity. The service manager does not
+/// restart on it for long, because only an administrator can fix the identity (FR-AG-01).
 pub const EXIT_NO_IDENTITY: u8 = 78;
+
+/// Tells whether the service stopped for a reason that only an administrator can fix.
+#[must_use]
+pub fn needs_administrator(error: &anyhow::Error) -> bool {
+    error.downcast_ref::<NoIdentity>().is_some() || error.downcast_ref::<UnsafeIdentity>().is_some()
+}
 
 /// The identity is absent or damaged, so the service cannot run (FR-AG-01).
 #[derive(Debug)]
@@ -44,6 +50,39 @@ impl std::fmt::Display for NoIdentity {
 
 impl std::error::Error for NoIdentity {}
 
+/// Another account could change the identity, so the service does not use it (FR-AG-04, T20).
+#[derive(Debug)]
+pub struct UnsafeIdentity {
+    dir: PathBuf,
+    cause: String,
+}
+
+impl std::fmt::Display for UnsafeIdentity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "the agent does not use the identity in {}: {}; an administrator runs `restichub-agent install-service`, which repairs the access control; if it says that another account could change the identity, {}",
+            self.dir.display(),
+            self.cause,
+            crate::preflight::REGISTER_AGAIN
+        )
+    }
+}
+
+impl std::error::Error for UnsafeIdentity {}
+
+/// Refuses an identity that another account could change, before anything reads it (T20).
+///
+/// # Errors
+///
+/// Returns [`UnsafeIdentity`] with the entry that another account could change.
+pub fn check_identity(dir: &Path) -> Result<(), UnsafeIdentity> {
+    crate::paths::check_identity_dir(dir).map_err(|error| UnsafeIdentity {
+        dir: dir.to_path_buf(),
+        cause: format!("{error:#}"),
+    })
+}
+
 /// Enrolls this host on a private runtime, then installs and starts the service and waits for the
 /// connection (FR-IN-07).
 ///
@@ -56,9 +95,18 @@ impl std::error::Error for NoIdentity {}
 /// service cannot be installed, or when the agent does not connect.
 pub fn register(options: &RegisterOptions, dir: &Path) -> Result<()> {
     crate::preflight::ensure_elevated()?;
-    // The tree check runs first: the move of an old restic reads from it, so a directory that
-    // another account can write must be refused before anything leaves it (T20, FR-IN-07).
-    crate::preflight::prepare_directories(dir, &crate::paths::cache_dir(), untrusted(options))?;
+    check_register_input(options, dir)?;
+    // Every check and repair that can refuse runs before `--force` removes an identity that another
+    // account could change, so a refusal leaves the old files in place (T20, FR-IN-07).
+    prepare_program(dir, &HostService, options.verbose)?;
+    // The tree check runs before the copy: the move of an old restic reads from it, so a directory
+    // that another account can write must be refused before anything leaves it (T20, FR-IN-07).
+    crate::preflight::prepare_directories(
+        dir,
+        &crate::paths::cache_dir(),
+        untrusted(options),
+        options.verbose,
+    )?;
     place_program()?;
     let installer = Installer::host()?;
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -100,7 +148,7 @@ pub async fn provision_and_register(
     supply: &Supply,
 ) -> Result<()> {
     check_register_input(options, dir)?;
-    crate::preflight::prepare_directories(dir, cache, untrusted(options))?;
+    crate::preflight::prepare_directories(dir, cache, untrusted(options), options.verbose)?;
     installer.ensure(supply).await?;
     let restic = ResticBinary::installed(&installer.layout)?;
     // The location rules run before the token is spent, so a refused location never leaves an
@@ -178,6 +226,18 @@ pub fn start_after_register(
         .context("the agent is registered, but the service is not ready; fix the cause and run: restichub-agent install-service")
 }
 
+/// Repairs and checks the program directory and reads the service state, so that the later copy
+/// meets no refusal (FR-IN-07, T20).
+fn prepare_program(config: &Path, manager: &dyn ServiceManager, verbose: bool) -> Result<()> {
+    crate::paths::repair_program_dir(config, verbose, &mut |line| println!("{line}"))?;
+    crate::paths::ensure_program_dir(&crate::paths::restic_dir())?;
+    crate::paths::ensure_program_dir(&crate::paths::program_dir())?;
+    manager
+        .state()
+        .context("cannot read the state of the agent service")?;
+    Ok(())
+}
+
 /// Copies the running agent into the program directory and moves an old restic there (FR-IN-07).
 fn place_program() -> Result<()> {
     let source = crate::self_install::running_image()?;
@@ -239,12 +299,18 @@ fn finish_setup(report: Option<&SetupReport>, hostname: Option<&str>) -> Result<
 ///
 /// Returns an error when the process is not elevated, the identity is absent, the service cannot be
 /// installed, or the agent does not connect.
-pub fn install_service(options: &ResticFileOptions) -> Result<()> {
+pub fn install_service(options: &InstallOptions) -> Result<()> {
     crate::preflight::ensure_elevated()?;
     let dir = crate::paths::config_dir();
-    prepare_install(&dir, &crate::paths::cache_dir(), &HostService)?;
+    prepare_program(&dir, &HostService, options.verbose)?;
+    prepare_install(
+        &dir,
+        &crate::paths::cache_dir(),
+        &HostService,
+        options.verbose,
+    )?;
     place_program()?;
-    let restic = ensure_restic(options)?;
+    let restic = ensure_restic(&options.restic)?;
     let report =
         crate::setup::install_and_wait(&HostService, &dir, restic.path(), WaitOptions::default())?;
     finish_setup(Some(&report), hostname().ok().as_deref())
@@ -262,8 +328,15 @@ fn untrusted(options: &RegisterOptions) -> UntrustedIdentity {
 
 /// The identity load finishes a staged rotation, so the tree check and the repair run before it, as
 /// in `register`: another account may have planted the staged files (T20).
-fn prepare_install(dir: &Path, cache: &Path, manager: &dyn ServiceManager) -> Result<()> {
-    if let Err(error) = crate::preflight::prepare_directories(dir, cache, UntrustedIdentity::Keep) {
+fn prepare_install(
+    dir: &Path,
+    cache: &Path,
+    manager: &dyn ServiceManager,
+    verbose: bool,
+) -> Result<()> {
+    if let Err(error) =
+        crate::preflight::prepare_directories(dir, cache, UntrustedIdentity::Keep, verbose)
+    {
         return Err(match error.downcast::<ChangeableIdentity>() {
             Ok(changeable) => refuse_changeable_identity(&changeable, manager),
             Err(error) => error,
@@ -364,7 +437,7 @@ pub async fn register_async(
     check_register_input(options, dir)?;
     let url = options.url.clone().unwrap_or_default();
     let token = resolve_token(options)?;
-    crate::preflight::prepare_directories(dir, cache, untrusted(options))?;
+    crate::preflight::prepare_directories(dir, cache, untrusted(options), options.verbose)?;
 
     let facts = Facts {
         hostname: hostname()?,
@@ -554,6 +627,12 @@ pub fn status(dir: &Path) -> Result<()> {
 /// Returns an error when the identity is absent, restic is not the recorded binary, or the runtime
 /// cannot start.
 pub fn run(dir: &Path, shutdown: Option<Receiver<()>>) -> Result<()> {
+    // The service never repairs: a connection with an identity that another account could have
+    // replaced would trust that account's control plane (T20).
+    if let Err(refused) = check_identity(dir) {
+        tracing::error!("{refused}");
+        return Err(anyhow::Error::new(refused));
+    }
     let identity = StoredIdentity::load(dir).map_err(|error| {
         if !is_missing_or_damaged(&error) {
             return error;
@@ -998,7 +1077,7 @@ mod tests {
         let (base, dir) = planted_rotation("order");
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o777))
             .expect("cannot set the mode");
-        let error = prepare_install(&dir, &base.join("cache"), &StopCounter::new(false))
+        let error = prepare_install(&dir, &base.join("cache"), &StopCounter::new(false), false)
             .expect_err("no identity");
         assert!(
             format!("{error:#}").contains("no valid agent identity"),
@@ -1017,7 +1096,7 @@ mod tests {
     fn fr_ag_04_install_service_refuses_an_open_directory_before_it_loads_the_identity() {
         let (base, dir) = planted_rotation("order");
         crate::winsec::tests::grant(&dir, "(OI)(CI)(WD)").expect("cannot add the entry");
-        let error = prepare_install(&dir, &dir.join("cache"), &StopCounter::new(false))
+        let error = prepare_install(&dir, &dir.join("cache"), &StopCounter::new(false), false)
             .expect_err("an open directory");
         assert!(
             format!("{error:#}").contains("cannot prepare the directory"),

@@ -68,11 +68,7 @@ fn run_service() -> Result<()> {
     // A failing run leaves a non-zero service exit code, so the SCM and an operator see it.
     let exit_code = match &result {
         Ok(()) => ServiceExitCode::NO_ERROR,
-        Err(error)
-            if error
-                .downcast_ref::<crate::commands::NoIdentity>()
-                .is_some() =>
-        {
+        Err(error) if crate::commands::needs_administrator(error) => {
             ServiceExitCode::ServiceSpecific(u32::from(crate::commands::EXIT_NO_IDENTITY))
         }
         Err(_) => ServiceExitCode::Win32(1),
@@ -163,8 +159,23 @@ pub fn install(restic: &Path) -> Result<()> {
         }
     };
     service.set_description("The ResticHub backup agent")?;
-    // The service restarts after a failure; a repeated failure stays visible in the event log.
-    service.update_failure_actions(ServiceFailureActions {
+    service.update_failure_actions(failure_actions())?;
+    service.set_failure_actions_on_non_crash_failures(true)?;
+    // A running service restarts, so that it uses the new executable path.
+    stop_and_wait(&service)?;
+    // A start failure is reported, not hidden behind a success message.
+    service
+        .start(&[] as &[&OsStr])
+        .context("cannot start the service")?;
+    Ok(())
+}
+
+/// The service restarts after a failure. The service control manager repeats the last action for
+/// each later failure, so the last one takes no action: a refusal that needs an administrator, such
+/// as an identity that another account could change, does not restart forever. The count resets
+/// after a day without a failure, and each failure stays in the event log.
+fn failure_actions() -> ServiceFailureActions {
+    ServiceFailureActions {
         reset_period: ServiceFailureResetPeriod::After(Duration::from_secs(86_400)),
         reboot_msg: None,
         command: None,
@@ -177,16 +188,12 @@ pub fn install(restic: &Path) -> Result<()> {
                 action_type: ServiceActionType::Restart,
                 delay: Duration::from_secs(30),
             },
+            ServiceAction {
+                action_type: ServiceActionType::None,
+                delay: Duration::default(),
+            },
         ]),
-    })?;
-    service.set_failure_actions_on_non_crash_failures(true)?;
-    // A running service restarts, so that it uses the new executable path.
-    stop_and_wait(&service)?;
-    // A start failure is reported, not hidden behind a success message.
-    service
-        .start(&[] as &[&OsStr])
-        .context("cannot start the service")?;
-    Ok(())
+    }
 }
 
 fn stop_and_wait(service: &windows_service::service::Service) -> Result<()> {
@@ -306,4 +313,24 @@ pub fn uninstall() -> Result<()> {
     crate::logging::remove_event_source()?;
     println!("the service {SERVICE_NAME} is removed");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fr_ag_01_a_refusal_restarts_twice_and_then_stays_stopped() {
+        let actions = failure_actions().actions.unwrap_or_default();
+        let kinds: Vec<ServiceActionType> =
+            actions.iter().map(|action| action.action_type).collect();
+        assert_eq!(
+            kinds,
+            [
+                ServiceActionType::Restart,
+                ServiceActionType::Restart,
+                ServiceActionType::None
+            ]
+        );
+    }
 }

@@ -137,8 +137,10 @@ pub(crate) fn agent_root() -> PathBuf {
 /// access instead. A refusal that the repair does not cover (a foreign owner of a level) comes from
 /// [`ensure_config_dir`]. Linux needs no repair: [`create_protected_dir`] sets the mode of an
 /// existing directory and has no owner check that an old build could trip. `log` gets one line for
-/// each change and each warning. Returns the identity entries that another account could change
-/// and that [`UntrustedIdentity::Keep`] left as found: they may hold replaced trust anchors.
+/// each warning and removal, and one line for each top-level directory whose access control
+/// changed; `verbose` gives one line for each changed entry instead. Returns the identity entries
+/// that another account could change and that [`UntrustedIdentity::Keep`] left as found: they may
+/// hold replaced trust anchors.
 ///
 /// # Errors
 ///
@@ -148,18 +150,99 @@ pub(crate) fn agent_root() -> PathBuf {
 pub fn repair_config_dir(
     dir: &Path,
     untrusted: UntrustedIdentity,
+    verbose: bool,
     log: &mut dyn FnMut(&str),
 ) -> Result<Vec<PathBuf>> {
     #[cfg(windows)]
     {
-        crate::winrepair::repair_agent_tree(dir, &agent_root(), untrusted, &mut |action| {
-            log(&action.to_string());
-        })
+        let root = agent_root();
+        let mut report = crate::winrepair::Report::new(&root, verbose, log);
+        let result = crate::winrepair::repair_agent_tree(dir, &root, untrusted, &mut |action| {
+            report.action(action);
+        });
+        report.finish();
+        result
     }
     #[cfg(not(windows))]
     {
-        let _ = (dir, untrusted, log);
+        let _ = (dir, untrusted, verbose, log);
         Ok(Vec::new())
+    }
+}
+
+/// Repairs the access control of the program directory that a manual copy or an older build left
+/// open (FR-IN-07, threat T20).
+///
+/// It runs before the program directory is checked, in the elevated commands only. A restic that
+/// another account could change is removed with its record in `config`, so the install downloads
+/// it again. Linux needs no repair: the check refuses a shared level with a remedy. `log` and
+/// `verbose` work as in [`repair_config_dir`].
+///
+/// # Errors
+///
+/// Returns an error when a level holds an entry that the agent does not know, a link or an entry
+/// that another account owns, or when the access control cannot be set.
+pub fn repair_program_dir(config: &Path, verbose: bool, log: &mut dyn FnMut(&str)) -> Result<()> {
+    #[cfg(windows)]
+    {
+        let program = program_dir();
+        let root = program.parent().map(Path::to_path_buf).unwrap_or_default();
+        let record = config.join(crate::restic_store::RECORD_FILE);
+        let mut report = crate::winrepair::Report::new(&root, verbose, log);
+        let result =
+            crate::winrepair::repair_program_tree(&program, &root, &record, &mut |action| {
+                report.action(action);
+            });
+        report.finish();
+        result
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (config, verbose, log);
+        Ok(())
+    }
+}
+
+/// Refuses an identity in `dir` that another account could change (FR-AG-04, threat T20).
+///
+/// The service runs it before it loads the identity. It repairs nothing. Linux refuses a directory
+/// or an identity file that a group or another account can write.
+///
+/// # Errors
+///
+/// Returns an error that names the entry another account could change.
+pub fn check_identity_dir(dir: &Path) -> Result<()> {
+    #[cfg(windows)]
+    {
+        crate::winrepair::check_identity(dir, &agent_root())
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        let files = crate::identity::IDENTITY_FILES
+            .iter()
+            .map(|file| dir.join(file));
+        for path in std::iter::once(dir.to_path_buf()).chain(files) {
+            let metadata = match std::fs::symlink_metadata(&path) {
+                Ok(metadata) => metadata,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => {
+                    return Err(error).with_context(|| format!("cannot read {}", path.display()));
+                }
+            };
+            if metadata.file_type().is_symlink() || metadata.mode() & 0o022 != 0 {
+                anyhow::bail!(
+                    "{} is a link or a group or another account can write it",
+                    path.display()
+                );
+            }
+        }
+        Ok(())
+    }
+    #[cfg(not(any(windows, unix)))]
+    {
+        let _ = dir;
+        Ok(())
     }
 }
 

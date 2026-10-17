@@ -16,6 +16,14 @@ pub const CERT_FILE: &str = "agent-cert.pem";
 pub const CA_CHAIN_FILE: &str = "ca-chain.pem";
 pub const METADATA_FILE: &str = "identity.json";
 pub const SIGNING_KEYS_FILE: &str = "signing-keys.json";
+
+pub(crate) const IDENTITY_FILES: [&str; 5] = [
+    KEY_FILE,
+    CERT_FILE,
+    CA_CHAIN_FILE,
+    METADATA_FILE,
+    SIGNING_KEYS_FILE,
+];
 /// The suffix of a file that a certificate rotation staged and did not yet move into place.
 pub(crate) const STAGED_SUFFIX: &str = ".next";
 /// The staged marker. Its presence says that the staged key, certificate and chain are complete.
