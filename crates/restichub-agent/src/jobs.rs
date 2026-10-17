@@ -57,6 +57,7 @@ use crate::restore_roots::RestoreAccess;
 use crate::scripts::ScriptStore;
 
 mod command_text;
+mod link_check;
 mod log;
 mod outcome;
 mod phases;
@@ -133,6 +134,8 @@ pub struct Jobs {
     /// The roots where a restore may write and the files of the agent that it may never touch
     /// (FR-RS-03, ADR-0035).
     restore: Arc<RestoreAccess>,
+    /// Checks the paths of a restore for links before restic writes (threat T31).
+    restore_link_rule: bool,
     /// Where a local backend may lie on a Linux host (ADR-0045).
     repository: Arc<RepositoryAccess>,
     /// The agent reads it again at each job (FR-HK-08).
@@ -181,6 +184,7 @@ impl Jobs {
             stop_grace: STOP_GRACE,
             cleanup_grace: CLEANUP_GRACE,
             restore: Arc::new(restore),
+            restore_link_rule: cfg!(windows),
             repository: Arc::new(repository),
             scripts: Arc::new(scripts),
             log_spool: Arc::new(LogSpool::open(dir, LogSpool::max_bytes_from_env())),
@@ -236,6 +240,15 @@ impl Jobs {
     #[must_use]
     pub fn with_restore_access(mut self, access: RestoreAccess) -> Self {
         self.restore = Arc::new(access);
+        self
+    }
+
+    /// Turns the link check of a restore on or off, so a Linux test covers the Windows rule
+    /// (threat T31).
+    #[cfg(feature = "test-util")]
+    #[must_use]
+    pub fn with_restore_link_rule(mut self, on: bool) -> Self {
+        self.restore_link_rule = on;
         self
     }
 
@@ -716,18 +729,6 @@ impl Jobs {
                 );
                 break;
             }
-            if let Some(reason) = restore_link_refusal(step).await {
-                tracing::warn!(%reason, "a restore target is refused");
-                failed += 1;
-                let outcome = StepOutcome::not_started_because(&reason);
-                progress.stopped_code = Some(outcome.exit_code);
-                stopped_status = Some(StepStatus::Failed);
-                step_results.push(
-                    self.send_step_result(&job_id, step, &outcome, started_at, started_at)
-                        .await,
-                );
-                break;
-            }
             let mut max = step_timeout(step.timeout_seconds, job.timeout_seconds);
             if let Some(deadline) = job_deadline {
                 let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
@@ -753,15 +754,24 @@ impl Jobs {
             if is_init {
                 progress.init_ran = true;
             }
-            let outcome = self
-                .run_step(
-                    &validated,
-                    step,
-                    &cancel,
-                    StepLimits::for_step(step, max, job.stall_timeout_seconds),
-                    &mut log,
-                )
+            let checked_at = tokio::time::Instant::now();
+            let refusal = self
+                .restore_link_check(&validated, step, &cancel, max, &mut log)
                 .await;
+            let outcome = match refusal {
+                Some(outcome) => outcome,
+                None => {
+                    let max = max.map(|max| max.saturating_sub(checked_at.elapsed()));
+                    self.run_step(
+                        &validated,
+                        step,
+                        &cancel,
+                        StepLimits::for_step(step, max, job.stall_timeout_seconds),
+                        &mut log,
+                    )
+                    .await
+                }
+            };
             let finished_at = now_timestamp();
             step_results.push(
                 self.send_step_result(&job_id, step, &outcome, started_at, finished_at)
@@ -1121,29 +1131,6 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
-}
-
-/// Why a restore step must not start because its target holds a link out of it (T31).
-///
-/// The walk runs right before restic, because a link can appear after the admission.
-async fn restore_link_refusal(step: &Step) -> Option<String> {
-    let Some(step::Kind::Restore(restore)) = step.kind.as_ref() else {
-        return None;
-    };
-    let target = PathBuf::from(&restore.target);
-    match tokio::task::spawn_blocking(move || crate::restore_roots::outward_link(&target)).await {
-        Ok(Ok(None)) => None,
-        Ok(Ok(Some(link))) => Some(format!(
-            "the restore target holds {}, a link that leads out of the target or nowhere; remove the link or restore into an empty directory",
-            link.display()
-        )),
-        Ok(Err(error)) => Some(format!(
-            "cannot check the links in the restore target: {error}"
-        )),
-        Err(error) => Some(format!(
-            "cannot check the links in the restore target: {error}"
-        )),
-    }
 }
 
 #[cfg(test)]
