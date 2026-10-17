@@ -434,15 +434,17 @@
 </script>
 
 {#snippet runsList(runs: string[] | null)}
-	{#if runs && runs.length > 0}
-		<ul class="runs">
-			{#each runs as run (run)}
-				<li title={utcTitle(run)}>{formatLocalTime(run)}</li>
-			{/each}
-		</ul>
-	{:else}
-		<p class="muted">{t('repositories.maintenance.nextRunsEmpty')}</p>
-	{/if}
+	<div class="runs-body">
+		{#if runs && runs.length > 0}
+			<ul class="runs">
+				{#each runs as run (run)}
+					<li title={utcTitle(run)}>{formatLocalTime(run)}</li>
+				{/each}
+			</ul>
+		{:else}
+			<p class="muted">{t('repositories.maintenance.nextRunsEmpty')}</p>
+		{/if}
+	</div>
 {/snippet}
 
 {#snippet lastRun(job: Job | null | undefined)}
@@ -818,6 +820,11 @@
 		display: flex;
 		flex-direction: column;
 		gap: var(--rh-space-1);
+	}
+
+	/* The preview arrives after a delay. The reserved height keeps the sections below it in place. */
+	.runs-body {
+		min-height: calc(var(--rh-font-size-sm) * var(--rh-line-height-base) * 3 + 2px * 2);
 	}
 
 	.runs {
