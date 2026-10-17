@@ -1579,8 +1579,8 @@ export interface components {
             last_certificate_rotation_at?: string | null;
             last_seen_at?: string | null;
             /**
-             * @description Whether the control plane saw the host within the online window of the dashboard. Always
-             *     false for a revoked host.
+             * @description Whether a control plane instance holds the stream of the host, the same fact that a job
+             *     dispatch needs. Always false for a revoked host.
              */
             online: boolean;
             os: string;
