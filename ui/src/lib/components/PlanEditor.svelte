@@ -521,17 +521,19 @@
 		</datalist>
 		<div class="runs-block">
 			<span class="muted">{t('plans.nextRuns')}</span>
-			{#if runsLoading && !runs}
-				<p class="muted">{t('common.loading')}</p>
-			{:else if runs && runs.length > 0}
-				<ul class="runs">
-					{#each runs as run (run)}
-						<li title={utcTitle(run)}>{formatTimeInZone(run, timeZone)}</li>
-					{/each}
-				</ul>
-			{:else}
-				<p class="muted">{t('plans.previewEmpty')}</p>
-			{/if}
+			<div class="runs-body">
+				{#if runsLoading && !runs}
+					<p class="muted">{t('common.loading')}</p>
+				{:else if runs && runs.length > 0}
+					<ul class="runs">
+						{#each runs as run (run)}
+							<li title={utcTitle(run)}>{formatTimeInZone(run, timeZone)}</li>
+						{/each}
+					</ul>
+				{:else}
+					<p class="muted">{t('plans.previewEmpty')}</p>
+				{/if}
+			</div>
 		</div>
 	</ProfileSection>
 
@@ -589,6 +591,11 @@
 		display: flex;
 		flex-direction: column;
 		gap: var(--rh-space-1);
+	}
+
+	/* The preview arrives after a delay. The reserved height keeps the sections below it in place. */
+	.runs-body {
+		min-height: calc(var(--rh-font-size-sm) * var(--rh-line-height-base) * 5 + 2px * 4);
 	}
 
 	.runs {
