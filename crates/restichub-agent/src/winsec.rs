@@ -440,6 +440,9 @@ fn foreign_owner_advice(path: &Path) -> String {
 
 /// Returns the mask that a non-admin holds, or `None` when no entry grants it.
 ///
+/// The mask is the granted part of `rights`, so a full control shows as `0x000d0156` against the
+/// agent rights: every right of [`AGENT_RIGHTS`].
+///
 /// A missing DACL grants everyone full access, so it gives [`u32::MAX`]. An allow entry of a type
 /// this module does not parse also gives [`u32::MAX`], because it may hold any right.
 fn first_foreign_grant(dacl: *mut ACL, rights: u32) -> Result<Option<u32>> {
