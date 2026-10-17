@@ -49,3 +49,11 @@ Use the shared components of [ui/COMPONENTS.md](../../ui/COMPONENTS.md). They ap
 1. Use Lucide icons only. Do not draw an SVG by hand.
 2. Do not put a colored stripe at the left edge of a panel, a callout or a row.
 3. Use one duration token for each spinner (`--rh-spin-duration`). A spinner shows the status of work that runs now, thus it is not decoration. When the reduced-motion setting is on, a spinner continues to turn at half speed (`--rh-spin-duration-reduced`). All other motion stops: a skeleton shows a static block and a transition is almost instant. Each spinner has the `rh-spinner` class.
+
+## 5. Forms
+
+1. A field with a rule, for example the minimum length of a password, shows the rule below the field. While the person types, the text shows the progress, for example "6 of 12 characters", in the usual tone. The text changes to the danger tone only after the person leaves the field or tries to send the form. The field refers to the text with `aria-describedby`.
+2. The rule in the UI is the same as the rule of the server. A test compares them.
+3. Each field that sets a password uses `NewPasswordField`.
+4. A primary action stays enabled when a field is not correct. When the person tries to send the form, each field that is not correct shows its error. The first of these fields gets the focus.
+5. If a primary action is disabled, a text next to the action or the tooltip of the action gives the reason.
