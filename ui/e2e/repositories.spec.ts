@@ -132,11 +132,17 @@ test('the repository init dialog picks a host and shows the job result', async (
 
 // The repository maintenance: the warning for a missing host, the schedules in the dialog and the
 // run-now action (FR-RP-08, FR-SC-09).
-async function addLocalRepository(page: Page, name: string, host: string | null): Promise<void> {
+// A local repository needs its host; a rest-server repository may have none.
+async function addRepository(page: Page, name: string, host: string | null): Promise<void> {
 	await page.getByRole('button', { name: 'Add repository' }).click();
 	await page.locator('#repo-name').fill(name);
-	await page.locator('#repo-kind').selectOption('local');
-	await page.locator('#repo-path').fill(`/srv/backup/${name}`);
+	if (host) {
+		await page.locator('#repo-kind').selectOption('local');
+		await page.locator('#repo-path').fill(`/srv/backup/${name}`);
+	} else {
+		await page.locator('#repo-kind').selectOption('rest');
+		await page.locator('#repo-endpoint').fill(`https://rest.example.net/${name}`);
+	}
 	await page.locator('#repo-password').fill('repo-password');
 	if (host) await page.locator('#repo-agent').selectOption({ label: host });
 	await page.getByRole('button', { name: 'Save', exact: true }).click();
@@ -159,8 +165,8 @@ test('the repository maintenance shows the warning, edits the schedules and runs
 	await expect(page.locator('#maintenance-time-zone')).toHaveValue(zone);
 	await page.getByRole('button', { name: 'Cancel', exact: true }).click();
 
-	await addLocalRepository(page, 'repo-m', 'nas-backup');
-	await addLocalRepository(page, 'repo-nohost', null);
+	await addRepository(page, 'repo-m', 'nas-backup');
+	await addRepository(page, 'repo-nohost', null);
 	// A repository without a maintenance host shows a warning in the list.
 	await expect(page.getByText('No maintenance host')).toBeVisible();
 

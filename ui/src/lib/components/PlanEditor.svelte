@@ -82,9 +82,18 @@
 	const profileOptions = $derived<SelectOption[]>(
 		profiles.map((profile) => ({ value: profile.id, label: profile.name }))
 	);
+	const repository = $derived.by(() => {
+		const repositoryId = profiles.find((profile) => profile.id === profileId)?.repository_id;
+		return repositories.find((item) => item.id === repositoryId);
+	});
+	// A local path is on the disk of the repository host only, so the plan runs there (FR-RP-08).
+	const localHost = $derived(
+		repository?.backend.kind === 'local' ? (repository.maintenance_agent_id ?? '') : null
+	);
 	const agentOptions = $derived<SelectOption[]>(
 		agents
 			.filter((agent) => agent.status === 'active')
+			.filter((agent) => localHost === null || agent.id === localHost)
 			.map((agent) => ({ value: agent.id, label: agent.hostname }))
 	);
 	const policyOptions = $derived<SelectOption[]>(
@@ -98,9 +107,11 @@
 
 	const profileName = $derived(profiles.find((profile) => profile.id === profileId)?.name ?? '');
 	const hostName = $derived(agents.find((agent) => agent.id === agentId)?.hostname ?? '');
-	const repositoryName = $derived.by(() => {
-		const repositoryId = profiles.find((profile) => profile.id === profileId)?.repository_id;
-		return repositories.find((repository) => repository.id === repositoryId)?.name ?? '';
+	const repositoryName = $derived(repository?.name ?? '');
+	const localHostName = $derived(agents.find((agent) => agent.id === localHost)?.hostname ?? '');
+
+	$effect(() => {
+		if (!loading && localHost !== null && agentId !== localHost) agentId = localHost;
 	});
 
 	function describeHours(seconds: number): string {
@@ -418,7 +429,13 @@
 				required
 			/>
 		</div>
-		{#if repositoryName}
+		{#if repositoryName && localHost === ''}
+			<p class="muted">{t('pl.source.localNoHost', { name: repositoryName })}</p>
+		{:else if repositoryName && localHost !== null}
+			<p class="muted">
+				{t('pl.source.localHost', { name: repositoryName, host: localHostName })}
+			</p>
+		{:else if repositoryName}
 			<p class="muted">{t('pl.source.repository', { name: repositoryName })}</p>
 		{/if}
 	</ProfileSection>

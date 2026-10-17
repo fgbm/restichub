@@ -64,8 +64,14 @@ async function shot(page: Page, name: string): Promise<void> {
 async function addLocal(page: Page, labels: Labels, name: string, host: string | null) {
 	await page.getByRole('button', { name: labels.addRepository, exact: true }).click();
 	await page.locator('#repo-name').fill(name);
-	await page.locator('#repo-kind').selectOption('local');
-	await page.locator('#repo-path').fill(`/srv/backup/${name}`);
+	// A local repository needs its host; a rest-server repository may have none.
+	if (host) {
+		await page.locator('#repo-kind').selectOption('local');
+		await page.locator('#repo-path').fill(`/srv/backup/${name}`);
+	} else {
+		await page.locator('#repo-kind').selectOption('rest');
+		await page.locator('#repo-endpoint').fill(`https://rest.example.net/${name}`);
+	}
 	await page.locator('#repo-password').fill('repo-password');
 	if (host) await page.locator('#repo-agent').selectOption({ label: host });
 	await page.locator('form button[type="submit"]').click();
@@ -100,7 +106,7 @@ async function capture(page: Page, labels: Labels, suffix: string): Promise<void
 	await page.getByRole('button', { name: labels.cancel, exact: true }).click();
 
 	await addLocal(page, labels, 'backups-prod', labels.hostName);
-	await addLocal(page, labels, 'scratch-local', null);
+	await addLocal(page, labels, 'scratch-remote', null);
 	await page.getByRole('button', { name: labels.moreActions('backups-prod') }).click();
 	await page.getByRole('menuitem', { name: labels.initialize }).click();
 	await page.getByRole('dialog').getByRole('button', { name: labels.start }).click();
@@ -132,7 +138,7 @@ async function capture(page: Page, labels: Labels, suffix: string): Promise<void
 	await shot(page, `repository-maintenance-check${suffix}`);
 	await page.getByRole('button', { name: labels.cancel, exact: true }).click();
 
-	await page.getByRole('button', { name: labels.moreActions('scratch-local') }).click();
+	await page.getByRole('button', { name: labels.moreActions('scratch-remote') }).click();
 	await page.getByRole('menuitem', { name: labels.edit }).click();
 	await page.locator('#repo-agent').waitFor();
 	await page

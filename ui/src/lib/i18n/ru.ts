@@ -553,6 +553,12 @@ export const ru: Record<MessageKey, string> = {
 	'repositories.maintenanceHostHint': 'Этот хост выполняет forget, prune и check для репозитория.',
 	'repositories.maintenanceHostNone': 'Нет',
 	'repositories.maintenanceMissing': 'Нет хоста обслуживания',
+	'repositories.hostPlaceholder': 'Выберите хост',
+	'repositories.repositoryHost': 'Хост репозитория',
+	'repositories.repositoryHostHint':
+		'Локальный путь находится на диске этого хоста. Все задания репозитория выполняются на этом хосте.',
+	'repositories.repositoryHostLocked':
+		'Хост инициализированного локального репозитория нельзя изменить. Снимки лежат на диске этого хоста.',
 	'repositories.maintenance.description':
 		'Хост обслуживания выполняет эти задачи по расписанию. Хост резервного копирования их не выполняет.',
 	'repositories.maintenance.noHostTitle': 'Нет хоста обслуживания',
@@ -814,6 +820,7 @@ export const ru: Record<MessageKey, string> = {
 	'jobs.errorCode.signing_failed': 'не удалось подписать задание',
 	'jobs.errorCode.plan_missing': 'план удалён',
 	'jobs.errorCode.plan_changed': 'план перенесён на другой хост',
+	'jobs.errorCode.not_repository_host': 'не хост локального репозитория',
 	'jobs.errorCode.profile_missing': 'профиль удалён',
 	'jobs.errorCode.repository_changed': 'профиль использует другой репозиторий',
 	'jobs.errorCode.agent_facts_invalid': 'сведения о хосте непригодны',
@@ -848,6 +855,8 @@ export const ru: Record<MessageKey, string> = {
 		'Сервер управления не смог подписать задание. Попросите администратора проверить ключ подписи.',
 	'jobs.reason.plan_missing': 'План удалён.',
 	'jobs.reason.plan_changed': 'План перенесён на другой хост.',
+	'jobs.reason.not_repository_host':
+		'Репозиторий локальный, и его путь находится на другом хосте. Перенесите план на хост репозитория.',
 	'jobs.reason.profile_missing': 'Профиль удалён.',
 	'jobs.reason.repository_missing': 'Репозиторий удалён.',
 	'jobs.reason.repository_changed': 'Профиль теперь использует другой репозиторий.',
@@ -1036,6 +1045,10 @@ export const ru: Record<MessageKey, string> = {
 	'pl.section.source': 'Что копировать',
 	'pl.section.objective': 'Допустимая потеря данных',
 	'pl.source.repository': 'Профиль пишет копии в репозиторий {name}.',
+	'pl.source.localHost':
+		'Репозиторий {name} локальный. Его путь есть только на хосте {host}, поэтому план выполняется на этом хосте.',
+	'pl.source.localNoHost':
+		'Репозиторий {name} локальный, и у него нет хоста. Сначала задайте хост репозитория.',
 	'pl.side.repository': 'Репозиторий',
 	'pl.summary.noName': 'Имя не задано',
 	'pl.summary.noSource': 'Выберите профиль и хост',
@@ -1155,6 +1168,8 @@ export const ru: Record<MessageKey, string> = {
 		'На хосте работает старый агент, он не умеет это делать. Обновите пакет агента и повторите.',
 	'error.restore_target_denied':
 		'Хост не восстанавливает в этот путь. Используйте корень восстановления хоста. Корень добавляет администратор на хосте.',
+	'error.repository_host_locked':
+		'Хост инициализированного локального репозитория нельзя изменить. Снимки лежат на диске этого хоста.',
 	'error.internal_error':
 		'В сервере управления внутренняя проблема. Повторите позже. Если проблема остаётся, попросите администратора прочитать журнал сервера.',
 	'error.network': 'Сервер управления не ответил. Проверьте сеть и повторите.',
@@ -1491,6 +1506,10 @@ export const ru: Record<MessageKey, string> = {
 	'reason.unavailable': 'Этот параметр пока недоступен.',
 	'reason.mismatch': 'Значение не совпадает.',
 	'reason.out_of_range': 'Значение вне допустимого диапазона.',
+	'reason.not_repository_host':
+		'Репозиторий локальный. Выберите хост репозитория: его путь есть только на этом хосте.',
+	'reason.plan_on_other_host':
+		'План репозитория выполняется на другом хосте. Локальный репозиторий работает только на своём хосте.',
 	'scripts.title': 'Скрипты',
 	'scripts.description':
 		'Скрипты выполняются на хосте от имени агента. Они запускаются до и после резервного копирования в порядке списков. Каждый скрипт — отдельный шаг задания со своим журналом.',
