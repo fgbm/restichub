@@ -103,13 +103,13 @@ See [Configure alerts](/restichub/operations/alert-configuration/) for the file 
 
 ## Docker Compose stack
 
-The file `.env` of the stack holds more values. The script `bootstrap.sh` writes most of them. See [Install the control plane](/restichub/operations/install-control-plane/#the-environment-file).
+The file `.env` of the stack holds more values. The script `init-env.sh` writes most of them. See [Install the control plane](/restichub/operations/install-control-plane/#the-environment-file).
 
 | Variable | Meaning |
 |---|---|
 | `RESTICHUB_OWNER_PASSWORD`, `RESTICHUB_RUNTIME_PASSWORD` | The passwords of the owner login and the runtime login of the database. |
 | `RESTICHUB_DOMAIN`, `RESTICHUB_ACME_EMAIL` | The host name of the control plane and the email address for its certificate. |
-| `RESTICHUB_IMAGE_TAG` | The tag of the control plane image. |
+| `RESTICHUB_IMAGE` | The control plane image reference with the digest of the release. |
 | `RESTICHUB_AGENT_PORT` | The published port of the agent listener. The default is 8443. |
 
 ## Agent
