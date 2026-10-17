@@ -27,6 +27,16 @@ export function uiText(lang: Lang, key: string): string {
 	return text;
 }
 
+/** The messages under a key prefix, sorted by the rest of the key. */
+export function uiTexts(lang: Lang, prefix: string): [string, string][] {
+	const found = [...catalogs[lang]]
+		.filter(([key]) => key.startsWith(prefix))
+		.map(([key, text]): [string, string] => [key.slice(prefix.length), text])
+		.sort(([a], [b]) => a.localeCompare(b));
+	if (found.length === 0) throw new Error(`the UI has no message under ${prefix}`);
+	return found;
+}
+
 /** Replaces each `{{message.key}}` with the UI label. */
 export function withUiText(lang: Lang, source: string): string {
 	return source.replace(/\{\{([\w.]+)\}\}/g, (_, key: string) => uiText(lang, key));

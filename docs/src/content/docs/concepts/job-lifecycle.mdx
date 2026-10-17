@@ -4,7 +4,7 @@ description: How the queue sends jobs to the agents, and how it limits and retri
 ---
 
 import Diagram from '../../../components/Diagram.astro';
-
+import Ui from '../../../components/Ui.astro';
 
 A job is one run of a plan or one manual operation. The control plane keeps the jobs in a queue in the database. The queue dispatcher sends each job to an online agent over the open stream.
 
@@ -16,15 +16,15 @@ The diagram does not show the redelivery. A job stays in `sent` while the contro
 
 | State in the web interface | Stored state | Meaning |
 |---|---|---|
-| Waiting | `queued` | The job is in the queue. The control plane did not send it. |
-| Sent to the host | `sent` | The control plane sent the job. The agent did not confirm it. |
-| Running | `running` | The agent confirmed the job and runs it. |
-| Succeeded | `succeeded` | Every step succeeded. |
-| Succeeded, in yellow | `succeeded` | Every step finished, and restic reported warnings. The tooltip shows "Succeeded with warnings". The result code is `succeeded_with_warnings`. |
-| Failed | `failed` | A step failed, or the control plane refused the job. The result code and the reason give the detail. |
-| Cancelled | `failed` | An Operator cancelled the job. The result code is `cancelled`. |
-| Expired | `expired` | The job waited in the queue longer than its acceptance window. A running job never expires. |
-| Gave up | `dead_letter` | The repository stayed locked after the last retry. |
+| <Ui k="jobs.status.queued" /> | `queued` | The job is in the queue. The control plane did not send it. |
+| <Ui k="jobs.status.sent" /> | `sent` | The control plane sent the job. The agent did not confirm it. |
+| <Ui k="jobs.status.running" /> | `running` | The agent confirmed the job and runs it. |
+| <Ui k="jobs.status.succeeded" /> | `succeeded` | Every step succeeded. |
+| <Ui k="jobs.status.succeeded_with_warnings" />, in yellow | `succeeded` | Every step finished, and restic reported warnings. The tooltip shows "<Ui k="jobs.statusFull.succeeded_with_warnings" />". The result code is `succeeded_with_warnings`. |
+| <Ui k="jobs.status.failed" /> | `failed` | A step failed, or the control plane refused the job. The result code and the reason give the detail. |
+| <Ui k="jobs.status.cancelled" /> | `failed` | An Operator cancelled the job. The result code is `cancelled`. |
+| <Ui k="jobs.status.expired" /> | `expired` | The job waited in the queue longer than its acceptance window. A running job never expires. |
+| <Ui k="jobs.status.dead_letter" /> | `dead_letter` | The repository stayed locked after the last retry. |
 
 A job in a final state never changes again.
 

@@ -1,0 +1,12 @@
+---
+// A label of the web interface in the page language, read from the UI catalogs at build time.
+import { pageLang, uiText } from '../lib/ui-text';
+
+interface Props {
+	k: string;
+}
+
+const text = uiText(pageLang(Astro.locals), Astro.props.k);
+---
+
+{text}
