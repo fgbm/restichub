@@ -822,7 +822,6 @@ export const en = {
 	'jobs.reason.unsupported_kind':
 		'The queue does not run this kind of job. Update the control plane or the agent.',
 	'jobDetail.notFound': 'This job does not exist.',
-	'jobDetail.live': 'live',
 	'jobDetail.refresh': 'Refresh',
 	'jobDetail.summary': 'Summary',
 	'jobDetail.summaryHint': 'Statistics from the restic summary',

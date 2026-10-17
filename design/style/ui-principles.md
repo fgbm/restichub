@@ -36,13 +36,14 @@ Use the shared components of [ui/COMPONENTS.md](../../ui/COMPONENTS.md). They ap
 
 1. A status label is a verb in the past tense or a result: Succeeded, Failed, Cancelled.
 2. A job that succeeded with warnings shows "Succeeded" in the warning tone. It has no icon. The tooltip and the `aria-label` give the full meaning.
-3. A panel or a section appears only when it has content. Do not show a placeholder panel, for example "appears when…".
-4. If a job has one step, do not show an overall progress bar next to the step bar.
-5. Only three tones have a color. Danger (red) is for data that is not safe or work that failed. Warning (yellow) is for a problem that comes soon. Running (blue) is for work that runs now. A success and a usual state are grey. Each state of each entity has one label, one tone and one Lucide icon (`$lib/vocabulary.ts`).
-6. A list shows the time in the formats of `$lib/list-format.ts`. Freshness is a short distance ("7 min ago"). A run is the day and the hours ("today 02:00"). An audit time has seconds and is below the heading of its day. A validity end is a date, or a distance when less than 30 days remain. The tooltip of a time shows the full date, the seconds and the time zone.
-7. A list page has no static documentation text. Do not add a note, a footnote or a help panel that does not change with the state and does not lead to an action. The documentation (`docs/`) holds this text. A list page shows a banner only for a state: an error, a warning, an empty list or an action that is necessary. The one-line description in the page header stays.
-8. A locked field (disabled or read-only) shows its value. If it has no value, it shows the muted text "Not set" ("Не задано"). It never shows an example placeholder, because an example in a locked field looks like a stored value. `TextField`, `Select` and `Combobox` apply this rule.
-9. In an editable field, an example placeholder starts with "e.g." ("например,"), for example "e.g. snapshots/prod". A placeholder that is not an example, for example the hint of a search field, does not have this prefix.
+3. A page header shows each fact one time. Do not add a second badge that repeats the status, for example "Live" next to "Running".
+4. A panel or a section appears only when it has content. Do not show a placeholder panel, for example "appears when…".
+5. If a job has one step, do not show an overall progress bar next to the step bar.
+6. Only three tones have a color. Danger (red) is for data that is not safe or work that failed. Warning (yellow) is for a problem that comes soon. Running (blue) is for work that runs now. A success and a usual state are grey. Each state of each entity has one label, one tone and one Lucide icon (`$lib/vocabulary.ts`).
+7. A list shows the time in the formats of `$lib/list-format.ts`. Freshness is a short distance ("7 min ago"). A run is the day and the hours ("today 02:00"). An audit time has seconds and is below the heading of its day. A validity end is a date, or a distance when less than 30 days remain. The tooltip of a time shows the full date, the seconds and the time zone.
+8. A list page has no static documentation text. Do not add a note, a footnote or a help panel that does not change with the state and does not lead to an action. The documentation (`docs/`) holds this text. A list page shows a banner only for a state: an error, a warning, an empty list or an action that is necessary. The one-line description in the page header stays.
+9. A locked field (disabled or read-only) shows its value. If it has no value, it shows the muted text "Not set" ("Не задано"). It never shows an example placeholder, because an example in a locked field looks like a stored value. `TextField`, `Select` and `Combobox` apply this rule.
+10. In an editable field, an example placeholder starts with "e.g." ("например,"), for example "e.g. snapshots/prod". A placeholder that is not an example, for example the hint of a search field, does not have this prefix.
 
 ## 4. Visual style
 
