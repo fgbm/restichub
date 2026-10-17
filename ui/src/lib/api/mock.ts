@@ -2205,13 +2205,18 @@ export class MockApiService {
 				(user) => user.username.toLowerCase() === request.username.toLowerCase()
 			)
 		) {
-			throw new Error('username_taken');
+			throw new ApiError({
+				status: 409,
+				code: 'username_taken',
+				title: 'Conflict',
+				field: 'username'
+			});
 		}
 		if (
 			request.email &&
 			this.platformUsers.some((user) => user.email?.toLowerCase() === request.email?.toLowerCase())
 		) {
-			throw new Error('email_taken');
+			throw new ApiError({ status: 409, code: 'email_taken', title: 'Conflict', field: 'email' });
 		}
 		const memberships = (request.memberships ?? []).map((membership) => ({
 			tenant_id: membership.tenant_id,

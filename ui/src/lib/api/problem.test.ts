@@ -31,6 +31,17 @@ describe('fieldError', () => {
 		expect(fieldError(problem('username'), 'username')).toBe('Correct this field.');
 	});
 
+	it('marks only the field that the conflict names', () => {
+		const taken: ApiProblem = {
+			status: 409,
+			code: 'email_taken',
+			title: 'Conflict',
+			field: 'email'
+		};
+		expect(fieldError(taken, 'email')).toBe('This email is taken.');
+		expect(fieldError(taken, 'username')).toBeUndefined();
+	});
+
 	it('returns undefined for another field', () => {
 		expect(fieldError(problem('username'), 'password')).toBeUndefined();
 		expect(fieldError(null, 'username')).toBeUndefined();
