@@ -26,7 +26,7 @@ When an alert resolves because its plan, host or rule is gone, the control plane
 
 ## Recovery point objective
 
-Each plan has an optional RPO from 15 minutes to 400 days. Set it in the plan form, in hours. The default is the schedule interval plus a margin. The margin is one tenth of the interval, at least 15 minutes and at most 2 hours.
+Each plan has an optional RPO from 15 minutes to 400 days. Set it on the page of the plan, in the section "Recovery point objective", in hours. The default is the schedule interval plus a margin. The margin is one tenth of the interval, at least 15 minutes and at most 2 hours.
 
 | Schedule | Default RPO |
 |---|---|

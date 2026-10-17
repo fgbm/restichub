@@ -287,8 +287,6 @@
 		<Button variant="primary" icon="plus" onclick={openCreate}>{t('users.create')}</Button>
 	{/snippet}
 
-	<Alert variant="inline" icon="users" title={t('users.sharedNote')} />
-
 	<ListView
 		label={t('users.title')}
 		items={shown}

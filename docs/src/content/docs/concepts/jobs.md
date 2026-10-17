@@ -13,13 +13,15 @@ A job is one run of a plan or one manual operation. The control plane keeps the 
 | Sent to the host | `sent` | The control plane sent the job. The agent did not confirm it. |
 | Running | `running` | The agent confirmed the job and runs it. |
 | Succeeded | `succeeded` | Every step succeeded. |
-| Succeeded with warnings | `succeeded` | Every step finished, and restic reported warnings. The result code is `succeeded_with_warnings`. |
+| Succeeded, in yellow | `succeeded` | Every step finished, and restic reported warnings. The tooltip shows "Succeeded with warnings". The result code is `succeeded_with_warnings`. |
 | Failed | `failed` | A step failed, or the control plane refused the job. The result code and the reason give the detail. |
 | Cancelled | `failed` | An Operator cancelled the job. The result code is `cancelled`. |
 | Expired | `expired` | The job waited in the queue longer than its acceptance window. A running job never expires. |
 | Gave up | `dead_letter` | The repository stayed locked after the last retry. |
 
 A job in a final state never changes again.
+
+The list "Jobs" groups the jobs in the tabs "All", "Running", "Failed", "With warnings" and "Succeeded". Each tab shows the number of its jobs.
 
 ## Delivery
 
@@ -192,7 +194,7 @@ The configuration file holds the same value as `log_retention_days`. The value i
 
 ## Job detail
 
-Select a job in the list "Jobs" to open its detail. The header shows the plan (or the kind of the job), the status, the host and the trigger. While the job runs, it also shows the step number. The button "Run again" starts the plan again. The button "Cancel job" is available while the job can still change. The panel "About this job" holds these fields:
+Select the name of a job in the list "Jobs". The page of the job opens at `/jobs/<id>`. The header shows the plan (or the kind of the job), the status, the host and the trigger. While the job runs, it also shows the step number. The button "Run again" starts the plan again. The button "Cancel job" is available while the job can still change. The panel "About this job" holds these fields:
 
 | Field | Meaning |
 |---|---|
@@ -224,7 +226,7 @@ A script step shows the badge "Script" and its phase. Select a step to read its 
 
 ### Reasons and result codes
 
-A failed or refused job shows a reason under its title. The list of jobs shows the short result code. These are the texts:
+A failed or refused job shows a reason under its title on the page of the job. These are the texts:
 
 | Code | Text in the web interface |
 |---|---|
@@ -266,7 +268,9 @@ A failed or refused job shows a reason under its title. The list of jobs shows t
 | `unsupported_kind` | The queue does not run this kind of job. |
 | `wrong_password` | The repository password or the access keys are wrong. |
 
-| Code | Text in the web interface |
+An alert about a failed job uses a short text of the code:
+
+| Code | Text in the alert |
 |---|---|
 | `agent_lost` | the host went offline |
 | `cancelled` | cancelled |

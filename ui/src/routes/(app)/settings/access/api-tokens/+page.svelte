@@ -356,8 +356,6 @@
 	<SidePanel bind:open={detailOpen} title={detail?.name ?? ''}>
 		<KeyValue items={detailItems} stacked />
 	</SidePanel>
-
-	<Alert variant="inline" icon="lock" title={t('tokens.valueNote')} />
 </SettingsLayout>
 
 <Dialog

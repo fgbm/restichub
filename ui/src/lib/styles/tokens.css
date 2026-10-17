@@ -81,6 +81,7 @@
 	--rh-transition-fast: 120ms ease;
 	--rh-transition-slow: 150ms ease;
 	--rh-spin-duration: 1.4s;
+	--rh-spin-duration-reduced: 2.8s;
 }
 
 /* Light theme (default) */
@@ -400,10 +401,15 @@ pre {
 	outline-offset: 2px;
 }
 
-/* An endless animation must stop, not run once in 0.01 ms forever: the browser then samples a
-   random phase on each frame and a spinner jumps (design/style/ui-principles.md, 4.3). */
+/* A spinner is a status signal, not decoration: under reduced motion it turns slower and the
+   remaining motion stops (design/style/ui-principles.md, 4.3). An endless animation must not run
+   in 0.01 ms forever: the browser then samples a random phase on each frame and a spinner jumps. */
 @media (prefers-reduced-motion: reduce) {
-	*,
+	:root {
+		--rh-spin-duration: var(--rh-spin-duration-reduced);
+	}
+
+	*:not(.rh-spinner),
 	*::before,
 	*::after {
 		transition-duration: 0.01ms !important;
