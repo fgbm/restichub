@@ -84,6 +84,7 @@ pub struct AgentFacts {
     pub status: AgentStatus,
     pub last_seen_at: Option<OffsetDateTime>,
     pub first_connected_at: Option<OffsetDateTime>,
+    pub stream_open: bool,
     pub created_at: OffsetDateTime,
 }
 
@@ -114,7 +115,8 @@ async fn agent_facts_page(
     after: Option<(String, AgentId)>,
 ) -> Result<Vec<AgentFacts>, DbError> {
     sqlx::query_as::<_, AgentFacts>(
-        "SELECT id, hostname, status, last_seen_at, first_connected_at, created_at FROM agents \
+        "SELECT id, hostname, status, last_seen_at, first_connected_at, \
+                stream_id IS NOT NULL AS stream_open, created_at FROM agents \
          WHERE ($1::text IS NULL OR (hostname, id) > ($1::text, $2::uuid)) \
          ORDER BY hostname, id LIMIT $3",
     )

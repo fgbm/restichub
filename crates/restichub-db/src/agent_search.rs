@@ -1,8 +1,8 @@
 //! The filtered, sorted and paged host list (FR-UI-01).
 //!
 //! The list filters, sorts and pages on the server, so a tenant with many hosts reads one page
-//! (ADR-0009). The connection state of a host is derived from the stored times with the same rule
-//! as the dashboard: the caller passes the start of the online window.
+//! (ADR-0009). The connection state of a host follows the same rule as the dashboard: an open
+//! stream, and a `last_seen_at` after the start of the online window that the caller passes.
 
 use time::OffsetDateTime;
 
@@ -12,7 +12,7 @@ use crate::enums::AgentStatus;
 use crate::job_search::COUNT_LIMIT;
 use crate::tx::TenantTx;
 
-/// Derived from the stored times with the online window of the dashboard.
+/// Derived with the online rule of the dashboard.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HostState {
     Online,
@@ -111,7 +111,7 @@ macro_rules! state_expr {
     () => {
         "(CASE WHEN a.status = 'revoked' THEN 'revoked' \
                WHEN a.first_connected_at IS NULL THEN 'waiting' \
-               WHEN a.last_seen_at >= $8 THEN 'online' \
+               WHEN a.stream_id IS NOT NULL AND a.last_seen_at >= $8 THEN 'online' \
                ELSE 'offline' END)"
     };
 }

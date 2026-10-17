@@ -33,6 +33,20 @@ vi.mock('#lib/stores/session.svelte.ts', () => ({
 }));
 vi.mock('#lib/stores/toasts.svelte.ts', () => ({ pushToast: mocks.pushToast }));
 
+const stream = vi.hoisted(() => ({
+	listeners: [] as ((event: { type: string; agent_id?: string }) => void)[]
+}));
+
+vi.mock('#lib/stores/events.svelte.ts', () => ({
+	isStreamConnected: () => false,
+	onEvent: (listener: (event: { type: string; agent_id?: string }) => void) => {
+		stream.listeners.push(listener);
+		return () => {
+			stream.listeners = stream.listeners.filter((item) => item !== listener);
+		};
+	}
+}));
+
 vi.mock('#lib/api/index.ts', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('#lib/api/index.ts')>();
 	return {
@@ -128,6 +142,18 @@ describe('the host page', () => {
 		expect((await screen.findAllByText('Offline')).length).toBeGreaterThan(0);
 		const state = screen.getByText('Open alerts').closest('.key-value__row') as HTMLElement;
 		expect(within(state).getByText('1')).toBeInTheDocument();
+	});
+
+	it('fr_ui_02 a host event reads the host again and shows it offline', async () => {
+		mocks.getAgent.mockResolvedValueOnce(agent()).mockResolvedValue(agent({ online: false }));
+		render(HostPage, { hostId: 'a_01' });
+
+		await screen.findByRole('heading', { level: 1, name: 'srv-db-01' });
+		expect(screen.queryByText('Offline')).not.toBeInTheDocument();
+		for (const listener of stream.listeners) listener({ type: 'host.offline', agent_id: 'a_01' });
+
+		expect((await screen.findAllByText('Offline')).length).toBeGreaterThan(0);
+		expect(screen.queryByText('Online')).not.toBeInTheDocument();
 	});
 
 	it('fr_hk_08 shows the trust mode with the interpreters', async () => {

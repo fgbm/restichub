@@ -1579,7 +1579,8 @@ export interface components {
             last_certificate_rotation_at?: string | null;
             last_seen_at?: string | null;
             /**
-             * @description Whether the control plane saw the host within the online window of the dashboard. Always
+             * @description Whether the host has an open stream to a control plane instance, as the database records it.
+             *     After an instance stops without a close, the value stays true for up to 90 seconds. Always
              *     false for a revoked host.
              */
             online: boolean;
