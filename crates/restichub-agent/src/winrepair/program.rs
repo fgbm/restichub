@@ -5,20 +5,30 @@
 //! administrator. A process of that account without elevation can then replace a program that the
 //! service runs as LocalSystem. A new access control does not stop it: a handle that the process
 //! opened before keeps its access, and the directory of the executable is the first place where
-//! Windows looks for a library. So the repair does not change such a tree in place. It moves the
-//! open tree aside and removes it, and the caller makes the directories again for SYSTEM and
-//! Administrators only, copies the running agent into them and downloads and verifies restic. An
-//! old handle then points to the moved tree, which the agent never uses.
+//! Windows looks for a library. So the repair moves the open tree aside and removes it, and the
+//! caller makes the directories again for SYSTEM and Administrators only, copies the running agent
+//! into them and downloads and verifies restic. An old handle then points to the moved tree, which
+//! the agent never uses. When another process keeps a file in the tree open, the tree cannot move
+//! and the repair falls back to a repair in place, so the host never stays without its service.
 
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, bail};
 
 use super::{Action, remove_file};
+use crate::paths::ProgramRebuild;
 use crate::winsec::{Entry, Exposure, Rights};
 
-/// Moves the program tree aside when another account could change a level or an entry of it
-/// (FR-IN-07). Returns whether it moved.
+mod in_place;
+
+pub(crate) use in_place::check_tree as check_program_tree;
+
+/// The Restart Manager takes a list of files; a tree larger than this is not a manual copy of the
+/// agent, and the first files name the holder well enough.
+const MAX_HOLDER_FILES: usize = 4096;
+
+/// Moves the program tree aside when another account could change a level or an entry of it, or
+/// repairs it in place when another process keeps it open (FR-IN-07).
 ///
 /// The open level nearest to `root` goes, or `program` when only an entry in it is open. A level
 /// of another owner is refused. `stop_service` runs before the move: a running agent or restic
@@ -32,9 +42,9 @@ pub(crate) fn rebuild_open_program_tree(
     current_dir: Option<&Path>,
     stop_service: &mut dyn FnMut() -> Result<()>,
     log: &mut dyn FnMut(Action),
-) -> Result<bool> {
+) -> Result<ProgramRebuild> {
     let Some(open) = open_level(program, root)? else {
-        return Ok(false);
+        return Ok(ProgramRebuild::Unchanged);
     };
     if is_inside(running, &open) {
         bail!(
@@ -50,19 +60,22 @@ pub(crate) fn rebuild_open_program_tree(
         );
     }
     stop_service().context("cannot stop the service before the program directory is replaced")?;
-    let name = open
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let stamp = time::OffsetDateTime::now_utc().unix_timestamp();
-    let aside = open.with_file_name(format!("{name}.untrusted-{stamp}"));
-    move_with_retry(&open, &aside).with_context(|| {
-        format!(
-            "cannot move {} to {}; another process keeps a file or a directory in it open, for example a restic that runs a job or a shell whose current directory is in it; the service is stopped and starts again when the command succeeds; an administrator closes that process, or waits for the job or restarts the computer, then runs the command again; to start the service without the repair, run: Start-Service restichub-agent",
-            open.display(),
-            aside.display()
-        )
-    })?;
+    let aside = aside_name(&open);
+    if let Err(error) = move_with_retry(&open, &aside) {
+        let holders = name_holders(&open);
+        log(Action::RepairingInPlace {
+            dir: open.clone(),
+            cause: error.to_string(),
+            holders: holders.clone(),
+        });
+        in_place::repair(&open, program, record, log).with_context(|| {
+            format!(
+                "cannot move {} ({error}; open in: {holders}), and the repair in place stopped; the service stays stopped until the command succeeds",
+                open.display()
+            )
+        })?;
+        return Ok(ProgramRebuild::RepairedInPlace { dir: open, holders });
+    }
     log(Action::MovedProgram {
         from: open,
         to: aside.clone(),
@@ -78,7 +91,52 @@ pub(crate) fn rebuild_open_program_tree(
             cause: error.to_string(),
         }),
     }
-    Ok(true)
+    Ok(ProgramRebuild::Moved)
+}
+
+fn aside_name(path: &Path) -> PathBuf {
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let stamp = time::OffsetDateTime::now_utc().unix_timestamp();
+    path.with_file_name(format!("{name}.untrusted-{stamp}"))
+}
+
+/// A handle to a directory, such as the current directory of a shell or an Explorer window, is
+/// not in the list, so the text says so when the list is empty.
+fn name_holders(dir: &Path) -> String {
+    let mut files = Vec::new();
+    collect_files(dir, &mut files);
+    match crate::winsec::holders(&files) {
+        Ok(holders) if holders.is_empty() => {
+            "no process keeps a file in it open, so a process keeps a directory in it open, for example a shell or an Explorer window".to_owned()
+        }
+        Ok(holders) => holders
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(", "),
+        Err(error) => format!("the process is not known: {error:#}"),
+    }
+}
+
+/// Never follows a link, so the list stays inside the tree.
+fn collect_files(dir: &Path, files: &mut Vec<PathBuf>) {
+    let Ok(listing) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for item in listing.flatten() {
+        if files.len() >= MAX_HOLDER_FILES {
+            return;
+        }
+        let path = item.path();
+        match std::fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.is_dir() => collect_files(&path, files),
+            Ok(metadata) if metadata.is_file() => files.push(path),
+            _ => {}
+        }
+    }
 }
 
 /// A scanner, or the image of a service that just stopped, can keep a file open for a moment.
@@ -214,7 +272,7 @@ mod tests {
     }
 
     struct Run {
-        result: Result<bool>,
+        result: Result<ProgramRebuild>,
         actions: Vec<Action>,
         stops: u32,
     }
@@ -286,9 +344,9 @@ mod tests {
         );
 
         let run = rebuild(&tree, &elsewhere(&tree));
-        assert!(
+        assert_eq!(
             run.result.expect("the repair must succeed"),
-            "the tree moves"
+            ProgramRebuild::Moved
         );
         assert_eq!(run.stops, 1, "the service stops before the move");
         let [Action::MovedProgram { from, to }, removed_record, ..] = run.actions.as_slice() else {
@@ -314,7 +372,10 @@ mod tests {
             "the old handle must not reach the new directory"
         );
         let run = rebuild(&tree, &elsewhere(&tree));
-        assert!(!run.result.expect("a second run must succeed"));
+        assert_eq!(
+            run.result.expect("a second run must succeed"),
+            ProgramRebuild::Unchanged
+        );
         assert!(run.actions.is_empty(), "{:?}", run.actions);
         assert_eq!(run.stops, 0);
     }
@@ -323,7 +384,10 @@ mod tests {
     fn fr_in_07_a_protected_install_directory_is_not_changed() {
         let tree = tree("program-clean");
         let run = rebuild(&tree, &elsewhere(&tree));
-        assert!(!run.result.expect("the repair must succeed"));
+        assert_eq!(
+            run.result.expect("the repair must succeed"),
+            ProgramRebuild::Unchanged
+        );
         assert!(run.actions.is_empty(), "{:?}", run.actions);
         assert_eq!(run.stops, 0, "a protected tree keeps the service running");
         assert!(tree.program.join("restic.exe").exists());
@@ -335,7 +399,10 @@ mod tests {
         let tree = tree("program-restic");
         grant(&tree.program.join("restic.exe"), "(R,W)").expect("cannot add the entry");
         let run = rebuild(&tree, &elsewhere(&tree));
-        assert!(run.result.expect("the repair must succeed"));
+        assert_eq!(
+            run.result.expect("the repair must succeed"),
+            ProgramRebuild::Moved
+        );
         assert!(
             matches!(run.actions.first(), Some(Action::MovedProgram { from, .. }) if *from == tree.program),
             "{:?}",
@@ -373,30 +440,124 @@ mod tests {
         assert!(tree.record.exists());
 
         let run = rebuild_from(&tree, &elsewhere(&tree), Some(&tree.base));
-        assert!(
+        assert_eq!(
             run.result
-                .expect("a directory above the tree does not stop the move")
+                .expect("a directory above the tree does not stop the move"),
+            ProgramRebuild::Moved
         );
     }
 
     #[test]
-    fn fr_in_07_a_file_in_use_stops_the_move_with_the_fix() {
+    fn fr_in_07_a_program_that_cannot_be_replaced_stops_with_its_holder() {
         let tree = tree("program-in-use");
         grant(&tree.program, "(OI)(CI)(M)").expect("cannot add the entry");
-        // A running restic; any open below a directory stops its rename.
-        let restic = std::fs::OpenOptions::new()
+        // Without the delete sharing, restic can be neither removed nor renamed.
+        let restic = hold(&tree.program.join("restic.exe"));
+        let run = rebuild(&tree, &elsewhere(&tree));
+        let error = format!("{:#}", run.result.expect_err("a program in use"));
+        assert!(error.contains(&this_process()), "{error}");
+        assert!(error.contains("restart the computer"), "{error}");
+        assert!(error.contains("the service stays stopped"), "{error}");
+        assert_eq!(run.stops, 1, "the service stops first");
+        assert!(tree.record.exists(), "a failed repair keeps the record");
+        drop(restic);
+    }
+
+    /// Opens a file as a FileStream with FileShare.Read does.
+    fn hold(path: &Path) -> std::fs::File {
+        std::fs::OpenOptions::new()
             .read(true)
             .share_mode(FILE_SHARE_READ)
-            .open(tree.program.join("restic.exe"))
-            .expect("cannot open restic");
+            .open(path)
+            .expect("cannot hold the file")
+    }
+
+    fn this_process() -> String {
+        format!("PID {}", std::process::id())
+    }
+
+    #[test]
+    fn fr_in_07_a_tree_that_another_process_keeps_open_is_repaired_in_place() {
+        let tree = tree("program-held");
+        let user = current_user_sid().expect("cannot read the user SID");
+        grant_sid(&tree.root, &user, "(OI)(CI)(F)").expect("cannot add the entry");
+        let license = tree.program.join("LICENSE");
+        grant_sid(&license, &user, "(F)").expect("cannot add the entry");
+        let held = hold(&license);
+
         let run = rebuild(&tree, &elsewhere(&tree));
-        let error = format!("{:#}", run.result.expect_err("a file in use"));
-        assert!(error.contains("restarts the computer"), "{error}");
-        assert!(error.contains("the service is stopped"), "{error}");
-        assert!(error.contains("Start-Service restichub-agent"), "{error}");
-        assert_eq!(run.stops, 1, "the service stops first");
-        assert!(tree.record.exists(), "a failed move keeps the record");
-        drop(restic);
+        let rebuilt = run.result.expect("the repair in place must succeed");
+        let ProgramRebuild::RepairedInPlace { dir, holders } = &rebuilt else {
+            panic!("unexpected result: {rebuilt:?}");
+        };
+        assert_eq!(dir, &tree.root);
+        assert!(holders.contains(&this_process()), "{holders}");
+        assert!(
+            rebuilt
+                .warning()
+                .is_some_and(|warning| warning.contains(&this_process())
+                    && warning.contains("restart the computer and run install-service again")),
+            "{rebuilt:?}"
+        );
+        assert_eq!(run.stops, 1);
+        assert!(
+            matches!(run.actions.first(), Some(Action::RepairingInPlace { .. })),
+            "{:?}",
+            run.actions
+        );
+        for level in [&tree.root, &tree.program] {
+            check_admin_only(level).expect("each level is protected");
+        }
+        check_admin_only(&license).expect("the held file is protected");
+        assert!(license.exists(), "the held file stays");
+        for gone in ["restichub-agent.exe", "restic.exe", "SHA256SUMS"] {
+            assert!(!tree.program.join(gone).exists(), "{gone} must go");
+        }
+        assert!(!tree.record.exists(), "the record of restic must go");
+
+        // The caller copies the agent; a file that appears after the repair stops the start.
+        crate::winsec::create_protected_file(&tree.program.join("restichub-agent.exe"), b"x")
+            .expect("cannot copy the agent");
+        check_program_tree(&tree.program, &tree.root).expect("the repaired tree passes");
+        std::fs::write(tree.program.join("version.dll"), b"x").expect("cannot plant");
+        let error = format!(
+            "{:#}",
+            check_program_tree(&tree.program, &tree.root)
+                .expect_err("a new library must stop the start")
+        );
+        assert!(error.contains("version.dll"), "{error}");
+        drop(held);
+    }
+
+    #[test]
+    fn fr_in_07_an_unknown_file_stops_the_repair_in_place() {
+        let tree = tree("program-held-unknown");
+        grant(&tree.program, "(OI)(CI)(M)").expect("cannot add the entry");
+        std::fs::write(tree.program.join("version.dll"), b"x").expect("cannot plant");
+        let held = hold(&tree.program.join("LICENSE"));
+        let run = rebuild(&tree, &elsewhere(&tree));
+        let error = format!("{:#}", run.result.expect_err("an unknown file"));
+        assert!(error.contains("version.dll"), "{error}");
+        assert!(error.contains("not a file of the agent"), "{error}");
+        assert!(tree.program.join("version.dll").exists());
+        assert!(tree.record.exists());
+        drop(held);
+    }
+
+    #[test]
+    fn fr_in_07_the_checks_of_the_agent_leave_no_handle_in_the_tree() {
+        let tree = tree("program-own-handles");
+        grant(&tree.program.join("restic.exe"), "(R,W)").expect("cannot add the entry");
+        let mut files = Vec::new();
+        collect_files(&tree.root, &mut files);
+        assert_eq!(
+            open_level(&tree.program, &tree.root).expect("the check must pass"),
+            Some(tree.program.clone())
+        );
+        let holders = crate::winsec::holders(&files).expect("the list must be read");
+        assert!(holders.is_empty(), "{holders:?}");
+        let aside = aside_name(&tree.root);
+        std::fs::rename(&tree.root, &aside).expect("the tree moves at the first attempt");
     }
 
     #[test]

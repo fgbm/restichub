@@ -614,6 +614,59 @@ jobs:
             Write-Host "crash ${crash}: state $($service.State), process $before -> $($service.ProcessId) after $i s"
             if ($service.State -ne 'Running' -or $service.ProcessId -eq $before) { throw "the service did not restart after crash $crash" }
           }
+      # A process that keeps a file open stops the move of the program directory, so the command
+      # repairs it in place and the service runs again (T20).
+      - name: install-service repairs in place a program directory that a process keeps open (T20)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $installed = Join-Path $env:ProgramFiles 'ResticHub\Agent\restichub-agent.exe'
+          $program = Join-Path $env:ProgramFiles 'ResticHub'
+          $package = Join-Path $env:RUNNER_TEMP 'held-package'
+          New-Item -ItemType Directory -Force $package | Out-Null
+          Copy-Item $installed $package
+          $agent = Join-Path $package 'restichub-agent.exe'
+          $user = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          $userAce = { param($path) (Get-Acl $path).GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) | Where-Object { $_.IdentityReference.Value -eq $user } }
+          # A manual copy of the package left a license file, and the open access.
+          $license = Join-Path $program 'Agent\LICENSE'
+          Set-Content $license 'license'
+          icacls $program /grant "*${user}:(OI)(CI)(M)" /T
+          if ($LASTEXITCODE -ne 0) { throw "icacls $program exit code $LASTEXITCODE" }
+          icacls $license /grant "*${user}:(M)"
+          if (-not (& $userAce $program)) { throw 'the test did not loosen the access' }
+          # FileShare.Read only: the file can be neither removed nor renamed, and the tree cannot move.
+          $held = [IO.File]::Open($license, 'Open', 'Read', 'Read')
+          try {
+            $since = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+            $output = & $agent install-service 2>&1 | Out-String
+            $code = $LASTEXITCODE
+            Write-Host $output
+            if ($code -ne 0) { throw "install-service exit code $code" }
+            if ($output -notmatch 'repairs it in place') { throw 'no repair in place' }
+            if ($output -notmatch "warning: a process kept .* open \(.*PID $PID\b.*\); restart the computer and run install-service again") { throw 'the warning does not name this process' }
+            if ((Get-Service restichub-agent).Status -ne 'Running') { throw 'not running' }
+            bash scripts/install-smoke.sh connected $since 60
+            if ($LASTEXITCODE -ne 0) { throw 'not connected' }
+            foreach ($path in $program, (Join-Path $program 'Agent'), $installed, $license) {
+              if (& $userAce $path) { throw "$path stays open" }
+            }
+            if ((Get-Acl $installed).Owner -notmatch 'Administrators|SYSTEM') { throw "the owner of the agent is $((Get-Acl $installed).Owner)" }
+            if (-not (Test-Path (Join-Path $program 'Agent\restic.exe'))) { throw 'restic was not installed again' }
+          } finally {
+            $held.Dispose()
+          }
+          # Without the held file nothing is left to repair.
+          $since = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+          $output = & $agent install-service 2>&1 | Out-String
+          $code = $LASTEXITCODE
+          Write-Host $output
+          if ($code -ne 0) { throw "install-service exit code $code" }
+          if ($output -match '(?m)^(repaired|moved) ') { throw 'the second run repaired again' }
+          bash scripts/install-smoke.sh connected $since 60
+          if ($LASTEXITCODE -ne 0) { throw 'not connected' }
+          Remove-Item $license
       - name: uninstall-service removes the service and the event source and keeps the log (FR-IN-08)
         shell: pwsh
         run: |

@@ -98,7 +98,13 @@ The command stops the service, copies the new program to `%ProgramFiles%\ResticH
 
 If a job runs, the command cannot stop the service. Wait for the job, then run the command again.
 
-The command cannot move an open `%ProgramFiles%\ResticHub` while a process keeps a file or a directory in it open. Do not go to a folder in `%ProgramFiles%\ResticHub` in PowerShell. If the move fails, the service stays stopped. Close that process or restart the computer, then run the command again.
+The command cannot move an open `%ProgramFiles%\ResticHub` while a process keeps a file or a directory in it open. Do not go to a folder in `%ProgramFiles%\ResticHub` in PowerShell. If another process keeps the folder open, the command repairs the folder in place and starts the service. Then it prints a warning that names that process. That process can add a file to the folder until the restart. If you see the warning, do these steps:
+
+1. Restart the computer.
+2. Run `install-service` again as Administrator.
+3. Make sure that the output does not show a line that starts with `repaired` or `moved`.
+
+If the command stops because the folder holds a file that the agent does not know, the service stays stopped. Examine that file and remove it. Then run the command again.
 
 ## Check the agents
 
@@ -120,7 +126,7 @@ Upgrade the agents only after the new control plane works.
 ## Upgrade notes since 0.1.0-rc.4
 
 - Three database migrations run at the first start. They add indexes and fields of the lists, and the password reset of a platform account.
-- On Windows, `install-service` and `register` repair the access control of `%ProgramData%\ResticHub`. Read the output: it prints one line for each top-level directory, and one line for each removal and each warning. Add `--verbose` to print each repaired item. An open `%ProgramFiles%\ResticHub` is moved aside and made again, so run the command from the unpacked package.
+- On Windows, `install-service` and `register` repair the access control of `%ProgramData%\ResticHub`. Read the output: it prints one line for each top-level directory, and one line for each removal and each warning. Add `--verbose` to print each repaired item. An open `%ProgramFiles%\ResticHub` is moved aside and made again, so run the command from the unpacked package. If a process keeps that folder open, the command repairs it in place and prints a warning. Then restart the computer and run the command again.
 - The Windows service restarts after each failure, after 5, 30 and then 60 seconds. It does not restart after the exit code 78, as on Linux.
 - A Windows service with an identity that another account could change does not start. It writes the cause to the event log `ResticHub`, and `status` shows it. Before this release such a service connected, and each job failed with "restic did not start".
 

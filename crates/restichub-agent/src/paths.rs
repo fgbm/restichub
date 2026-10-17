@@ -169,8 +169,43 @@ pub fn repair_config_dir(
     }
 }
 
+/// What [`rebuild_program_dir`] did to the program directory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProgramRebuild {
+    Unchanged,
+    /// Moved aside and removed, so the caller makes it again.
+    Moved,
+    /// Another process kept `dir` open, so it did not move. Its levels and files got the access
+    /// of SYSTEM and Administrators only, and the agent and restic in it are removed.
+    RepairedInPlace {
+        dir: PathBuf,
+        holders: String,
+    },
+}
+
+impl ProgramRebuild {
+    /// Whether the agent and restic must be written again.
+    #[must_use]
+    pub fn replaced(&self) -> bool {
+        *self != Self::Unchanged
+    }
+
+    /// A handle opened before the repair keeps its access until the restart (T20).
+    #[must_use]
+    pub fn warning(&self) -> Option<String> {
+        let Self::RepairedInPlace { dir, holders } = self else {
+            return None;
+        };
+        Some(format!(
+            "warning: a process kept {} open ({holders}); restart the computer and run install-service again; it must print no repaired or moved lines",
+            dir.display()
+        ))
+    }
+}
+
 /// Moves aside and removes the program directory that a manual copy or an older build left open
-/// (FR-IN-07, threat T20). Returns whether it moved, so the caller makes it again.
+/// (FR-IN-07, threat T20). When another process keeps a file in it open, it repairs the directory
+/// in place instead.
 ///
 /// It runs before the program directory is checked, in the elevated commands only. The restic
 /// record in `config` goes with restic, so the install downloads restic again. `running` is the
@@ -181,13 +216,14 @@ pub fn repair_config_dir(
 /// # Errors
 ///
 /// Returns an error when a level has another owner, when the running image is inside the open
-/// directory, or when the service does not stop or the directory does not move.
+/// directory, when the service does not stop, or when the directory neither moves nor takes the
+/// repair in place, for example because it holds a file that the agent does not know.
 pub fn rebuild_program_dir(
     config: &Path,
     running: &Path,
     stop_service: &mut dyn FnMut() -> Result<()>,
     log: &mut dyn FnMut(&str),
-) -> Result<bool> {
+) -> Result<ProgramRebuild> {
     #[cfg(windows)]
     {
         let program = program_dir();
@@ -206,7 +242,27 @@ pub fn rebuild_program_dir(
     #[cfg(not(windows))]
     {
         let _ = (config, running, stop_service, log);
-        Ok(false)
+        Ok(ProgramRebuild::Unchanged)
+    }
+}
+
+/// Refuses a name that the agent does not know, a link or an open access in the program
+/// directory, right before the service starts (T20). A process that kept the directory open during
+/// a repair in place can add a file there until the restart.
+///
+/// # Errors
+///
+/// Returns an error with the path of the first such entry.
+pub fn check_program_files() -> Result<()> {
+    #[cfg(windows)]
+    {
+        let program = program_dir();
+        let root = program.parent().map(Path::to_path_buf).unwrap_or_default();
+        crate::winrepair::check_program_tree(&program, &root)
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(())
     }
 }
 

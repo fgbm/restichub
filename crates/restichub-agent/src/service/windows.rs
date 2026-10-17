@@ -192,20 +192,57 @@ fn failure_actions() -> ServiceFailureActions {
 }
 
 fn stop_and_wait(service: &windows_service::service::Service) -> Result<()> {
-    if service.query_status()?.current_state == ServiceState::Stopped {
+    let status = service.query_status()?;
+    if status.current_state == ServiceState::Stopped {
         return Ok(());
     }
+    // The process reports the stopped state before it exits, and until then its image and its
+    // restic keep files of the program directory open. The handle is opened before the stop, so a
+    // reused process id cannot take its place.
+    let process = status.process_id.and_then(open_process);
     service.stop().context("cannot stop the service")?;
     let deadline = std::time::Instant::now() + STOP_WAIT;
+    let late = || {
+        anyhow::anyhow!(
+            "the service {SERVICE_NAME} did not stop in time; start it by hand after it stops"
+        )
+    };
     while service.query_status()?.current_state != ServiceState::Stopped {
         if std::time::Instant::now() >= deadline {
-            anyhow::bail!(
-                "the service {SERVICE_NAME} did not stop in time; start it by hand after it stops"
-            );
+            return Err(late());
         }
         std::thread::sleep(Duration::from_millis(500));
     }
+    if let Some(process) = process
+        && !wait_for_exit(
+            &process,
+            deadline.saturating_duration_since(std::time::Instant::now()),
+        )
+    {
+        return Err(late());
+    }
     Ok(())
+}
+
+#[allow(unsafe_code)]
+fn open_process(pid: u32) -> Option<std::os::windows::io::OwnedHandle> {
+    use std::os::windows::io::FromRawHandle as _;
+    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE};
+    // SAFETY: the call takes no pointer; a null result means no handle.
+    let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
+    // SAFETY: a non-null handle is open and owned by nothing else.
+    (!handle.is_null())
+        .then(|| unsafe { std::os::windows::io::OwnedHandle::from_raw_handle(handle) })
+}
+
+#[allow(unsafe_code)]
+fn wait_for_exit(process: &std::os::windows::io::OwnedHandle, timeout: Duration) -> bool {
+    use std::os::windows::io::AsRawHandle as _;
+    use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
+    use windows_sys::Win32::System::Threading::WaitForSingleObject;
+    let millis = u32::try_from(timeout.as_millis()).unwrap_or(u32::MAX - 1);
+    // SAFETY: the handle is open with SYNCHRONIZE for the call.
+    unsafe { WaitForSingleObject(process.as_raw_handle(), millis) == WAIT_OBJECT_0 }
 }
 
 /// # Errors
