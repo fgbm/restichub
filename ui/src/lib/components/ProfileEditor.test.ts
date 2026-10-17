@@ -293,6 +293,38 @@ describe('Profile editor sections', () => {
 		expect(screen.getByText(/^restic backup/)).not.toHaveTextContent('/etc');
 	});
 
+	it('ac_ui_11_restic_commands_keep_the_system', async () => {
+		const u = user();
+		const paths = { all: ['/srv'], windows: ['C:\\Data'], linux: ['/etc'], macos: [] };
+		mocks.listProfiles.mockResolvedValue([profile({ paths })]);
+		const first = render(ProfileEditor, { profileId: 'p_1' });
+		await screen.findByLabelText(/^Profile/);
+		await u.click(screen.getByRole('button', { name: 'Restic commands' }));
+		await u.selectOptions(await screen.findByLabelText('Commands for the host:'), 'windows');
+		expect(JSON.parse(localStorage.getItem('restichub.v1.commands.os') ?? '""')).toBe('windows');
+		first.unmount();
+
+		render(ProfileEditor, { profileId: 'p_1' });
+		await screen.findByLabelText(/^Profile/);
+		await u.click(screen.getByRole('button', { name: 'Restic commands' }));
+		expect(await screen.findByLabelText('Commands for the host:')).toHaveValue('windows');
+	});
+
+	it('ac_ui_10_profile_editor_keeps_the_closed_sections', async () => {
+		const u = user();
+		mocks.listProfiles.mockResolvedValue([profile()]);
+		const first = render(ProfileEditor, { profileId: 'p_1' });
+		await screen.findByLabelText(/^Profile/);
+		await u.click(screen.getByRole('button', { name: 'Collapse all' }));
+		first.unmount();
+
+		render(ProfileEditor, { profileId: 'p_1' });
+		const expand = await screen.findByRole('button', { name: 'Expand all' });
+		await waitFor(() => expect(screen.queryByLabelText(/^Profile/)).not.toBeInTheDocument());
+		await u.click(expand);
+		expect(await screen.findByLabelText(/^Profile/)).toBeInTheDocument();
+	});
+
 	it('disables the restic commands until the profile has paths and says why', async () => {
 		render(ProfileEditor);
 		await screen.findByLabelText(/^Profile/);

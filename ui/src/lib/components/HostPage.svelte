@@ -25,6 +25,7 @@
 	import type { SummaryState } from '#lib/profile-form.ts';
 	import { enableCommand } from '#lib/scripts.ts';
 	import { onEvent } from '#lib/stores/events.svelte.ts';
+	import { rememberSections } from '#lib/section-state.svelte.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { keepUnchanged } from '#lib/unchanged.ts';
 
@@ -45,7 +46,9 @@
 	let plans = $state<Plan[]>([]);
 	let openAlerts = $state<AlertItem[]>([]);
 	let hostActions: HostActions;
-	let open = $state<Record<string, boolean>>(
+	const open = rememberSections(
+		'host',
+		SECTIONS,
 		Object.fromEntries(SECTIONS.map((key) => [key, true]))
 	);
 

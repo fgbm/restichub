@@ -193,6 +193,16 @@ Each automated test refers to its criterion ID in its name or in a comment.
 | AC-UI-01 | FR-API-01 | Compare the UI calls with the OpenAPI specification. **Expected:** each UI operation has an endpoint in the specification. Coverage 100 %. | A |
 | AC-UI-02 | FR-UI-02 | Watch job progress in the UI. **Expected:** update delay 2 s or less (95th percentile). | L |
 | AC-UI-03 | FR-UI-04 | Change the language to English and to Russian. **Expected:** the i18n linter finds no text without a translation. | A |
+| AC-UI-04 | FR-UI-05 | Set a tab, a filter, a sort and a page size on the Jobs list. Open another page from the navigation, then open Jobs from the navigation. **Expected:** the list shows the same tab, filter, sort and page size, and the address holds them. A reload gives the same result. | A |
+| AC-UI-05 | FR-UI-05 | Open a list with a link that has parameters. **Expected:** the list uses the parameters of the link and not the kept ones. The kept view does not change until the person changes the list. | A |
+| AC-UI-06 | FR-UI-05 | Use "Reset" in the filter bar of a list. **Expected:** the kept filters of that list are cleared. | A |
+| AC-UI-07 | FR-UI-05 | Keep a filter value that no longer exists (a deleted host, repository or plan, or an unknown tab). **Expected:** the list drops that value without an error and applies the other kept values. | A |
+| AC-UI-08 | FR-UI-05 | Sign in as a second user, or in a second tenant, in the same browser. **Expected:** the second person does not see the kept view of the first person. | A |
+| AC-UI-09 | FR-UI-05 | On the Restore page, choose a repository, open another page, then return. Reload the page. **Expected:** the same repository is selected each time. This includes a repository that the page chose by itself on the first visit. | A |
+| AC-UI-10 | FR-UI-05 | Close a section of the profile, plan, repository or host editor. Open another record of the same kind. **Expected:** the section is closed there too. The state is kept for each kind of editor and not for each record. | A |
+| AC-UI-11 | FR-UI-05 | Choose an operating system in the restic commands panel of the profile editor, then open the editor again. **Expected:** the panel shows the same operating system. The choice is kept for the browser. | A |
+| AC-UI-12 | FR-UI-05 | Fill the search field, go to page 2, and fill the restore target, the overwrite mode, the dry run flag, the verify flag and a form field. Open the page again. **Expected:** none of these values is kept. The browser storage holds no secret. | A |
+| AC-UI-13 | FR-UI-05 | Open the UI in a browser with no storage (private mode or disabled storage). **Expected:** the UI works and shows the default view. | A |
 | AC-AU-01 | FR-AU-01 | Do each operation from the list in FR-AU-01. **Expected:** the audit log has a record with user, time, IP address and diff. The API has no endpoint that changes or deletes audit records. | A |
 | AC-AU-02 | Section 2 | Table-driven test "role × operation". **Expected:** a Viewer gets HTTP 403 for each write operation. An Operator cannot manage users or revoke agents. | A |
 | AC-AU-03 | FR-AU-04 | Sign in with the username and the password only. The account has one active membership. **Expected:** a session in that tenant. The sign-in screen has no tenant field. | A |

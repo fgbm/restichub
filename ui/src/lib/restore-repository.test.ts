@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Me } from '#lib/api/index.ts';
-import { loadRepository, pickRepository, saveRepository, storageKey } from './restore-repository';
+import { clearSession, setSession } from '#lib/stores/session.svelte.ts';
+import { loadRepository, pickRepository, saveRepository } from './restore-repository';
 
 function session(tenant: string, user = 'u-1'): Me {
 	return {
@@ -13,51 +14,54 @@ function session(tenant: string, user = 'u-1'): Me {
 
 const available = [{ id: 'r-1' }, { id: 'r-2' }, { id: 'r-3' }];
 
+beforeEach(() => setSession(session('t-1')));
+
 afterEach(() => {
 	localStorage.clear();
+	clearSession();
 });
 
-describe('last repository of the Restore page', () => {
-	it('the address wins over the stored choice', () => {
-		expect(pickRepository(available, 'r-3', 'r-2')).toBe('r-3');
+// AC-UI-09: the Restore page keeps the repository.
+describe('ac_ui_09_restore_repository', () => {
+	it('the address wins over the kept choice', () => {
+		expect(pickRepository(available, 'r-3', 'r-2')).toEqual({ id: 'r-3', fromAddress: true });
 	});
 
-	it('the stored choice wins over the first repository', () => {
-		expect(pickRepository(available, null, 'r-2')).toBe('r-2');
+	it('the kept choice wins over the first repository', () => {
+		expect(pickRepository(available, null, 'r-2')).toEqual({ id: 'r-2', fromAddress: false });
 	});
 
-	it('an unknown address id falls back to the stored choice', () => {
-		expect(pickRepository(available, 'gone', 'r-2')).toBe('r-2');
+	it('an unknown address id falls back to the kept choice', () => {
+		expect(pickRepository(available, 'gone', 'r-2').id).toBe('r-2');
 	});
 
-	it('a stored id of a deleted repository falls back to the first one', () => {
-		const owner = session('t-1');
-		saveRepository(owner, 'deleted');
-		expect(pickRepository(available, null, loadRepository(owner))).toBe('r-1');
+	it('a kept id of a deleted repository falls back to the first one', () => {
+		saveRepository('deleted');
+		expect(pickRepository(available, null, loadRepository()).id).toBe('r-1');
 	});
 
 	it('an empty list gives no repository', () => {
-		expect(pickRepository([], 'r-1', 'r-2')).toBe('');
+		expect(pickRepository([], 'r-1', 'r-2').id).toBe('');
 	});
 
 	it('each tenant keeps its own choice', () => {
-		saveRepository(session('t-1'), 'r-2');
-		saveRepository(session('t-2'), 'r-3');
-		expect(loadRepository(session('t-1'))).toBe('r-2');
-		expect(loadRepository(session('t-2'))).toBe('r-3');
-		expect(loadRepository(session('t-3'))).toBeNull();
+		saveRepository('r-2');
+		setSession(session('t-2'));
+		expect(loadRepository()).toBeNull();
+		saveRepository('r-3');
+		setSession(session('t-1'));
+		expect(loadRepository()).toBe('r-2');
 	});
 
 	it('each user in a tenant keeps its own choice', () => {
-		saveRepository(session('t-1', 'u-1'), 'r-2');
-		expect(loadRepository(session('t-1', 'u-2'))).toBeNull();
-		expect(storageKey(session('t-1', 'u-1'))).toBe('restichub.restore.repository.t-1.u-1');
+		saveRepository('r-2');
+		setSession(session('t-1', 'u-2'));
+		expect(loadRepository()).toBeNull();
 	});
 
-	it('a session without a tenant stores nothing', () => {
-		const none = { platform_admin: true, role: 'admin' } as Me;
-		saveRepository(none, 'r-2');
+	it('a value that is not a text is removed', () => {
+		localStorage.setItem('restichub.v1.t-1.u-1.restore.repository', '{"x":1}');
+		expect(loadRepository()).toBeNull();
 		expect(localStorage.length).toBe(0);
-		expect(loadRepository(none)).toBeNull();
 	});
 });

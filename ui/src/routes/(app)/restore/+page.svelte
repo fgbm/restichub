@@ -209,7 +209,7 @@
 	}
 
 	function changeRepository(): void {
-		saveRepository(getSession(), repositoryId);
+		saveRepository(repositoryId);
 		void open().then(remember);
 	}
 
@@ -231,7 +231,11 @@
 				]);
 				repositories = allRepositories.filter((item) => item.initialized);
 				profiles = new Map(allProfiles.map((item) => [item.id, item.name]));
-				repositoryId = pickRepository(repositories, repositoryId, loadRepository(getSession()));
+				const kept = loadRepository();
+				const picked = pickRepository(repositories, repositoryId, kept);
+				repositoryId = picked.id;
+				// A pick by the page itself is a choice too: the list order must not change it later.
+				if (!picked.fromAddress && picked.id !== kept) saveRepository(picked.id);
 			} catch (problem) {
 				error = describe(problem);
 			} finally {

@@ -208,4 +208,6 @@ export interface FilterFacet {
 	hint?: string;
 	/** Show the search field at any number of options. Default: from seven options. */
 	search?: boolean;
+	/** The options hold every possible value, so a kept value outside them is dropped. */
+	exact?: boolean;
 }

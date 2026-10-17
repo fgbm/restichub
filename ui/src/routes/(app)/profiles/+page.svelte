@@ -51,6 +51,7 @@
 		{
 			key: 'repository',
 			label: t('profiles.repository'),
+			exact: !loading && !error,
 			options: facetCounts(profiles, (profile) => [profile.repository_id]).map((option) => ({
 				...option,
 				label: repositoryNames.get(option.value) ?? option.value

@@ -243,6 +243,7 @@ FR-IN-03, FR-IN-04 and FR-IN-05 are out of the MVP. The MVP installs an agent by
 | FR-UI-02 | Real-time updates through Server-Sent Events. | M |
 | FR-UI-03 | Profile editor: form and YAML with validation. | M (form), 1.0 (YAML) |
 | FR-UI-04 | Dark and light themes. English and Russian languages. | M |
+| FR-UI-05 | The web UI keeps the view settings that a person chooses and shows them again on the next visit in the same browser. A setting that depends on the data is kept for one tenant and one user. A setting of the workstation is kept for the browser. A link with explicit parameters wins over a kept setting. The UI never keeps a secret or a value that can cause harm when it applies again. | M |
 | FR-API-01 | Public REST API with an OpenAPI specification that the CP generates from code. API tokens with limited permissions. The API can do all operations that the UI can do. | M |
 | FR-API-02 | Command-line client `restichubctl`. | L |
 | FR-AU-01 | Audit log: sign-in, configuration changes, run, cancellation, restore, delivery of secrets to agents, agent enrollment and revocation, remote installation. Each record has user, time, IP address and diff. | M |

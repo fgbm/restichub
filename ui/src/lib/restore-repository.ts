@@ -1,38 +1,40 @@
 /*
- * The last repository that a person chose on the Restore page. The key holds the tenant and
- * the user, so a shared browser does not carry the choice to another tenant or person.
+ * The repository that the Restore page shows. The kept choice belongs to one tenant and one user,
+ * so a shared browser does not carry it to another person (FR-UI-05).
  */
-import type { Me } from '#lib/api/index.ts';
+import {
+	loadPreference,
+	savePreference,
+	type PreferenceScope
+} from '#lib/stores/ui-preferences.svelte.ts';
 
-const PREFIX = 'restichub.restore.repository';
+const KEY = 'restore.repository';
+const SCOPE: PreferenceScope = 'user';
 
-export function storageKey(session: Me | null): string | null {
-	const tenant = session?.tenant?.id;
-	if (!tenant) return null;
-	const user = session?.user?.id;
-	return user ? `${PREFIX}.${tenant}.${user}` : `${PREFIX}.${tenant}`;
+export function loadRepository(): string | null {
+	return loadPreference<string | null>(
+		SCOPE,
+		KEY,
+		(value): value is string => typeof value === 'string' && value !== '',
+		null
+	);
 }
 
-export function loadRepository(session: Me | null): string | null {
-	const key = storageKey(session);
-	if (!key || typeof localStorage === 'undefined') return null;
-	return localStorage.getItem(key);
+export function saveRepository(repositoryId: string): void {
+	if (repositoryId) savePreference(SCOPE, KEY, repositoryId);
 }
 
-export function saveRepository(session: Me | null, repositoryId: string): void {
-	const key = storageKey(session);
-	if (!key || !repositoryId || typeof localStorage === 'undefined') return;
-	localStorage.setItem(key, repositoryId);
+function isKnown(available: readonly { id: string }[], id: string | null): id is string {
+	return Boolean(id) && available.some((item) => item.id === id);
 }
 
-/** Order: the address, then the stored choice, then the first repository. An unknown id is skipped. */
+/** Order: the address, then the kept choice, then the first repository. An unknown id is skipped. */
 export function pickRepository(
 	available: readonly { id: string }[],
 	fromAddress: string | null,
-	stored: string | null
-): string {
-	for (const candidate of [fromAddress, stored]) {
-		if (candidate && available.some((item) => item.id === candidate)) return candidate;
-	}
-	return available[0]?.id ?? '';
+	kept: string | null
+): { id: string; fromAddress: boolean } {
+	if (isKnown(available, fromAddress)) return { id: fromAddress, fromAddress: true };
+	if (isKnown(available, kept)) return { id: kept, fromAddress: false };
+	return { id: available[0]?.id ?? '', fromAddress: false };
 }
