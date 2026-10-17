@@ -496,10 +496,6 @@
 		{/snippet}
 	</ListView>
 
-	<div class="note">
-		<Alert variant="inline" icon="lock" title={t('repositories.valueNote')} />
-	</div>
-
 	<Dialog
 		bind:open={unlockOpen}
 		size="sm"
@@ -600,10 +596,6 @@
 </Page>
 
 <style>
-	.note {
-		margin-top: var(--rh-space-4);
-	}
-
 	.job {
 		display: flex;
 		flex-direction: column;
