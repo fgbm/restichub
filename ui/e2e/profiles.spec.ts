@@ -140,7 +140,7 @@ test('editing a profile keeps the retention fields', async ({ page }) => {
 	await page.getByRole('button', { name: /^Retention/ }).click();
 	await expect(page.locator('#profile-keep-yearly')).toHaveValue('2');
 	await page.getByText('Limit the rules to some snapshots').click();
-	await expect(page.locator('#profile-filter-hosts')).toHaveValue('web-*');
+	await expect(page.getByRole('button', { name: 'Remove web-*' })).toBeVisible();
 	await page.locator('#profile-name').fill('web-renamed');
 	await page.getByRole('button', { name: 'Save' }).click();
 	await expect(page.getByText('The profile is updated.')).toBeVisible();
@@ -150,7 +150,7 @@ test('editing a profile keeps the retention fields', async ({ page }) => {
 	await page.getByRole('button', { name: /^Retention/ }).click();
 	await expect(page.locator('#profile-keep-yearly')).toHaveValue('2');
 	await page.getByText('Limit the rules to some snapshots').click();
-	await expect(page.locator('#profile-filter-hosts')).toHaveValue('web-*');
+	await expect(page.getByRole('button', { name: 'Remove web-*' })).toBeVisible();
 });
 
 test('the limits section creates and edits a profile with the job limits', async ({ page }) => {
