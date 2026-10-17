@@ -21,7 +21,7 @@
 		open?: boolean;
 		title: string;
 		description?: string;
-		/** Width: `sm` 400px, `md` 440px, `lg` 480px, `xl` 760px. */
+		/** Width: `sm` 400px, `md` 440px, `lg` 480px, `xl` 920px. */
 		size?: Size;
 		/** Title icon; a destructive dialog uses `octagon`. */
 		icon?: IconName;
@@ -111,7 +111,7 @@
 	}
 
 	:global(.rh-dialog--xl) {
-		width: min(760px, calc(100vw - 32px));
+		width: min(920px, calc(100vw - 32px));
 	}
 
 	:global(.rh-dialog:focus-visible) {

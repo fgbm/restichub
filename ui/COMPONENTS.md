@@ -199,6 +199,12 @@ A host facet of a list uses `withHosts` from `$lib/host-picker.ts`. It gives eac
 
 A form does not disable its primary action for a value that is not correct (UI principles 5.4). The submit handler sets `submitted`, calls `focusFirstInvalid` from `$lib/form.ts` and stops when it returns `true`. `emptyError(submitted, value)` gives the error of an empty required field.
 
+`TextField` takes an `action`: `{ icon, label, onclick }`. The field shows an icon button at its end, for example "Reset to the default path". The label is the tooltip and the accessible name of the button. Do not put a separate button next to the field for this. Give the action only when it can change the value, for example when the value is not the default. A locked field does not show the action.
+
+## Dialog
+
+`Dialog` (`$lib/components/ui`) is the centered modal for a small form or a confirmation (UI principles 1.5). The `size` property sets the width: `sm` 400 px, `md` 440 px, `lg` 480 px and `xl` 920 px. Each width is at most the window width less 32 px. Use `xl` only for a form with two columns, for example the restore dialog: the fields at the left and the summary at the right. Below 900 px, put the summary below the fields.
+
 ## Lint rules
 
 The rules are in `eslint-rules/ui-principles.js`, and `npm run lint` runs them in CI:

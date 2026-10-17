@@ -703,6 +703,10 @@ export const icons = {
 		['path', { d: 'M7.5 13.5 10 11' }],
 		['path', { d: 'M10.5 16.5 13 14' }],
 		['path', { d: 'm18 3-4 4h6l-4 4' }]
+	],
+	'rotate-ccw': [
+		['path', { d: 'M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8' }],
+		['path', { d: 'M3 3v5h5' }]
 	]
 } satisfies Record<string, IconShape[]>;
 

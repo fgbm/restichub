@@ -1272,7 +1272,7 @@ export const en = {
 	'restore.dialog.agentHelp':
 		'The host that writes the files. It starts as the snapshot host when that host is active.',
 	'restore.dialog.agentLocal':
-		'This repository has a local path. Only its maintenance host can read it.',
+		'This repository has a local path. Only the repository host can read it.',
 	'restore.dialog.agentNone': 'No active host',
 	'restore.dialog.target': 'Target path',
 	'restore.dialog.targetHelp': 'An absolute directory on the target host.',
@@ -1334,6 +1334,7 @@ export const en = {
 	'restore.dialog.rootsRule':
 		'A host restores only inside its restore roots. It does not replace the files of the agent itself.',
 	'restore.dialog.rootUse': 'Use {root}',
+	'restore.dialog.targetReset': 'Reset to the default path',
 	'restore.dialog.hostsLink': 'Open hosts',
 	'restore.dialog.overwriteAlwaysTitle': 'Every existing file in the target is replaced',
 	'restore.dialog.overwriteAlwaysBody':
