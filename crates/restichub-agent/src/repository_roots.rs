@@ -68,7 +68,7 @@ impl RepositoryAccess {
         self.roots.as_ref().map_or(&[], |(roots, _)| roots)
     }
 
-    /// Checks the location of a local repository.
+    /// Accepts the location of a local repository below a root.
     ///
     /// # Errors
     ///

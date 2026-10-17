@@ -49,3 +49,4 @@ To write a new record, copy [0000-template.md](0000-template.md) and use the nex
 | [0041](0041-re-registration-and-duplicate-detection.md) | Re-registration that keeps the agent ID, and duplicate detection | accepted |
 | [0042](0042-agent-log-spool-and-acknowledgements.md) | The agent log spool and the log acknowledgements | accepted |
 | [0043](0043-no-grace-for-unlisted-running-jobs.md) | No grace for a running job that the hello omits | accepted |
+| [0044](0044-repository-roots-for-local-repositories.md) | Repository roots for local repositories | accepted |

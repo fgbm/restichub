@@ -133,7 +133,7 @@ pub struct Jobs {
     /// The roots where a restore may write and the files of the agent that it may never touch
     /// (FR-RS-03, ADR-0035).
     restore: Arc<RestoreAccess>,
-    /// The roots where a local repository may lie (ADR-0044).
+    /// Where a local backend may lie on a Linux host (ADR-0044).
     repository: Arc<RepositoryAccess>,
     /// The agent reads it again at each job (FR-HK-08).
     scripts: Arc<ScriptStore>,

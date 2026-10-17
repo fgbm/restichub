@@ -62,7 +62,9 @@ A failed or refused job shows a reason under its title on the page of the job. T
 | `profile_missing` | The profile is deleted. |
 | `repository_changed` | The profile now uses another repository. |
 | `repository_locked` | The repository is locked by another process. |
-| `repository_missing` | The repository is deleted. |
+| `repository_missing` | No repository at this location. The control plane also uses the code for a deleted repository. |
+| `repository_path_denied` | The host refused the local repository path. Add its root to `/etc/restichub-agent-repository-roots.txt` on the host and run `install-service`. |
+| `repository_read_only` | The agent cannot write to the local repository path. Add its root to `/etc/restichub-agent-repository-roots.txt` on the host and run `install-service`. |
 | `request_missing` | The job lost its request. |
 | `restore_target_denied` | The host refused the target path. It lies outside the restore roots or holds a file of the agent. |
 | `secret_unavailable` | A repository secret is not available. |
@@ -90,6 +92,8 @@ An alert about a failed job uses a short text of the code:
 | `max_duration_exceeded` | maximum duration exceeded |
 | `repository_locked` | repository locked |
 | `repository_missing` | repository not found |
+| `repository_path_denied` | the repository path is not allowed on the host |
+| `repository_read_only` | the repository path is read-only for the agent |
 | `stalled` | no progress |
 | `step_failed` | restic error |
 | `step_not_started` | restic did not start |

@@ -62,7 +62,9 @@ description: Статусы шагов, коды причин неудачных
 | `profile_missing` | Профиль удалён. |
 | `repository_changed` | Профиль теперь использует другой репозиторий. |
 | `repository_locked` | Репозиторий заблокирован другим процессом. |
-| `repository_missing` | Репозиторий удалён. |
+| `repository_missing` | Репозиторий не найден по этому пути. Сервер управления использует этот код и для удалённого репозитория. |
+| `repository_path_denied` | Хост отклонил путь локального репозитория. Добавьте его корень в `/etc/restichub-agent-repository-roots.txt` на хосте и выполните `install-service`. |
+| `repository_read_only` | Агент не может писать по пути локального репозитория. Добавьте его корень в `/etc/restichub-agent-repository-roots.txt` на хосте и выполните `install-service`. |
 | `request_missing` | У задания нет запроса. |
 | `restore_target_denied` | Хост отклонил путь назначения. Он вне корней восстановления или содержит файл агента. |
 | `secret_unavailable` | Секрет репозитория недоступен. |
@@ -90,6 +92,8 @@ description: Статусы шагов, коды причин неудачных
 | `max_duration_exceeded` | превышена предельная длительность |
 | `repository_locked` | репозиторий заблокирован |
 | `repository_missing` | репозиторий не найден |
+| `repository_path_denied` | путь репозитория не разрешён на хосте |
+| `repository_read_only` | путь репозитория доступен агенту только для чтения |
 | `stalled` | нет прогресса |
 | `step_failed` | ошибка restic |
 | `step_not_started` | restic не запустился |
