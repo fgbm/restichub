@@ -58,10 +58,10 @@ pub enum TargetDenied {
 impl fmt::Display for TargetDenied {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            Self::NotAbsolute => "the restore target is not a plain absolute path",
-            Self::Unresolvable => "the restore target cannot be resolved",
-            Self::ProtectedPath => "the restore target overlaps a file of the agent",
-            Self::OutsideRoots => "the restore target is outside the restore roots",
+            Self::NotAbsolute => "the path is not a plain absolute path",
+            Self::Unresolvable => "the path cannot be resolved",
+            Self::ProtectedPath => "the path overlaps a file of the agent",
+            Self::OutsideRoots => "the path is outside the configured roots",
         })
     }
 }
@@ -86,21 +86,14 @@ impl RestoreAccess {
     /// downloaded restic binary. The directory of `program` joins the protected paths (ADR-0038).
     #[must_use]
     pub fn for_host(config_dir: &Path, cache_dir: &Path, program: &Path) -> Self {
-        let mut protected = vec![config_dir.to_path_buf(), cache_dir.to_path_buf()];
-        protected.push(roots_file_for(config_dir));
-        protected.push(crate::paths::program_dir());
-        protected.push(crate::paths::data_dir());
-        protected.push(crate::scripts::mode_file_for(config_dir));
-        if let Some(dir) = program.parent() {
-            protected.push(dir.to_path_buf());
-        }
-        if let Some(dir) = std::env::current_exe()
-            .ok()
-            .and_then(|exe| exe.parent().map(Path::to_path_buf))
-        {
-            protected.push(dir);
-        }
-        Self::new(load_roots(&roots_file_for(config_dir)), protected)
+        let repository_roots = listed_roots(&crate::repository_roots::roots_file_for(config_dir));
+        Self::new(
+            load_roots(&roots_file_for(config_dir)),
+            restore_protected(
+                protected_paths(config_dir, cache_dir, program),
+                repository_roots,
+            ),
+        )
     }
 
     /// Text form for `AgentHello`. A root that is not UTF-8 is left out.
@@ -123,37 +116,75 @@ impl RestoreAccess {
     ///
     /// Returns the reason when the agent must refuse the target.
     pub fn check(&self, target: &str) -> Result<(), TargetDenied> {
-        let flavor = PathFlavor::host();
-        if components(flavor, target).is_none() {
-            return Err(TargetDenied::NotAbsolute);
+        check_path(&self.roots, &self.protected, target)
+    }
+}
+
+/// The files of the agent that no restore and no local repository may touch (T31).
+///
+/// `program` is the downloaded restic binary; its directory is protected too (ADR-0038).
+pub(crate) fn protected_paths(config_dir: &Path, cache_dir: &Path, program: &Path) -> Vec<PathBuf> {
+    let mut protected = vec![config_dir.to_path_buf(), cache_dir.to_path_buf()];
+    protected.push(roots_file_for(config_dir));
+    protected.push(crate::repository_roots::roots_file_for(config_dir));
+    protected.push(crate::paths::program_dir());
+    protected.push(crate::paths::data_dir());
+    protected.push(crate::scripts::mode_file_for(config_dir));
+    if let Some(dir) = program.parent() {
+        protected.push(dir.to_path_buf());
+    }
+    if let Some(dir) = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf))
+    {
+        protected.push(dir);
+    }
+    protected
+}
+
+/// A restore never writes into a repository root, even below a restore root `/` (ADR-0045).
+fn restore_protected(mut protected: Vec<PathBuf>, repository_roots: Vec<PathBuf>) -> Vec<PathBuf> {
+    protected.extend(repository_roots);
+    protected
+}
+
+/// Accepts a path below one of `roots` that does not overlap a protected path. Links are resolved
+/// first, so a link cannot lead out of a root or into a file of the agent.
+pub(crate) fn check_path(
+    roots: &[PathBuf],
+    protected: &[PathBuf],
+    target: &str,
+) -> Result<(), TargetDenied> {
+    let flavor = PathFlavor::host();
+    if components(flavor, target).is_none() {
+        return Err(TargetDenied::NotAbsolute);
+    }
+    let resolved = resolve(Path::new(target)).map_err(|_| TargetDenied::Unresolvable)?;
+    let resolved = resolved.to_str().ok_or(TargetDenied::NotAbsolute)?;
+    for protected in protected {
+        let Some(path) = protected.to_str() else {
+            continue;
+        };
+        let real = resolve(protected).ok();
+        let real = real.as_deref().and_then(Path::to_str);
+        if overlaps(flavor, target, path)
+            || overlaps(flavor, resolved, path)
+            || real.is_some_and(|real| overlaps(flavor, resolved, real))
+        {
+            return Err(TargetDenied::ProtectedPath);
         }
-        let resolved = resolve(Path::new(target)).map_err(|_| TargetDenied::Unresolvable)?;
-        let resolved = resolved.to_str().ok_or(TargetDenied::NotAbsolute)?;
-        for protected in &self.protected {
-            let Some(path) = protected.to_str() else {
-                continue;
-            };
-            let real = resolve(protected).ok();
-            let real = real.as_deref().and_then(Path::to_str);
-            if overlaps(flavor, target, path)
-                || overlaps(flavor, resolved, path)
-                || real.is_some_and(|real| overlaps(flavor, resolved, real))
-            {
-                return Err(TargetDenied::ProtectedPath);
-            }
-        }
-        let inside = self.roots.iter().any(|root| {
-            let Some(root) = resolve(root).ok() else {
-                return false;
-            };
-            root.to_str()
-                .is_some_and(|root| is_within(flavor, resolved, root))
-        });
-        if inside {
-            Ok(())
-        } else {
-            Err(TargetDenied::OutsideRoots)
-        }
+    }
+    let inside = roots.iter().any(|root| {
+        let Some(root) = resolve(root).ok() else {
+            return false;
+        };
+        root.to_str()
+            .is_some_and(|root| is_within(flavor, resolved, root))
+    });
+    if inside {
+        Ok(())
+    } else {
+        Err(TargetDenied::OutsideRoots)
     }
 }
 
@@ -190,24 +221,49 @@ fn resolve(path: &Path) -> io::Result<PathBuf> {
 /// so a local user cannot widen the roots.
 fn load_roots(file: &Path) -> Vec<PathBuf> {
     let mut roots = vec![default_root()];
+    roots.extend(
+        load_roots_file(file)
+            .into_iter()
+            .filter(|root| usable_restore_root(file, root)),
+    );
+    roots
+}
+
+fn usable_restore_root(file: &Path, root: &Path) -> bool {
+    let home = cfg!(target_os = "linux") && crate::repository_roots::is_home_dir(root);
+    if home {
+        tracing::warn!(
+            file = %file.display(),
+            root = %root.display(),
+            "the restore root is ignored: the service keeps /home and /root read-only; use a directory below it"
+        );
+    }
+    !home
+}
+
+/// The safe roots of a roots file. An absent file holds no root.
+pub(crate) fn load_roots_file(file: &Path) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
     match std::fs::symlink_metadata(file) {
         Ok(_) => match read_trusted(file) {
             Ok(text) => {
                 let (extra, skipped) = parse_roots(&text);
-                if skipped > 0 {
+                if !skipped.is_empty() {
+                    let lines: Vec<usize> = skipped.iter().map(|(line, _)| *line).collect();
                     tracing::warn!(
                         file = %file.display(),
-                        skipped,
-                        "the restore roots file holds lines that are not absolute paths"
+                        lines = ?lines,
+                        "the roots file holds lines that are not plain absolute paths"
                     );
                 }
-                for root in extra {
+                for (_, root) in extra {
                     match check_root(&root) {
                         Ok(()) => roots.push(root),
                         Err(error) => tracing::warn!(
+                            file = %file.display(),
                             root = %root.display(),
                             error = %format!("{error:#}"),
-                            "the restore root is ignored"
+                            "the root is ignored"
                         ),
                     }
                 }
@@ -215,30 +271,107 @@ fn load_roots(file: &Path) -> Vec<PathBuf> {
             Err(error) => tracing::warn!(
                 file = %file.display(),
                 error = %format!("{error:#}"),
-                "the restore roots file is ignored"
+                "the roots file is ignored"
             ),
         },
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-        Err(error) => tracing::warn!(%error, "cannot read the restore roots file"),
+        Err(error) => tracing::warn!(file = %file.display(), %error, "cannot read the roots file"),
     }
     roots
+}
+
+/// Every root line of a roots file, without the trust checks of `load_roots_file`.
+///
+/// Only for a refusal: a repository stays in a root that the agent stopped trusting, so a restore
+/// must keep away from it (ADR-0045).
+fn listed_roots(file: &Path) -> Vec<PathBuf> {
+    // A FIFO or a device in place of the file would block or flood the read.
+    if !std::fs::metadata(file).is_ok_and(|metadata| metadata.is_file()) {
+        return Vec::new();
+    }
+    match std::fs::read_to_string(file) {
+        Ok(text) => parse_roots(&text)
+            .0
+            .into_iter()
+            .map(|(_, root)| root)
+            .collect(),
+        Err(error) => {
+            tracing::warn!(file = %file.display(), %error, "cannot read the roots file");
+            Vec::new()
+        }
+    }
 }
 
 /// The roots of the roots file that `load_roots` ignores, with the reason. `install-service`
 /// refuses to continue while this list is not empty, so the administrator learns about the root.
 #[must_use]
 pub fn rejected_roots(config_dir: &Path) -> Vec<(PathBuf, String)> {
-    let Ok(text) = read_trusted(&roots_file_for(config_dir)) else {
+    rejected_roots_in(&roots_file_for(config_dir))
+}
+
+pub(crate) fn rejected_roots_in(file: &Path) -> Vec<(PathBuf, String)> {
+    let Ok(text) = read_trusted(file) else {
         return Vec::new();
     };
     parse_roots(&text)
         .0
         .into_iter()
-        .filter_map(|root| {
+        .filter_map(|(_, root)| {
             let error = check_root(&root).err()?;
             Some((root, format!("{error:#}")))
         })
         .collect()
+}
+
+/// Refuses a line of a roots file that the agent skips at load, so `install-service` names it
+/// instead of a silent warning.
+///
+/// # Errors
+///
+/// Returns an error with the line number for the first such line.
+pub fn refuse_skipped_lines(file: &Path) -> Result<()> {
+    match read_trusted(file) {
+        Ok(text) => skipped_line_error(file, &text),
+        Err(_) => Ok(()),
+    }
+}
+
+fn skipped_line_error(file: &Path, text: &str) -> Result<()> {
+    if let Some((line, text)) = parse_roots(text).1.into_iter().next() {
+        anyhow::bail!(
+            "line {line} of {} is not a plain absolute path, or holds a quote, a backslash, white space or %: {text:?}; fix or remove the line and run install-service again",
+            file.display()
+        );
+    }
+    Ok(())
+}
+
+/// Refuses the restore root `/home` or `/root`: `ProtectHome=read-only` keeps it read-only even in
+/// `ReadWritePaths`, so a restore there would fail.
+///
+/// # Errors
+///
+/// Returns an error with the line number for the first such root.
+pub fn refuse_home_roots(file: &Path) -> Result<()> {
+    match read_trusted(file) {
+        Ok(text) => home_root_error(file, &text),
+        Err(_) => Ok(()),
+    }
+}
+
+fn home_root_error(file: &Path, text: &str) -> Result<()> {
+    if let Some((line, root)) = parse_roots(text)
+        .0
+        .into_iter()
+        .find(|(_, root)| crate::repository_roots::is_home_dir(root))
+    {
+        anyhow::bail!(
+            "line {line} of {}: the restore root {} stays read-only, because the service keeps /home and /root read-only; use a directory below it, owned by root, and run install-service again",
+            file.display(),
+            root.display()
+        );
+    }
+    Ok(())
 }
 
 /// Refuses a root that another account can change, or whose existing ancestor another account can
@@ -320,22 +453,35 @@ fn check_trusted(_file: &Path) -> Result<()> {
     Ok(())
 }
 
-/// The roots of a file text and the number of lines that are not absolute paths. A line that starts
+/// A line of a roots file with its number from 1.
+type Numbered<T> = (usize, T);
+
+/// The roots of a file text and the lines that are not plain absolute paths. A line that starts
 /// with `#` is a comment.
-fn parse_roots(text: &str) -> (Vec<PathBuf>, usize) {
+fn parse_roots(text: &str) -> (Vec<Numbered<PathBuf>>, Vec<Numbered<String>>) {
     let mut roots = Vec::new();
-    let mut skipped = 0;
-    for line in text.lines().map(str::trim).filter(|line| !line.is_empty()) {
-        if line.starts_with('#') {
+    let mut skipped = Vec::new();
+    for (index, line) in text.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        if components(PathFlavor::host(), line).is_some() {
-            roots.push(PathBuf::from(line));
+        if components(PathFlavor::host(), line).is_some() && !has_unit_syntax(line) {
+            roots.push((index + 1, PathBuf::from(line)));
         } else {
-            skipped += 1;
+            skipped.push((index + 1, line.to_owned()));
         }
     }
     (roots, skipped)
+}
+
+/// Each root goes into `ReadWritePaths` of the systemd unit, where quotes, backslashes and white
+/// space split or change the path and `%` starts a specifier. So `/srv" "/etc` would open `/etc`.
+fn has_unit_syntax(line: &str) -> bool {
+    cfg!(unix)
+        && line
+            .chars()
+            .any(|c| matches!(c, '"' | '\'' | '\\' | '%') || c.is_whitespace() || c.is_control())
 }
 
 /// Creates the default root with the access of the service account only (FR-RS-03).
@@ -558,14 +704,133 @@ mod tests {
     }
 
     #[test]
+    fn adr_0045_a_restore_into_a_repository_root_is_refused() {
+        let base = temp_dir("repository-root");
+        let config = base.join("config");
+        let repos = base.join("repos");
+        std::fs::create_dir_all(&config).expect("cannot create the config");
+        std::fs::create_dir_all(repos.join("fs-01")).expect("cannot create the repository");
+        let protected = restore_protected(vec![config], vec![repos.clone()]);
+        for root in [PathBuf::from("/"), base.clone()] {
+            let access = RestoreAccess::new(vec![root.clone()], protected.clone());
+            for target in [
+                repos.clone(),
+                repos.join("fs-01").join("config"),
+                base.clone(),
+            ] {
+                assert_eq!(
+                    access.check(target.to_str().expect("utf-8")),
+                    Err(TargetDenied::ProtectedPath),
+                    "{} below {}",
+                    target.display(),
+                    root.display()
+                );
+            }
+            let other = base.join("data");
+            assert_eq!(access.check(other.to_str().expect("utf-8")), Ok(()));
+        }
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
     fn ac_rs_05_the_roots_file_lists_absolute_paths() {
         let (roots, skipped) =
             parse_roots("# comment\n\n/srv/restore\n  /data  \nrelative\n../x\n");
         assert_eq!(
             roots,
-            vec![PathBuf::from("/srv/restore"), PathBuf::from("/data")]
+            vec![
+                (3, PathBuf::from("/srv/restore")),
+                (4, PathBuf::from("/data"))
+            ]
         );
-        assert_eq!(skipped, 2);
+        assert_eq!(
+            skipped,
+            vec![(5, "relative".to_owned()), (6, "../x".to_owned())]
+        );
+    }
+
+    #[test]
+    fn adr_0045_a_root_line_with_unit_syntax_is_skipped() {
+        let (roots, skipped) = parse_roots(
+            "/srv/\" \"/etc\n/srv/'a'\n/srv/a b\n/srv/a\tb\n/srv/a\\b\n/srv/%h\n/srv/a\u{7}\n/srv/ok\n",
+        );
+        assert_eq!(roots, vec![(8, PathBuf::from("/srv/ok"))]);
+        assert_eq!(skipped.len(), 7);
+    }
+
+    #[test]
+    fn adr_0045_install_service_refuses_a_skipped_root_line_by_its_number() {
+        let file = Path::new("/etc/restichub-agent-repository-roots.txt");
+        let error = skipped_line_error(file, "# comment\n/srv/ok\n/srv/a b\nrelative\n")
+            .expect_err("the line must be refused");
+        let message = format!("{error:#}");
+        assert!(
+            message.contains("line 3 of /etc/restichub-agent-repository-roots.txt"),
+            "{message}"
+        );
+        assert!(message.contains("\"/srv/a b\""), "{message}");
+        assert!(skipped_line_error(file, "# comment\n\n/srv/ok\n").is_ok());
+    }
+
+    #[test]
+    fn ac_rs_05_install_service_refuses_the_restore_root_home_or_root() {
+        let file = Path::new("/etc/restichub-agent-restore-roots.txt");
+        for (text, line) in [
+            ("/srv/ok\n/home\n", 2),
+            ("/home/\n", 1),
+            ("# c\n//root\n", 2),
+        ] {
+            let error = home_root_error(file, text).expect_err("the root must be refused");
+            let message = format!("{error:#}");
+            assert!(
+                message.contains(&format!(
+                    "line {line} of /etc/restichub-agent-restore-roots.txt"
+                )),
+                "{message}"
+            );
+            assert!(message.contains("below it, owned by root"), "{message}");
+        }
+        assert!(home_root_error(file, "/home/restore\n/root/restore\n/srv\n").is_ok());
+    }
+
+    #[test]
+    fn ac_rs_05_the_agent_skips_the_restore_root_home_or_root() {
+        let file = Path::new("/etc/restichub-agent-restore-roots.txt");
+        assert!(!usable_restore_root(file, Path::new("/home")));
+        assert!(!usable_restore_root(file, Path::new("/root/")));
+        assert!(usable_restore_root(file, Path::new("/home/restore")));
+        assert!(usable_restore_root(file, Path::new("/srv/restore")));
+    }
+
+    #[test]
+    fn adr_0045_a_restore_keeps_away_from_an_untrusted_repository_root() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let base = temp_dir("untrusted-repository-root");
+        let config = base.join("config");
+        let repos = base.join("repos");
+        std::fs::create_dir_all(&config).expect("cannot create the config");
+        std::fs::create_dir_all(repos.join("fs-01")).expect("cannot create the repository");
+        std::fs::set_permissions(&repos, std::fs::Permissions::from_mode(0o777))
+            .expect("cannot set the mode");
+        let file = crate::repository_roots::roots_file_for(&config);
+        std::fs::write(&file, format!("{}\n", repos.display())).expect("cannot write the file");
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o666))
+            .expect("cannot set the mode");
+        assert!(load_roots_file(&file).is_empty());
+        let access = RestoreAccess::new(
+            vec![PathBuf::from("/")],
+            restore_protected(vec![config], listed_roots(&file)),
+        );
+        for target in [repos.clone(), repos.join("fs-01").join("config")] {
+            assert_eq!(
+                access.check(target.to_str().expect("utf-8")),
+                Err(TargetDenied::ProtectedPath),
+                "{}",
+                target.display()
+            );
+        }
+        assert!(listed_roots(&base.join("absent.txt")).is_empty());
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

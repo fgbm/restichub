@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
 	unlockAllRepository: vi.fn(),
 	initRepository: vi.fn(),
 	testAccessRepository: vi.fn(),
+	getJob: vi.fn(),
 	pushToast: vi.fn(),
 	goto: vi.fn()
 }));
@@ -52,7 +53,8 @@ vi.mock('#lib/api/index.ts', async (importOriginal) => {
 			runMaintenance: mocks.runMaintenance,
 			unlockAllRepository: mocks.unlockAllRepository,
 			initRepository: mocks.initRepository,
-			testAccessRepository: mocks.testAccessRepository
+			testAccessRepository: mocks.testAccessRepository,
+			getJob: mocks.getJob
 		}
 	};
 });
@@ -248,6 +250,25 @@ describe('the host of an init and an access test', () => {
 		await waitFor(() =>
 			expect(mocks.initRepository).toHaveBeenCalledWith('r_1', { agent_id: 'a_1' })
 		);
+	});
+
+	it('adr_0045 names the repository roots file when the host refuses a local path', async () => {
+		const refused = {
+			id: 'j_1',
+			status: 'failed',
+			result_code: 'failed',
+			result_message: 'repository_path_denied'
+		};
+		mocks.listRepositories.mockResolvedValue([repository({ initialized: false })]);
+		mocks.initRepository.mockResolvedValue({ id: 'j_1', status: 'queued' });
+		mocks.getJob.mockResolvedValue(refused);
+		const dialog = await openAction('Initialize');
+		await userEvent.click(within(dialog).getByRole('button', { name: 'Start' }));
+
+		expect(
+			await within(dialog).findByText(/Add its root to \/etc\/restichub-agent-repository-roots.txt/)
+		).toBeInTheDocument();
+		expect(within(dialog).queryByText('The job failed.')).not.toBeInTheDocument();
 	});
 
 	it('fr_rp_08 says why an init cannot start without a maintenance host', async () => {

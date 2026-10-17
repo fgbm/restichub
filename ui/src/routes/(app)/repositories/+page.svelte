@@ -35,7 +35,7 @@
 	import { ago, plural } from '#lib/list-format.ts';
 	import { iconOf, pillOf, repositoryState } from '#lib/vocabulary.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
-	import { t, tErrorCode, type MessageKey } from '#lib/i18n/index.ts';
+	import { t, tErrorCode, tOr, type MessageKey } from '#lib/i18n/index.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
@@ -97,6 +97,13 @@
 		repository_locked: 'repositories.result.repository_locked',
 		incompatible: 'repositories.result.incompatible'
 	};
+
+	// A refusal of the host names its cause, such as a local path outside the repository roots.
+	function jobResultText(current: Job, code: JobResultCode): string {
+		const label = t(jobResultLabels[code]);
+		if (code !== 'failed' || !current.result_message) return label;
+		return tOr(`jobs.reason.${current.result_message}`, label);
+	}
 
 	const jobDone = $derived(
 		job !== null &&
@@ -586,7 +593,7 @@
 					{#if jobExpired}
 						{t('repositories.jobExpired')}
 					{:else if jobDone && job.result_code}
-						{t(jobResultLabels[job.result_code])}
+						{jobResultText(job, job.result_code)}
 					{:else}
 						{t('repositories.jobRunning')}
 					{/if}

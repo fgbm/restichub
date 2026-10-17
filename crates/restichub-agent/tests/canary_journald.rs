@@ -149,7 +149,8 @@ async fn ac_ag_03_linux_ten_jobs_leave_no_canary_in_journald() {
         &refused_dir,
     )
     .expect("the job journal must open")
-    .with_restore_access(temp_roots());
+    .with_restore_access(temp_roots())
+    .with_repository_access(restichub_agent::repository_roots::RepositoryAccess::unrestricted());
     for index in 0..10 {
         let repository = format!("repo-{}", index % 3 + 1);
         let job = job(

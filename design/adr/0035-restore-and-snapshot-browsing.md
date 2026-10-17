@@ -3,6 +3,7 @@
 - Status: accepted
 - Date: 2026-10-15
 - Amended by: [ADR-0040](0040-remove-allow-list-hooks.md): the protected path "hook allow-list" is now the trust mode file
+- Amended by: [ADR-0045](0045-repository-roots-for-local-repositories.md): the repository roots file and the repository roots are protected paths, and the unit also lists the repository roots
 - Requirements: FR-RS-01, FR-RS-02, FR-RS-03, FR-RS-04, FR-PR-02, FR-PR-09, FR-AU-01, AC-RS-01, AC-RS-02, AC-RS-03, AC-RS-04, AC-PR-03
 
 ## Context
@@ -54,6 +55,10 @@ A restore runs as root on Linux and as LocalSystem on Windows. A target path fro
 ### Note (2026-10-15)
 
 [ADR-0040](0040-remove-allow-list-hooks.md) removes the allow-list. The protected path "The hook allow-list" in the list above is now the trust mode file of [ADR-0037](0037-server-scripts-on-trusted-hosts.md). The agent keeps this file in the protected set, and so it also protects each ancestor of the file. The comparison "like the hook allow-list" in the alternatives means the rule of the trust mode file.
+
+### Note (2026-10-17)
+
+[ADR-0045](0045-repository-roots-for-local-repositories.md) adds a second roots file, `restichub-agent-repository-roots.txt`, for local repositories on Linux. It uses the format and the checks of the restore roots file. The repository roots file and each repository root are protected paths of a restore. `install-service` refuses a restore root that overlaps a repository root, except the restore root `/`. It adds the restore roots and the repository roots to `ReadWritePaths`. A repository root is not a restore root.
 
 ## Consequences
 

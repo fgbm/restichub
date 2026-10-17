@@ -368,6 +368,77 @@ describe('the job detail screen', () => {
 		expect(screen.getByText(/exit code 12/)).toBeInTheDocument();
 	});
 
+	it('shows the missing repository of an init job as the expected answer', async () => {
+		const probe = {
+			step_id: 'test-access',
+			status: 'config_error',
+			exit_code: 10,
+			started_at: '2026-10-14T10:01:00Z',
+			finished_at: '2026-10-14T10:01:01Z',
+			error_code: 'step_config_error',
+			error_params: {},
+			possible_stale_lock: false,
+			output: { kind: 'none' }
+		};
+		mocks.getJob.mockResolvedValue(
+			job({
+				kind: 'init',
+				status: 'succeeded',
+				result_code: 'succeeded',
+				summary: null,
+				planned_steps: ['test-access', 'init'],
+				steps: [
+					probe,
+					{
+						...probe,
+						step_id: 'init',
+						status: 'success',
+						exit_code: 0,
+						error_code: null
+					}
+				]
+			})
+		);
+		const { container } = render(JobDetailPage);
+
+		expect(
+			await screen.findByText('No repository at this location. The next step creates it.')
+		).toBeInTheDocument();
+		expect(screen.getByText(/No repository ·/)).toBeInTheDocument();
+		expect(screen.queryByText(/Configuration error/)).not.toBeInTheDocument();
+		expect(screen.queryByText(/access keys are wrong/)).not.toBeInTheDocument();
+		expect(container.querySelector('.timeline__marker--info')).not.toBeNull();
+		expect(container.querySelector('.timeline__marker--failed')).toBeNull();
+	});
+
+	it('explains a missing repository of a plain access test', async () => {
+		mocks.getJob.mockResolvedValue(
+			job({
+				kind: 'test_access',
+				status: 'failed',
+				result_code: 'not_initialized',
+				summary: null,
+				steps: [
+					{
+						step_id: 'test-access',
+						status: 'config_error',
+						exit_code: 10,
+						started_at: '2026-10-14T10:01:00Z',
+						finished_at: '2026-10-14T10:01:01Z',
+						error_code: 'repository_missing',
+						error_params: {},
+						possible_stale_lock: false,
+						output: { kind: 'none' }
+					}
+				]
+			})
+		);
+		render(JobDetailPage);
+
+		expect(await screen.findByText('No repository at this location.')).toBeInTheDocument();
+		expect(screen.queryByText(/access keys are wrong/)).not.toBeInTheDocument();
+	});
+
 	it('tells that the retention deleted the log and keeps the summary', async () => {
 		mocks.getJobLogs.mockResolvedValue(logPage([], { purged: true }));
 		render(JobDetailPage);

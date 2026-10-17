@@ -39,6 +39,7 @@ Open the job, and read the reason under its title and the log of the failed step
 | The job stays in "Waiting" | The host is offline, or another job holds the repository. | Check the host. See [Repository barriers](/restichub/concepts/job-lifecycle/#repository-barriers). |
 | The job failed with `wrong_password` | The repository password or the access keys are wrong. | Correct the secrets on the page of the repository. |
 | The job failed with `step_failed` | restic stopped with an error. | Read the log of the step. The last lines give the restic error. |
+| A job on a local repository fails with `read-only file system`, `repository_path_denied` or `repository_read_only` | On Linux the service can write a local repository only below a repository root. The path is outside the roots, or the installed unit does not list the root yet. | Add the root to `/etc/restichub-agent-repository-roots.txt` and run `sudo restichub-agent install-service`. See [A local repository on Linux](/restichub/guides/add-a-repository/#a-local-repository-on-linux). |
 | The job failed with `stalled` | restic made no progress for too long. | Check the backup source and the network to the repository. See [Stall timeout](/restichub/concepts/job-lifecycle/#stall-timeout). |
 | The job failed with `agent_lost` | The host went offline during the job. | Check the host. The control plane marks a possible stale lock. |
 | The job failed with `compile_failed` | The profile does not fit the host any more. | Open the profile and read the warnings. |

@@ -7,10 +7,12 @@ import type { JobDetail, StepOutput } from '#lib/api/index.ts';
 import { setLocale, t } from '#lib/i18n/index.ts';
 import {
 	formatFiles,
+	isInitProbe,
 	isLive,
 	limitLines,
 	markerOf,
 	statsOf,
+	stepErrorCode,
 	stepProgress,
 	stepRows
 } from './job-detail';
@@ -123,6 +125,20 @@ describe('the job state', () => {
 		expect(markerOf('success')).toBe('success');
 		expect(markerOf('skipped')).toBe('skipped');
 		expect(markerOf('cancelled')).toBe('skipped');
+	});
+
+	it('treats the missing repository before an init as the expected answer (FR-RP-02)', () => {
+		const probe = {
+			step_id: 'test-access',
+			status: 'config_error',
+			exit_code: 10,
+			error_code: 'step_config_error'
+		} as JobDetail['steps'][number];
+		expect(isInitProbe({ kind: 'init' }, probe)).toBe(true);
+		expect(isInitProbe({ kind: 'test_access' }, probe)).toBe(false);
+		expect(isInitProbe({ kind: 'init' }, { ...probe, exit_code: 12 })).toBe(false);
+		expect(stepErrorCode(probe)).toBe('repository_missing');
+		expect(stepErrorCode({ ...probe, exit_code: 12 })).toBe('step_config_error');
 	});
 });
 

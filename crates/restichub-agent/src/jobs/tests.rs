@@ -411,6 +411,20 @@ fn ac_rp_01_maps_the_init_chain_to_a_job_outcome() {
 }
 
 #[test]
+fn adr_0045_a_read_only_local_repository_has_its_own_error_code() {
+    let read_only = Progress {
+        stopped_code: Some(1),
+        repository_read_only: true,
+        ..Progress::default()
+    };
+    assert_eq!(job_outcome(&read_only), JobStatus::Failed);
+    assert_eq!(
+        job_error(JobStatus::Failed, &read_only).map(|error| error.code),
+        Some("repository_read_only".to_owned())
+    );
+}
+
+#[test]
 fn fr_ag_09_a_warning_and_a_lock_are_typed_at_the_job_level() {
     // A step with restic exit code 3 gives a job that succeeded with warnings.
     assert_eq!(

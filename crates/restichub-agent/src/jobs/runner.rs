@@ -16,6 +16,7 @@ use restichub_proto::agent::v1::{
     AgentMessage, ErrorDetail, LogStream, ProcessPriority, Step, StepProgress, StepStatus,
     agent_message, step, step_result,
 };
+use restichub_proto::restore_path::{PathFlavor, components};
 use tokio::sync::mpsc;
 
 use super::command_text::command_line_text;
@@ -54,6 +55,12 @@ pub(super) enum StepError {
     Warning,
     LockHeld,
     ConfigError,
+    /// restic exit code 10: no repository at the location. Before an init it is the expected
+    /// answer (FR-RP-02).
+    RepositoryMissing,
+    /// restic could not write a local repository because the path is read-only for the agent
+    /// (ADR-0045).
+    ReadOnly,
     Failed,
     Cancelled,
     /// The step ran longer than its maximum duration (ADR-0039).
@@ -71,6 +78,8 @@ impl StepError {
             Self::Warning => "step_warning",
             Self::LockHeld => "repository_locked",
             Self::ConfigError => "step_config_error",
+            Self::RepositoryMissing => "repository_missing",
+            Self::ReadOnly => "repository_read_only",
             Self::Failed => "step_failed",
             Self::Cancelled => "step_cancelled",
             Self::MaxDuration => "step_max_duration",
@@ -163,7 +172,15 @@ impl StepOutcome {
     }
 
     fn from_exit(code: i32) -> Self {
-        Self::new(status_for_exit(code), code)
+        let outcome = Self::new(status_for_exit(code), code);
+        if code == 10 {
+            Self {
+                error: Some(StepError::RepositoryMissing),
+                ..outcome
+            }
+        } else {
+            outcome
+        }
     }
 }
 
@@ -267,6 +284,9 @@ struct StepOutput {
     watchdog: Watchdog,
     last_progress: Option<tokio::time::Instant>,
     last_log: tokio::time::Instant,
+    /// The local repository locations of the job, to recognize a write that the sandbox refused.
+    local_repositories: Vec<String>,
+    read_only: bool,
 }
 
 impl StepOutput {
@@ -293,6 +313,7 @@ impl StepOutput {
             },
             Pipe::Stderr => {
                 self.watchdog.output(now);
+                self.read_only |= names_read_only_repository(&text, &self.local_repositories);
                 let text = crate::output::stderr_text(&text, line.truncated);
                 log.push(
                     &self.step_id,
@@ -382,6 +403,15 @@ impl Jobs {
             watchdog: Watchdog::new(limits.stall, tokio::time::Instant::now()),
             last_progress: None,
             last_log: tokio::time::Instant::now(),
+            local_repositories: validated
+                .job()
+                .repositories
+                .iter()
+                .map(|repository| repository.location.as_str())
+                .filter(|location| crate::repository_roots::is_local(location))
+                .map(clean_path)
+                .collect(),
+            read_only: false,
         };
 
         *lock(&cancel.child) = Some(child);
@@ -493,6 +523,12 @@ impl Jobs {
                 ..StepOutcome::from_exit(code)
             }
         };
+        if output.read_only
+            && outcome.status == StepStatus::Failed
+            && outcome.error == Some(StepError::Failed)
+        {
+            outcome.error = Some(StepError::ReadOnly);
+        }
         outcome.output = output.collector.finish();
         outcome
     }
@@ -526,6 +562,29 @@ impl Jobs {
     }
 }
 
+/// True for a restic error line that reports `EROFS` on a path of a local repository (ADR-0045).
+///
+/// `repositories` holds paths in the form of [`clean_path`], the form that restic prints.
+fn names_read_only_repository(line: &str, repositories: &[String]) -> bool {
+    line.contains("read-only file system")
+        && repositories.iter().any(|repository| {
+            line.match_indices(repository.as_str()).any(|(at, _)| {
+                matches!(
+                    line[at + repository.len()..].chars().next(),
+                    None | Some('/' | ':' | ' ' | '"' | '\'')
+                )
+            })
+        })
+}
+
+/// A POSIX path without repeated and trailing separators. Another form stays as it is.
+fn clean_path(location: &str) -> String {
+    match components(PathFlavor::Posix, location) {
+        Some(parts) => format!("/{}", parts.join("/")),
+        None => location.to_owned(),
+    }
+}
+
 /// Sends the graceful stop signal to the child of a step (FR-AG-10).
 pub(super) fn interrupt(child: &Mutex<Option<JobChild>>) {
     if let Some(child) = lock(child).as_ref()
@@ -548,7 +607,9 @@ pub(super) fn kill_tree(child: &Mutex<Option<JobChild>>) {
 mod tests {
     use restichub_proto::agent::v1::StepStatus;
 
-    use super::{LimitStop, StepError, StepOutcome, status_for_exit};
+    use super::{
+        LimitStop, StepError, StepOutcome, clean_path, names_read_only_repository, status_for_exit,
+    };
 
     #[test]
     fn ac_ag_05_maps_the_restic_exit_codes() {
@@ -583,5 +644,64 @@ mod tests {
             Some(StepError::Stalled)
         );
         assert!(StepOutcome::limit_exceeded(LimitStop::Stalled, true).possible_stale_lock);
+    }
+
+    #[test]
+    fn ac_rp_01_exit_code_10_names_the_missing_repository() {
+        let outcome = StepOutcome::from_exit(10);
+        assert_eq!(outcome.status, StepStatus::ConfigError);
+        assert_eq!(
+            outcome
+                .error
+                .map(StepError::detail)
+                .map(|detail| detail.code),
+            Some("repository_missing".to_owned())
+        );
+        assert_eq!(
+            StepOutcome::from_exit(12).error,
+            Some(StepError::ConfigError)
+        );
+    }
+
+    #[test]
+    fn adr_0045_a_read_only_error_on_a_local_repository_is_recognized() {
+        let repositories = ["/var/spool/restichub/local-test".to_owned()];
+        for line in [
+            "Fatal: create repository at /var/spool/restichub/local-test failed: mkdir /var/spool/restichub: read-only file system",
+            "Fatal: create repository at /var/spool/restichub/local-test failed: mkdir /var/spool/restichub/local-test/data: read-only file system",
+        ] {
+            assert!(names_read_only_repository(line, &repositories), "{line}");
+        }
+        assert!(!names_read_only_repository(
+            "open /srv/restore/a.txt: read-only file system",
+            &repositories
+        ));
+        assert!(!names_read_only_repository(
+            "Fatal: unable to open config file: stat /var/spool/restichub/local-test/config: no such file or directory",
+            &repositories
+        ));
+        assert!(!names_read_only_repository(
+            "Fatal: create repository at /var/spool/restichub/local-test2 failed: mkdir /var/spool/restichub/local-test2: read-only file system",
+            &repositories
+        ));
+    }
+
+    #[test]
+    fn adr_0045_a_read_only_error_matches_a_location_with_extra_separators() {
+        for location in [
+            "/var/spool/restichub/local-test/",
+            "/var/spool//restichub/local-test",
+            "/var/spool/restichub/local-test//",
+        ] {
+            let repositories = [clean_path(location)];
+            assert!(
+                names_read_only_repository(
+                    "Fatal: create repository at /var/spool/restichub/local-test failed: mkdir /var/spool/restichub/local-test: read-only file system",
+                    &repositories
+                ),
+                "{location}"
+            );
+        }
+        assert_eq!(clean_path(r"C:\repo\"), r"C:\repo\");
     }
 }
