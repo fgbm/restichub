@@ -108,23 +108,9 @@ the control plane refused the agent identity; check that the agent is enrolled a
 
 The agent then waits 60 seconds and tries again. Register the host again after a revoke (see [Enroll a host again](/restichub/operations/enroll-a-host-again/)).
 
-## Initialize a repository
+## Next step
 
-An agent runs a repository job on demand. The control plane sends the job through the open stream. The job holds a `test_access` step and, for an init, an `init` step. The agent runs `restic cat config` for a test-access step and `restic init` for an init step.
-
-The agent runs `init` only when `test_access` exits with restic code 10. Restic code 10 means that the repository does not exist. Any other result stops the job, so the agent never initializes an existing repository a second time. A wrong password exits with code 12 and the job reports `config_error`.
-
-The repository password and the backend credentials travel inside the signed job only. The agent passes them to restic in the environment. They never reach an argument, a log, the job journal or an error message. The agent keeps the result of a finished job, so a job that the control plane delivers again does not run a second time.
-
-To initialize a repository:
-
-1. Open the "Repositories" screen in the Web UI.
-2. Find the repository.
-3. Start "Initialize". For a repository that exists, start "Test access" instead.
-4. Read the job result. "The repository is ready." means that restic initialized the repository or that the access worked. "The repository password or the credentials are not correct." is the result `config_error`. "The repository does not exist yet. Initialize it." is the result `not_initialized`.
-5. Read the repository state. The control plane sets `initialized` after a successful init or a successful test-access.
-
-An init and a local-path repository run on the maintenance agent of the repository only.
+Add a repository and initialize it from this host. See [Add a repository](/restichub/operations/add-a-repository/).
 
 ## Install the service
 
