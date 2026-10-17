@@ -16,6 +16,7 @@ use restichub_proto::agent::v1::{
     AgentMessage, ErrorDetail, LogStream, ProcessPriority, Step, StepProgress, StepStatus,
     agent_message, step, step_result,
 };
+use restichub_proto::restore_path::{PathFlavor, components};
 use tokio::sync::mpsc;
 
 use super::command_text::command_line_text;
@@ -406,8 +407,9 @@ impl Jobs {
                 .job()
                 .repositories
                 .iter()
-                .map(|repository| repository.location.clone())
+                .map(|repository| repository.location.as_str())
                 .filter(|location| crate::repository_roots::is_local(location))
+                .map(clean_path)
                 .collect(),
             read_only: false,
         };
@@ -561,11 +563,26 @@ impl Jobs {
 }
 
 /// True for a restic error line that reports `EROFS` on a path of a local repository (ADR-0044).
+///
+/// `repositories` holds paths in the form of [`clean_path`], the form that restic prints.
 fn names_read_only_repository(line: &str, repositories: &[String]) -> bool {
     line.contains("read-only file system")
-        && repositories
-            .iter()
-            .any(|repository| line.contains(repository.as_str()))
+        && repositories.iter().any(|repository| {
+            line.match_indices(repository.as_str()).any(|(at, _)| {
+                matches!(
+                    line[at + repository.len()..].chars().next(),
+                    None | Some('/' | ':' | ' ' | '"' | '\'')
+                )
+            })
+        })
+}
+
+/// A POSIX path without repeated and trailing separators. Another form stays as it is.
+fn clean_path(location: &str) -> String {
+    match components(PathFlavor::Posix, location) {
+        Some(parts) => format!("/{}", parts.join("/")),
+        None => location.to_owned(),
+    }
 }
 
 /// Sends the graceful stop signal to the child of a step (FR-AG-10).
@@ -590,7 +607,9 @@ pub(super) fn kill_tree(child: &Mutex<Option<JobChild>>) {
 mod tests {
     use restichub_proto::agent::v1::StepStatus;
 
-    use super::{LimitStop, StepError, StepOutcome, names_read_only_repository, status_for_exit};
+    use super::{
+        LimitStop, StepError, StepOutcome, clean_path, names_read_only_repository, status_for_exit,
+    };
 
     #[test]
     fn ac_ag_05_maps_the_restic_exit_codes() {
@@ -661,5 +680,28 @@ mod tests {
             "Fatal: unable to open config file: stat /var/spool/restichub/local-test/config: no such file or directory",
             &repositories
         ));
+        assert!(!names_read_only_repository(
+            "Fatal: create repository at /var/spool/restichub/local-test2 failed: mkdir /var/spool/restichub/local-test2: read-only file system",
+            &repositories
+        ));
+    }
+
+    #[test]
+    fn adr_0044_a_read_only_error_matches_a_location_with_extra_separators() {
+        for location in [
+            "/var/spool/restichub/local-test/",
+            "/var/spool//restichub/local-test",
+            "/var/spool/restichub/local-test//",
+        ] {
+            let repositories = [clean_path(location)];
+            assert!(
+                names_read_only_repository(
+                    "Fatal: create repository at /var/spool/restichub/local-test failed: mkdir /var/spool/restichub/local-test: read-only file system",
+                    &repositories
+                ),
+                "{location}"
+            );
+        }
+        assert_eq!(clean_path(r"C:\repo\"), r"C:\repo\");
     }
 }

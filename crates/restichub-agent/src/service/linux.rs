@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
+use restichub_proto::restore_path::{PathFlavor, components, overlaps};
 
 pub const SERVICE_NAME: &str = "restichub-agent";
 
@@ -24,10 +25,10 @@ fn unit_path() -> PathBuf {
 
 /// The systemd unit text for the running agent (FR-AG-01, AC-IN-03).
 ///
-/// `ProtectSystem=strict` makes the whole file system read-only except the identity directory, the
-/// cache directory and `writable_roots`: the restore roots (FR-RS-03) and the repository roots
-/// (ADR-0044). A read of a backup source stays possible. `ProtectHome` stays off, because a backup
-/// source is often below `/home`.
+/// `ProtectSystem=strict` and `ProtectHome=read-only` make the whole file system read-only except
+/// the identity directory, the cache directory and `writable_roots`: the restore roots (FR-RS-03)
+/// and the repository roots (ADR-0044). `ProtectSystem=strict` alone leaves `/home`, `/root` and
+/// `/run/user` writable. A read of a backup source stays possible.
 #[must_use]
 pub fn unit_contents(exe: &Path, config_dir: &Path, writable_roots: &[PathBuf]) -> String {
     let writable_paths: String = writable_roots
@@ -50,6 +51,7 @@ pub fn unit_contents(exe: &Path, config_dir: &Path, writable_roots: &[PathBuf]) 
          LimitCORE=0\n\
          NoNewPrivileges=true\n\
          ProtectSystem=strict\n\
+         ProtectHome=read-only\n\
          PrivateTmp=true\n\
          PrivateDevices=true\n\
          ProtectKernelTunables=true\n\
@@ -132,7 +134,16 @@ pub fn install(restic: &Path) -> Result<()> {
             );
         }
     }
-    let repository_roots = repository_roots(&config)?;
+    let repository_roots = repository_roots(&config, restic)?;
+    if let Some((restore_root, repository_root)) =
+        overlapping_roots(access.roots(), &repository_roots)
+    {
+        bail!(
+            "the restore root {} and the repository root {} overlap, so a restore could overwrite a repository; remove one of them from its roots file and run install-service again",
+            restore_root.display(),
+            repository_root.display()
+        );
+    }
     let writable: Vec<PathBuf> = access
         .roots()
         .iter()
@@ -197,8 +208,9 @@ fn refuse_rejected_roots(config: &Path) -> Result<()> {
 }
 
 /// The repository roots of the host, each created with the access of root only when it is missing
-/// (ADR-0044). A root that another account can change stops the install.
-fn repository_roots(config: &Path) -> Result<Vec<PathBuf>> {
+/// (ADR-0044). A root that another account can change, a system directory and a root on the files
+/// of the agent stop the install.
+fn repository_roots(config: &Path, restic: &Path) -> Result<Vec<PathBuf>> {
     let file = crate::repository_roots::roots_file_for(config);
     if let Some((root, reason)) = crate::restore_roots::rejected_roots_in(&file)
         .into_iter()
@@ -210,12 +222,70 @@ fn repository_roots(config: &Path) -> Result<Vec<PathBuf>> {
         );
     }
     let roots = crate::restore_roots::load_roots_file(&file);
+    let protected = crate::restore_roots::protected_paths(config, Path::new(CACHE_DIR), restic);
+    for root in &roots {
+        if let Some(reason) = crate::repository_roots::refused_root(root, &protected) {
+            bail!(
+                "the repository root {} in {} is not allowed: {reason}; remove the line and run install-service again",
+                root.display(),
+                file.display()
+            );
+        }
+    }
     for root in &roots {
         if !root.is_dir() {
-            crate::paths::create_protected_dir(root)?;
+            create_repository_root(root)?;
         }
     }
     Ok(roots)
+}
+
+/// Missing parents get mode `0755` whatever the umask, so the root check accepts them later.
+fn create_repository_root(root: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt as _;
+    if let Some(parent) = root.parent() {
+        crate::paths::ensure_program_dir(parent)?;
+    }
+    std::fs::create_dir(root)
+        .with_context(|| format!("cannot create the repository root {}", root.display()))?;
+    std::fs::set_permissions(root, std::fs::Permissions::from_mode(0o700))
+        .with_context(|| format!("cannot set the mode of {}", root.display()))
+}
+
+fn is_filesystem_root(path: &Path) -> bool {
+    path.to_str()
+        .and_then(|path| components(PathFlavor::host(), path))
+        .is_some_and(|parts| parts.is_empty())
+}
+
+/// The first restore root and repository root where one holds the other. A restore there could
+/// overwrite a repository. The restore root `/` is the documented root of an in-place restore, so
+/// it stays allowed; the restore check keeps it out of the repository roots.
+fn overlapping_roots(restore: &[PathBuf], repository: &[PathBuf]) -> Option<(PathBuf, PathBuf)> {
+    let flavor = PathFlavor::host();
+    let forms = |path: &Path| -> Vec<String> {
+        let mut forms: Vec<String> = path.to_str().map(str::to_owned).into_iter().collect();
+        forms.extend(
+            path.canonicalize()
+                .ok()
+                .and_then(|real| real.to_str().map(str::to_owned)),
+        );
+        forms
+    };
+    restore
+        .iter()
+        .filter(|root| !is_filesystem_root(root))
+        .find_map(|restore_root| {
+            let restore_forms = forms(restore_root);
+            repository.iter().find_map(|repository_root| {
+                let hit = forms(repository_root).iter().any(|repository_form| {
+                    restore_forms
+                        .iter()
+                        .any(|restore_form| overlaps(flavor, restore_form, repository_form))
+                });
+                hit.then(|| (restore_root.clone(), repository_root.clone()))
+            })
+        })
 }
 
 /// Restarts the unit when it is installed.
@@ -323,11 +393,9 @@ mod tests {
             Path::new("/etc/restichub-agent"),
             &[PathBuf::from("/var/lib/restichub-restore")],
         );
-        // A backup source below /home must stay readable, so ProtectHome must be absent.
-        assert!(
-            !unit.contains("ProtectHome"),
-            "ProtectHome breaks a source under /home"
-        );
+        // A backup source below /home stays readable; only a write needs a root.
+        assert!(unit.contains("ProtectHome=read-only\n"));
+        assert!(!unit.contains("ProtectHome=true") && !unit.contains("ProtectHome=tmpfs"));
         for capability in CAPABILITIES.split_whitespace() {
             assert!(
                 unit.contains(capability),
@@ -390,5 +458,35 @@ mod tests {
             vec![PathBuf::from("/srv/restore")]
         );
         assert!(roots_missing_from_unit(&unit, &roots[..2]).is_empty());
+    }
+
+    #[test]
+    fn adr_0044_a_restore_root_that_overlaps_a_repository_root_is_refused() {
+        let repository = [PathBuf::from("/srv/repos")];
+        for restore in ["/srv", "/srv/repos", "/srv/repos/fs-01", "/srv//repos/"] {
+            assert_eq!(
+                overlapping_roots(&[PathBuf::from(restore)], &repository),
+                Some((PathBuf::from(restore), PathBuf::from("/srv/repos"))),
+                "{restore}"
+            );
+        }
+        let apart = [
+            PathBuf::from("/var/lib/restichub-restore"),
+            PathBuf::from("/srv/restore"),
+            PathBuf::from("/srv/repos2"),
+        ];
+        assert_eq!(overlapping_roots(&apart, &repository), None);
+    }
+
+    #[test]
+    fn adr_0044_the_restore_root_slash_stays_allowed_next_to_a_repository_root() {
+        let restore = [
+            PathBuf::from("/"),
+            PathBuf::from("/var/lib/restichub-restore"),
+        ];
+        assert_eq!(
+            overlapping_roots(&restore, &[PathBuf::from("/srv/repos")]),
+            None
+        );
     }
 }

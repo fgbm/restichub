@@ -86,9 +86,11 @@ impl RestoreAccess {
     /// downloaded restic binary. The directory of `program` joins the protected paths (ADR-0038).
     #[must_use]
     pub fn for_host(config_dir: &Path, cache_dir: &Path, program: &Path) -> Self {
+        let protected = protected_paths(config_dir, cache_dir, program);
+        let repository_roots = crate::repository_roots::load_roots(config_dir, &protected);
         Self::new(
             load_roots(&roots_file_for(config_dir)),
-            protected_paths(config_dir, cache_dir, program),
+            restore_protected(protected, repository_roots),
         )
     }
 
@@ -135,6 +137,12 @@ pub(crate) fn protected_paths(config_dir: &Path, cache_dir: &Path, program: &Pat
     {
         protected.push(dir);
     }
+    protected
+}
+
+/// A restore never writes into a repository root, even below a restore root `/` (ADR-0044).
+fn restore_protected(mut protected: Vec<PathBuf>, repository_roots: Vec<PathBuf>) -> Vec<PathBuf> {
+    protected.extend(repository_roots);
     protected
 }
 
@@ -587,6 +595,35 @@ mod tests {
             Err(TargetDenied::ProtectedPath)
         );
         assert_eq!(access.check("/"), Err(TargetDenied::ProtectedPath));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn adr_0044_a_restore_into_a_repository_root_is_refused() {
+        let base = temp_dir("repository-root");
+        let config = base.join("config");
+        let repos = base.join("repos");
+        std::fs::create_dir_all(&config).expect("cannot create the config");
+        std::fs::create_dir_all(repos.join("fs-01")).expect("cannot create the repository");
+        let protected = restore_protected(vec![config], vec![repos.clone()]);
+        for root in [PathBuf::from("/"), base.clone()] {
+            let access = RestoreAccess::new(vec![root.clone()], protected.clone());
+            for target in [
+                repos.clone(),
+                repos.join("fs-01").join("config"),
+                base.clone(),
+            ] {
+                assert_eq!(
+                    access.check(target.to_str().expect("utf-8")),
+                    Err(TargetDenied::ProtectedPath),
+                    "{} below {}",
+                    target.display(),
+                    root.display()
+                );
+            }
+            let other = base.join("data");
+            assert_eq!(access.check(other.to_str().expect("utf-8")), Ok(()));
+        }
         let _ = std::fs::remove_dir_all(&base);
     }
 

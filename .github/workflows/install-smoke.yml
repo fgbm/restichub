@@ -111,7 +111,18 @@ jobs:
       - name: A local repository below a repository root inits and backs up (ADR-0044)
         run: |
           set -euo pipefail
-          root=/var/lib/restichub-smoke-repositories
+          root=/srv/restichub-smoke-repositories
+          # A root below a directory of the runner account and a system directory are refused.
+          mkdir -p "$SMOKE_DIR/repositories"
+          for refused in "$SMOKE_DIR/repositories" /etc; do
+            echo "$refused" | sudo tee /etc/restichub-agent-repository-roots.txt >/dev/null
+            sudo chmod 0644 /etc/restichub-agent-repository-roots.txt
+            if output="$(sudo /opt/restichub-agent/bin/restichub-agent install-service 2>&1)"; then
+              echo "install-service must refuse the repository root $refused" >&2
+              exit 1
+            fi
+            echo "$output" | grep -q "$refused"
+          done
           echo "$root" | sudo tee /etc/restichub-agent-repository-roots.txt >/dev/null
           sudo chmod 0644 /etc/restichub-agent-repository-roots.txt
           since="$(date -u +%s)"
@@ -132,7 +143,7 @@ jobs:
           scripts/install-smoke.sh connected "$since" 60
           canaries="$SMOKE_DIR/canaries"
           for _ in 1 2 3; do echo "CANARY-$(cat /proc/sys/kernel/random/uuid)"; done >"$canaries"
-          scripts/install-smoke.sh canary-jobs "$canaries" /var/lib/restichub-smoke-repositories/canary
+          scripts/install-smoke.sh canary-jobs "$canaries" /srv/restichub-smoke-repositories/canary
           control="CANARY-$(cat /proc/sys/kernel/random/uuid)"
           echo "control line $control" | systemd-cat --identifier restichub-canary-control
           journal="$SMOKE_DIR/journal.export"

@@ -8,6 +8,7 @@
 use std::path::{Path, PathBuf};
 
 use restichub_proto::agent::v1::Job;
+use restichub_proto::restore_path::{PathFlavor, components, is_within, overlaps};
 use restichub_proto::validate::is_absolute_path;
 
 use crate::restore_roots::{TargetDenied, check_path};
@@ -54,10 +55,8 @@ impl RepositoryAccess {
     #[must_use]
     pub fn for_host(config_dir: &Path, cache_dir: &Path, program: &Path) -> Self {
         if cfg!(target_os = "linux") {
-            Self::new(
-                crate::restore_roots::load_roots_file(&roots_file_for(config_dir)),
-                crate::restore_roots::protected_paths(config_dir, cache_dir, program),
-            )
+            let protected = crate::restore_roots::protected_paths(config_dir, cache_dir, program);
+            Self::new(load_roots(config_dir, &protected), protected)
         } else {
             Self::unrestricted()
         }
@@ -95,6 +94,73 @@ impl RepositoryAccess {
 /// absolute path, and a Windows drive letter also has a colon.
 pub(crate) fn is_local(location: &str) -> bool {
     is_absolute_path(location)
+}
+
+/// Directories that a repository root must not hold or lie in. Each root goes into
+/// `ReadWritePaths`, so such a root would open the system files to a compromised restic.
+const SYSTEM_DIRS: &[&str] = &[
+    "/etc", "/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/libx32", "/boot", "/proc",
+    "/sys", "/dev", "/run",
+];
+
+/// The directory that holds the state directories of the agent and the default restore root.
+const STATE_PARENT: &str = "/var/lib";
+
+/// The safe roots of the repository roots file. A root that is a system directory or overlaps a
+/// file of the agent is left out with a warning.
+pub(crate) fn load_roots(config_dir: &Path, protected: &[PathBuf]) -> Vec<PathBuf> {
+    let file = roots_file_for(config_dir);
+    crate::restore_roots::load_roots_file(&file)
+        .into_iter()
+        .filter(|root| match refused_root(root, protected) {
+            Some(reason) => {
+                tracing::warn!(
+                    file = %file.display(),
+                    line = %root.display(),
+                    reason,
+                    "the repository root is ignored"
+                );
+                false
+            }
+            None => true,
+        })
+        .collect()
+}
+
+/// Why a repository root is not allowed, or `None` for an allowed root.
+pub(crate) fn refused_root(root: &Path, protected: &[PathBuf]) -> Option<&'static str> {
+    let mut forms = vec![root.to_path_buf()];
+    forms.extend(root.canonicalize().ok());
+    let flavor = PathFlavor::host();
+    for form in &forms {
+        let Some(path) = form.to_str() else {
+            return Some("the path is not UTF-8");
+        };
+        let Some(parts) = components(flavor, path) else {
+            return Some("the path is not a plain absolute path");
+        };
+        if parts.is_empty() {
+            return Some("the root is the root of the file system");
+        }
+        let system = SYSTEM_DIRS.iter().any(|dir| overlaps(flavor, path, dir));
+        let state = is_within(flavor, STATE_PARENT, path)
+            || (is_within(flavor, path, STATE_PARENT)
+                && parts
+                    .get(2)
+                    .is_some_and(|name| name.starts_with("restichub")));
+        if system || state {
+            return Some("the root is a system directory, or holds or lies in one");
+        }
+        let agent = protected.iter().any(|protected| {
+            protected
+                .to_str()
+                .is_some_and(|protected| overlaps(flavor, path, protected))
+        });
+        if agent {
+            return Some("the root overlaps a file of the agent");
+        }
+    }
+    None
 }
 
 #[cfg(all(test, unix))]
@@ -190,18 +256,57 @@ mod tests {
     }
 
     #[test]
-    fn adr_0044_a_roots_file_of_a_user_account_is_ignored() {
+    fn adr_0044_a_roots_file_that_another_account_can_change_is_ignored() {
+        use std::os::unix::fs::PermissionsExt as _;
         let base = temp_dir("untrusted");
         let file = base.join("roots.txt");
         std::fs::write(&file, "/srv/repos\n").expect("cannot write the file");
-        // The check compares the owner with root, so the test needs a non-root account.
-        let owner = std::os::unix::fs::MetadataExt::uid(
-            &std::fs::metadata(&file).expect("cannot read the file"),
-        );
-        if owner != 0 {
-            assert!(crate::restore_roots::load_roots_file(&file).is_empty());
-        }
+        // A world-writable file fails the mode check under root and the owner check otherwise.
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o666))
+            .expect("cannot set the mode");
+        assert!(crate::restore_roots::load_roots_file(&file).is_empty());
         assert!(crate::restore_roots::load_roots_file(&base.join("absent.txt")).is_empty());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn adr_0044_the_filesystem_root_and_system_directories_are_refused_as_roots() {
+        let base = temp_dir("system-roots");
+        let config = base.join("config");
+        let protected = vec![config.clone(), PathBuf::from("/opt/restichub-agent")];
+        for root in [
+            "/",
+            "//",
+            "/etc",
+            "/etc/backups",
+            "/usr/local/repos",
+            "/boot",
+            "/proc",
+            "/sys",
+            "/dev",
+            "/run/repos",
+            "/lib64",
+            "/var",
+            "/var/lib",
+            "/var/lib/restichub-restore",
+            "/var/lib/restichub-agent/repos",
+            "/opt",
+            "/opt/restichub-agent",
+        ] {
+            assert!(
+                refused_root(Path::new(root), &protected).is_some(),
+                "{root} must be refused"
+            );
+        }
+        assert!(refused_root(&config.join("repos"), &protected).is_some());
+        for root in [
+            "/srv/repos",
+            "/var/spool/restichub",
+            "/var/lib/backups",
+            "/home",
+        ] {
+            assert_eq!(refused_root(Path::new(root), &protected), None, "{root}");
+        }
         let _ = std::fs::remove_dir_all(&base);
     }
 
