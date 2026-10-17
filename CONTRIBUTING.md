@@ -35,6 +35,7 @@ docs(design): add ADR for log storage
 - Write Russian documentation by the rules in [`design/style/ru-technical.md`](design/style/ru-technical.md).
 - Vale checks the documentation in CI. Fix all errors before you ask for a review.
 - Write a diagram in Mermaid in `docs/src/diagrams/<name>.<en|ru>.mmd`, and show it with the `Diagram` component in an `.mdx` page. The build makes an SVG that follows the site theme. Write `{{message.key}}` to show a label of the web interface.
+- Quote a label of the web interface with `<Ui k="message.key" />`, and a list of codes with their labels with `<UiTable prefix="message.prefix." … />`. The build reads the labels from `ui/src/lib/i18n`, so the pages follow the UI.
 - Show a frame of the web interface with the `Screen` component. The frames come from `ui/e2e/docs-screens.spec.ts` and the demo data in `ui/src/lib/api/mock-docs.ts`. Run `scripts/docs-screens.sh` (Docker) to write them again after a UI change. CI reports a frame that no longer matches the UI.
 
 ## Pull requests

@@ -3,9 +3,11 @@ title: Watch and cancel jobs
 description: Find a job, read its steps and its log, and cancel it.
 ---
 
+import Ui from '../../../components/Ui.astro';
+
 The list "Jobs" shows each job of the organization. For the states and the rules of the queue, see [Job lifecycle](/restichub/concepts/job-lifecycle/).
 
-The list "Jobs" groups the jobs in the tabs "All", "Running", "Failed", "With warnings" and "Succeeded". Each tab shows the number of its jobs.
+The list "Jobs" groups the jobs in the tabs "<Ui k="jobs.tab.all" />", "<Ui k="jobs.tab.running" />", "<Ui k="jobs.tab.failed" />", "<Ui k="jobs.tab.warnings" />" and "<Ui k="jobs.tab.succeeded" />". Each tab shows the number of its jobs.
 
 ## Job detail
 
