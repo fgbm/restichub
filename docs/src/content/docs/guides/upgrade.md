@@ -94,7 +94,7 @@ The command stops the service, copies the new program, starts the service and wa
    .\restichub-agent.exe install-service
    ```
 
-The command stops the service, copies the new program to `%ProgramFiles%\ResticHub\Agent` and starts the service. It also repairs the access control of `%ProgramData%\ResticHub` that an older agent left. If the command stops with a message, see [Agent commands and files](/restichub/reference/agent-commands/#upgrade-the-agent).
+The command stops the service, copies the new program to `%ProgramFiles%\ResticHub\Agent` and starts the service. It also repairs the access control of `%ProgramData%\ResticHub` that an older agent left. If an older agent or a manual copy left `%ProgramFiles%\ResticHub` open, the command makes it again. If the command stops with a message, see [Agent commands and files](/restichub/reference/agent-commands/#upgrade-the-agent).
 
 If a job runs, the command cannot stop the service. Wait for the job, then run the command again.
 
@@ -118,7 +118,22 @@ Upgrade the agents only after the new control plane works.
 ## Upgrade notes since 0.1.0-rc.4
 
 - Three database migrations run at the first start. They add indexes and fields of the lists, and the password reset of a platform account.
-- On Windows, `install-service` repairs the access control of `%ProgramData%\ResticHub`. Read its output: it prints one line for each change.
+- On Windows, `install-service` and `register` repair the access control of `%ProgramData%\ResticHub`. Read the output: it prints one line for each top-level directory, and one line for each removal and each warning. Add `--verbose` to print each repaired item. An open `%ProgramFiles%\ResticHub` is moved aside and made again, so run the command from the unpacked package.
+- The Windows service restarts after each failure, after 5, 30 and then 60 seconds. It does not restart after the exit code 78, as on Linux.
+- A Windows service with an identity that another account could change does not start. It writes the cause to the event log `ResticHub`, and `status` shows it. Before this release such a service connected, and each job failed with "restic did not start".
+
+### Windows hosts that need a new registration
+
+The releases 0.1.0-rc.2, 0.1.0-rc.3 and 0.1.0-rc.4 make each missing level of `%ProgramData%\ResticHub` and `%ProgramFiles%\ResticHub` with the access control for SYSTEM and Administrators only. They do not make a directory with the inherited access. An open access has two causes. An agent build before 0.1.0-rc.2 made `%ProgramData%\ResticHub` with the access of `%ProgramData%`. A person made a folder by hand, for example for a manual copy of the agent to `%ProgramFiles%\ResticHub\Agent`.
+
+On such a host, do these steps one time:
+
+1. Run `install-service` of the new package as Administrator.
+2. If the command says `the identity of this host could be changed by another account`, create a token with "Re-register" on the host page.
+3. Run `restichub-agent register --force --url <URL> --token <TOKEN>` as Administrator. The command repairs all the directories first. It removes the old identity only after all the checks pass.
+4. If a command printed `repaired the access control of ... under C:\ProgramData\ResticHub...`, restart the computer. A program that opened that directory before the repair can still add a file to it until the restart.
+
+A host that you registered first with 0.1.0-rc.2 or a later release on a clean computer does not need these steps. `install-service` alone is sufficient there.
 - The Windows service writes its log to rotated files in `%ProgramData%\ResticHub\Agent-logs` and to the event log `ResticHub`. See [Agent logs](/restichub/reference/agent-logs/).
 - A local repository is bound to its host. The control plane refuses a job of a local repository on another host with the reason `not_repository_host`. If several hosts used one shared network disk (NFS or SMB) as a local repository, move this repository to rest-server or SFTP. To find and correct the old plans, see [Repositories saved before this rule](/restichub/guides/add-a-repository/#repositories-saved-before-this-rule).
 

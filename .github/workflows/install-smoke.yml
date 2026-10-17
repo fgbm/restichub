@@ -503,6 +503,117 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'not connected' }
           $after = @(Get-ChildItem $logs -Filter 'agent-*.log' | Select-String -Pattern 'the control plane greeted the agent').Count
           if ($after -le $greetings) { throw 'the service wrote no new line after the registration' }
+      # A folder that a person made by hand, or an older build, lets the account of the
+      # administrator change the agent without elevation (T20).
+      - name: register --force repairs an install that the account of the administrator could change (T20)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $installed = Join-Path $env:ProgramFiles 'ResticHub\Agent\restichub-agent.exe'
+          $program = Join-Path $env:ProgramFiles 'ResticHub'
+          # The commands run from the package, as the upgrade guide says: the agent cannot move the
+          # directory that holds its own running image.
+          $package = Join-Path $env:RUNNER_TEMP 'acl-package'
+          New-Item -ItemType Directory -Force $package | Out-Null
+          Copy-Item $installed $package
+          $agent = Join-Path $package 'restichub-agent.exe'
+          $data = Join-Path $env:ProgramData 'ResticHub\Agent'
+          $user = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          $userAce = { param($path) (Get-Acl $path).GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) | Where-Object { $_.IdentityReference.Value -eq $user } }
+          # Many cache files, as a restic cache of a real repository holds.
+          $blobs = Join-Path $data 'cache\smoke\data'
+          New-Item -ItemType Directory -Force $blobs | Out-Null
+          1..200 | ForEach-Object { Set-Content (Join-Path $blobs "blob-$_") 'x' }
+          # /T puts the entry on each existing item, as the inherited entries of an older build.
+          icacls $program /grant "*${user}:(OI)(CI)(M)" /T
+          if ($LASTEXITCODE -ne 0) { throw "icacls $program exit code $LASTEXITCODE" }
+          icacls $data /grant "*${user}:(OI)(CI)(M)" /T /Q | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "icacls $data exit code $LASTEXITCODE" }
+          # A file takes no inheritance flags, and its protected DACL takes no inherited entry.
+          icacls $installed /grant "*${user}:(M)"
+          if ($LASTEXITCODE -ne 0) { throw "icacls $installed exit code $LASTEXITCODE" }
+          Write-Host "the entry of the user on the agent before the repair:"
+          & $userAce $installed | Format-List IdentityReference, FileSystemRights, AccessControlType, IsInherited | Out-String | Write-Host
+          if (-not (& $userAce $program) -or -not (& $userAce $data) -or -not (& $userAce $installed)) { throw 'the test did not loosen the access' }
+          $identity = Join-Path $data 'identity.json'
+          $before = Get-FileHash $identity
+          # install-service makes the program directory again, prints summaries and refuses the identity.
+          $output = & $agent install-service 2>&1 | Out-String
+          $code = $LASTEXITCODE
+          Write-Host $output
+          if ($code -eq 0) { throw 'install-service must refuse the identity' }
+          if ($output -notmatch 'could be changed by another account') { throw 'no refusal of the identity' }
+          if ($output -notmatch 'repaired the access control of \d+ entr(y|ies) under') { throw 'no summary line' }
+          $lines = @($output -split "`n" | Where-Object { $_ -match 'repaired the access control of' })
+          if ($lines.Count -gt 4) { throw "the repair printed $($lines.Count) lines instead of one for each directory" }
+          $agentDir = [regex]::Escape($data)
+          if ($output -notmatch "repaired the access control of (\d+) entries under $agentDir\r?\n") { throw 'no summary for the data directory' }
+          if ([int]$Matches[1] -lt 200) { throw "the summary counts $($Matches[1]) entries, not the cache files" }
+          if ($output -notmatch 'downloads and verifies restic again') { throw 'restic in the open directory was not removed' }
+          if ($output -notmatch "moved $([regex]::Escape($program)) to $([regex]::Escape($program))\.untrusted-\d+") { throw 'the open program directory was not moved aside' }
+          if (& $userAce $program) { throw 'the program directory stays open' }
+          if (-not (Test-Path $installed)) { throw 'the agent was not copied into the new program directory' }
+          Write-Host "the access control of the agent after the repair:"
+          icacls $installed
+          if (& $userAce $installed) { throw 'the agent executable stays open' }
+          if (Test-Path (Join-Path $program 'Agent\restic.exe')) { throw 'restic of the open directory stays' }
+          if ((Get-FileHash $identity).Hash -ne $before.Hash) { throw 'install-service changed the identity' }
+          # The service refuses the identity and does not restart forever.
+          & $agent status 2>&1 | Out-String | Tee-Object -Variable status | Write-Host
+          if ($status -notmatch 'does not use the identity') { throw 'status does not report the refusal' }
+          $start = [DateTime]::Now
+          Start-Service restichub-agent -ErrorAction SilentlyContinue
+          $refused = $null
+          for ($i = 0; $i -lt 60 -and -not $refused; $i++) {
+            Start-Sleep -Seconds 1
+            $refused = Get-WinEvent -FilterHashtable @{LogName='ResticHub'; ProviderName='ResticHub Agent'; StartTime=$start} -ErrorAction SilentlyContinue |
+              Where-Object { $_.Message -match 'does not use the identity' } | Select-Object -First 1
+          }
+          if (-not $refused) { throw 'the service wrote no refusal to the event log' }
+          Write-Host "event: $($refused.Message)"
+          $service = $null
+          for ($i = 0; $i -lt 30; $i++) {
+            $service = Get-CimInstance Win32_Service -Filter "Name='restichub-agent'"
+            if ($service.State -eq 'Stopped' -and $service.ServiceSpecificExitCode -eq 78) { break }
+            Start-Sleep -Seconds 1
+          }
+          $service | Format-List State, ExitCode, ServiceSpecificExitCode
+          if ($service.ServiceSpecificExitCode -ne 78) { throw "the service exit code is $($service.ServiceSpecificExitCode)" }
+          # register --force repairs everything first, then replaces the identity.
+          $token = "$env:SMOKE_DIR/enrollment-token-3"
+          bash scripts/install-smoke.sh token $token
+          if ($LASTEXITCODE -ne 0) { throw 'cannot create the token' }
+          $since = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+          $output = & $agent register --force --url 'https://localhost:8443' --token-file $token --ca-file "$env:SMOKE_DIR/ca.pem" 2>&1 | Out-String
+          $code = $LASTEXITCODE
+          Write-Host $output
+          if ($code -ne 0) { throw "register --force exit code $code" }
+          if (& $userAce $data) { throw 'the identity directory stays open' }
+          if (-not (Test-Path $identity)) { throw 'no new identity' }
+          if (-not (Test-Path (Join-Path $env:ProgramFiles 'ResticHub\Agent\restic.exe'))) { throw 'restic was not installed again' }
+          if ((Get-Service restichub-agent).Status -ne 'Running') { throw 'not running' }
+          bash scripts/install-smoke.sh connected $since 60
+          if ($LASTEXITCODE -ne 0) { throw 'not connected' }
+          bash scripts/install-smoke.sh one-job "$env:SMOKE_DIR/acl-repair"
+          if ($LASTEXITCODE -ne 0) { throw 'the job after the repair failed' }
+      # The same rule as Restart=on-failure with RestartPreventExitStatus=78 on Linux.
+      - name: the service restarts after each crash (FR-AG-01)
+        shell: pwsh
+        run: |
+          foreach ($crash in 1..3) {
+            $before = (Get-CimInstance Win32_Service -Filter "Name='restichub-agent'").ProcessId
+            if (-not $before) { throw "crash ${crash}: the service has no process" }
+            Stop-Process -Id $before -Force
+            $service = $null
+            for ($i = 0; $i -lt 120; $i++) {
+              Start-Sleep -Seconds 1
+              $service = Get-CimInstance Win32_Service -Filter "Name='restichub-agent'"
+              if ($service.State -eq 'Running' -and $service.ProcessId -and $service.ProcessId -ne $before) { break }
+            }
+            Write-Host "crash ${crash}: state $($service.State), process $before -> $($service.ProcessId) after $i s"
+            if ($service.State -ne 'Running' -or $service.ProcessId -eq $before) { throw "the service did not restart after crash $crash" }
+          }
       - name: uninstall-service removes the service and the event source and keeps the log (FR-IN-08)
         shell: pwsh
         run: |

@@ -424,7 +424,7 @@ fn check_owner(path: &Path, owner: PSID) -> Result<()> {
 /// The advice for a path that another account owns. The agent never repairs it: the owner can
 /// change the access control and may have put files there. Deleting a directory would also delete
 /// the agent identity, so the text asks for a check of the files, then a reset.
-fn foreign_owner_advice(path: &Path) -> String {
+pub(crate) fn foreign_owner_advice(path: &Path) -> String {
     let shown = path.display();
     if path.is_dir() {
         format!(
@@ -439,6 +439,9 @@ fn foreign_owner_advice(path: &Path) -> String {
 }
 
 /// Returns the mask that a non-admin holds, or `None` when no entry grants it.
+///
+/// The mask is the granted part of `rights`, so a full control shows as `0x000d0156` against the
+/// agent rights: every right of [`AGENT_RIGHTS`].
 ///
 /// A missing DACL grants everyone full access, so it gives [`u32::MAX`]. An allow entry of a type
 /// this module does not parse also gives [`u32::MAX`], because it may hold any right.
@@ -934,7 +937,11 @@ pub(crate) mod tests {
 
     /// Grants the account of BUILTIN\Users the given rights, for a negative test.
     pub(crate) fn grant(dir: &Path, rights: &str) -> Result<()> {
-        run_icacls(dir, &["/grant", &format!("*S-1-5-32-545:{rights}")])
+        grant_sid(dir, "S-1-5-32-545", rights)
+    }
+
+    pub(crate) fn grant_sid(path: &Path, sid: &str, rights: &str) -> Result<()> {
+        run_icacls(path, &["/grant", &format!("*{sid}:{rights}")])
     }
 
     /// Copies the DACL of the real `C:\Program Files` onto `dir`, for a positive test.

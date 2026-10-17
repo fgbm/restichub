@@ -40,7 +40,7 @@
 	} from '#lib/job-detail.ts';
 	import type { StepMarker, StepRow } from '#lib/job-detail.ts';
 	import { countLines, groupLines, logText } from '#lib/job-log.ts';
-	import { jobReason } from '#lib/job-reason.ts';
+	import { jobDetailReason, notStartedReason } from '#lib/job-reason.ts';
 	import type { LogCounts } from '#lib/job-log.ts';
 	import { plural } from '#lib/profile-form.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
@@ -166,7 +166,7 @@
 
 	function reasonOf(current: JobDetail): string | null {
 		if (cancelled) return null;
-		return jobReason(current);
+		return jobDetailReason(current);
 	}
 
 	async function copyKeyId(keyId: string): Promise<void> {
@@ -235,6 +235,8 @@
 		if (job && isInitProbe(job, step)) return t('jobDetail.probe.willCreate');
 		const code = stepErrorCode(step);
 		if (!code) return null;
+		const reason = notStartedReason(step);
+		if (reason) return t('jobDetail.notStartedBecause', { reason });
 		const key = `jobDetail.stepError.${code}` as MessageKey;
 		const text = t(key);
 		return text === key ? code : text;
@@ -654,6 +656,7 @@
 									name={rowTitle(row)}
 									lines={stepLines(row)}
 									live={row.state === 'running'}
+									empty={notStartedReason(row.step) ? t('jobDetail.stepLogEmptyReason') : undefined}
 									onCopy={copyLog}
 								/>
 							{/if}

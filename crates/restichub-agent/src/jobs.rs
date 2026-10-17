@@ -964,7 +964,7 @@ impl Jobs {
             exit_code: outcome.exit_code,
             started_at: Some(started_at),
             finished_at: Some(finished_at),
-            error: outcome.error.map(StepError::detail),
+            error: outcome.error_detail(),
             possible_stale_lock: outcome.possible_stale_lock,
             output: outcome.output.clone(),
         };

@@ -54,7 +54,7 @@ fn is_elevated() -> Result<bool> {
 ///
 /// The check covers the configuration directory, the staging directory that the identity save uses
 /// and the cache directory. It leaves no probe file behind. `untrusted` says what happens to an
-/// identity that another account could change.
+/// identity that another account could change. `verbose` prints each repaired entry.
 ///
 /// # Errors
 ///
@@ -64,8 +64,10 @@ pub fn prepare_directories(
     config: &Path,
     cache: &Path,
     untrusted: paths::UntrustedIdentity,
+    verbose: bool,
 ) -> Result<()> {
-    let changeable = paths::repair_config_dir(config, untrusted, &mut |line| println!("{line}"))?;
+    let changeable =
+        paths::repair_config_dir(config, untrusted, verbose, &mut |line| println!("{line}"))?;
     if !changeable.is_empty() {
         return Err(ChangeableIdentity { paths: changeable }.into());
     }
@@ -175,7 +177,7 @@ mod tests {
         let base = temp("create");
         let config = base.join("one").join("two").join("Agent");
         let cache = base.join("cache").join("restic");
-        prepare_directories(&config, &cache, paths::UntrustedIdentity::Keep)
+        prepare_directories(&config, &cache, paths::UntrustedIdentity::Keep, false)
             .expect("the directories must be prepared");
         assert!(config.is_dir());
         assert!(cache.is_dir());
@@ -194,6 +196,7 @@ mod tests {
             &base.join("Agent"),
             &blocker.join("cache"),
             paths::UntrustedIdentity::Keep,
+            false,
         )
         .expect_err("a cache below a file must fail");
         assert!(error.to_string().contains("cache directory"), "{error}");

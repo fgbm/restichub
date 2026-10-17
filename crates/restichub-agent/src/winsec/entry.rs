@@ -65,13 +65,22 @@ impl Drop for Entry {
 impl Entry {
     /// Opens the entry at `path`, or returns `None` when the path does not exist.
     pub(crate) fn open(path: &Path) -> Result<Option<Self>> {
+        Self::open_with(path, READ_CONTROL | WRITE_DAC)
+    }
+
+    /// Opens the entry for [`Entry::exposure`] only, so a process without elevation can check it.
+    pub(crate) fn inspect(path: &Path) -> Result<Option<Self>> {
+        Self::open_with(path, READ_CONTROL)
+    }
+
+    fn open_with(path: &Path, access: u32) -> Result<Option<Self>> {
         let wide = wide_path(path);
         // SAFETY: the path is a null-terminated UTF-16 string. The access asks for no data, so the
         // share mode of another handle cannot refuse it.
         let handle = unsafe {
             CreateFileW(
                 wide.as_ptr(),
-                READ_CONTROL | WRITE_DAC,
+                access,
                 FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                 std::ptr::null(),
                 OPEN_EXISTING,

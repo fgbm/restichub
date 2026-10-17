@@ -192,7 +192,9 @@ pub fn collect_status(
     dir: &Path,
     restic: Option<(String, String)>,
 ) -> StatusReport {
-    let identity = require_identity(dir)
+    let identity = crate::commands::check_identity(dir)
+        .map_err(anyhow::Error::new)
+        .and_then(|()| require_identity(dir))
         .and_then(|identity| {
             Ok(StatusIdentity {
                 certificate_expiry: identity.certificate_expiry()?,
@@ -361,7 +363,8 @@ mod tests {
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("cannot create the directory");
+        // The status refuses a directory that another account could change.
+        crate::paths::ensure_config_dir(&dir).expect("cannot create the directory");
         dir
     }
 

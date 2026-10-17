@@ -13,8 +13,8 @@ use std::time::Duration;
 use restichub_compiler::ValidatedJob;
 use restichub_compiler::arg::build_command;
 use restichub_proto::agent::v1::{
-    AgentMessage, ErrorDetail, LogStream, ProcessPriority, Step, StepProgress, StepStatus,
-    agent_message, step, step_result,
+    AgentMessage, ErrorDetail, KeyValue, LogStream, ProcessPriority, Step, StepProgress,
+    StepStatus, agent_message, step, step_result,
 };
 use restichub_proto::restore_path::{PathFlavor, components};
 use tokio::sync::mpsc;
@@ -48,6 +48,11 @@ pub(super) const SEND_WAIT: Duration = Duration::from_millis(250);
 
 /// The lines that the agent takes before it looks at the child again.
 pub(super) const LINES_PER_TURN: usize = 256;
+
+/// The parameter of `step_not_started` that holds the scrubbed cause. The control plane stores a
+/// parameter value of up to this many characters.
+pub(super) const REASON_PARAM: &str = "reason";
+const MAX_REASON_CHARS: usize = 500;
 
 /// Why a step is not a success. The stable code reaches the control plane (NFR-DOC-04).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -118,6 +123,9 @@ pub(super) struct StepOutcome {
     pub(super) error: Option<StepError>,
     /// The typed output that the agent parsed from the restic JSON (FR-AG-08).
     pub(super) output: Option<step_result::Output>,
+    /// Why restic did not start, scrubbed and bounded. It reaches the control plane even when the
+    /// log cannot, for example when the log spool cannot be written.
+    pub(super) reason: Option<String>,
 }
 
 impl StepOutcome {
@@ -128,6 +136,7 @@ impl StepOutcome {
             possible_stale_lock: false,
             error: StepError::for_status(status),
             output: None,
+            reason: None,
         }
     }
 
@@ -169,6 +178,25 @@ impl StepOutcome {
             error: Some(StepError::NotStarted),
             ..Self::new(StepStatus::Failed, -1)
         }
+    }
+
+    /// `reason` is already scrubbed. It holds no secret, and a path is fine.
+    pub(super) fn not_started_because(reason: &str) -> Self {
+        Self {
+            reason: Some(reason.chars().take(MAX_REASON_CHARS).collect()),
+            ..Self::not_started()
+        }
+    }
+
+    pub(super) fn error_detail(&self) -> Option<ErrorDetail> {
+        let mut detail = self.error?.detail();
+        if let Some(reason) = &self.reason {
+            detail.params.push(KeyValue {
+                key: REASON_PARAM.to_owned(),
+                value: reason.clone(),
+            });
+        }
+        Some(detail)
     }
 
     fn from_exit(code: i32) -> Self {
@@ -347,7 +375,9 @@ impl Jobs {
             Ok(line) => line,
             Err(error) => {
                 tracing::warn!(%error, "cannot build the restic command");
-                return StepOutcome::not_started();
+                return StepOutcome::not_started_because(&format!(
+                    "cannot build the restic command: {error}"
+                ));
             }
         };
         let step_id = step.step_id.as_str();
@@ -379,7 +409,7 @@ impl Jobs {
                     &scrubber.scrub(&format!("restic did not start: {detail}")),
                 );
                 self.send_log(log).await;
-                return StepOutcome::not_started();
+                return StepOutcome::not_started_because(&scrubber.scrub(&detail));
             }
         };
         // The secrets leave the memory of the agent with the command line (FR-AG-07).
@@ -608,7 +638,8 @@ mod tests {
     use restichub_proto::agent::v1::StepStatus;
 
     use super::{
-        LimitStop, StepError, StepOutcome, clean_path, names_read_only_repository, status_for_exit,
+        LimitStop, REASON_PARAM, StepError, StepOutcome, clean_path, names_read_only_repository,
+        status_for_exit,
     };
 
     #[test]
@@ -644,6 +675,31 @@ mod tests {
             Some(StepError::Stalled)
         );
         assert!(StepOutcome::limit_exceeded(LimitStop::Stalled, true).possible_stale_lock);
+    }
+
+    #[test]
+    fn fr_ag_09_a_step_that_did_not_start_sends_its_bounded_reason() {
+        let plain = StepOutcome::not_started()
+            .error_detail()
+            .expect("a not-started step has an error");
+        assert_eq!(plain.code, "step_not_started");
+        assert!(plain.params.is_empty());
+
+        let reason = format!(
+            "cannot protect the directory C:\\ProgramData\\ResticHub {}",
+            "x".repeat(1000)
+        );
+        let detail = StepOutcome::not_started_because(&reason)
+            .error_detail()
+            .expect("a not-started step has an error");
+        assert_eq!(detail.code, "step_not_started");
+        let [param] = detail.params.as_slice() else {
+            panic!("one parameter: {:?}", detail.params);
+        };
+        assert_eq!(param.key, REASON_PARAM);
+        assert_eq!(param.value.chars().count(), 500);
+        assert!(param.value.starts_with("cannot protect the directory"));
+        assert_eq!(StepOutcome::from_exit(0).error_detail(), None);
     }
 
     #[test]

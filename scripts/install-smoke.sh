@@ -8,6 +8,7 @@
 #   install-smoke.sh token FILE   write a new enrollment token to FILE
 #   install-smoke.sh connected    wait until the control plane lists the agent as connected
 #   install-smoke.sh canary-jobs  run ten jobs on three repositories whose passwords are canaries
+#   install-smoke.sh one-job DIR  create a local repository below DIR and run init and test-access
 #   install-smoke.sh local-repository ROOT SOURCE OUTSIDE
 #                                 back up into a local repository below ROOT; refuse OUTSIDE
 #   install-smoke.sh cp-logs      print the log of the control plane
@@ -190,6 +191,20 @@ canary_jobs() {
 	echo "ten canary jobs succeeded"
 }
 
+# One repository with a random password, so a job proves that the service runs restic.
+one_job() {
+	local root="${1:?the repository directory}" agent repository
+	agent="$(agent_json | jq -r '.items[0].id')"
+	repository="$(head -c 24 /dev/urandom | base64 |
+		jq -Rc --arg path "$root/repo" --arg agent "$agent" \
+			'{name: "acl-repair", backend: {kind: "local", path: $path}, password: ., maintenance_agent_id: $agent}' |
+		curl -fsS "${csrf[@]}" -b "$jar" -H 'content-type: application/json' \
+			"$web/api/v1/repositories" --data-binary @- | jq -r .id)"
+	run_job "$repository" init
+	run_job "$repository" test-access
+	echo "the job succeeded"
+}
+
 # Prints the id of a new local repository $1 at the path $2 with the maintenance agent $3.
 create_local_repository() {
 	printf '%s' "smoke-local-password" |
@@ -245,6 +260,7 @@ ca) ca ;;
 token) shift; token "$@" ;;
 connected) shift; connected "$@" ;;
 canary-jobs) shift; canary_jobs "$@" ;;
+one-job) shift; one_job "$@" ;;
 local-repository) shift; local_repository "$@" ;;
 cp-logs) cat "$smoke_dir/cp.log" ;;
 *) echo "unknown command: ${1:-}" >&2; exit 2 ;;

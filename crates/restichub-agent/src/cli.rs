@@ -38,6 +38,7 @@ REGISTER OPTIONS:
   --force            replace an existing identity (re-register)
   --no-service       only enroll; do not install or start the service
   --trust-server-scripts  turn the trust mode on before the service starts: the control plane can then run any command on this host (default: off)
+  --verbose          print each entry whose access control the repair changes (also install-service)
   --help             print this help
 
 RESTIC OPTIONS (register, install-service, restic update):
@@ -54,7 +55,7 @@ RESTIC UPDATE OPTIONS:
 #[derive(Debug)]
 pub enum Command {
     Register(RegisterOptions),
-    InstallService(ResticFileOptions),
+    InstallService(InstallOptions),
     ResticUpdate(UpdateOptions),
     UninstallService,
     Run,
@@ -79,6 +80,13 @@ pub struct RegisterOptions {
     pub force: bool,
     pub no_service: bool,
     pub trust_server_scripts: bool,
+    pub verbose: bool,
+    pub restic: ResticFileOptions,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct InstallOptions {
+    pub verbose: bool,
     pub restic: ResticFileOptions,
 }
 
@@ -108,7 +116,7 @@ pub fn parse(args: Vec<String>) -> Result<Command> {
     };
     match first.as_str() {
         "register" => parse_register(rest).map(Command::Register),
-        "install-service" => parse_restic_files(rest).map(Command::InstallService),
+        "install-service" => parse_install(rest).map(Command::InstallService),
         "restic" => match rest.split_first() {
             Some((sub, options)) if sub == "update" => {
                 parse_update(options).map(Command::ResticUpdate)
@@ -143,6 +151,7 @@ fn parse_register(args: &[String]) -> Result<RegisterOptions> {
             "--force" => options.force = true,
             "--no-service" => options.no_service = true,
             "--trust-server-scripts" => options.trust_server_scripts = true,
+            "--verbose" => options.verbose = true,
             "--help" | "-h" => {
                 println!("{USAGE}");
                 std::process::exit(0);
@@ -179,17 +188,22 @@ fn parse_trust(args: &[String]) -> Result<Command> {
     Ok(Command::TrustServerScripts { enable, no_restart })
 }
 
-fn parse_restic_files(args: &[String]) -> Result<ResticFileOptions> {
-    let mut options = ResticFileOptions::default();
+fn parse_install(args: &[String]) -> Result<InstallOptions> {
+    let mut options = InstallOptions::default();
     let mut index = 0;
     while index < args.len() {
         let name = args[index].split('=').next().unwrap_or_default().to_owned();
-        if name == "--help" || name == "-h" {
-            println!("{USAGE}");
-            std::process::exit(0);
-        }
-        if !take_restic_option(&name, args, &mut index, &mut options)? {
-            bail!("unknown argument: {name}");
+        match name.as_str() {
+            "--help" | "-h" => {
+                println!("{USAGE}");
+                std::process::exit(0);
+            }
+            "--verbose" => options.verbose = true,
+            other => {
+                if !take_restic_option(other, args, &mut index, &mut options.restic)? {
+                    bail!("unknown argument: {other}");
+                }
+            }
         }
         index += 1;
     }
@@ -358,7 +372,9 @@ mod tests {
         let update = parse_args(&["restic", "update", "--restic-sums", "s"]).expect("command");
         assert!(matches!(update, Command::ResticUpdate(options) if options.restic.sums.is_some()));
         let install = parse_args(&["install-service", "--restic-archive", "a"]).expect("command");
-        assert!(matches!(install, Command::InstallService(options) if options.archive.is_some()));
+        assert!(
+            matches!(install, Command::InstallService(options) if options.restic.archive.is_some())
+        );
         assert!(parse_args(&["restic"]).is_err());
         assert!(parse_args(&["restic", "downgrade"]).is_err());
         assert!(parse_args(&["install-service", "--nope"]).is_err());
@@ -389,6 +405,18 @@ mod tests {
             .expect("command");
         assert!(matches!(only, Command::Register(options) if options.no_service));
         assert!(parse_args(&["install-service", "--no-service"]).is_err());
+    }
+
+    #[test]
+    fn fr_ag_04_register_and_install_service_print_each_repaired_entry_only_when_told() {
+        let plain = parse_args(&["install-service"]).expect("command");
+        assert!(matches!(plain, Command::InstallService(options) if !options.verbose));
+        let verbose = parse_args(&["install-service", "--verbose"]).expect("command");
+        assert!(matches!(verbose, Command::InstallService(options) if options.verbose));
+        let register =
+            parse_args(&["register", "--url", "https://cp.example", "--verbose"]).expect("command");
+        assert!(matches!(register, Command::Register(options) if options.verbose));
+        assert!(parse_args(&["restic", "update", "--verbose"]).is_err());
     }
 
     #[test]
