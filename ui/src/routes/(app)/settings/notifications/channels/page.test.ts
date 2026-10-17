@@ -104,7 +104,7 @@ describe('the channel settings', () => {
 		expect(await screen.findByText(/no SMTP server/)).toBeInTheDocument();
 	});
 
-	it('creates an email channel from the recipient lines', async () => {
+	it('creates an email channel from the recipient chips', async () => {
 		const user = userEvent.setup();
 		mocks.listChannels.mockResolvedValueOnce(list([])).mockResolvedValueOnce(list([channel()]));
 		mocks.createChannel.mockResolvedValue({ channel: channel(), signing_secret: null });
@@ -116,8 +116,15 @@ describe('the channel settings', () => {
 		await user.type(within(dialog).getByLabelText(/Name/), 'ops-mail');
 		await user.type(
 			within(dialog).getByLabelText(/Recipients/),
-			'ops@example.com\nbackup@example.com'
+			'ops@example.com{Enter}not-an-address, backup@example.com'
 		);
+		expect(within(dialog).getByRole('alert')).toHaveTextContent(
+			'not-an-address: This is not an email address.'
+		);
+		const field = within(dialog).getByLabelText(/Recipients/);
+		await user.tab();
+		expect(field).toHaveValue('not-an-address');
+		await user.clear(field);
 		await user.click(within(dialog).getByRole('button', { name: 'Save' }));
 
 		await waitFor(() =>

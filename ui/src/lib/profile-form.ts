@@ -41,7 +41,7 @@ export interface ProfileDraft {
 	groupByHost: boolean;
 	groupByPaths: boolean;
 	groupByTags: boolean;
-	filterHosts: string;
+	filterHosts: string[];
 	filterTags: string[];
 	filterPaths: string;
 	readDataSubset: string;
@@ -98,10 +98,9 @@ export function splitLines(value: string): string[] {
 		.filter((line) => line.length > 0);
 }
 
-/** Splits typed text into tags: a comma or a space separates them. */
-export function parseTags(value: string): string[] {
-	return value.split(/[\s,]+/).filter((tag) => tag.length > 0);
-}
+// The limits of the server on the tag lists and the retention lists.
+export const MAX_TAGS = 64;
+export const MAX_RETENTION_LIST = 64;
 
 export function numberOrZero(value: string): number {
 	const parsed = Number.parseInt(value, 10);
@@ -156,7 +155,7 @@ export function emptyDraft(repositoryId = '', defaults?: JobLimitDefaults): Prof
 		groupByHost: false,
 		groupByPaths: false,
 		groupByTags: false,
-		filterHosts: '',
+		filterHosts: [],
 		filterTags: [],
 		filterPaths: '',
 		readDataSubset: '',
@@ -210,7 +209,7 @@ export function draftFromProfile(profile: Profile): ProfileDraft {
 		draft.groupByHost = groupBy.includes('host');
 		draft.groupByPaths = groupBy.includes('paths');
 		draft.groupByTags = groupBy.includes('tags');
-		draft.filterHosts = joinLines(retention.filter?.hosts);
+		draft.filterHosts = [...(retention.filter?.hosts ?? [])];
 		draft.filterTags = [...(retention.filter?.tags ?? [])];
 		draft.filterPaths = joinLines(retention.filter?.paths);
 	}
@@ -286,7 +285,7 @@ export function settingsOf(
 					keep_tags: draft.keepTags,
 					group_by: groupByOf(draft),
 					filter: {
-						hosts: splitLines(draft.filterHosts),
+						hosts: draft.filterHosts,
 						tags: draft.filterTags,
 						paths: splitLines(draft.filterPaths)
 					}
@@ -674,7 +673,7 @@ export function buildSteps(
 		}
 		if (draft.keepWithin.trim()) forget.push(`--keep-within ${draft.keepWithin.trim()}`);
 		for (const tag of draft.keepTags) forget.push(`--keep-tag ${quote(tag)}`);
-		for (const host of splitLines(draft.filterHosts)) forget.push(`--host ${quote(host)}`);
+		for (const host of draft.filterHosts) forget.push(`--host ${quote(host)}`);
 		for (const tag of draft.filterTags) forget.push(`--tag ${quote(tag)}`);
 		for (const path of splitLines(draft.filterPaths)) forget.push(`--path ${quote(path)}`);
 		steps.push({ kind: 'forget', title: t('pe.cmd.forget'), command: forget.join(' \\\n  ') });

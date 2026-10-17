@@ -44,6 +44,7 @@ Use the shared components of [ui/COMPONENTS.md](../../ui/COMPONENTS.md). They ap
 8. A list page has no static documentation text. Do not add a note, a footnote or a help panel that does not change with the state and does not lead to an action. The documentation (`docs/`) holds this text. A list page shows a banner only for a state: an error, a warning, an empty list or an action that is necessary. The one-line description in the page header stays.
 9. A locked field (disabled or read-only) shows its value. If it has no value, it shows the muted text "Not set" ("Не задано"). It never shows an example placeholder, because an example in a locked field looks like a stored value. `TextField`, `Select` and `Combobox` apply this rule.
 10. In an editable field, an example placeholder starts with "e.g." ("например,"), for example "e.g. snapshots/prod". A placeholder that is not an example, for example the hint of a search field, does not have this prefix.
+11. A person enters a set of values, for example labels, tags, host names or email addresses, with the tag input (`TagInput`). Each value shows as a chip. Do not ask for one text with separators, for example "comma-separated". A path or a pattern can hold a comma or a space. Thus a list of paths or patterns is a text area with one value on each line. The lint rule `ui/no-separated-text` reports a catalog text that asks for separators.
 
 ## 4. Visual style
 
