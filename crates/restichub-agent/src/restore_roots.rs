@@ -248,12 +248,12 @@ pub(crate) fn load_roots_file(file: &Path) -> Vec<PathBuf> {
         Ok(_) => match read_trusted(file) {
             Ok(text) => {
                 let (extra, skipped) = parse_roots(&text);
-                for (line, text) in skipped {
+                if !skipped.is_empty() {
+                    let lines: Vec<usize> = skipped.iter().map(|(line, _)| *line).collect();
                     tracing::warn!(
                         file = %file.display(),
-                        line,
-                        text = ?text,
-                        "the roots file line is ignored: it is not a plain absolute path"
+                        lines = ?lines,
+                        "the roots file holds lines that are not plain absolute paths"
                     );
                 }
                 for (_, root) in extra {

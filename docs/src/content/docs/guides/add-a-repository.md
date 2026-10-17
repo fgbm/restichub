@@ -58,7 +58,7 @@ The agent service on Linux runs in a systemd sandbox. The sandbox makes the file
 
 Do these steps on the maintenance host before you initialize the repository:
 
-1. Write the parent directory of the repository on one line of the file `/etc/restichub-agent-repository-roots.txt`, for example `/srv/restichub` or `/var/spool/restichub`. Each line holds one absolute path. A line that starts with `#` is a comment. On Linux the agent ignores a line with a quotation mark, a backslash, `%`, a space or a control character. The agent logs a warning for such a line and for a line that is not an absolute path. `install-service` refuses these lines and names the line number.
+1. Write the parent directory of the repository on one line of the file `/etc/restichub-agent-repository-roots.txt`, for example `/srv/restichub` or `/var/spool/restichub`. Each line holds one absolute path. A line that starts with `#` is a comment. On Linux the agent ignores a line with a quotation mark, a backslash, `%`, a space or a control character. The agent logs a warning for these lines and for a line that is not an absolute path. The command `install-service` refuses such a line and names its number.
 2. Make sure that root owns the file and that no other account can write it: `sudo chown root:root /etc/restichub-agent-repository-roots.txt` and `sudo chmod 0644 /etc/restichub-agent-repository-roots.txt`.
 3. Run `sudo restichub-agent install-service`. The command adds each root to `ReadWritePaths` of the systemd unit and restarts the service. It creates a missing root with access for root only, and each missing parent with mode `0755`.
 
