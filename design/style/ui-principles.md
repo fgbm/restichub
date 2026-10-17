@@ -40,6 +40,7 @@ Use the shared components of [ui/COMPONENTS.md](../../ui/COMPONENTS.md). They ap
 4. If a job has one step, do not show an overall progress bar next to the step bar.
 5. Only three tones have a color. Danger (red) is for data that is not safe or work that failed. Warning (yellow) is for a problem that comes soon. Running (blue) is for work that runs now. A success and a usual state are grey. Each state of each entity has one label, one tone and one Lucide icon (`$lib/vocabulary.ts`).
 6. A list shows the time in the formats of `$lib/list-format.ts`. Freshness is a short distance ("7 min ago"). A run is the day and the hours ("today 02:00"). An audit time has seconds and is below the heading of its day. A validity end is a date, or a distance when less than 30 days remain. The tooltip of a time shows the full date, the seconds and the time zone.
+7. A list page has no static documentation text. Do not add a note, a footnote or a help panel that does not change with the state and does not lead to an action. The documentation (`docs/`) holds this text. A list page shows a banner only for a state: an error, a warning, an empty list or an action that is necessary. The one-line description in the page header stays.
 
 ## 4. Visual style
 

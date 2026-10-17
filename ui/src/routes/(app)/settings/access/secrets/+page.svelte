@@ -388,8 +388,6 @@
 	<SidePanel bind:open={detailOpen} title={detail?.name ?? ''}>
 		<KeyValue items={detailItems} stacked />
 	</SidePanel>
-
-	<Alert variant="inline" icon="lock" title={t('secrets.note')} />
 </SettingsLayout>
 
 <Dialog bind:open={createOpen} size="md" title={t('secrets.createTitle')} onsubmit={createSecret}>

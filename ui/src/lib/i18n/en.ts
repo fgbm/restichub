@@ -247,8 +247,6 @@ export const en = {
 	'users.resetDone': 'The password is reset.',
 	'users.sharedResetHint':
 		'This account belongs to other organizations. The user or a Platform Admin can reset the password.',
-	'users.sharedNote':
-		'An account that belongs to more than one organization is a shared account. Only the user or a Platform Admin can reset its password.',
 	'users.roles.admin':
 		'All organization operations, including users, agent revocation and installation.',
 	'users.roles.operator': 'Profiles, plans, manual runs, cancellation and restore.',
@@ -342,14 +340,10 @@ export const en = {
 	'tokens.valueOnceTitle': 'Copy the token value',
 	'tokens.valueOnceBody': 'This value appears one time only',
 	'tokens.valueOnceText': 'Copy it and keep it safe. The control plane cannot show it again.',
-	'tokens.valueNote':
-		'A token value appears one time only. Revoke a token to stop the external tools that use it.',
 
 	'nav.secrets': 'Secrets',
 	'secrets.title': 'Secrets',
 	'secrets.description': 'Stored values for repositories, scripts and notification channels.',
-	'secrets.note':
-		'ResticHub shows a value never again after you save it. Replace the value to change it. The control plane encrypts each value.',
 	'secrets.create': 'Add secret',
 	'secrets.createTitle': 'Add a secret',
 	'secrets.created': 'The secret is added.',
@@ -583,8 +577,6 @@ export const en = {
 	'repositories.deleteTitle': 'Delete the repository?',
 	'repositories.deleteBody':
 		'This action removes the repository "{name}" and its stored secrets. The data in the backend stays. Continue?',
-	'repositories.valueNote':
-		'An agent holds the repository password only for the duration of one job. ResticHub shows a secret value never again after you save it. The repository password is set at creation and cannot be changed in this version. You can replace the S3 keys and the REST server credentials.',
 	'repositories.initialize': 'Initialize',
 	'repositories.testAccess': 'Test access',
 	'repositories.initializeTitle': 'Initialize the repository?',
