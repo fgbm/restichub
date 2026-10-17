@@ -42,6 +42,10 @@ A membership can show "Disabled" or "Suspended". "Disabled" means that an Admin 
 
 The Platform Admin right gives no access to the data of an organization. To work in an organization, add a membership for your own account.
 
+## Change your own password
+
+In the user menu of the top bar, select "Change password", then enter the current password and a new password. Your other sessions end, and the current session continues.
+
 ## Reset a password
 
 1. Open the page of the user.
@@ -55,7 +59,7 @@ The reset does not revoke the API tokens that the account created. To stop all a
 
 A Platform Admin can reset the password of another Platform Admin.
 
-A Platform Admin cannot reset its own password on this page. To change your own password, send `POST /api/v1/auth/password` with the current password.
+A Platform Admin cannot reset its own password on this page. To change your own password, use the user menu (see [Change your own password](#change-your-own-password)).
 
 ## Grant and remove the Platform Admin right
 
