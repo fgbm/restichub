@@ -474,8 +474,9 @@ jobs:
           $blobs = Join-Path $data 'cache\smoke\data'
           New-Item -ItemType Directory -Force $blobs | Out-Null
           1..200 | ForEach-Object { Set-Content (Join-Path $blobs "blob-$_") 'x' }
-          icacls $program /grant "*${user}:(OI)(CI)(M)" | Out-Null
-          icacls $data /grant "*${user}:(OI)(CI)(M)" | Out-Null
+          # /T puts the entry on each existing item, as the inherited entries of an older build.
+          icacls $program /grant "*${user}:(OI)(CI)(M)" /T /Q | Out-Null
+          icacls $data /grant "*${user}:(OI)(CI)(M)" /T /Q | Out-Null
           if (-not (& $userAce $program) -or -not (& $userAce $data)) { throw 'the test did not loosen the access' }
           $identity = Join-Path $data 'identity.json'
           $before = Get-FileHash $identity
@@ -488,6 +489,9 @@ jobs:
           if ($output -notmatch 'repaired the access control of \d+ entr(y|ies) under') { throw 'no summary line' }
           $lines = @($output -split "`n" | Where-Object { $_ -match 'repaired the access control of' })
           if ($lines.Count -gt 4) { throw "the repair printed $($lines.Count) lines instead of one for each directory" }
+          $agentDir = [regex]::Escape($data)
+          if ($output -notmatch "repaired the access control of (\d+) entries under $agentDir\r?\n") { throw 'no summary for the data directory' }
+          if ([int]$Matches[1] -lt 200) { throw "the summary counts $($Matches[1]) entries, not the cache files" }
           if ($output -notmatch 'downloads and verifies restic again') { throw 'restic in the open directory was not removed' }
           if (& $userAce $program) { throw 'the program directory stays open' }
           if ((Get-FileHash $identity).Hash -ne $before.Hash) { throw 'install-service changed the identity' }
