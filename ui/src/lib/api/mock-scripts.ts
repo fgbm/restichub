@@ -14,7 +14,6 @@ import type {
 	Secret,
 	UpdateJobTemplateRequest,
 	UpdateScriptTemplateRequest,
-	UsageView
 } from './types';
 
 function problem(code: string, field: string, reason: string): Error {
@@ -342,17 +341,6 @@ export class MockScripts {
 		this.secrets = this.secrets.map((item) =>
 			item.id === id ? { ...item, updated_at: now() } : item
 		);
-	}
-
-	secretUsage(id: string): UsageView {
-		const secret = this.secrets.find((item) => item.id === id);
-		if (!secret) throw problem('not_found', 'id', 'unknown');
-		return secret.used_by.length === 0
-			? { blocked_by: null, blockers: { items: [], total: 0 } }
-			: {
-					blocked_by: 'secret_in_use',
-					blockers: { items: secret.used_by, total: secret.used_by.length }
-				};
 	}
 
 	deleteSecret(id: string): void {

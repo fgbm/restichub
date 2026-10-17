@@ -219,8 +219,6 @@ export interface ApiService {
 	replaceSecretValue(id: string, value: string): Promise<void>;
 	/** Removes a secret. The control plane refuses it while an object uses the secret. */
 	deleteSecret(id: string): Promise<void>;
-	/** What blocks the delete of the secret now. */
-	secretUsage(id: string): Promise<UsageView>;
 
 	/** The built-in and the own script templates (FR-HK-12). */
 	listScriptTemplates(): Promise<ScriptTemplate[]>;
@@ -414,7 +412,6 @@ const httpService: ApiService = {
 	createSecret: (request) => api.post<Secret>(endpoints.secrets.create, request),
 	replaceSecretValue: (id, value) => api.put<void>(endpoints.secrets.value(id), { value }),
 	deleteSecret: (id) => api.delete<void>(endpoints.secrets.byId(id)),
-	secretUsage: (id) => api.get<UsageView>(endpoints.secrets.usage(id)),
 
 	listScriptTemplates: () =>
 		api

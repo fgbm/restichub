@@ -504,12 +504,6 @@ pub const ROUTES: &[Route] = &[
     },
     Route {
         method: "get",
-        path: "/api/v1/secrets/{id}/usage",
-        access: Access::Protected(Operation::SecretsRead),
-        handler: || routes!(crate::secrets::secret_usage),
-    },
-    Route {
-        method: "get",
         path: "/api/v1/repositories",
         access: Access::Protected(Operation::RepositoriesRead),
         handler: || routes!(crate::repositories::list_repositories),

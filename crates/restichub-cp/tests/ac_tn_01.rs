@@ -140,10 +140,6 @@ const FIXTURES: &[(&str, Fixture)] = &[
         "/api/v1/secrets/{id}/value",
         Fixture::Object(Object::Secret),
     ),
-    (
-        "/api/v1/secrets/{id}/usage",
-        Fixture::Object(Object::Secret),
-    ),
     ("/api/v1/repositories", Fixture::Collection),
     (
         "/api/v1/repositories/{id}",

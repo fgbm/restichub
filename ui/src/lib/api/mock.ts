@@ -2110,10 +2110,6 @@ export class MockApiService {
 		this.scriptMock.replaceSecretValue(id);
 	}
 
-	async secretUsage(id: string): Promise<UsageView> {
-		return this.scriptMock.secretUsage(id);
-	}
-
 	async deleteSecret(id: string): Promise<void> {
 		this.scriptMock.deleteSecret(id);
 	}

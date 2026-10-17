@@ -203,11 +203,45 @@ async fn a_secret_in_use_names_its_objects() {
     assert_eq!(names(&body), ["uses-secret"]);
     assert_eq!(body["blockers"]["items"][0]["kind"], "repository");
 
-    let (status, usage) = f
-        .call("GET", &format!("/api/v1/secrets/{secret}/usage"))
-        .await;
-    assert_eq!(status, StatusCode::OK, "{usage}");
-    assert_eq!(usage["blocked_by"], "secret_in_use");
+    f.db.cleanup().await;
+}
+
+/// A reader sees no channel or job template through a usage route (FR-SC-11).
+#[tokio::test]
+async fn a_viewer_sees_no_channel_or_template_in_a_usage_route() {
+    let Some(f) = fixture().await else {
+        return;
+    };
+    let secret = seed_secret(f.db.database(), f.tenant, "shared").await;
+    let repository = seed_repository(f.db.database(), f.tenant, "main", secret).await;
+    let profile = seed_profile(f.db.database(), f.tenant, "daily", repository).await;
+    let viewer = seed_session(f.db.database(), f.tenant, "viewer", "viewer").await;
+
+    for path in [
+        format!("/api/v1/secrets/{secret}/usage"),
+        format!("/api/v1/repositories/{repository}/usage"),
+        format!("/api/v1/profiles/{profile}/usage"),
+    ] {
+        let (status, _, body) = send(&f.app, request("GET", &path, Some(&viewer), None)).await;
+        let kinds: Vec<&str> = body["blockers"]["items"]
+            .as_array()
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item["kind"].as_str())
+                    .collect()
+            })
+            .unwrap_or_default();
+        assert!(
+            !kinds
+                .iter()
+                .any(|kind| matches!(*kind, "channel" | "job_template")),
+            "{path}: {status} {body}"
+        );
+        if path.contains("/secrets/") {
+            assert!(status.is_client_error(), "{path}: {status} {body}");
+        }
+    }
     f.db.cleanup().await;
 }
 

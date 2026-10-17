@@ -83,7 +83,6 @@ export const endpoints = {
 		list: '/secrets',
 		create: '/secrets',
 		byId: (id: string) => `/secrets/${encodeURIComponent(id)}`,
-		usage: (id: string) => `/secrets/${encodeURIComponent(id)}/usage`,
 		value: (id: string) => `/secrets/${encodeURIComponent(id)}/value`
 	},
 	scriptTemplates: {

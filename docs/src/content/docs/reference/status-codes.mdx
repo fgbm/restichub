@@ -42,7 +42,7 @@ An alert about a failed job uses a short text of the code:
 
 ## Refused deletes
 
-If a record blocks a delete, the control plane answers `409 Conflict` with a code. The web interface asks `GET /api/v1/repositories/{id}/usage`, `/profiles/{id}/usage` or `/secrets/{id}/usage` before it asks you to confirm. The answer has the same shape as the refusal: `blocked_by` holds the code, or null if the delete is allowed.
+If a record blocks a delete, the control plane answers `409 Conflict` with a code. The web interface asks `GET /api/v1/repositories/{id}/usage`, or `/profiles/{id}/usage` before it asks you to confirm. The answer has the same shape as the refusal: `blocked_by` holds the code, or null if the delete is allowed.
 
 The problem body of a code that names records has a `blockers` object. It holds at most 10 records, each with `kind`, `id` and `name`, and `total`, the count of all the records.
 
