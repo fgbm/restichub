@@ -189,7 +189,8 @@ The control plane keeps the repository passwords in the database, wrapped with t
    ```
 
 2. Copy the file to another host.
-3. Keep the key encryption key with the copy. The key is in the file `secrets/restichub_kek`.
+3. Copy the key encryption key to a different location, for example a password manager. The key is in the file `secrets/restichub_kek`.
+4. Do not keep the key with the database copy. If an attacker gets the copy and the key together, all secrets are disclosed.
 
 :::danger
 Losing the database or the key encryption key loses the repository passwords and the installation CA. Restic cannot open a repository without its password. Keep the copies on another host.

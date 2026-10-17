@@ -20,7 +20,7 @@
 	const filled = $derived(items.length > 0 || Boolean(children));
 </script>
 
-<!-- A panel appears only when it has content (UI principles 3.3). -->
+<!-- A panel appears only when it has content (UI principles 3.4). -->
 {#if filled}
 	<Panel {title} {actions}>
 		<div class="summary">
