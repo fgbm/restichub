@@ -370,7 +370,7 @@ describe('the job detail screen', () => {
 
 	it('fr_ag_09_shows_why_restic_did_not_start_in_the_step_and_the_header', async () => {
 		const reason =
-			'restic did not start: cannot protect the directory C:\\ProgramData\\ResticHub; run `restichub-agent install-service` as an administrator';
+			'cannot protect the directory C:\\ProgramData\\ResticHub; run `restichub-agent install-service` as an administrator';
 		mocks.getJob.mockResolvedValue(
 			job({
 				status: 'failed',
@@ -395,8 +395,13 @@ describe('the job detail screen', () => {
 		mocks.getJobLogs.mockResolvedValue(logPage([]));
 		render(JobDetailPage);
 
-		expect(await screen.findByText(`restic did not start: ${reason}`)).toBeInTheDocument();
-		expect(screen.getByText(`The step did not start: ${reason}`)).toBeInTheDocument();
+		expect(
+			await screen.findByText(`restic did not start. Agent message: ${reason}`)
+		).toBeInTheDocument();
+		expect(
+			screen.getByText(`The step did not start. Agent message: ${reason}`)
+		).toBeInTheDocument();
+		expect(screen.queryByText(/did not start: restic did not start/)).not.toBeInTheDocument();
 		expect(
 			await screen.findByText('The step wrote no log line. The cause is above.')
 		).toBeInTheDocument();

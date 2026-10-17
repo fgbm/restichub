@@ -382,10 +382,13 @@ impl Jobs {
             Err(error) => {
                 let detail = format!("{error:#}");
                 tracing::warn!(%detail, "cannot start restic");
-                let reason = scrubber.scrub(&format!("restic did not start: {detail}"));
-                log.push(step_id, LogStream::Agent, &reason);
+                log.push(
+                    step_id,
+                    LogStream::Agent,
+                    &scrubber.scrub(&format!("restic did not start: {detail}")),
+                );
                 self.send_log(log).await;
-                return StepOutcome::not_started_because(&reason);
+                return StepOutcome::not_started_because(&scrubber.scrub(&detail));
             }
         };
         // The secrets leave the memory of the agent with the command line (FR-AG-07).
@@ -621,7 +624,7 @@ mod tests {
         assert!(plain.params.is_empty());
 
         let reason = format!(
-            "restic did not start: cannot protect the directory C:\\ProgramData\\ResticHub {}",
+            "cannot protect the directory C:\\ProgramData\\ResticHub {}",
             "x".repeat(1000)
         );
         let detail = StepOutcome::not_started_because(&reason)
@@ -633,11 +636,7 @@ mod tests {
         };
         assert_eq!(param.key, REASON_PARAM);
         assert_eq!(param.value.chars().count(), 500);
-        assert!(
-            param
-                .value
-                .starts_with("restic did not start: cannot protect")
-        );
+        assert!(param.value.starts_with("cannot protect the directory"));
         assert_eq!(StepOutcome::from_exit(0).error_detail(), None);
     }
 }

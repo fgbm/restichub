@@ -68,7 +68,11 @@ describe('the reason of a step that did not start', () => {
 			steps: [{ error_code: null, error_params: {} }, step({ reason: 'cannot protect C:\\x' })]
 		};
 		expect(notStartedReason(job.steps[1])).toBe('cannot protect C:\\x');
-		expect(jobDetailReason(job)).toBe('restic did not start: cannot protect C:\\x');
+		expect(jobDetailReason(job)).toBe('restic did not start. Agent message: cannot protect C:\\x');
+		setLocale('ru');
+		expect(jobDetailReason(job)).toBe(
+			'restic не запустился. Сообщение агента: cannot protect C:\\x'
+		);
 	});
 
 	it('fr_ag_09_keeps_the_general_text_without_a_cause', () => {

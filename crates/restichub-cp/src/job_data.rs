@@ -597,7 +597,7 @@ mod tests {
 
     #[test]
     fn fr_ag_09_the_reason_of_a_step_that_did_not_start_is_kept_and_bounded() {
-        let reason = format!("restic did not start: {}", "x".repeat(600));
+        let reason = format!("cannot protect the directory {}", "x".repeat(600));
         let (code, params) = error_of(&ErrorDetail {
             code: "step_not_started".to_owned(),
             params: vec![restichub_proto::agent::v1::KeyValue {
