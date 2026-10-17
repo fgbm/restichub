@@ -22,7 +22,7 @@ const RU: Labels = {
 	nav: 'Основная навигация',
 	openJob: /Открыть задание nightly-db/,
 	edit: 'Изменить',
-	actions: 'Другие действия для db-nightly'
+	actions: 'Другие действия: db-nightly'
 };
 
 async function start(page: Page, scheme: string, labels: Labels): Promise<void> {

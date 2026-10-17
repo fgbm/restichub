@@ -46,7 +46,7 @@ const RU: Labels = {
 	edit: 'Изменить',
 	initialize: 'Инициализировать',
 	start: 'Запустить',
-	moreActions: (name) => `Другие действия для ${name}`,
+	moreActions: (name) => `Другие действия: ${name}`,
 	hostName: 'nas-backup',
 	unlockAll: 'Снять все блокировки'
 };
