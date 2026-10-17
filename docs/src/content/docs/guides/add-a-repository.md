@@ -1,6 +1,6 @@
 ---
 title: Add a repository
-description: Add an S3 or rest-server repository, set its maintenance host, and initialize it from a host.
+description: Add an S3, rest-server or local repository, set its host, and initialize it from a host.
 ---
 
 A repository is the place where restic stores the snapshots. The control plane keeps the location of the repository and its secrets. The hosts connect to the repository directly, so the backup data does not go through the control plane.
@@ -11,6 +11,7 @@ A repository is the place where restic stores the snapshots. The control plane k
 - Prepare a backend that the host can reach on the network:
   - An S3-compatible storage: a bucket, an access key and a secret key with the permission to read, write, list and delete objects in the bucket.
   - A [rest-server](https://github.com/restic/rest-server). Give each repository its own path, for example `https://rest.example.com:8000/fs-01`. If the rest-server uses an `.htpasswd` file, prepare the user name and the password of one account in the file.
+  - A local path: a directory on the disk of one host, for example `/mnt/backup/restic`. See [A local repository](#a-local-repository).
 - Sign in as an Admin. Only an Admin creates a repository.
 
 ## The fields of the backend
@@ -25,6 +26,7 @@ A repository is the place where restic stores the snapshots. The control plane k
 | REST server | "Endpoint" | The address of the repository on the rest-server, for example `https://rest.example.com:8000/fs-01` |
 | REST server | "User name" | Optional. The user name of the account in the `.htpasswd` file of the rest-server |
 | REST server | "REST server password" | Optional. The password of the same account |
+| Local path | "Path" | An absolute path on the disk of the repository host, for example `/mnt/backup/restic` |
 
 An "Endpoint" uses the scheme `https` or `http`. It cannot hold a user name, a password, a query or a fragment. Enter the credentials of the rest-server in the fields "User name" and "REST server password" in the section "Access".
 
@@ -39,11 +41,11 @@ Keep a copy of the repository password outside ResticHub. If you lose the contro
 1. Open "Repositories".
 2. Select "Add repository". The page "New repository" opens.
 3. In the section "Main", enter a name in the field "Repository".
-4. In the section "Location", select the "Backend kind": "S3-compatible" or "REST server".
+4. In the section "Location", select the "Backend kind": "S3-compatible", "REST server" or "Local path".
 5. Enter the fields of the backend from the table above.
 6. In the section "Access", enter the "Repository password".
 7. Enter the credentials of the backend.
-8. In the section "Maintenance host", select the host.
+8. In the section "Maintenance host", select the host. For a local repository, the section is "Repository host", and the host is necessary.
 9. Select "Save".
 
 The repository appears in the list with the status "Not initialized". The control plane does not show a secret value again. You can only replace the S3 keys and the REST server password.
@@ -78,7 +80,26 @@ The agent runs `init` only when `test_access` exits with restic code 10. Restic 
 
 The repository password and the backend credentials travel inside the signed job only. The agent passes them to restic in the environment. They never reach an argument, a log, the job journal or an error message.
 
-A repository with a local path runs its repository jobs on the maintenance host only.
+## A local repository
+
+A local path exists on the disk of one host only. Thus a local repository is bound to one host, the repository host. The repository host is also the maintenance host of the repository.
+
+- You must select the repository host when you create the repository. The control plane refuses a local repository without a host.
+- Every job of the repository runs on the repository host. This includes the backups of the plans, `forget`, `prune`, `check` and `unlock`. It also includes the initialization, the test of the access, the snapshot list, the tree pages and the restore.
+- A plan of a profile that writes to the repository runs on the repository host only. The plan page offers only this host. See [Plans](/restichub/concepts/plans/#a-local-repository).
+- A restore from the repository writes to the repository host only, because restic reads the repository on that host.
+- Before the initialization, you can change the repository host. The control plane refuses the change while a plan of the repository runs on the old host. Move or delete the plan first.
+- After the initialization, the repository host cannot change, like the path. The snapshots are on the disk of this host. The page shows the field locked with the reason, and the API refuses the change with the code `repository_host_locked`.
+
+For an S3 or rest-server repository, each host reaches the repository on the network. A change of the maintenance host is a usual operation.
+
+### Repositories saved before this rule
+
+The control plane keeps a local repository that has no host, and a plan that runs on another host. It deletes nothing. At the start, the control plane writes a warning to its log for each such repository, with the identifiers of the plans. The control plane refuses a job of such a plan with the reason `not_repository_host`. To correct a repository:
+
+1. Open the repository page.
+2. In the section "Repository host", select the host that holds the path. A repository without a host accepts this change also when a plan runs on another host.
+3. Open each plan that the log names, and select the repository host.
 
 ## Related
 

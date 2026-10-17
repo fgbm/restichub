@@ -19,6 +19,10 @@ A plan assigns one profile to one agent with a schedule. The control plane keeps
 
 The profile and the agent belong to the same tenant. The control plane compiles the stored profile for the operating system of the agent before it writes the plan. A profile without a path for that operating system is refused.
 
+## A local repository
+
+The path of a local repository exists on the repository host only. A plan of a profile that writes to a local repository therefore runs on the repository host only. The plan page offers only this host, and it selects the host when you select the profile. The control plane refuses another host with the reason `not_repository_host` on the field "Host". It also refuses a profile change to a local repository while a plan of the profile runs on another host. See [A local repository](/restichub/guides/add-a-repository/#a-local-repository).
+
 ## Schedule
 
 The control plane calculates each fire time from the cron expression and the time zone. A job names the plan and the fire time. The control plane creates one job for each fire time. The pair `(plan, fire time)` is unique, so two control plane instances create one job for one fire time.
