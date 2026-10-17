@@ -262,6 +262,7 @@
 	{loading}
 	error={loadError}
 	onsubmit={() => void save()}
+	save={readonly ? undefined : { dirty, saving, create: !templateId, oncancel: toList }}
 >
 	{#snippet actions()}
 		{#if existing && canWrite}
@@ -308,15 +309,6 @@
 			{/if}
 		</SummaryPanel>
 		<SummaryPanel title={t('templates.summary')} items={summaryItems} />
-	{/snippet}
-	{#snippet footer()}
-		{#if !readonly}
-			<div class="savebar">
-				<span class="savebar__text">{dirty ? t('rp.save.dirty') : ''}</span>
-				<Button onclick={toList}>{t('common.cancel')}</Button>
-				<Button type="submit" variant="primary" loading={saving}>{t('common.save')}</Button>
-			</div>
-		{/if}
 	{/snippet}
 
 	<ProfileSection
@@ -415,21 +407,5 @@
 		flex-direction: column;
 		min-width: 0;
 		overflow-wrap: anywhere;
-	}
-
-	.savebar {
-		display: flex;
-		align-items: center;
-		gap: var(--rh-space-3);
-		padding: var(--rh-space-3) var(--rh-space-4);
-		border: var(--rh-border-width) solid var(--rh-color-border);
-		border-radius: var(--rh-radius-lg);
-		background-color: var(--rh-color-surface);
-	}
-
-	.savebar__text {
-		flex: 1;
-		color: var(--rh-color-text-muted);
-		font-size: var(--rh-font-size-sm);
 	}
 </style>

@@ -27,6 +27,7 @@
 		Panel,
 		PasswordField,
 		Popover,
+		RecordPicker,
 		Select,
 		SidePanel,
 		Skeleton,
@@ -43,6 +44,7 @@
 		IconName,
 		ListMeta,
 		MenuItem,
+		RecordOption,
 		StatusTone,
 		TableColumn
 	} from '#lib/components/ui/index.ts';
@@ -59,6 +61,18 @@
 	let displayName = $state('Boris Ivanov');
 	let role = $state('operator');
 	let host = $state('');
+	let profile = $state('p1');
+	let profileFilter = $state('');
+
+	const profileOptions: RecordOption[] = [
+		{ value: 'p1', label: 'user-profiles', description: ['test-s3-yandex', { tag: 'S3' }] },
+		{ value: 'p2', label: 'db-hourly', description: ['rest-main', { tag: 'REST' }] },
+		{
+			value: 'p3',
+			label: 'nas-files',
+			description: ['nas-local', { tag: 'Local' }, 'host MINDCORE']
+		}
+	];
 
 	const menuItems: MenuItem[] = [
 		{ label: 'Open', icon: 'eye' },
@@ -323,6 +337,38 @@
 				<Switch label="Enabled" checked />
 				<Switch label="Off" />
 				<Switch label="Disabled" disabled />
+			</div>
+		</div>
+
+		<h3>Record picker</h3>
+		<div class="grid-3">
+			<div class="demo-cell">
+				<span class="demo-label">default</span>
+				<RecordPicker
+					label="Profile"
+					bind:value={profile}
+					options={profileOptions}
+					searchPlaceholder="Profile or repository"
+				/>
+			</div>
+			<div class="demo-cell">
+				<span class="demo-label">filter with All</span>
+				<RecordPicker
+					label="Profile"
+					bind:value={profileFilter}
+					options={profileOptions}
+					allLabel="All"
+				/>
+			</div>
+			<div class="demo-cell">
+				<span class="demo-label">disabled empty, invalid</span>
+				<RecordPicker label="Profile" options={profileOptions} disabled />
+				<RecordPicker
+					label="Profile"
+					value="p2"
+					options={profileOptions}
+					error="The profile does not exist."
+				/>
 			</div>
 		</div>
 	</section>

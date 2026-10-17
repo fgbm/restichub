@@ -15,7 +15,9 @@
 		TextField
 	} from '#lib/components/ui/index.ts';
 	import type { SelectOption } from '#lib/components/ui/index.ts';
+	import HostPicker from '#lib/components/HostPicker.svelte';
 	import { emptyError, focusFirstInvalid } from '#lib/form.ts';
+	import type { HostRef } from '#lib/host-picker.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
 	import {
@@ -61,16 +63,19 @@
 
 	// A repository with a local path lives on one host, so only its maintenance host can read it.
 	const localOnly = $derived(repository.backend.kind === 'local');
+	const activeHosts = $derived(agents.filter((agent) => agent.status === 'active'));
 	const candidates = $derived(
-		agents.filter(
-			(agent) =>
-				agent.status === 'active' &&
-				(!localOnly || agent.id === (repository.maintenance_agent_id ?? agent.id))
+		activeHosts.filter(
+			(agent) => !localOnly || agent.id === (repository.maintenance_agent_id ?? agent.id)
 		)
 	);
-	const agentOptions = $derived<SelectOption[]>(
-		candidates.map((agent) => ({ value: agent.id, label: `${agent.hostname} · ${agent.os}` }))
+	const repositoryHost = $derived(
+		agents.find((agent) => agent.id === repository.maintenance_agent_id)?.hostname ?? ''
 	);
+	function hostReason(agent: HostRef): string | null {
+		if (candidates.some((candidate) => candidate.id === agent.id)) return null;
+		return t('hostPicker.localRepository', { repository: repository.name, host: repositoryHost });
+	}
 	const overwriteOptions = $derived<SelectOption[]>(
 		OVERWRITE_MODES.map((value) => ({
 			value,
@@ -174,18 +179,19 @@
 		<Alert tone="danger" title={failure} />
 	{/if}
 	<div class="form">
-		<Select
+		<HostPicker
 			id="restore-agent"
 			label={t('restore.dialog.agent')}
-			help={agentOptions.length === 0
+			help={candidates.length === 0
 				? t('restore.dialog.agentNone')
 				: localOnly
 					? t('restore.dialog.agentLocal')
 					: t('restore.dialog.agentHelp')}
 			error={fieldError(problem, 'agent_id')}
-			options={agentOptions}
+			hosts={activeHosts}
+			reason={hostReason}
 			bind:value={agentId}
-			disabled={agentOptions.length === 0}
+			disabled={candidates.length === 0}
 		/>
 		<div class="target">
 			<TextField

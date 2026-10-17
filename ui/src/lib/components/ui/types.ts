@@ -6,6 +6,26 @@ export interface SelectOption {
 	label: string;
 }
 
+/** A part of the secondary line of a record: a muted text or a small tag chip. */
+export type RecordPart = string | { tag: string };
+
+/** A native select cannot draw a secondary line, so only `RecordPicker` takes this type. */
+export interface RecordOption extends SelectOption {
+	/** The closed field shows the first part after the label. */
+	description?: RecordPart[];
+	/** The text after the label in the closed field. Default: the first part of `description`. */
+	detail?: string;
+	/** A status dot before the label. `state` gives the same fact in words. */
+	dot?: RecordDot;
+	/** The state in words at the right of the option. */
+	state?: string;
+	disabled?: boolean;
+	/** Why the option cannot be selected; it shows below the option. */
+	reason?: string;
+}
+
+export type RecordDot = 'success' | 'warning' | 'neutral';
+
 export type BadgeTone = 'neutral' | 'accent' | 'success' | 'warning' | 'danger' | 'info';
 
 export type StatusTone =
@@ -169,6 +189,8 @@ export interface FilterOption {
 	label?: string;
 	/** The number of items with this value. */
 	count?: number;
+	/** A secondary line below the label; the facet search also matches it. */
+	description?: RecordPart[];
 }
 
 export interface FilterFacet {
@@ -184,4 +206,6 @@ export interface FilterFacet {
 	mono?: boolean;
 	/** A short muted line at the top of the popover. */
 	hint?: string;
+	/** Show the search field at any number of options. Default: from seven options. */
+	search?: boolean;
 }

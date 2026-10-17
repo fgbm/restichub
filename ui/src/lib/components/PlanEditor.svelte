@@ -13,6 +13,8 @@
 		Repository,
 		UpdatePlanRequest
 	} from '#lib/api/index.ts';
+	import HostPicker from './HostPicker.svelte';
+	import ProfilePicker from './ProfilePicker.svelte';
 	import ProfileSection from './ProfileSection.svelte';
 	import { RecordPage, SummaryPanel } from './layout/index.ts';
 	import { Alert, Button, Checkbox, ConfirmDialog, Select, TextField } from './ui/index.ts';
@@ -20,6 +22,7 @@
 	import { formatLocalTime, formatTimeInZone } from '#lib/format.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
+	import type { HostRef } from '#lib/host-picker.ts';
 	import type { SummaryState } from '#lib/profile-form.ts';
 	import {
 		browserTimeZone,
@@ -79,9 +82,6 @@
 	const canWrite = $derived(['admin', 'operator'].includes(getSession()?.role ?? ''));
 	const allOpen = $derived(SECTIONS.every((key) => open[key]));
 
-	const profileOptions = $derived<SelectOption[]>(
-		profiles.map((profile) => ({ value: profile.id, label: profile.name }))
-	);
 	function repositoryOf(id: string): Repository | undefined {
 		const repositoryId = profiles.find((profile) => profile.id === id)?.repository_id;
 		return repositories.find((item) => item.id === repositoryId);
@@ -94,15 +94,15 @@
 	const localHost = $derived(localHostOf(repository));
 	// The stored host of a plan stays an option, so the field shows the real value and its error
 	// instead of a silent move to another host.
-	const agentOptions = $derived<SelectOption[]>(
-		agents
-			.filter(
-				(agent) =>
-					(agent.status === 'active' && (localHost === null || agent.id === localHost)) ||
-					agent.id === existing?.agent_id
-			)
-			.map((agent) => ({ value: agent.id, label: agent.hostname }))
+	const hostChoices = $derived(
+		agents.filter((agent) => agent.status === 'active' || agent.id === existing?.agent_id)
 	);
+	function hostReason(agent: HostRef): string | null {
+		if (localHost === null || agent.id === localHost) return null;
+		return localHost === ''
+			? t('pl.source.localNoHost', { name: repositoryName })
+			: t('hostPicker.localRepository', { repository: repositoryName, host: localHostName });
+	}
 	const hostMismatch = $derived(
 		localHost !== null && agentId !== localHost ? t('reason.not_repository_host') : undefined
 	);
@@ -207,7 +207,8 @@
 				service.listPlans(),
 				service.listProfiles(),
 				service.listAgents(),
-				// The repository name is only a hint in the summary, so its failure does not block the form.
+				// The repository is only a hint in the profile field and the summary, so its failure does not
+				// block the form.
 				service.listRepositories().catch(() => [])
 			]);
 			profiles = profileList;
@@ -229,8 +230,8 @@
 				enabled = found.enabled;
 				rpoHours = found.rpo_seconds ? String(found.rpo_seconds / 3600) : '';
 			} else {
-				profileId = profileOptions[0]?.value ?? '';
-				agentId = agentOptions[0]?.value ?? '';
+				profileId = profiles[0]?.id ?? '';
+				agentId = hostChoices.find((agent) => hostReason(agent) === null)?.id ?? '';
 				timeZone = browserTimeZone();
 			}
 			baseline = stateKey;
@@ -358,6 +359,13 @@
 	{loading}
 	error={loadError}
 	onsubmit={() => void save()}
+	save={{
+		dirty,
+		saving,
+		create: !planId,
+		readonly: canWrite ? null : t('pl.save.readonly'),
+		oncancel: () => goto(resolve('/(app)/plans'))
+	}}
 >
 	{#snippet actions()}
 		<Button size="sm" onclick={() => setAll(true)} disabled={allOpen}>{t('pe.expandAll')}</Button>
@@ -381,21 +389,6 @@
 	{/snippet}
 	{#snippet side()}
 		<SummaryPanel title={t('rp.side.result')} items={resultItems} />
-	{/snippet}
-	{#snippet footer()}
-		<div class="savebar">
-			<span class="muted savebar__text">
-				{#if !canWrite}
-					{t('pl.save.readonly')}
-				{:else if dirty}
-					{t('rp.save.dirty')}
-				{/if}
-			</span>
-			<Button onclick={() => goto(resolve('/(app)/plans'))}>{t('common.cancel')}</Button>
-			{#if canWrite}
-				<Button type="submit" variant="primary" loading={saving}>{t('common.save')}</Button>
-			{/if}
-		</div>
 	{/snippet}
 
 	<ProfileSection
@@ -425,19 +418,20 @@
 		bind:open={open.source}
 	>
 		<div class="grid2">
-			<Select
+			<ProfilePicker
 				id="plan-profile"
-				label={t('plans.profile')}
-				options={profileOptions}
+				{profiles}
+				{repositories}
+				{agents}
 				error={fieldError(formProblem, 'profile_id')}
 				bind:value={profileId}
-				onchange={(event) => selectProfile(event.currentTarget.value)}
+				onchange={selectProfile}
 				required
 			/>
-			<Select
+			<HostPicker
 				id="plan-agent"
-				label={t('plans.host')}
-				options={agentOptions}
+				hosts={hostChoices}
+				reason={hostReason}
 				error={fieldError(formProblem, 'agent_id') ?? hostMismatch}
 				bind:value={agentId}
 				required
@@ -449,8 +443,6 @@
 			<p class="muted">
 				{t('pl.source.localHost', { name: repositoryName, host: localHostName })}
 			</p>
-		{:else if repositoryName}
-			<p class="muted">{t('pl.source.repository', { name: repositoryName })}</p>
 		{/if}
 	</ProfileSection>
 
@@ -588,20 +580,6 @@
 	.runs li {
 		width: fit-content;
 		cursor: help;
-	}
-
-	.savebar {
-		display: flex;
-		align-items: center;
-		gap: var(--rh-space-3);
-		padding: var(--rh-space-3) var(--rh-space-4);
-		border: var(--rh-border-width) solid var(--rh-color-border);
-		border-radius: var(--rh-radius-lg);
-		background-color: var(--rh-color-surface);
-	}
-
-	.savebar__text {
-		flex: 1;
 	}
 
 	@media (max-width: 720px) {

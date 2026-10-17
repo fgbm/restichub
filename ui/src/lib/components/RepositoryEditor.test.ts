@@ -7,6 +7,16 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import RepositoryEditor from './RepositoryEditor.svelte';
 
+const HOST = {
+	status: 'active',
+	os: 'linux',
+	arch: 'amd64',
+	labels: [],
+	online: true,
+	first_connected_at: '2026-01-01T00:00:00Z',
+	last_seen_at: '2026-01-01T00:00:00Z'
+};
+
 const mocks = vi.hoisted(() => ({
 	listRepositories: vi.fn(),
 	listAgents: vi.fn(),
@@ -95,12 +105,29 @@ function maintenance() {
 	};
 }
 
+const hostField = () =>
+	waitFor(() => {
+		const field = document.querySelector<HTMLButtonElement>('#repo-agent');
+		expect(field).toBeTruthy();
+		return field as HTMLButtonElement;
+	});
+const hostOptionNames = () =>
+	[...document.querySelectorAll('[role="option"] .rh-record__option-label')].map((label) =>
+		label.textContent?.trim()
+	);
+
+async function pickHost(user: ReturnType<typeof userEvent.setup>, name: string): Promise<void> {
+	await user.click(await hostField());
+	const label = await screen.findByText(name, { selector: '.rh-record__option-label' });
+	await user.click(label.closest('[role="option"]')!);
+}
+
 describe('the repository page', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		session.role = 'admin';
 		mocks.listRepositories.mockResolvedValue([repository()]);
-		mocks.listAgents.mockResolvedValue([{ id: 'a_1', hostname: 'nas-backup', status: 'active' }]);
+		mocks.listAgents.mockResolvedValue([{ id: 'a_1', hostname: 'nas-backup', ...HOST }]);
 		mocks.getMaintenance.mockResolvedValue(maintenance());
 		mocks.previewSchedule.mockResolvedValue({
 			time_zone: 'UTC',
@@ -136,11 +163,11 @@ describe('the repository page', () => {
 		mocks.listRepositories.mockResolvedValue([
 			repository({ backend: { kind: 'rest', endpoint: 'https://rest.example.net/a' } })
 		]);
-		const { container } = render(RepositoryEditor, { repositoryId: 'r_1' });
+		render(RepositoryEditor, { repositoryId: 'r_1' });
 
-		await screen.findByLabelText('Maintenance host');
+		expect(await hostField()).toHaveTextContent('nas-backup');
 		expect(screen.queryByText(/creates no forget, prune or check job/)).not.toBeInTheDocument();
-		await user.selectOptions(container.querySelector('#repo-agent') as HTMLSelectElement, '');
+		await pickHost(user, 'None');
 
 		expect(await screen.findByText(/creates no forget, prune or check job/)).toBeInTheDocument();
 	});
@@ -180,11 +207,11 @@ describe('the repository page', () => {
 		render(RepositoryEditor);
 
 		await user.type(await screen.findByLabelText(/^Repository\b/, { selector: '#repo-name' }), 'x');
-		expect(screen.getByText('The changes are not saved.')).toBeInTheDocument();
+		expect(screen.getByText('The changes are not saved')).toBeInTheDocument();
 		await user.selectOptions(screen.getByLabelText('Backend kind'), 'local');
 		await user.type(screen.getByLabelText(/Path/), '/srv/x');
 		await user.type(screen.getByLabelText(/Repository password/), 'pw');
-		await user.selectOptions(screen.getByLabelText(/Repository host/), 'a_1');
+		await pickHost(user, 'nas-backup');
 		await user.click(screen.getByRole('button', { name: 'Save' }));
 
 		await waitFor(() =>
@@ -202,35 +229,36 @@ describe('the repository page', () => {
 	it('fr_rp_08 locks the host of an initialized local repository and says why', async () => {
 		render(RepositoryEditor, { repositoryId: 'r_1' });
 
-		const host = await screen.findByLabelText(/Repository host/);
+		const host = await hostField();
 		expect(host).toBeDisabled();
-		expect(host).toHaveValue('a_1');
+		expect(host).toHaveTextContent(/nas-backup\s*· Linux · Online/);
 		expect(host).toHaveAccessibleDescription(/initialized local repository cannot change/);
-		expect(screen.queryByRole('option', { name: 'None' })).not.toBeInTheDocument();
 	});
 
 	it('fr_rp_08 requires the host of a local repository and lets it change before the init', async () => {
 		mocks.listRepositories.mockResolvedValue([repository({ initialized: false })]);
 		mocks.listAgents.mockResolvedValue([
-			{ id: 'a_1', hostname: 'nas-backup', status: 'active' },
-			{ id: 'a_2', hostname: 'nas-spare', status: 'active' }
+			{ id: 'a_1', hostname: 'nas-backup', ...HOST },
+			{ id: 'a_2', hostname: 'nas-spare', ...HOST }
 		]);
 		render(RepositoryEditor, { repositoryId: 'r_1' });
 
-		const host = await screen.findByLabelText(/Repository host/);
+		const user = userEvent.setup();
+		const host = await hostField();
 		expect(host).toBeEnabled();
-		expect(host).toBeRequired();
+		expect(host).toHaveAttribute('aria-required', 'true');
 		expect(host).toHaveAccessibleDescription(/Every job of the repository runs on this host/);
-		expect(screen.queryByRole('option', { name: 'None' })).not.toBeInTheDocument();
-		expect(screen.getByRole('option', { name: 'nas-spare' })).toBeInTheDocument();
+		await user.click(host);
+		await screen.findByText('nas-spare', { selector: '.rh-record__option-label' });
+		expect(hostOptionNames()).toEqual(['nas-backup', 'nas-spare']);
 	});
 
 	it('fr_rp_08 shows the field error of a refused host change', async () => {
 		const user = userEvent.setup();
 		mocks.listRepositories.mockResolvedValue([repository({ initialized: false })]);
 		mocks.listAgents.mockResolvedValue([
-			{ id: 'a_1', hostname: 'nas-backup', status: 'active' },
-			{ id: 'a_2', hostname: 'nas-spare', status: 'active' }
+			{ id: 'a_1', hostname: 'nas-backup', ...HOST },
+			{ id: 'a_2', hostname: 'nas-spare', ...HOST }
 		]);
 		const { ApiError } = await import('#lib/api/index.ts');
 		mocks.updateRepository.mockRejectedValue(
@@ -244,7 +272,7 @@ describe('the repository page', () => {
 		);
 		render(RepositoryEditor, { repositoryId: 'r_1' });
 
-		await user.selectOptions(await screen.findByLabelText(/Repository host/), 'a_2');
+		await pickHost(user, 'nas-spare');
 		await user.click(screen.getByRole('button', { name: 'Save' }));
 
 		expect(

@@ -11,6 +11,7 @@
 		required = false,
 		helpId,
 		errorId,
+		labelId,
 		children
 	}: {
 		label?: string;
@@ -20,13 +21,14 @@
 		required?: boolean;
 		helpId?: string;
 		errorId?: string;
+		labelId?: string;
 		children: Snippet;
 	} = $props();
 </script>
 
 <div class="rh-field" class:rh-field--invalid={Boolean(error)}>
 	{#if label}
-		<label class="rh-field__label" for={htmlFor}>
+		<label class="rh-field__label" for={htmlFor} id={labelId}>
 			{label}
 			{#if required}<span class="rh-field__req" aria-hidden="true">*</span>{/if}
 		</label>

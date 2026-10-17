@@ -1,7 +1,10 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import { t } from '#lib/i18n/index.ts';
 	import type { Crumb } from '#lib/stores/page-meta.svelte.ts';
+	import Button from '../ui/Button.svelte';
 	import Page from './Page.svelte';
+	import type { SaveBar } from './types';
 
 	let {
 		title,
@@ -14,7 +17,7 @@
 		actions,
 		banners,
 		side,
-		footer,
+		save,
 		onsubmit,
 		children
 	}: {
@@ -31,13 +34,29 @@
 		banners?: Snippet;
 		/** The sticky side panel: the summary or the parameters of the record. */
 		side?: Snippet;
-		/** A sticky bar below the sections, such as the save bar of an editor. */
-		footer?: Snippet;
-		/** Makes the sections and the footer one form. */
+		/** The save bar of an editor at the bottom of the sections. */
+		save?: SaveBar;
+		/** Makes the sections and the save bar one form. */
 		onsubmit?: (event: SubmitEvent) => void;
 		/** The sections of the record. */
 		children: Snippet;
 	} = $props();
+
+	const uid = $props.id();
+	const stateId = `record-save-${uid}`;
+	let stuck = $state(false);
+
+	// The bar casts a shadow only while the sections scroll under it, that is while the end of the
+	// sections is below the top edge of the bar.
+	function watchEnd(node: HTMLElement): (() => void) | void {
+		if (typeof IntersectionObserver === 'undefined') return;
+		const bar = node.closest('.record')?.querySelector<HTMLElement>('.record__bar');
+		const observer = new IntersectionObserver(([entry]) => (stuck = !entry.isIntersecting), {
+			rootMargin: `0px 0px -${bar?.offsetHeight ?? 0}px 0px`
+		});
+		observer.observe(node);
+		return () => observer.disconnect();
+	}
 </script>
 
 <Page
@@ -57,6 +76,7 @@
 		this={onsubmit ? 'form' : 'div'}
 		class="record"
 		class:record--side={Boolean(side)}
+		class:record--save={Boolean(save)}
 		onsubmit={onsubmit
 			? (event: SubmitEvent) => {
 					event.preventDefault();
@@ -64,12 +84,47 @@
 				}
 			: undefined}
 	>
-		<div class="record__main">{@render children()}</div>
+		<div class="record__main">
+			{@render children()}
+			{#if save}
+				<div class="record__end" {@attach watchEnd}></div>
+			{/if}
+		</div>
 		{#if side}
 			<aside class="record__side">{@render side()}</aside>
 		{/if}
-		{#if footer}
-			<div class="record__footer">{@render footer()}</div>
+		{#if save}
+			<div class="record__bar" class:record__bar--stuck={stuck}>
+				<span class="record__state" id={stateId}>
+					<span class="record__status">
+						{#if save.readonly}
+							{save.readonly}
+						{:else if save.dirty}
+							<span class="record__dot" aria-hidden="true"></span>
+							{t('record.save.dirty')}
+						{:else if !save.create}
+							{t('record.save.clean')}
+						{/if}
+					</span>
+					{#if save.note && !save.readonly}
+						<span class="record__note">{save.note}</span>
+					{/if}
+				</span>
+				{#if !save.readonly}
+					{#if save.dirty}
+						<Button onclick={save.oncancel}>{t('common.cancel')}</Button>
+					{/if}
+					<Button
+						type="submit"
+						variant="primary"
+						loading={save.saving}
+						disabled={!save.dirty && !save.create}
+						aria-describedby={stateId}
+					>
+						{t('common.save')}
+					</Button>
+				{/if}
+			</div>
 		{/if}
 	</svelte:element>
 </Page>
@@ -83,6 +138,7 @@
 	}
 
 	.record {
+		--record-bar-height: 56px;
 		display: grid;
 		grid-template-columns: minmax(0, 1fr);
 		grid-template-areas:
@@ -96,7 +152,12 @@
 		grid-template-columns: minmax(0, 1fr) var(--rh-layout-side-width);
 		grid-template-areas:
 			'main side'
-			'bar bar';
+			'bar .';
+	}
+
+	/* The bar ends at the bottom edge of the page, so the page padding below it goes. */
+	.record--save {
+		margin-bottom: calc(-1 * var(--rh-page-padding-bottom, 0px));
 	}
 
 	.record__main {
@@ -119,15 +180,65 @@
 		overflow-y: auto;
 	}
 
+	.record--save .record__side {
+		max-height: calc(
+			100vh - var(--rh-layout-topbar-height) - var(--rh-space-8) - var(--record-bar-height)
+		);
+	}
+
 	.record__side > :global(*) {
 		flex-shrink: 0;
 	}
 
-	.record__footer {
+	.record__bar {
 		position: sticky;
 		bottom: 0;
 		z-index: var(--rh-z-sticky);
 		grid-area: bar;
+		display: flex;
+		align-items: center;
+		gap: var(--rh-space-3);
+		min-height: var(--record-bar-height);
+		padding: var(--rh-space-2) var(--rh-space-4);
+		border-top: var(--rh-border-width) solid var(--rh-color-border);
+		background-color: var(--rh-color-surface-muted);
+	}
+
+	.record__bar--stuck {
+		box-shadow: var(--rh-shadow-bar);
+	}
+
+	.record__state {
+		display: flex;
+		flex: 1;
+		flex-direction: column;
+		gap: 2px;
+		min-width: 0;
+		color: var(--rh-color-text-muted);
+		font-size: var(--rh-font-size-sm);
+	}
+
+	.record__status {
+		display: flex;
+		align-items: center;
+		gap: var(--rh-space-2);
+	}
+
+	.record__dot {
+		flex: none;
+		width: 8px;
+		height: 8px;
+		border-radius: var(--rh-radius-pill);
+		background-color: var(--rh-color-warning);
+	}
+
+	.record__note {
+		font-size: var(--rh-font-size-xs);
+	}
+
+	.record__end {
+		height: 1px;
+		margin-top: calc(-1 * var(--rh-space-3) - 1px);
 	}
 
 	@media (max-width: 1023px) {
@@ -139,7 +250,8 @@
 				'bar';
 		}
 
-		.record__side {
+		.record__side,
+		.record--save .record__side {
 			position: static;
 			max-height: none;
 		}

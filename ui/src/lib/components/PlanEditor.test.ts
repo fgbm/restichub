@@ -80,8 +80,47 @@ function plan(overrides: Record<string, unknown> = {}) {
 	};
 }
 
+function agent(id: string, hostname: string, status = 'active') {
+	return {
+		id,
+		hostname,
+		status,
+		os: 'windows',
+		arch: 'amd64',
+		labels: [],
+		online: true,
+		first_connected_at: FUTURE,
+		last_seen_at: FUTURE
+	};
+}
+
 const input = (selector: string) =>
 	document.querySelector<HTMLInputElement>(selector) as HTMLInputElement;
+
+const optionOf = (name: string) =>
+	screen.getByText(name, { selector: '.rh-record__option-label' }).closest('[role="option"]')!;
+const hostOptions = () =>
+	[...document.querySelectorAll('[role="option"]')].map(
+		(option) => option.querySelector('.rh-record__option-label')?.textContent?.trim() ?? ''
+	);
+
+async function pickProfile(user: ReturnType<typeof userEvent.setup>, name: string): Promise<void> {
+	await screen.findByRole('heading', { level: 1 });
+	await user.click(input('#plan-profile'));
+	const label = await screen.findByText(name, { selector: '.rh-record__option-label' });
+	await user.click(label.closest('[role="option"]')!);
+}
+
+async function openHosts(user: ReturnType<typeof userEvent.setup>): Promise<HTMLElement> {
+	const host = await waitFor(() => {
+		const field = input('#plan-agent');
+		expect(field).toBeTruthy();
+		return field;
+	});
+	await user.click(host);
+	await screen.findAllByRole('option', { hidden: true });
+	return host;
+}
 
 describe('the plan page', () => {
 	beforeEach(() => {
@@ -93,8 +132,8 @@ describe('the plan page', () => {
 			{ id: 'p_2', name: 'db-hourly', repository_id: 'r_1' }
 		]);
 		mocks.listAgents.mockResolvedValue([
-			{ id: 'a_1', hostname: 'win-fs01', status: 'active' },
-			{ id: 'a_2', hostname: 'old-host', status: 'revoked' }
+			agent('a_1', 'win-fs01'),
+			agent('a_2', 'old-host', 'revoked')
 		]);
 		mocks.listRepositories.mockResolvedValue([
 			{
@@ -136,19 +175,30 @@ describe('the plan page', () => {
 		expect(mocks.goto).toHaveBeenCalledWith('/(app)/plans');
 	});
 
-	it('fr_sc_01 offers only the active hosts', async () => {
+	it('fr_sc_01 shows the repository of each profile in the profile field', async () => {
+		const user = userEvent.setup();
+		render(PlanEditor, { planId: 'pl_1' });
+
+		await screen.findByRole('heading', { level: 1, name: 'nightly-web' });
+		expect(input('#plan-profile')).toHaveTextContent(/web-daily\s*· repo-a/);
+		await user.click(input('#plan-profile'));
+		const label = await screen.findByText('db-hourly', { selector: '.rh-record__option-label' });
+		expect(label.closest('[role="option"]')).toHaveTextContent(/repo-a\s*REST/);
+	});
+
+	it('fr_sc_01 offers only the active hosts with their state and platform', async () => {
+		const user = userEvent.setup();
 		render(PlanEditor);
 
-		const host = await screen.findByLabelText(/Host/, { selector: 'select' });
-		expect(within(host).getByRole('option', { name: 'win-fs01' })).toBeInTheDocument();
-		expect(within(host).queryByRole('option', { name: 'old-host' })).not.toBeInTheDocument();
+		const host = await openHosts(user);
+		expect(host).toHaveTextContent(/win-fs01\s*· Windows · Online/);
+		expect(hostOptions()).toEqual(['win-fs01']);
+		expect(optionOf('win-fs01')).toHaveTextContent(/Windows · amd64/);
+		expect(screen.getByText('1 host')).toBeInTheDocument();
 	});
 
 	it('ac_rp_07 offers only the repository host for a local repository', async () => {
-		mocks.listAgents.mockResolvedValue([
-			{ id: 'a_1', hostname: 'win-fs01', status: 'active' },
-			{ id: 'a_3', hostname: 'nas-01', status: 'active' }
-		]);
+		mocks.listAgents.mockResolvedValue([agent('a_1', 'win-fs01'), agent('a_3', 'nas-01')]);
 		mocks.listProfiles.mockResolvedValue([
 			{ id: 'p_1', name: 'web-daily', repository_id: 'r_1' },
 			{ id: 'p_2', name: 'nas-files', repository_id: 'r_2' }
@@ -170,24 +220,19 @@ describe('the plan page', () => {
 		const user = userEvent.setup();
 		render(PlanEditor);
 
-		const host = await screen.findByLabelText(/Host/, { selector: 'select' });
-		expect(within(host).getAllByRole('option')).toHaveLength(2);
-		await user.selectOptions(screen.getByLabelText(/Profile/, { selector: 'select' }), 'p_2');
-
-		await waitFor(() => expect(host).toHaveValue('a_3'));
-		expect(
-			within(host)
-				.getAllByRole('option')
-				.map((option) => option.textContent)
-		).toEqual(['nas-01']);
+		await pickProfile(user, 'nas-files');
+		const host = await openHosts(user);
+		await waitFor(() => expect(host).toHaveTextContent('nas-01'));
+		expect(hostOptions()).toEqual(['win-fs01', 'nas-01']);
+		const other = optionOf('win-fs01');
+		expect(other).toHaveAttribute('data-disabled');
+		expect(other).toHaveAccessibleDescription(/Repository nas-local is on nas-01/);
+		expect(optionOf('nas-01')).not.toHaveAttribute('data-disabled');
 		expect(screen.getByText(/Its path is on the host nas-01 only/)).toBeInTheDocument();
 	});
 
 	it('ac_rp_07 keeps the host of a stored plan on another host and shows the error', async () => {
-		mocks.listAgents.mockResolvedValue([
-			{ id: 'a_1', hostname: 'win-fs01', status: 'active' },
-			{ id: 'a_3', hostname: 'nas-01', status: 'active' }
-		]);
+		mocks.listAgents.mockResolvedValue([agent('a_1', 'win-fs01'), agent('a_3', 'nas-01')]);
 		mocks.listRepositories.mockResolvedValue([
 			{
 				id: 'r_1',
@@ -200,13 +245,9 @@ describe('the plan page', () => {
 		mocks.updatePlan.mockResolvedValue({ plan: plan() });
 		render(PlanEditor, { planId: 'pl_1' });
 
-		const host = await screen.findByLabelText(/Host/, { selector: 'select' });
-		expect(host).toHaveValue('a_1');
-		expect(
-			within(host)
-				.getAllByRole('option')
-				.map((option) => option.textContent)
-		).toEqual(['win-fs01', 'nas-01']);
+		await screen.findByRole('heading', { level: 1, name: 'nightly-web' });
+		const host = input('#plan-agent');
+		expect(host).toHaveTextContent('win-fs01');
 		expect(host).toHaveAttribute('aria-invalid', 'true');
 		expect(screen.getByText(/Select the repository host/)).toBeInTheDocument();
 
@@ -243,11 +284,11 @@ describe('the plan page', () => {
 		const user = userEvent.setup();
 		render(PlanEditor);
 
-		const host = await screen.findByLabelText(/Host/, { selector: 'select' });
-		await user.selectOptions(screen.getByLabelText(/Profile/, { selector: 'select' }), 'p_2');
+		await pickProfile(user, 'nas-files');
+		const host = await openHosts(user);
 
-		await waitFor(() => expect(within(host).queryAllByRole('option')).toHaveLength(0));
-		expect((host as HTMLSelectElement).value).toBe('');
+		expect(host).not.toHaveTextContent('win-fs01');
+		expect(optionOf('win-fs01')).toHaveAttribute('data-disabled');
 		expect(screen.getByText(/Select the repository host/)).toBeInTheDocument();
 	});
 
@@ -261,7 +302,7 @@ describe('the plan page', () => {
 		).toBeInTheDocument();
 		expect(input('#plan-cron').value).toBe('0 2 * * *');
 		expect(screen.getAllByText('repo-a').length).toBeGreaterThan(0);
-		await user.selectOptions(input('#plan-profile'), 'p_2');
+		await pickProfile(user, 'db-hourly');
 		await user.click(screen.getByRole('button', { name: 'Save' }));
 
 		await waitFor(() =>
@@ -331,6 +372,7 @@ describe('the plan page', () => {
 
 		await screen.findByRole('heading', { level: 1, name: 'nightly-web' });
 		// A collapsed section opens when the server names its field.
+		await user.type(input('#plan-name'), '-2');
 		await user.click(screen.getByRole('button', { name: 'Collapse all' }));
 		await user.click(screen.getByRole('button', { name: 'Save' }));
 

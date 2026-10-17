@@ -194,6 +194,7 @@ describe('Profile editor scripts', () => {
 		await expand(u, /^Scripts on the host/);
 		expect(screen.getByText('Only an Admin changes the scripts of a profile.')).toBeInTheDocument();
 		expect(screen.queryByRole('button', { name: 'Use a job template' })).not.toBeInTheDocument();
+		await u.type(screen.getByLabelText(/^Profile/), '-2');
 		await u.click(screen.getByRole('button', { name: 'Save' }));
 		await waitFor(() => expect(mocks.updateProfile).toHaveBeenCalledTimes(1));
 		expect(mocks.updateProfile.mock.calls[0][1].scripts).toEqual([STORED_SCRIPT]);
@@ -256,17 +257,29 @@ describe('Profile editor sections', () => {
 		expect(toggle).toHaveAttribute('aria-expanded', 'true');
 	});
 
-	it('shows the commands of the host system in the side panel', async () => {
+	it('fr_pf_04 shows the restic commands of the host system in a side panel', async () => {
 		const u = user();
 		mocks.listProfiles.mockResolvedValue([
 			profile({ paths: { all: ['/srv'], windows: ['C:\\Data'], linux: ['/etc'], macos: [] } })
 		]);
 		render(ProfileEditor, { profileId: 'p_1' });
 		await screen.findByLabelText(/^Profile/);
-		expect(screen.getByText(/^restic backup/)).toHaveTextContent('/etc');
+		expect(screen.queryByText(/^restic backup/)).not.toBeInTheDocument();
+		await u.click(screen.getByRole('button', { name: 'Restic commands' }));
+		const panel = await screen.findByRole('dialog', { name: 'Restic commands' });
+		expect(within(panel).getByText(/^restic backup/)).toHaveTextContent('/etc');
+		expect(within(panel).getByRole('button', { name: 'Copy' })).toBeInTheDocument();
 		await u.selectOptions(screen.getByLabelText('Commands for the host:'), 'windows');
 		expect(screen.getByText(/^restic backup/)).toHaveTextContent('C:\\Data');
 		expect(screen.getByText(/^restic backup/)).not.toHaveTextContent('/etc');
+	});
+
+	it('disables the restic commands until the profile has paths and says why', async () => {
+		render(ProfileEditor);
+		await screen.findByLabelText(/^Profile/);
+		const action = screen.getByRole('button', { name: 'Restic commands' });
+		expect(action).toBeDisabled();
+		expect(action).toHaveAttribute('title', 'Set the paths to see the commands.');
 	});
 });
 
@@ -325,6 +338,7 @@ describe('Profile editor tags and limits', () => {
 			'placeholder',
 			'45 (default)'
 		);
+		await u.type(screen.getByLabelText(/^Profile/), '-2');
 		await u.click(screen.getByRole('button', { name: 'Save' }));
 		await waitFor(() => expect(mocks.updateProfile).toHaveBeenCalledTimes(1));
 		const options = mocks.updateProfile.mock.calls[0][1].options;
