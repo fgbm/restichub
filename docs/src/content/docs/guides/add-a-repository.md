@@ -111,7 +111,7 @@ To keep the old snapshots on a new host:
 
 To keep the plans and the data at the same path:
 
-1. Add a new local repository with the same path on the new host, and a new profile that writes to it.
+1. Add a new local repository with the same path on the new host. Add a new profile that writes to it.
 2. Open each plan of the old profile. Select the new profile and the new host in one change, then save.
 3. On the new repository, select "Test access". The test finds the existing repository and marks it initialized.
 4. Delete the old repository and the old profile.
