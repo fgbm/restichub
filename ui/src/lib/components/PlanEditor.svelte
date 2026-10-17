@@ -31,6 +31,7 @@
 		describeMissedRunPolicy,
 		timeZoneNames
 	} from '#lib/schedule.ts';
+	import { rememberSections } from '#lib/section-state.svelte.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
@@ -63,7 +64,9 @@
 	let formError = $state<string | null>(null);
 	let formProblem = $state<ApiProblem | null>(null);
 	let baseline = $state('');
-	let open = $state<Record<string, boolean>>(
+	const open = rememberSections(
+		'plan',
+		SECTIONS,
 		Object.fromEntries(SECTIONS.map((key) => [key, true]))
 	);
 

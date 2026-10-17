@@ -44,6 +44,8 @@
 	let hosts = $state<Agent[]>([]);
 	let repositories = $state<{ id: string; name: string }[]>([]);
 	let plans = $state<{ id: string; name: string }[]>([]);
+	// The id facets hold every possible value only when all three lists came.
+	let optionsLoaded = $state(false);
 	// The list filters, sorts and pages on the server (FR-UI-01). The host page links here with the
 	// host to show (`?agent_id=`).
 	const filters = queryFilters([
@@ -145,6 +147,7 @@
 		{
 			key: 'agent_id',
 			label: t('jobs.host'),
+			exact: optionsLoaded,
 			search: true,
 			options: withHosts(
 				hosts.map((host) => ({ value: host.id })),
@@ -159,11 +162,13 @@
 		{
 			key: 'repository_id',
 			label: t('jobs.repository'),
+			exact: optionsLoaded,
 			options: repositories.map((repository) => ({ value: repository.id, label: repository.name }))
 		},
 		{
 			key: 'plan_id',
 			label: t('jobs.plan'),
+			exact: optionsLoaded,
 			options: plans.map((plan) => ({ value: plan.id, label: plan.name }))
 		}
 	]);
@@ -253,6 +258,9 @@
 		if (hostList.status === 'fulfilled') hosts = hostList.value;
 		if (repositoryList.status === 'fulfilled') repositories = repositoryList.value;
 		if (planList.status === 'fulfilled') plans = planList.value;
+		optionsLoaded = [hostList, repositoryList, planList].every(
+			(item) => item.status === 'fulfilled'
+		);
 	}
 
 	// An older link names a status. The tab of that status replaces it; a status without a tab
@@ -272,7 +280,12 @@
 	}
 
 	// The list opens on the jobs of the last 7 days; "All time" in the period facet shows the rest.
-	if (!page.url.searchParams.has('period') && !filters.value.from && !filters.value.to) {
+	if (
+		!filters.restored &&
+		!page.url.searchParams.has('period') &&
+		!filters.value.from &&
+		!filters.value.to
+	) {
 		filters.update({ period: '7d', page: filters.value.page });
 	}
 

@@ -33,6 +33,7 @@
 		{
 			key: 'host',
 			label: t('plans.host'),
+			exact: !loading && !error,
 			search: true,
 			options: withHosts(
 				facetCounts(plans, (plan) => [plan.agent_hostname]),
@@ -43,6 +44,7 @@
 		{
 			key: 'profile',
 			label: t('plans.profile'),
+			exact: !loading && !error,
 			search: true,
 			options: facetCounts(plans, (plan) => [plan.profile_name]).map((option) => ({
 				...option,

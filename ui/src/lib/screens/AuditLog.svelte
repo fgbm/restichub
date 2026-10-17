@@ -48,7 +48,12 @@
 	] as const);
 	// The log opens on the last 30 days, so a search reads one month of records; "All time" in the
 	// period facet reads the rest.
-	if (!page.url.searchParams.has('period') && !filters.value.from && !filters.value.to) {
+	if (
+		!filters.restored &&
+		!page.url.searchParams.has('period') &&
+		!filters.value.from &&
+		!filters.value.to
+	) {
 		filters.update({ period: '30d', page: filters.value.page });
 	}
 	const tablePage = $derived(pageNumber(filters.value.page));

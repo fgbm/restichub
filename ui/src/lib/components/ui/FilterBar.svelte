@@ -12,6 +12,7 @@
 		type FilterState
 	} from '#lib/filters.ts';
 	import { formatCount } from '#lib/format.ts';
+	import { KEPT_FILTERS, type KeptFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { t } from '#lib/i18n/index.ts';
 	import Button from './Button.svelte';
 	import Checkbox from './Checkbox.svelte';
@@ -76,11 +77,38 @@
 
 	// Inside a list view the bar is the list header: search, then tabs, facets and sort, then chips.
 	const inList = getContext<boolean>('rh-list-view') ?? false;
+	const kept = getContext<KeptFilters | undefined>(KEPT_FILTERS);
 	const statesKey = $derived(states?.key ?? 'state');
 	const currentState = $derived(states ? value[statesKey] || states.default : '');
 	const sortField = $derived(sort ? value.sort || sort.default : '');
 	const sortOption = $derived(sort?.options.find((option) => option.value === sortField));
 	const sortOrder = $derived(value.order || sortOption?.order || 'asc');
+
+	// A kept tab, sort or id that the list no longer offers is dropped (FR-UI-05).
+	$effect(() => {
+		if (!kept) return;
+		if (states) {
+			kept.prune(
+				statesKey,
+				states.options.map((option) => option.value)
+			);
+		}
+		if (sort) {
+			kept.prune(
+				'sort',
+				sort.options.map((option) => option.value)
+			);
+			kept.prune('order', ['asc', 'desc']);
+		}
+		for (const facet of facets) {
+			if (facet.exact && facet.options) {
+				kept.prune(
+					facet.key,
+					facet.options.map((option) => option.value)
+				);
+			}
+		}
+	});
 
 	function pickState(next: string): void {
 		if (!states) return;

@@ -149,8 +149,8 @@ test('editing a profile keeps the retention fields', async ({ page }) => {
 	await expect(page.getByText('The profile is updated.')).toBeVisible();
 
 	// A second edit keeps the fields after the rename.
+	// The section stays open: the interface keeps the sections of the editor (FR-UI-05).
 	await page.getByRole('link', { name: 'web-renamed' }).click();
-	await page.getByRole('button', { name: /^Retention/ }).click();
 	await expect(page.locator('#profile-keep-yearly')).toHaveValue('2');
 	await page.getByText('Limit the rules to some snapshots').click();
 	await expect(page.getByRole('button', { name: 'Remove web-*' })).toBeVisible();
@@ -174,7 +174,6 @@ test('the limits section creates and edits a profile with the job limits', async
 	await expect(page.getByText('The profile is created.')).toBeVisible();
 
 	await page.getByRole('link', { name: 'limits-demo' }).click();
-	await page.getByRole('button', { name: /^Run limits/ }).click();
 	await expect(page.locator('#profile-stall-timeout')).toHaveValue('90');
 	await expect(page.locator('#profile-max-duration')).toHaveValue('12');
 
@@ -184,7 +183,6 @@ test('the limits section creates and edits a profile with the job limits', async
 	await page.getByRole('button', { name: 'Save' }).click();
 	await expect(page.getByText('The profile is updated.')).toBeVisible();
 	await page.getByRole('link', { name: 'limits-demo' }).click();
-	await page.getByRole('button', { name: /^Run limits/ }).click();
 	await expect(page.locator('#profile-stall-timeout')).toHaveValue('90');
 	await expect(page.locator('#profile-max-duration')).toHaveValue('5');
 });

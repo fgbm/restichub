@@ -45,8 +45,8 @@ test('a profile keeps its scripts in two ordered lists and saves a reorder', asy
 	await expect(page.getByText('The profile is updated.')).toBeVisible();
 
 	// The saved order comes back when the page opens again.
+	// The section stays open: the interface keeps the sections of the editor (FR-UI-05).
 	await page.getByRole('link', { name: 'db-nightly' }).click();
-	await page.getByRole('button', { name: /^Scripts on the host/ }).click();
 	await expect(page.getByTestId('scripts-before').locator('.card__title')).toHaveText([
 		'Dump the PostgreSQL database',
 		'Check free disk space'

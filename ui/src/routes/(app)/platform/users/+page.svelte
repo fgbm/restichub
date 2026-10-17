@@ -86,6 +86,7 @@
 		{
 			key: 'tenant',
 			label: t('platformUsers.facet.organization'),
+			exact: !loading && !error,
 			options: facetCounts(accounts, (user) => user.memberships.map((member) => member.tenant_name))
 		},
 		{

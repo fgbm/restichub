@@ -16,4 +16,6 @@ if (!('ResizeObserver' in globalThis)) {
 
 afterEach(() => {
 	cleanup();
+	// A kept view must not leak from one test to the next.
+	localStorage.clear();
 });

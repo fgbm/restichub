@@ -51,6 +51,8 @@
 		MAX_TAGS
 	} from '#lib/profile-form.ts';
 	import type { Os, ProfileDraft, SummaryKey } from '#lib/profile-form.ts';
+	import { loadPreference, savePreference } from '#lib/stores/ui-preferences.svelte.ts';
+	import { rememberSections } from '#lib/section-state.svelte.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
@@ -65,6 +67,7 @@
 	} = $props();
 
 	const SECTIONS = SUMMARY_ORDER;
+	const OS_VALUES: readonly string[] = ['linux', 'windows', 'macos'];
 
 	let loading = $state(true);
 	let loadError = $state<string | null>(null);
@@ -83,9 +86,18 @@
 	let formError = $state<string | null>(null);
 	let formProblem = $state<ApiProblem | null>(null);
 	let warnings = $state<ProfileWarning[]>([]);
-	let os = $state('linux');
+	let os = $state(
+		loadPreference(
+			'browser',
+			'commands.os',
+			(value): value is string => typeof value === 'string' && OS_VALUES.includes(value),
+			'linux'
+		)
+	);
 	let copied = $state(false);
-	let open = $state<Record<string, boolean>>(
+	const open = rememberSections(
+		'profile',
+		SECTIONS,
 		Object.fromEntries(SECTIONS.map((key) => [key, key === 'basics' || key === 'paths']))
 	);
 
@@ -703,6 +715,7 @@
 						{ value: 'macos', label: 'macOS' }
 					]}
 					bind:value={os}
+					onchange={() => savePreference('browser', 'commands.os', os)}
 				/>
 			</div>
 			{#each steps as step, index (step.kind + index)}
