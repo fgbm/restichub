@@ -164,7 +164,7 @@ describe('the Hosts screen', () => {
 		);
 		expect(screen.getByText('Showing 1 to 1 of 1')).toBeInTheDocument();
 		// The tabs count the hosts on the server, also the hidden revoked ones.
-		expect(screen.getByRole('button', { name: 'Active 3' })).toHaveAttribute(
+		expect(screen.getByRole('button', { name: 'All 3' })).toHaveAttribute(
 			'aria-pressed',
 			'true'
 		);
