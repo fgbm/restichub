@@ -114,7 +114,8 @@ export function docsRepositories(): Repository[] {
 		created_by: 'u_01',
 		lock_state: 'free',
 		last_check: { finished_at: iso(checkedMinutesAgo), result: 'passed' },
-		snapshot_count: snapshots
+		snapshot_count: snapshots,
+		shares_location_with: []
 	});
 	return [
 		repository(

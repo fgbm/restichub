@@ -134,6 +134,13 @@ describe('other entity states', () => {
 		expect(pillOf(repositoryState({ initialized: true, lock_state: 'held' }))).toBeNull();
 	});
 
+	it('fr_rp_11 ranks a shared location before the other repository states', () => {
+		expect(repositoryState({ initialized: false, shares_location_with: ['repo-b'] })).toMatchObject(
+			{ key: 'sharedLocation', tone: 'warning' }
+		);
+		expect(repositoryState({ initialized: true, shares_location_with: [] }).key).toBe('ready');
+	});
+
 	it('warns about an API token that expires within 14 days', () => {
 		const in9 = new Date(now + 9 * day).toISOString();
 		expect(apiTokenState({ expires_at: in9, revoked_at: null }, now).key).toBe('expiring');

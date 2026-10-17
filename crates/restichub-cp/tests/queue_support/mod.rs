@@ -482,8 +482,9 @@ impl Env {
 
     /// Creates a local repository whose maintenance agent is `agent` and returns its identifier.
     pub async fn create_repository(&self, agent: AgentId, password: &str) -> Uuid {
-        self.create_repository_at(agent, password, "/srv/backup/restic")
-            .await
+        // A unique path: one tenant cannot hold two repositories at one location (FR-RP-11).
+        let path = format!("/srv/backup/restic-{}", Uuid::now_v7());
+        self.create_repository_at(agent, password, &path).await
     }
 
     pub async fn create_repository_at(&self, agent: AgentId, password: &str, path: &str) -> Uuid {

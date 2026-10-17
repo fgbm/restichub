@@ -110,6 +110,9 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
             {
                 tracing::warn!(%error, "the check of the local repository hosts failed");
             }
+            if let Err(error) = restichub_cp::startup::report_shared_locations(&database).await {
+                tracing::warn!(%error, "the check of the shared repository locations failed");
+            }
         });
     }
 

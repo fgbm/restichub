@@ -1201,6 +1201,8 @@ export const en = {
 		'The host runs an older agent that cannot do this. Update the agent package and try again.',
 	'error.restore_target_denied':
 		'The host does not restore to this path. Use a restore root of the host. An administrator adds a root on the host.',
+	'error.repository_location_taken':
+		'The repository "{name}" already uses this location. Use another location or the existing repository.',
 	'error.repository_host_locked':
 		'The host of an initialized local repository cannot change. The snapshots are on the disk of this host.',
 	'error.not_repository_host':
@@ -2054,6 +2056,9 @@ export const en = {
 	'hosts.status.outdated': 'Agent too old',
 	'plans.ok': 'OK',
 	'repositories.status.ready': 'Ready',
+	'repositories.status.sharedLocation': 'Shared location',
+	'repositories.sharedLocation':
+		'Another repository uses this location: {names}. Two repositories at one location share locks and snapshots. Delete one of them.',
 	'alerts.status.resolved': 'Resolved',
 	'channels.disabled': 'Disabled',
 	'channels.send': 'Send alerts',

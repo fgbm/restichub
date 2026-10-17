@@ -88,6 +88,7 @@ function repository(overrides: Record<string, unknown> = {}) {
 		lock_state: 'free',
 		last_check: null,
 		snapshot_count: null,
+		shares_location_with: [],
 		...overrides
 	};
 }

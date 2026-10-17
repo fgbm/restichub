@@ -58,6 +58,7 @@ pub enum ErrorCode {
     InvalidSetupToken,
     RepositoryHostLocked,
     NotRepositoryHost,
+    RepositoryLocationTaken,
 }
 
 impl ErrorCode {
@@ -93,6 +94,7 @@ impl ErrorCode {
             Self::InvalidSetupToken => "invalid_setup_token",
             Self::RepositoryHostLocked => "repository_host_locked",
             Self::NotRepositoryHost => "not_repository_host",
+            Self::RepositoryLocationTaken => "repository_location_taken",
         }
     }
 }
@@ -106,6 +108,8 @@ pub struct ApiError {
     title: &'static str,
     field: Option<String>,
     reason: Option<Reason>,
+    /// The name of the repository that holds the location. Only `repository_location_taken` sets it.
+    existing_name: Option<String>,
     /// The `Retry-After` header value in seconds. Only `rate_limited` and `busy` set it.
     retry_after: Option<u64>,
     /// The internal detail. The response body never holds it; the mapper logs it with the request
@@ -121,6 +125,7 @@ impl ApiError {
             title,
             field: None,
             reason: None,
+            existing_name: None,
             retry_after: None,
             cause: None,
         }
@@ -395,6 +400,19 @@ impl ApiError {
         error
     }
 
+    /// Creates a `409 repository_location_taken` error on a location field: another repository of
+    /// the tenant holds the location (FR-RP-11).
+    pub fn repository_location_taken(field: &'static str, existing_name: String) -> Self {
+        let mut error = Self::new(
+            StatusCode::CONFLICT,
+            ErrorCode::RepositoryLocationTaken,
+            "Conflict",
+        );
+        error.field = Some(field.to_owned());
+        error.existing_name = Some(existing_name);
+        error
+    }
+
     /// Creates a `409 not_repository_host` error: the plan runs on another host than its local
     /// repository, so a job cannot reach the path.
     pub fn not_repository_host() -> Self {
@@ -516,6 +534,7 @@ impl IntoResponse for ApiError {
             request_id: String::new(),
             field: self.field,
             reason: self.reason.map(|reason| reason.as_str().to_owned()),
+            existing_name: self.existing_name,
         };
         let mut response = (
             self.status,
@@ -550,6 +569,10 @@ pub struct ProblemBody {
     /// In snake_case; only `invalid_argument` sets it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    /// The name of the repository that holds the location; only `repository_location_taken` sets
+    /// it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub existing_name: Option<String>,
 }
 
 /// The shared responses of a protected route: 401 and 403 with the problem body.

@@ -2309,7 +2309,7 @@ export interface components {
         /** @enum {string} */
         EnvKind: "string" | "secret_ref";
         /** @enum {string} */
-        ErrorCode: "not_found" | "service_unavailable" | "internal_error" | "unauthenticated" | "invalid_credentials" | "forbidden" | "csrf_required" | "conflict" | "invalid_argument" | "payload_too_large" | "tenant_key_missing" | "ambiguous_credentials" | "method_not_allowed" | "rate_limited" | "busy" | "shared_account" | "username_taken" | "email_taken" | "agent_offline" | "already_queued" | "agent_capability_missing" | "restore_target_denied" | "token_used" | "token_already_revoked" | "token_expired" | "agent_recently_online" | "setup_already_done" | "invalid_setup_token" | "repository_host_locked" | "not_repository_host";
+        ErrorCode: "not_found" | "service_unavailable" | "internal_error" | "unauthenticated" | "invalid_credentials" | "forbidden" | "csrf_required" | "conflict" | "invalid_argument" | "payload_too_large" | "tenant_key_missing" | "ambiguous_credentials" | "method_not_allowed" | "rate_limited" | "busy" | "shared_account" | "username_taken" | "email_taken" | "agent_offline" | "already_queued" | "agent_capability_missing" | "restore_target_denied" | "token_used" | "token_already_revoked" | "token_expired" | "agent_recently_online" | "setup_already_done" | "invalid_setup_token" | "repository_host_locked" | "not_repository_host" | "repository_location_taken";
         /** @description One value of a filter with the number of rows that hold it. */
         FacetValue: {
             /** Format: int64 */
@@ -2903,6 +2903,11 @@ export interface components {
         ProblemBody: {
             /** @description In snake_case. */
             code: components["schemas"]["ErrorCode"];
+            /**
+             * @description The name of the repository that holds the location; only `repository_location_taken` sets
+             *     it.
+             */
+            existing_name?: string | null;
             /** @description Set by `invalid_argument`, `username_taken` and `email_taken`. */
             field?: string | null;
             /** @description In snake_case; only `invalid_argument` sets it. */
@@ -3044,6 +3049,11 @@ export interface components {
             lock_state: components["schemas"]["LockState"];
             maintenance_agent_id?: string | null;
             name: string;
+            /**
+             * @description The names of the other repositories that hold the same location (FR-RP-11). Only the list
+             *     fills it; a duplicate came from before the rule.
+             */
+            shares_location_with: string[];
             /**
              * Format: int64
              * @description From the newest snapshot listing of the Restore screen, kept for 7 days. Null without a

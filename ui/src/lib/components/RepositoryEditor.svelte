@@ -510,6 +510,15 @@
 		{#if locationLocked}
 			<Alert tone="attention" icon="lock" title={t('repositories.locationLocked')} />
 		{/if}
+		{#if existing?.shares_location_with.length}
+			<Alert
+				tone="attention"
+				icon="alert"
+				title={t('repositories.sharedLocation', {
+					names: existing.shares_location_with.join(', ')
+				})}
+			/>
+		{/if}
 		<Select
 			id="repo-kind"
 			label={t('repositories.backendKind')}

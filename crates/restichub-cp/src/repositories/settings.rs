@@ -156,6 +156,9 @@ pub struct RepositoryView {
     /// From the newest snapshot listing of the Restore screen, kept for 7 days. Null without a
     /// listing or when the listing was cut.
     pub snapshot_count: Option<i64>,
+    /// The names of the other repositories that hold the same location (FR-RP-11). Only the list
+    /// fills it; a duplicate came from before the rule.
+    pub shares_location_with: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
@@ -227,6 +230,7 @@ impl RepositoryView {
                 })
             }),
             snapshot_count: health.and_then(|health| health.snapshot_count),
+            shares_location_with: Vec::new(),
         }
     }
 }
@@ -234,13 +238,13 @@ impl RepositoryView {
 /// The typed backend settings of a repository, with owned values.
 pub(super) struct ValidatedBackend {
     pub(super) kind: BackendKind,
-    s3_endpoint: Option<String>,
-    s3_bucket: Option<String>,
-    s3_prefix: Option<String>,
+    pub(super) s3_endpoint: Option<String>,
+    pub(super) s3_bucket: Option<String>,
+    pub(super) s3_prefix: Option<String>,
     s3_region: Option<String>,
-    rest_endpoint: Option<String>,
+    pub(super) rest_endpoint: Option<String>,
     pub(super) rest_username: Option<String>,
-    local_path: Option<String>,
+    pub(super) local_path: Option<String>,
 }
 
 impl ValidatedBackend {

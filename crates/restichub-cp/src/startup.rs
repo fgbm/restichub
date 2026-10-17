@@ -182,3 +182,32 @@ pub async fn report_local_repository_hosts(db: &Database) -> Result<(), restichu
     }
     Ok(())
 }
+
+/// Logs each repository that shares its location with another repository of its tenant (FR-RP-11).
+///
+/// The check changes no row. A duplicate from before the rule stays until the owner deletes one.
+pub async fn report_shared_locations(db: &Database) -> Result<(), restichub_db::DbError> {
+    let tenant_list = {
+        let mut tx = db.begin_platform().await?;
+        let list = tenants::list(&mut tx).await?;
+        tx.commit().await?;
+        list
+    };
+    for tenant in tenant_list {
+        let mut tx = db.begin_tenant(tenant.id).await?;
+        let repositories = restichub_db::repositories::list(&mut tx).await?;
+        tx.commit().await?;
+        let sharing = crate::repositories::location::sharing_names(&repositories);
+        for (repository, others) in repositories.iter().zip(sharing) {
+            if !others.is_empty() {
+                tracing::warn!(
+                    tenant = %tenant.id,
+                    repository = %repository.id,
+                    shared_with = ?others,
+                    "a repository shares its location with another repository; delete one of them"
+                );
+            }
+        }
+    }
+    Ok(())
+}
