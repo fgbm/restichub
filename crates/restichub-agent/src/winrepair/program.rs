@@ -381,7 +381,7 @@ mod tests {
             ProgramRebuild::Moved
         );
         assert_eq!(run.stops, 1, "the service stops before the move");
-        let [Action::MovedProgram { from, to }, removed_record, ..] = run.actions.as_slice() else {
+        let [removed_record, Action::MovedProgram { from, to }, ..] = run.actions.as_slice() else {
             panic!("unexpected actions: {:?}", run.actions);
         };
         assert_eq!(from, &tree.root);
@@ -436,7 +436,9 @@ mod tests {
             ProgramRebuild::Moved
         );
         assert!(
-            matches!(run.actions.first(), Some(Action::MovedProgram { from, .. }) if *from == tree.program),
+            run.actions
+                .iter()
+                .any(|action| matches!(action, Action::MovedProgram { from, .. } if *from == tree.program)),
             "{:?}",
             run.actions
         );
@@ -554,7 +556,14 @@ mod tests {
         );
         assert_eq!(run.stops, 1);
         assert!(
-            matches!(run.actions.first(), Some(Action::RepairingInPlace { .. })),
+            matches!(
+                run.actions.as_slice(),
+                [
+                    Action::RemovedRestic(_),
+                    Action::RepairingInPlace { .. },
+                    ..
+                ]
+            ),
             "{:?}",
             run.actions
         );

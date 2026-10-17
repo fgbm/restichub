@@ -690,7 +690,7 @@ jobs:
       - name: Start the control plane and create the token
         env:
           CP_BIN: target/debug/restichub-cp.exe
-          SMOKE_KEK: /wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+          SMOKE_KEK: /wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
         run: |
           set -euo pipefail
           scripts/install-smoke.sh cp-up
@@ -798,6 +798,7 @@ jobs:
           Set-Content $planted 'x'
           $refused = & $run '(4) register --force with a file that the agent does not know' @('register', '--force', '--url', 'https://localhost:8443', '--token-stdin', '--ca-file', "$env:SMOKE_DIR/ca.pem") (Get-Content $token)
           & $expect ($refused.Code -ne 0 -and $refused.Text -match 'version\.dll') 'register refuses the planted file and names it'
+          & $expect (Test-Path (Join-Path $config 'identity.json')) 'the refusal keeps the old identity'
           Remove-Item $planted
           $since = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
           $registered = & $run '(4) register --force with the same token' @('register', '--force', '--url', 'https://localhost:8443', '--token-stdin', '--ca-file', "$env:SMOKE_DIR/ca.pem") (Get-Content $token)

@@ -150,6 +150,10 @@ pub fn register(options: &RegisterOptions, dir: &Path) -> Result<()> {
     // Every check and repair that can refuse runs before `--force` removes an identity that another
     // account could change, so a refusal leaves the old files in place (T20, FR-IN-07).
     let program = crate::program_repair::prepare(dir, &HostService)?;
+    // The token is spent only for a tree that the service may start from.
+    if !options.no_service {
+        program.check_before_start()?;
+    }
     // The tree check runs before the copy: the move of an old restic reads from it, so a directory
     // that another account can write must be refused before anything leaves it (T20, FR-IN-07).
     crate::preflight::prepare_directories(
@@ -159,10 +163,6 @@ pub fn register(options: &RegisterOptions, dir: &Path) -> Result<()> {
         options.verbose,
     )?;
     place_program()?;
-    // The token is spent only for a tree that the service may start from.
-    if !options.no_service {
-        program.check_before_start()?;
-    }
     let installer = Installer::host()?;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
