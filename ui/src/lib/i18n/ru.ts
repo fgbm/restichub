@@ -147,7 +147,13 @@ export const ru: Record<MessageKey, string> = {
 	'setup.displayName': 'Отображаемое имя',
 	'setup.password': 'Пароль',
 	'setup.confirmPassword': 'Повторите пароль',
-	'setup.passwordHint': 'Используйте 12 символов или больше.',
+	'password.rule': 'Не меньше {min} символов.',
+	'password.progress': '{count} из {min} символов',
+	'password.enough.one': '{n} символ — достаточно',
+	'password.enough.few': '{n} символа — достаточно',
+	'password.enough.many': '{n} символов — достаточно',
+	'password.enough.other': '{n} символа — достаточно',
+	'password.tooLong': 'Пароль слишком длинный: не больше {max} байт.',
 	'setup.passwordMismatch': 'Пароли не совпадают.',
 	'setup.submit': 'Создать администратора платформы',
 	'setup.submitSingle': 'Создать администратора',
@@ -278,7 +284,7 @@ export const ru: Record<MessageKey, string> = {
 	'platformUsers.username': 'Имя пользователя',
 	'platformUsers.displayName': 'Отображаемое имя',
 	'platformUsers.email': 'Электронная почта',
-	'platformUsers.emailHint': 'Необязательно. Используется приглашениями в версии 1.0.',
+	'platformUsers.emailHint': 'Необязательно.',
 	'platformUsers.password': 'Пароль',
 	'platformUsers.organizations': 'Организации',
 	'platformUsers.noOrganizations': 'Нет организации',
@@ -561,8 +567,7 @@ export const ru: Record<MessageKey, string> = {
 	'repositories.passwordHint':
 		'Сохраните копию этого пароля вне ResticHub. Если сервер управления потерян, без пароля снимки открыть нельзя.',
 	'repositories.passwordKeepHint': 'Оставьте поле пустым, чтобы сохранить текущее значение.',
-	'repositories.passwordLocked':
-		'Пароль репозитория нельзя заменить в этой версии. Ротация появится в следующем выпуске.',
+	'repositories.passwordLocked': 'Пароль репозитория нельзя заменить.',
 	'repositories.secretHint':
 		'ResticHub больше никогда не показывает это значение после сохранения. Его можно только заменить.',
 	'repositories.s3AccessKey': 'Ключ доступа S3',
@@ -621,7 +626,7 @@ export const ru: Record<MessageKey, string> = {
 		'Репозитория нет по этому пути на этом хосте. Проверьте путь, точку монтирования и хост.',
 	'repositories.jobExpired': 'Срок задания истёк до ответа хоста. Запустите его снова.',
 	'repositories.locationLocked':
-		'Путь инициализированного репозитория нельзя изменить в этой версии. Там лежат снимки.',
+		'Путь инициализированного репозитория нельзя изменить. Там лежат снимки.',
 
 	// Profiles
 	'profiles.title': 'Профили',
@@ -826,7 +831,6 @@ export const ru: Record<MessageKey, string> = {
 	'jobs.reason.unsupported_kind':
 		'Очередь не выполняет задания этого вида. Обновите сервер управления или агент.',
 	'jobDetail.notFound': 'Такого задания нет.',
-	'jobDetail.live': 'в реальном времени',
 	'jobDetail.refresh': 'Обновить',
 	'jobDetail.summary': 'Итоги',
 	'jobDetail.summaryHint': 'Статистика из итогов restic',

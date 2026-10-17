@@ -407,7 +407,6 @@
 			>
 				{statusLabel}
 			</StatusPill>
-			{#if live}<span class="head__live">{t('jobDetail.live')}</span>{/if}
 		{/if}
 	{/snippet}
 	{#snippet actions()}
@@ -697,15 +696,6 @@
 		margin: 0;
 		color: var(--rh-color-text-muted);
 		font-size: var(--rh-font-size-sm);
-	}
-
-	.head__live {
-		padding: 0 var(--rh-space-2);
-		border: var(--rh-border-width) solid var(--rh-color-running-subtle-border);
-		border-radius: var(--rh-radius-pill);
-		background-color: var(--rh-color-running-subtle);
-		color: var(--rh-color-running-subtle-text);
-		font-size: var(--rh-font-size-xs);
 	}
 
 	.head__reason {

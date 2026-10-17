@@ -478,6 +478,8 @@ describe('the job detail screen', () => {
 			'Plan nightly-web · host win-fs01 · triggered by the schedule · step 1 of 3'
 		);
 		expect(screen.getByRole('heading', { level: 1, name: 'j_1' })).toBeInTheDocument();
+		// The status pill alone tells that the job runs (UI principles 3.3).
+		expect(screen.queryByText('live')).not.toBeInTheDocument();
 		expect(screen.getByText('0 of 3 complete')).toBeInTheDocument();
 		// The steps that did not start show as queued.
 		expect(screen.getAllByText('queued')).toHaveLength(2);

@@ -330,9 +330,10 @@ describe('the Hosts screen', () => {
 
 		await user.clear(input);
 		await user.type(input, '   ');
-		await waitFor(() =>
-			expect(within(dialog).getByRole('button', { name: 'Rename' })).toBeDisabled()
-		);
+		await user.click(within(dialog).getByRole('button', { name: 'Rename' }));
+		expect(await within(dialog).findByText('This field is required.')).toBeVisible();
+		expect(input).toHaveFocus();
+		expect(mocks.renameAgent).not.toHaveBeenCalled();
 
 		await user.clear(input);
 		await user.type(input, '  new-name  ');

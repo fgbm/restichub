@@ -31,6 +31,7 @@
 		StatusTone
 	} from '#lib/components/ui/index.ts';
 	import { facetCounts, matchesSearch, splitList } from '#lib/filters.ts';
+	import { focusFirstInvalid } from '#lib/form.ts';
 	import { ago, plural } from '#lib/list-format.ts';
 	import { iconOf, pillOf, repositoryState } from '#lib/vocabulary.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
@@ -61,6 +62,7 @@
 	let job = $state<Job | null>(null);
 	let jobError = $state<string | null>(null);
 	let jobStarting = $state(false);
+	let jobSubmitted = $state(false);
 	let jobTimer: ReturnType<typeof setInterval> | null = null;
 
 	const jobStatusLabels: Record<JobStatus, MessageKey> = {
@@ -379,11 +381,14 @@
 		job = null;
 		jobError = null;
 		jobStarting = false;
+		jobSubmitted = false;
 		jobOpen = true;
 	}
 
 	async function startJob(): Promise<void> {
-		if (!jobRepository || !jobHost) return;
+		if (!jobRepository) return;
+		jobSubmitted = true;
+		if (focusFirstInvalid([['job-host', jobHost === '']])) return;
 		jobStarting = true;
 		jobError = null;
 		try {
@@ -580,6 +585,7 @@
 				id="job-host"
 				label={t('repositories.jobHost')}
 				help={t('repositories.jobHostHint')}
+				error={jobSubmitted && jobHost === '' ? t('repositories.jobHostRequired') : undefined}
 				options={jobAgentOptions}
 				bind:value={jobHost}
 			/>
@@ -587,7 +593,7 @@
 		{#snippet footer()}
 			<Button onclick={closeJob}>{t('common.close')}</Button>
 			{#if !job}
-				<Button type="submit" variant="primary" loading={jobStarting} disabled={!jobHost}>
+				<Button type="submit" variant="primary" loading={jobStarting}>
 					{t('repositories.jobStart')}
 				</Button>
 			{/if}

@@ -28,6 +28,7 @@
 	import { changedAt, plural } from '#lib/list-format.ts';
 	import { iconOf, pillOf, secretState } from '#lib/vocabulary.ts';
 	import { facetCounts, matchesSearch, splitList } from '#lib/filters.ts';
+	import { emptyError, focusFirstInvalid } from '#lib/form.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import {
@@ -55,6 +56,7 @@
 	let newName = $state('');
 	let newPurpose = $state<CreatablePurpose>('hook_secret');
 	let newValue = $state('');
+	let createSubmitted = $state(false);
 	const createFields = ['name', 'purpose', 'value'];
 
 	let replaceTarget = $state<Secret | null>(null);
@@ -63,6 +65,7 @@
 	let replaceError = $state<string | null>(null);
 	let replaceProblem = $state<ApiProblem | null>(null);
 	let replaceValue = $state('');
+	let replaceSubmitted = $state(false);
 
 	let deleteTarget = $state<Secret | null>(null);
 	let deleteOpen = $state(false);
@@ -244,11 +247,19 @@
 		newValue = '';
 		createError = null;
 		createProblem = null;
+		createSubmitted = false;
 		createOpen = true;
 	}
 
 	async function createSecret(): Promise<void> {
-		if (!newName || !newValue) return;
+		createSubmitted = true;
+		if (
+			focusFirstInvalid([
+				['secret-name', newName === ''],
+				['secret-value', newValue === '']
+			])
+		)
+			return;
 		creating = true;
 		createError = null;
 		createProblem = null;
@@ -270,11 +281,14 @@
 		replaceValue = '';
 		replaceError = null;
 		replaceProblem = null;
+		replaceSubmitted = false;
 		replaceOpen = true;
 	}
 
 	async function confirmReplace(): Promise<void> {
-		if (!replaceTarget || !replaceValue) return;
+		if (!replaceTarget) return;
+		replaceSubmitted = true;
+		if (focusFirstInvalid([['secret-replace-value', replaceValue === '']])) return;
 		replacing = true;
 		replaceError = null;
 		replaceProblem = null;
@@ -398,7 +412,7 @@
 		id="secret-name"
 		label={t('secrets.name')}
 		help={t('secrets.nameHint')}
-		error={fieldError(createProblem, 'name')}
+		error={emptyError(createSubmitted, newName) ?? fieldError(createProblem, 'name')}
 		bind:value={newName}
 		placeholder={t('secrets.namePlaceholder')}
 		required
@@ -415,14 +429,14 @@
 		id="secret-value"
 		label={t('secrets.value')}
 		help={t('secrets.valueHint')}
-		error={fieldError(createProblem, 'value')}
+		error={emptyError(createSubmitted, newValue) ?? fieldError(createProblem, 'value')}
 		autocomplete="new-password"
 		bind:value={newValue}
 		required
 	/>
 	{#snippet footer()}
 		<Button onclick={() => (createOpen = false)}>{t('common.cancel')}</Button>
-		<Button type="submit" variant="primary" loading={creating} disabled={!newName || !newValue}>
+		<Button type="submit" variant="primary" loading={creating}>
 			{t('secrets.create')}
 		</Button>
 	{/snippet}
@@ -449,7 +463,7 @@
 	<PasswordField
 		id="secret-replace-value"
 		label={t('secrets.newValue')}
-		error={fieldError(replaceProblem, 'value')}
+		error={emptyError(replaceSubmitted, replaceValue) ?? fieldError(replaceProblem, 'value')}
 		autocomplete="new-password"
 		bind:value={replaceValue}
 		required
@@ -457,7 +471,7 @@
 	<p class="dialog-note">{t('secrets.replaceDependents')}</p>
 	{#snippet footer()}
 		<Button onclick={() => (replaceOpen = false)}>{t('common.cancel')}</Button>
-		<Button type="submit" variant="primary" loading={replacing} disabled={!replaceValue}>
+		<Button type="submit" variant="primary" loading={replacing}>
 			{t('secrets.replace')}
 		</Button>
 	{/snippet}

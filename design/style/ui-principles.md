@@ -36,16 +36,25 @@ Use the shared components of [ui/COMPONENTS.md](../../ui/COMPONENTS.md). They ap
 
 1. A status label is a verb in the past tense or a result: Succeeded, Failed, Cancelled.
 2. A job that succeeded with warnings shows "Succeeded" in the warning tone. It has no icon. The tooltip and the `aria-label` give the full meaning.
-3. A panel or a section appears only when it has content. Do not show a placeholder panel, for example "appears when…".
-4. If a job has one step, do not show an overall progress bar next to the step bar.
-5. Only three tones have a color. Danger (red) is for data that is not safe or work that failed. Warning (yellow) is for a problem that comes soon. Running (blue) is for work that runs now. A success and a usual state are grey. Each state of each entity has one label, one tone and one Lucide icon (`$lib/vocabulary.ts`).
-6. A list shows the time in the formats of `$lib/list-format.ts`. Freshness is a short distance ("7 min ago"). A run is the day and the hours ("today 02:00"). An audit time has seconds and is below the heading of its day. A validity end is a date, or a distance when less than 30 days remain. The tooltip of a time shows the full date, the seconds and the time zone.
-7. A list page has no static documentation text. Do not add a note, a footnote or a help panel that does not change with the state and does not lead to an action. The documentation (`docs/`) holds this text. A list page shows a banner only for a state: an error, a warning, an empty list or an action that is necessary. The one-line description in the page header stays.
-8. A locked field (disabled or read-only) shows its value. If it has no value, it shows the muted text "Not set" ("Не задано"). It never shows an example placeholder, because an example in a locked field looks like a stored value. `TextField`, `Select` and `Combobox` apply this rule.
-9. In an editable field, an example placeholder starts with "e.g." ("например,"), for example "e.g. snapshots/prod". A placeholder that is not an example, for example the hint of a search field, does not have this prefix.
+3. A page header shows each fact one time. Do not add a second badge that repeats the status, for example "Live" next to "Running".
+4. A panel or a section appears only when it has content. Do not show a placeholder panel, for example "appears when…".
+5. If a job has one step, do not show an overall progress bar next to the step bar.
+6. Only three tones have a color. Danger (red) is for data that is not safe or work that failed. Warning (yellow) is for a problem that comes soon. Running (blue) is for work that runs now. A success and a usual state are grey. Each state of each entity has one label, one tone and one Lucide icon (`$lib/vocabulary.ts`).
+7. A list shows the time in the formats of `$lib/list-format.ts`. Freshness is a short distance ("7 min ago"). A run is the day and the hours ("today 02:00"). An audit time has seconds and is below the heading of its day. A validity end is a date, or a distance when less than 30 days remain. The tooltip of a time shows the full date, the seconds and the time zone.
+8. A list page has no static documentation text. Do not add a note, a footnote or a help panel that does not change with the state and does not lead to an action. The documentation (`docs/`) holds this text. A list page shows a banner only for a state: an error, a warning, an empty list or an action that is necessary. The one-line description in the page header stays.
+9. A locked field (disabled or read-only) shows its value. If it has no value, it shows the muted text "Not set" ("Не задано"). It never shows an example placeholder, because an example in a locked field looks like a stored value. `TextField`, `Select` and `Combobox` apply this rule.
+10. In an editable field, an example placeholder starts with "e.g." ("например,"), for example "e.g. snapshots/prod". A placeholder that is not an example, for example the hint of a search field, does not have this prefix.
 
 ## 4. Visual style
 
 1. Use Lucide icons only. Do not draw an SVG by hand.
 2. Do not put a colored stripe at the left edge of a panel, a callout or a row.
 3. Use one duration token for each spinner (`--rh-spin-duration`). A spinner shows the status of work that runs now, thus it is not decoration. When the reduced-motion setting is on, a spinner continues to turn at half speed (`--rh-spin-duration-reduced`). All other motion stops: a skeleton shows a static block and a transition is almost instant. Each spinner has the `rh-spinner` class.
+
+## 5. Forms
+
+1. A field with a rule, for example the minimum length of a password, shows the rule below the field. While the person types, the text shows the progress, for example "6 of 12 characters", in the usual tone. The text changes to the danger tone only after the person leaves the field or tries to send the form. The field refers to the text with `aria-describedby`.
+2. The rule in the UI is the same as the rule of the server. A test compares them.
+3. Each field that sets a password uses `NewPasswordField`.
+4. A primary action stays enabled when a field is not correct. When the person tries to send the form, each field that is not correct shows its error. The first of these fields gets the focus.
+5. If a primary action is disabled, a text next to the action or the tooltip of the action gives the reason.

@@ -127,6 +127,12 @@ The bar shows a chip with a × button for each applied filter and a Reset button
 
 To keep the filters in the query string, use `queryFilters(keys)` from `$lib/stores/query-filters.svelte.ts`. It reads the keys from the address. `update(patch)` writes them back at once and replaces the history entry. A change of a filter sets the `page` key to the first page. `$lib/filters.ts` has the helpers for a client-side filter: `matchesSearch`, `splitList`, `inPeriod` and `facetCounts`.
 
+## Forms
+
+`NewPasswordField` (`$lib/components/ui`) is the field for each new password. Use it for the initial setup, a new user, a password reset and the grant of the Platform Admin right. Below the field, it shows the password rule of the server from `$lib/password-policy.ts` and the progress, for example "6 of 12 characters" (UI principles 5.1). The text is in the danger tone after the person leaves the field or after a submit attempt (`submitted`). A value that is too long shows the danger tone at once. An `error` from the server replaces the text.
+
+A form does not disable its primary action for a value that is not correct (UI principles 5.4). The submit handler sets `submitted`, calls `focusFirstInvalid` from `$lib/form.ts` and stops when it returns `true`. `emptyError(submitted, value)` gives the error of an empty required field.
+
 ## Lint rules
 
 The rules are in `eslint-rules/ui-principles.js`, and `npm run lint` runs them in CI:

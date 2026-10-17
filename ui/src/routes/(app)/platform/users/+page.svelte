@@ -12,12 +12,14 @@
 		Dialog,
 		FilterBar,
 		ListView,
-		PasswordField,
+		NewPasswordField,
 		Select,
 		TextField
 	} from '#lib/components/ui/index.ts';
 	import type { FilterFacet, ListMeta, RowAction, SelectOption } from '#lib/components/ui/index.ts';
+	import { emptyError, focusFirstInvalid } from '#lib/form.ts';
 	import { plural } from '#lib/list-format.ts';
+	import { passwordProblem } from '#lib/password-policy.ts';
 	import { iconOf, pillOf, userState } from '#lib/vocabulary.ts';
 	import { facetCounts, matchesSearch, splitList } from '#lib/filters.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
@@ -36,6 +38,7 @@
 
 	let createOpen = $state(false);
 	let creating = $state(false);
+	let createSubmitted = $state(false);
 	let createError = $state<string | null>(null);
 	let createProblem = $state<ApiProblem | null>(null);
 	let newUsername = $state('');
@@ -233,11 +236,20 @@
 		newPlatformAdmin = false;
 		createError = null;
 		createProblem = null;
+		createSubmitted = false;
 		createOpen = true;
 	}
 
 	async function createUser(): Promise<void> {
-		if (!newUsername || !newDisplayName || newPassword.length < 12) return;
+		createSubmitted = true;
+		if (
+			focusFirstInvalid([
+				['platform-user-username', newUsername === ''],
+				['platform-user-display-name', newDisplayName === ''],
+				['platform-user-password', passwordProblem(newPassword) !== null]
+			])
+		)
+			return;
 		creating = true;
 		createError = null;
 		createProblem = null;
@@ -312,7 +324,7 @@
 	<TextField
 		id="platform-user-username"
 		label={t('platformUsers.username')}
-		error={fieldError(createProblem, 'username')}
+		error={emptyError(createSubmitted, newUsername) ?? fieldError(createProblem, 'username')}
 		bind:value={newUsername}
 		mono
 		autocomplete="off"
@@ -321,7 +333,7 @@
 	<TextField
 		id="platform-user-display-name"
 		label={t('platformUsers.displayName')}
-		error={fieldError(createProblem, 'display_name')}
+		error={emptyError(createSubmitted, newDisplayName) ?? fieldError(createProblem, 'display_name')}
 		bind:value={newDisplayName}
 		autocomplete="off"
 		required
@@ -335,14 +347,12 @@
 		type="email"
 		autocomplete="off"
 	/>
-	<PasswordField
+	<NewPasswordField
 		id="platform-user-password"
 		label={t('users.initialPassword')}
-		help={t('setup.passwordHint')}
 		error={fieldError(createProblem, 'password')}
+		submitted={createSubmitted}
 		bind:value={newPassword}
-		autocomplete="new-password"
-		required
 	/>
 	<Checkbox
 		id="platform-user-admin"
@@ -365,12 +375,7 @@
 	{/if}
 	{#snippet footer()}
 		<Button onclick={() => (createOpen = false)}>{t('common.cancel')}</Button>
-		<Button
-			type="submit"
-			variant="primary"
-			loading={creating}
-			disabled={!newUsername || !newDisplayName || newPassword.length < 12}
-		>
+		<Button type="submit" variant="primary" loading={creating}>
 			{t('platformUsers.create')}
 		</Button>
 	{/snippet}

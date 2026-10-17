@@ -10,7 +10,7 @@
 		Button,
 		Dialog,
 		ListView,
-		PasswordField,
+		NewPasswordField,
 		FilterBar,
 		Select,
 		TextField
@@ -18,7 +18,9 @@
 	import type { FilterFacet, ListMeta, RowAction, SelectOption } from '#lib/components/ui/index.ts';
 	import { iconOf, pillOf, userState } from '#lib/vocabulary.ts';
 	import { matchesSearch, splitList } from '#lib/filters.ts';
+	import { emptyError, focusFirstInvalid } from '#lib/form.ts';
 	import { ago } from '#lib/list-format.ts';
+	import { passwordProblem } from '#lib/password-policy.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
@@ -31,6 +33,7 @@
 
 	let createOpen = $state(false);
 	let creating = $state(false);
+	let createSubmitted = $state(false);
 	let createError = $state<string | null>(null);
 	let createProblem = $state<ApiProblem | null>(null);
 
@@ -234,13 +237,20 @@
 		newPassword = '';
 		createError = null;
 		createProblem = null;
+		createSubmitted = false;
 		createOpen = true;
 	}
 
-	const canCreate = $derived(!!newUsername && !!newDisplayName && newPassword.length >= 12);
-
 	async function createUser(): Promise<void> {
-		if (!canCreate) return;
+		createSubmitted = true;
+		if (
+			focusFirstInvalid([
+				['user-username', newUsername === ''],
+				['user-display-name', newDisplayName === ''],
+				['user-password', passwordProblem(newPassword) !== null]
+			])
+		)
+			return;
 		creating = true;
 		createError = null;
 		createProblem = null;
@@ -312,7 +322,7 @@
 	<TextField
 		id="user-username"
 		label={t('users.username')}
-		error={fieldError(createProblem, 'username')}
+		error={emptyError(createSubmitted, newUsername) ?? fieldError(createProblem, 'username')}
 		bind:value={newUsername}
 		mono
 		autocomplete="off"
@@ -321,7 +331,7 @@
 	<TextField
 		id="user-display-name"
 		label={t('users.displayName')}
-		error={fieldError(createProblem, 'display_name')}
+		error={emptyError(createSubmitted, newDisplayName) ?? fieldError(createProblem, 'display_name')}
 		bind:value={newDisplayName}
 		placeholder={t('users.displayNamePlaceholder')}
 		autocomplete="off"
@@ -335,18 +345,16 @@
 		options={roleOptions}
 		required
 	/>
-	<PasswordField
+	<NewPasswordField
 		id="user-password"
 		label={t('users.initialPassword')}
-		help={t('setup.passwordHint')}
 		error={fieldError(createProblem, 'password')}
+		submitted={createSubmitted}
 		bind:value={newPassword}
-		autocomplete="new-password"
-		required
 	/>
 	{#snippet footer()}
 		<Button onclick={() => (createOpen = false)}>{t('common.cancel')}</Button>
-		<Button type="submit" variant="primary" loading={creating} disabled={!canCreate}>
+		<Button type="submit" variant="primary" loading={creating}>
 			{t('users.create')}
 		</Button>
 	{/snippet}
