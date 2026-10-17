@@ -40,6 +40,8 @@ Use the shared components of [ui/COMPONENTS.md](../../ui/COMPONENTS.md). They ap
 4. If a job has one step, do not show an overall progress bar next to the step bar.
 5. Only three tones have a color. Danger (red) is for data that is not safe or work that failed. Warning (yellow) is for a problem that comes soon. Running (blue) is for work that runs now. A success and a usual state are grey. Each state of each entity has one label, one tone and one Lucide icon (`$lib/vocabulary.ts`).
 6. A list shows the time in the formats of `$lib/list-format.ts`. Freshness is a short distance ("7 min ago"). A run is the day and the hours ("today 02:00"). An audit time has seconds and is below the heading of its day. A validity end is a date, or a distance when less than 30 days remain. The tooltip of a time shows the full date, the seconds and the time zone.
+7. A locked field (disabled or read-only) shows its value. If it has no value, it shows the muted text "Not set" ("Не задано"). It never shows an example placeholder, because an example in a locked field looks like a stored value. `TextField`, `Select` and `Combobox` apply this rule.
+8. In an editable field, an example placeholder starts with "e.g." ("например,"), for example "e.g. snapshots/prod". A placeholder that is not an example, for example the hint of a search field, does not have this prefix.
 
 ## 4. Visual style
 

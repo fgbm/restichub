@@ -23,4 +23,18 @@ describe('Select', () => {
 		render(Select, { props: { label: 'Role', options, class: 'extra' } });
 		expect(screen.getByLabelText('Role')).toHaveClass('rh-select', 'extra');
 	});
+
+	it('says "Not set" instead of the placeholder in an empty disabled select', () => {
+		render(Select, {
+			props: { label: 'Role', options, placeholder: 'Pick a role', disabled: true }
+		});
+		expect(screen.getByRole('option', { name: 'Not set' })).toBeInTheDocument();
+		expect(screen.queryByRole('option', { name: 'Pick a role' })).not.toBeInTheDocument();
+	});
+
+	it('shows the value of a disabled select without "Not set"', () => {
+		render(Select, { props: { label: 'Role', options, value: 'viewer', disabled: true } });
+		expect(screen.getByLabelText('Role')).toHaveValue('viewer');
+		expect(screen.queryByRole('option', { name: 'Not set' })).not.toBeInTheDocument();
+	});
 });

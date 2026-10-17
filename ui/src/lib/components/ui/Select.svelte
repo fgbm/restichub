@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { HTMLSelectAttributes } from 'svelte/elements';
+	import { t } from '#lib/i18n/index.ts';
 	import Field from './Field.svelte';
 	import Icon from './Icon.svelte';
 	import type { SelectOption } from './types';
@@ -13,6 +14,7 @@
 		id,
 		required = false,
 		placeholder,
+		disabled = false,
 		class: className,
 		...rest
 	}: {
@@ -31,6 +33,11 @@
 	const helpId = $derived(`${selectId}-help`);
 	const errorId = $derived(`${selectId}-error`);
 	const describedBy = $derived(error ? errorId : help ? helpId : undefined);
+	const emptyLabel = $derived.by(() => {
+		if (!disabled) return placeholder;
+		const empty = !value && !options.some((option) => option.value === '');
+		return empty ? t('common.notSet') : undefined;
+	});
 </script>
 
 <Field {label} {help} {error} for={selectId} {required} {helpId} {errorId}>
@@ -41,11 +48,12 @@
 			class={['rh-select', className]}
 			aria-invalid={error ? 'true' : undefined}
 			aria-describedby={describedBy}
+			{disabled}
 			{required}
 			{...rest}
 		>
-			{#if placeholder}
-				<option value="" disabled>{placeholder}</option>
+			{#if emptyLabel}
+				<option value="" disabled>{emptyLabel}</option>
 			{/if}
 			{#each options as option (option.value)}
 				<option value={option.value}>{option.label}</option>
