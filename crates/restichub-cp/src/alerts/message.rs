@@ -140,7 +140,7 @@ impl Message {
                     .zip(alert.plan_name.as_ref())
                     .map(|(id, name)| Reference {
                         id: id.to_string(),
-                        name: scrub(name, 120),
+                        name: name_text(name, 120),
                     }),
                 repository: alert.repository_id.zip(alert.repository_name.as_ref()).map(
                     |(id, name)| Reference {
@@ -211,7 +211,7 @@ impl Message {
             lines.push(format!("{}: {}", labels.host, scrub(name, 120)));
         }
         if let Some(name) = &alert.plan_name {
-            lines.push(format!("{}: {}", labels.plan, scrub(name, 120)));
+            lines.push(format!("{}: {}", labels.plan, name_text(name, 120)));
         }
         if let Some(name) = &alert.repository_name {
             lines.push(format!("{}: {}", labels.repository, scrub(name, 120)));
@@ -253,13 +253,33 @@ fn error_body_in(language: Language, alert: &Alert) -> Option<String> {
 }
 
 fn subject_name(alert: &Alert) -> String {
+    if let Some(name) = &alert.plan_name {
+        return name_text(name, 80);
+    }
     let name = alert
-        .plan_name
+        .repository_name
         .as_deref()
-        .or(alert.repository_name.as_deref())
         .or(alert.agent_hostname.as_deref())
         .unwrap_or("-");
     scrub(name, 80)
+}
+
+/// Makes the name of a plan safe for a message: a control character becomes a space and the text
+/// is cut to `max_chars` characters. The name is free text (FR-PF-01) and no credential, so the
+/// redaction of [`scrub`] would damage a name such as "Passwords database". The message is plain
+/// text or JSON, so the name needs no other escape.
+pub fn name_text(name: &str, max_chars: usize) -> String {
+    let cleaned: String = name
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    let cleaned = cleaned.trim();
+    if cleaned.chars().count() <= max_chars {
+        return cleaned.to_owned();
+    }
+    let mut cut: String = cleaned.chars().take(max_chars.saturating_sub(1)).collect();
+    cut.push('…');
+    cut
 }
 
 /// The link of an alert: the job when the alert names one, else the page of the subject.
@@ -365,6 +385,67 @@ fn scrub_token(token: &str, lower: &str, hide_next: &mut bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// FR-PF-01: a plan name is free text, so the redaction of credentials leaves it alone.
+    #[test]
+    fn fr_pf_01_name_text_keeps_free_text() {
+        for name in [
+            "Passwords database",
+            "Basic backup",
+            "token: weekly",
+            "Ночной бэкап 📦",
+            "<b>\"x\" & *y* [z](http://e)</b>",
+        ] {
+            assert_eq!(name_text(name, 120), name);
+        }
+        assert_eq!(name_text(" a\u{7}b ", 120), "a b");
+        let long = "я".repeat(100);
+        assert_eq!(name_text(&long, 120), long);
+        assert_eq!(name_text(&long, 10).chars().count(), 10);
+    }
+
+    fn alert_with_plan(name: &str) -> Alert {
+        Alert {
+            id: restichub_db::AlertId::new(),
+            kind: AlertKind::RpoViolated,
+            dedupe_key: String::new(),
+            status: restichub_db::alerts::AlertStatus::Open,
+            agent_id: None,
+            plan_id: Some(restichub_db::PlanId::new()),
+            repository_id: None,
+            job_id: None,
+            agent_hostname: None,
+            plan_name: Some(name.to_owned()),
+            repository_name: None,
+            params: sqlx::types::Json(AlertParams::default()),
+            detail: String::new(),
+            opened_at: OffsetDateTime::UNIX_EPOCH,
+            resolved_at: None,
+        }
+    }
+
+    /// FR-PF-01: a plan name with quotes, tags and Markdown reaches the webhook as a JSON string
+    /// and the email as plain text, both unchanged. The messages hold no HTML and no Markdown.
+    #[test]
+    fn fr_pf_01_a_plan_name_is_data_in_the_messages() {
+        let name = "<img src=x onerror=alert(1)> \"q\" *b* [l](http://e) \\ \u{1F4E6} Пароли";
+        let message = Message {
+            delivery_id: DeliveryId::new(),
+            event: MessageEvent::Opened,
+            sent_at: OffsetDateTime::UNIX_EPOCH,
+            tenant_id: TenantId::new(),
+            tenant_name: "acme".to_owned(),
+            alert: Some(alert_with_plan(name)),
+            public_origin: None,
+            language: Language::En,
+        };
+        let json: serde_json::Value =
+            serde_json::from_slice(&message.json()).expect("the payload is JSON");
+        assert_eq!(json["alert"]["plan"]["name"], name);
+        assert!(message.text().contains(&format!("{name}\n")));
+        assert!(message.subject().contains(name));
+        assert!(!message.subject().contains('\n'));
+    }
 
     /// AC-MN-02: the scrubbed text hides credentials and stays bounded.
     #[test]
