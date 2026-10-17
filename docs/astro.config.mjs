@@ -1,6 +1,7 @@
 // @ts-check
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
+import starlightLinksValidator from 'starlight-links-validator';
 
 const group = (en, ru, slugs) => ({
 	label: en,
@@ -22,6 +23,7 @@ export default defineConfig({
 				root: { label: 'English', lang: 'en' },
 				ru: { label: 'Русский', lang: 'ru' },
 			},
+			plugins: [starlightLinksValidator()],
 			customCss: ['./src/styles/base.css', './src/styles/theme.css'],
 			expressiveCode: { frames: false, styleOverrides: { borderRadius: '6px' } },
 			social: [

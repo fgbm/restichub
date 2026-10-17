@@ -134,12 +134,12 @@ The agent listener port must be reachable from every agent network. Check the fi
 
 Set `RESTICHUB_AGENT_ENDPOINT` to the address that the agents dial. The control plane issues the listener certificate with that host as a subject alternative name.
 
-Enroll each host as described in [Register an agent](register-an-agent.md).
+Enroll each host as described in [Register an agent](/restichub/operations/register-an-agent/).
 
 ## Related
 
-- [Register an agent](register-an-agent.md)
-- [Agent enrollment rate limit](enrollment-rate-limit.md)
-- [Root CA rotation](root-ca-rotation.md)
+- [Register an agent](/restichub/operations/register-an-agent/)
+- [Agent enrollment rate limit](/restichub/operations/enrollment-rate-limit/)
+- [Root CA rotation](/restichub/operations/root-ca-rotation/)
 - [Single-tenant mode](https://github.com/fgbm/restichub/blob/main/design/adr/0024-single-tenant-mode.md)
 - [Agent PKI identity and key rotation](https://github.com/fgbm/restichub/blob/main/design/adr/0026-agent-pki-identity-and-key-rotation.md)

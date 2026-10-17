@@ -134,12 +134,12 @@ description: Установка сервера управления, веб-ин
 
 Задайте в `RESTICHUB_AGENT_ENDPOINT` адрес, к которому обращаются агенты. Сервер управления выпускает для порта агентов сертификат, в котором этот хост указан как дополнительное имя (SAN).
 
-Зарегистрируйте каждый хост так, как описано в разделе [Регистрация агента](register-an-agent.md).
+Зарегистрируйте каждый хост так, как описано в разделе [Регистрация агента](/restichub/ru/operations/register-an-agent/).
 
 ## См. также
 
-- [Регистрация агента](register-an-agent.md)
-- [Предел частоты регистрации агентов](enrollment-rate-limit.md)
-- [Замена корневого удостоверяющего центра](root-ca-rotation.md)
+- [Регистрация агента](/restichub/ru/operations/register-an-agent/)
+- [Предел частоты регистрации агентов](/restichub/ru/operations/enrollment-rate-limit/)
+- [Замена корневого удостоверяющего центра](/restichub/ru/operations/root-ca-rotation/)
 - [Режим одной организации](https://github.com/fgbm/restichub/blob/main/design/adr/0024-single-tenant-mode.md)
 - [Удостоверение агента (PKI) и смена ключей](https://github.com/fgbm/restichub/blob/main/design/adr/0026-agent-pki-identity-and-key-rotation.md)
