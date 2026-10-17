@@ -229,21 +229,37 @@ describe('Snapshot page', () => {
 		expect(within(dialog).getByRole('button', { name: 'Start restore' })).toBeDisabled();
 	});
 
-	it('fr_rs_04_a_restore_root_button_fills_the_target_and_the_rule_is_explained', async () => {
+	it('fr_rs_04_the_reset_in_the_target_field_returns_the_default_and_the_rule_is_explained', async () => {
 		const user = userEvent.setup();
 		render(Snapshot);
 		const dialog = await openDialog(user);
 		const field = within(dialog).getByLabelText(/Target path/);
+		const reset = () => within(dialog).queryByRole('button', { name: 'Reset to the default path' });
+		expect(reset()).toBeNull();
+		// One root is plain text; the reset in the field puts the default back.
+		expect(within(dialog).queryByRole('button', { name: /^Use / })).toBeNull();
+		expect(within(dialog).getByText('/var/lib/restichub-restore')).toBeVisible();
 		await user.clear(field);
-		await user.click(
-			within(dialog).getByRole('button', { name: 'Use /var/lib/restichub-restore' })
-		);
+		await user.click(reset()!);
 		expect(field).toHaveValue('/var/lib/restichub-restore/a1b2c3d4');
+		expect(reset()).toBeNull();
 		expect(
 			within(dialog).getByText(
 				'A host restores only inside its restore roots. It does not replace the files of the agent itself.'
 			)
 		).toBeVisible();
+	});
+
+	it('fr_rs_04_each_of_several_restore_roots_fills_the_target', async () => {
+		const user = userEvent.setup();
+		mocks.listAgents.mockResolvedValue([
+			{ ...agent, restore_roots: ['/var/lib/restichub-restore', '/mnt/restore'] },
+			peer
+		]);
+		render(Snapshot);
+		const dialog = await openDialog(user);
+		await user.click(within(dialog).getByRole('button', { name: 'Use /mnt/restore' }));
+		expect(within(dialog).getByLabelText(/Target path/)).toHaveValue('/mnt/restore/a1b2c3d4');
 	});
 
 	it('fr_rs_04_warns_clearly_when_every_existing_file_is_replaced', async () => {
@@ -265,7 +281,7 @@ describe('Snapshot page', () => {
 		const dialog = await openDialog(user);
 		const summary = within(dialog).getByRole('region', { name: 'Summary' });
 		expect(summary).toHaveTextContent('a1b2c3d4 · nas-backup · offsite-s3');
-		expect(summary).toHaveTextContent('nas-backup: /var/lib/restichub-restore/a1b2c3d4');
+		expect(summary).toHaveTextContent(/nas-backup\s*\/var\/lib\/restichub-restore\/a1b2c3d4/);
 		expect(summary).toHaveTextContent('/var/lib/restichub-restore/a1b2c3d4/notes.txt');
 		expect(summary).toHaveTextContent('Keep every existing file');
 	});

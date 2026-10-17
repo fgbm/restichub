@@ -1,5 +1,5 @@
-import { render, screen } from '@testing-library/svelte';
-import { describe, expect, it } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/svelte';
+import { describe, expect, it, vi } from 'vitest';
 import TextField from './TextField.svelte';
 
 describe('TextField', () => {
@@ -53,5 +53,19 @@ describe('TextField', () => {
 		expect(input).toHaveValue('nas');
 		expect(input).not.toHaveAttribute('placeholder');
 		expect(screen.queryByText('Not set')).not.toBeInTheDocument();
+	});
+
+	it('puts the action in the field as an icon button with a name and a tooltip', async () => {
+		const onclick = vi.fn();
+		const action = { icon: 'rotate-ccw' as const, label: 'Restore the default path', onclick };
+		const { rerender } = render(TextField, { props: { label: 'Target', action } });
+		const button = screen.getByRole('button', { name: 'Restore the default path' });
+		expect(button).toHaveAttribute('title', 'Restore the default path');
+		expect(button).toHaveAttribute('type', 'button');
+		await fireEvent.click(button);
+		expect(onclick).toHaveBeenCalledOnce();
+
+		await rerender({ label: 'Target', action, disabled: true });
+		expect(screen.queryByRole('button')).toBeNull();
 	});
 });

@@ -23,11 +23,14 @@
 	import {
 		OVERWRITE_MODES,
 		escapeGlob,
+		hostPath,
 		isAbsolutePath,
+		isWindowsSnapshot,
 		isWithinRoots,
 		landingPath,
 		parsePatterns,
 		suggestTarget,
+		treePath,
 		warnsSystemPath
 	} from '#lib/restore.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
@@ -102,7 +105,19 @@
 	const landing = $derived(
 		trimmed === '' || relative || outside
 			? ''
-			: landingPath(trimmed, paths[0] ?? snapshot.paths[0] ?? '', windows)
+			: landingPath(trimmed, paths[0] ?? treePath(snapshot.paths[0] ?? ''), windows)
+	);
+	// The tree names a Windows path `/C/Users`; the person knows it as `C:\Users`.
+	const sourceWindows = $derived(isWindowsSnapshot(snapshot.paths));
+	const shownPaths = $derived(paths.map((path) => hostPath(path, sourceWindows)));
+	const resetAction = $derived(
+		suggestion !== '' && trimmed !== suggestion
+			? {
+					icon: 'rotate-ccw' as const,
+					label: t('restore.dialog.targetReset'),
+					onclick: () => (target = suggestion)
+				}
+			: undefined
 	);
 	const mode = $derived(dryRun ? 'modeDryRun' : verify ? 'modeVerify' : 'modeRestore');
 	const blocked = $derived(!agentId || relative || outside || roots.length === 0);
@@ -170,7 +185,7 @@
 
 <Dialog
 	bind:open
-	size="lg"
+	size="xl"
 	title={t('restore.dialog.title', { id: snapshot.short_id })}
 	description={t('restore.dialog.description')}
 	onsubmit={submit}
@@ -178,112 +193,119 @@
 	{#if failure}
 		<Alert tone="danger" title={failure} />
 	{/if}
-	<div class="form">
-		<HostPicker
-			id="restore-agent"
-			label={t('restore.dialog.agent')}
-			help={candidates.length === 0
-				? t('restore.dialog.agentNone')
-				: localOnly
-					? t('restore.dialog.agentLocal')
-					: t('restore.dialog.agentHelp')}
-			error={fieldError(problem, 'agent_id')}
-			hosts={activeHosts}
-			reason={hostReason}
-			bind:value={agentId}
-			disabled={candidates.length === 0}
-		/>
-		<div class="target">
-			<TextField
-				id="restore-target"
-				label={t('restore.dialog.target')}
-				help={t('restore.dialog.targetHelp')}
-				placeholder={windows
-					? t('common.example', { value: 'D:\\restore' })
-					: t('restore.dialog.targetPlaceholder')}
-				error={emptyError(submitted, trimmed) ??
-					(relative
-						? t('restore.dialog.targetRelative')
-						: outside
-							? t('restore.dialog.targetOutside')
-							: fieldError(problem, 'target'))}
-				mono
-				autocomplete="off"
-				bind:value={target}
-				required
+	<div class="layout">
+		<div class="fields">
+			<HostPicker
+				id="restore-agent"
+				label={t('restore.dialog.agent')}
+				help={candidates.length === 0
+					? t('restore.dialog.agentNone')
+					: localOnly
+						? t('restore.dialog.agentLocal')
+						: t('restore.dialog.agentHelp')}
+				error={fieldError(problem, 'agent_id')}
+				hosts={activeHosts}
+				reason={hostReason}
+				bind:value={agentId}
+				disabled={candidates.length === 0}
 			/>
-			{#if roots.length > 0}
-				<div class="roots">
-					<span class="roots__label">{t('restore.dialog.rootsLabel')}</span>
-					{#each roots as root (root)}
-						<Button
-							size="sm"
-							class="roots__root"
-							aria-label={t('restore.dialog.rootUse', { root })}
-							onclick={() => (target = suggestTarget(root, snapshot.short_id, windows))}
-						>
-							<span class="mono">{root}</span>
-						</Button>
-					{/each}
-				</div>
-				<p class="hint">{t('restore.dialog.rootsRule')}</p>
+			<div class="target">
+				<TextField
+					id="restore-target"
+					label={t('restore.dialog.target')}
+					help={t('restore.dialog.targetHelp')}
+					placeholder={windows
+						? t('common.example', { value: 'D:\\restore' })
+						: t('restore.dialog.targetPlaceholder')}
+					error={emptyError(submitted, trimmed) ??
+						(relative
+							? t('restore.dialog.targetRelative')
+							: outside
+								? t('restore.dialog.targetOutside')
+								: fieldError(problem, 'target'))}
+					mono
+					autocomplete="off"
+					action={resetAction}
+					bind:value={target}
+					required
+				/>
+				{#if roots.length > 0}
+					<p class="roots">
+						<span class="roots__label">{t('restore.dialog.rootsLabel')}:</span>
+						{#each roots as root (root)}
+							{#if roots.length > 1}
+								<button
+									type="button"
+									class="roots__root"
+									aria-label={t('restore.dialog.rootUse', { root })}
+									onclick={() => (target = suggestTarget(root, snapshot.short_id, windows))}
+								>
+									{root}
+								</button>
+							{:else}
+								<span class="roots__root roots__root--text">{root}</span>
+							{/if}
+						{/each}
+					</p>
+					<p class="hint">{t('restore.dialog.rootsRule')}</p>
+				{/if}
+			</div>
+			{#if agentId && roots.length === 0}
+				<Alert tone="attention" icon="alert" title={t('restore.dialog.rootsNone')}>
+					{t('restore.dialog.rootsNoneBody')}
+					{#snippet actions()}
+						<a class="link" href={resolve('/(app)/hosts')}>{t('restore.dialog.hostsLink')}</a>
+					{/snippet}
+				</Alert>
 			{/if}
-		</div>
-		{#if agentId && roots.length === 0}
-			<Alert tone="attention" icon="alert" title={t('restore.dialog.rootsNone')}>
-				{t('restore.dialog.rootsNoneBody')}
-				{#snippet actions()}
-					<a class="link" href={resolve('/(app)/hosts')}>{t('restore.dialog.hostsLink')}</a>
-				{/snippet}
-			</Alert>
-		{/if}
-		{#if system}
-			<Alert tone="attention" icon="alert" title={t('restore.dialog.systemPath')}>
-				{t('restore.dialog.systemPathBody')}
-			</Alert>
-		{/if}
-		{#if wholeSnapshot}
-			<Field
-				label={t('restore.dialog.excludes')}
-				help={t('restore.dialog.excludesHelp')}
-				error={fieldError(problem, 'excludes')}
-				for="restore-excludes"
-			>
-				<textarea
-					id="restore-excludes"
-					class="rh-textarea rh-input--mono"
-					rows="2"
-					placeholder={t('restore.dialog.excludesPlaceholder')}
-					bind:value={excludeText}></textarea>
-			</Field>
-		{/if}
-		<Select
-			id="restore-overwrite"
-			label={t('restore.dialog.overwrite')}
-			error={fieldError(problem, 'overwrite')}
-			options={overwriteOptions}
-			bind:value={overwrite}
-		/>
-		{#if replacesAll}
-			<Alert tone="attention" icon="alert" title={t('restore.dialog.overwriteAlwaysTitle')}>
-				{t('restore.dialog.overwriteAlwaysBody')}
-			</Alert>
-		{/if}
-		<div class="options">
-			<Checkbox
-				id="restore-dry-run"
-				label={t('restore.dialog.dryRun')}
-				help={t('restore.dialog.dryRunHelp')}
-				bind:checked={dryRun}
-				disabled={verify}
+			{#if system}
+				<Alert tone="attention" icon="alert" title={t('restore.dialog.systemPath')}>
+					{t('restore.dialog.systemPathBody')}
+				</Alert>
+			{/if}
+			{#if wholeSnapshot}
+				<Field
+					label={t('restore.dialog.excludes')}
+					help={t('restore.dialog.excludesHelp')}
+					error={fieldError(problem, 'excludes')}
+					for="restore-excludes"
+				>
+					<textarea
+						id="restore-excludes"
+						class="rh-textarea rh-input--mono"
+						rows="2"
+						placeholder={t('restore.dialog.excludesPlaceholder')}
+						bind:value={excludeText}></textarea>
+				</Field>
+			{/if}
+			<Select
+				id="restore-overwrite"
+				label={t('restore.dialog.overwrite')}
+				error={fieldError(problem, 'overwrite')}
+				options={overwriteOptions}
+				bind:value={overwrite}
 			/>
-			<Checkbox
-				id="restore-verify"
-				label={t('restore.dialog.verify')}
-				help={dryRun ? t('restore.dialog.verifyDryRun') : t('restore.dialog.verifyHelp')}
-				bind:checked={verify}
-				disabled={dryRun}
-			/>
+			{#if replacesAll}
+				<Alert tone="attention" icon="alert" title={t('restore.dialog.overwriteAlwaysTitle')}>
+					{t('restore.dialog.overwriteAlwaysBody')}
+				</Alert>
+			{/if}
+			<div class="options">
+				<Checkbox
+					id="restore-dry-run"
+					label={t('restore.dialog.dryRun')}
+					help={t('restore.dialog.dryRunHelp')}
+					bind:checked={dryRun}
+					disabled={verify}
+				/>
+				<Checkbox
+					id="restore-verify"
+					label={t('restore.dialog.verify')}
+					help={dryRun ? t('restore.dialog.verifyDryRun') : t('restore.dialog.verifyHelp')}
+					bind:checked={verify}
+					disabled={dryRun}
+				/>
+			</div>
 		</div>
 		<section class="summary" aria-label={t('restore.dialog.summary')}>
 			<h3 class="summary__title">{t('restore.dialog.summary')}</h3>
@@ -298,7 +320,7 @@
 						<Badge tone="warning">{t('restore.dialog.wholeSnapshot')}</Badge>
 					{:else}
 						{t('restore.dialog.scopeSome', { count: paths.length })}
-						<span class="summary__paths mono">{paths.join(', ')}</span>
+						<span class="summary__paths mono">{shownPaths.join(', ')}</span>
 					{/if}
 					{#if excludes.length > 0}
 						<span class="summary__paths">
@@ -308,7 +330,8 @@
 				</dd>
 				<dt>{t('restore.dialog.summaryTarget')}</dt>
 				<dd>
-					{selected?.hostname ?? '—'}<span class="mono">{trimmed ? `: ${trimmed}` : ''}</span>
+					{selected?.hostname ?? '—'}
+					{#if trimmed}<span class="summary__paths mono">{trimmed}</span>{/if}
 				</dd>
 				{#if landing}
 					<dt>{t('restore.dialog.summaryLands')}</dt>
@@ -330,10 +353,18 @@
 </Dialog>
 
 <style>
-	.form {
+	.layout {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) 300px;
+		gap: var(--rh-space-5);
+		align-items: start;
+	}
+
+	.fields {
 		display: flex;
 		flex-direction: column;
 		gap: var(--rh-space-4);
+		min-width: 0;
 	}
 
 	.target {
@@ -345,13 +376,37 @@
 	.roots {
 		display: flex;
 		flex-wrap: wrap;
-		align-items: center;
-		gap: var(--rh-space-2);
+		align-items: baseline;
+		gap: var(--rh-space-1) var(--rh-space-2);
+		margin: 0;
+		font-size: var(--rh-font-size-sm);
 	}
 
 	.roots__label {
 		color: var(--rh-color-text-muted);
+	}
+
+	.roots__root {
+		padding: 0;
+		border: 0;
+		background: none;
+		color: var(--rh-color-link);
+		font-family: var(--rh-font-mono);
 		font-size: var(--rh-font-size-sm);
+		cursor: pointer;
+	}
+
+	.roots__root:hover {
+		text-decoration: underline;
+	}
+
+	.roots__root--text {
+		color: var(--rh-color-text);
+		cursor: auto;
+	}
+
+	.roots__root--text:hover {
+		text-decoration: none;
 	}
 
 	.hint {
@@ -376,21 +431,23 @@
 	}
 
 	.summary {
+		position: sticky;
+		top: 0;
 		padding: var(--rh-space-4);
 		border: var(--rh-border-width) solid var(--rh-color-border);
 		border-radius: var(--rh-radius-md);
-		background-color: var(--rh-color-surface-muted, var(--rh-color-canvas-subtle));
+		background-color: var(--rh-color-surface-muted);
 	}
 
 	.summary__title {
-		margin: 0 0 var(--rh-space-2);
+		margin: 0 0 var(--rh-space-3);
+		color: var(--rh-color-text);
 		font-size: var(--rh-font-size-base);
 	}
 
 	.summary__list {
-		display: grid;
-		grid-template-columns: minmax(6rem, 10rem) minmax(0, 1fr);
-		gap: var(--rh-space-1) var(--rh-space-3);
+		display: flex;
+		flex-direction: column;
 		margin: 0;
 		font-size: var(--rh-font-size-sm);
 	}
@@ -400,8 +457,13 @@
 	}
 
 	.summary__list dd {
-		margin: 0;
+		margin: 0 0 var(--rh-space-3);
+		color: var(--rh-color-text);
 		overflow-wrap: anywhere;
+	}
+
+	.summary__list dd:last-child {
+		margin-bottom: 0;
 	}
 
 	.summary__paths {
@@ -409,9 +471,13 @@
 		color: var(--rh-color-text-muted);
 	}
 
-	@media (max-width: 40rem) {
-		.summary__list {
+	@media (max-width: 900px) {
+		.layout {
 			grid-template-columns: minmax(0, 1fr);
+		}
+
+		.summary {
+			position: static;
 		}
 	}
 </style>

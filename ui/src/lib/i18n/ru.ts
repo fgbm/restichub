@@ -1279,7 +1279,7 @@ export const ru: Record<MessageKey, string> = {
 	'restore.dialog.agentHelp':
 		'Хост, который записывает файлы. По умолчанию это хост снимка, если он активен.',
 	'restore.dialog.agentLocal':
-		'У этого репозитория локальный путь. Прочитать его может только его хост обслуживания.',
+		'У этого репозитория локальный путь. Прочитать его может только хост репозитория.',
 	'restore.dialog.agentNone': 'Нет активного хоста',
 	'restore.dialog.target': 'Целевой путь',
 	'restore.dialog.targetHelp': 'Абсолютный путь к каталогу на целевом хосте.',
@@ -1341,6 +1341,7 @@ export const ru: Record<MessageKey, string> = {
 	'restore.dialog.rootsRule':
 		'Хост восстанавливает только внутрь корней. Файлы самого агента хост не заменяет.',
 	'restore.dialog.rootUse': 'Подставить {root}',
+	'restore.dialog.targetReset': 'Вернуть путь по умолчанию',
 	'restore.dialog.hostsLink': 'Открыть хосты',
 	'restore.dialog.overwriteAlwaysTitle': 'Каждый существующий файл в цели будет заменён',
 	'restore.dialog.overwriteAlwaysBody':

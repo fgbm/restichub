@@ -111,7 +111,8 @@ export const mapping = {
 	webhook: 'webhook',
 	eraser: 'eraser',
 	'shield-check': 'shield-check',
-	'plug-zap': 'plug-zap'
+	'plug-zap': 'plug-zap',
+	'rotate-ccw': 'rotate-ccw'
 };
 
 /** Icons that Lucide draws as an outline but the app shows as a solid shape. */

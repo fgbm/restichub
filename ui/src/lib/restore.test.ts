@@ -4,16 +4,19 @@ import {
 	escapeGlob,
 	filtersFromQuery,
 	filtersToQuery,
+	hostPath,
 	iconOfNode,
 	includePaths,
 	isAbsolutePath,
 	isCovered,
 	isSystemPath,
+	isWindowsSnapshot,
 	isWithinRoots,
 	landingPath,
 	parsePatterns,
 	profileOfTag,
 	suggestTarget,
+	treePath,
 	warnsSystemPath
 } from './restore';
 
@@ -176,5 +179,25 @@ describe('restore page helpers (FR-RS-01, FR-RS-02)', () => {
 		expect(landingPath('/srv/restore/', '/etc/fstab', false)).toBe('/srv/restore/etc/fstab');
 		expect(landingPath('D:\\restore', '/etc', true)).toBe('D:\\restore\\etc');
 		expect(landingPath('/srv/restore', '/', false)).toBe('/srv/restore');
+	});
+});
+
+describe('restore paths in the format of the host (FR-RS-04)', () => {
+	it('shows the tree path of a Windows snapshot with the drive letter', () => {
+		expect(isWindowsSnapshot(['C:\\Users\\vch', 'D:\\Projects'])).toBe(true);
+		expect(isWindowsSnapshot(['/srv', '/etc'])).toBe(false);
+		expect(hostPath('/C/Users/vch/notes.txt', true)).toBe('C:\\Users\\vch\\notes.txt');
+		expect(hostPath('/D', true)).toBe('D:\\');
+		expect(hostPath('/srv/www', false)).toBe('/srv/www');
+		expect(hostPath('/srv/www', true)).toBe('/srv/www');
+	});
+
+	it('gives the tree form of a snapshot path, where restic puts the files', () => {
+		expect(treePath('C:\\Users\\vch')).toBe('/C/Users/vch');
+		expect(treePath('D:\\')).toBe('/D');
+		expect(treePath('/srv')).toBe('/srv');
+		expect(landingPath('D:\\restore\\a1b2', treePath('C:\\Users\\vch'), true)).toBe(
+			'D:\\restore\\a1b2\\C\\Users\\vch'
+		);
 	});
 });
