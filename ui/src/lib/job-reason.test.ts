@@ -52,4 +52,13 @@ describe('jobReason', () => {
 			'brand_new_code'
 		);
 	});
+
+	it('tells a deleted repository from a location without a repository (ADR-0044)', () => {
+		expect(jobReason({ result_code: 'failed', result_message: 'repository_deleted' })).toBe(
+			'The repository is deleted.'
+		);
+		expect(jobReason({ result_code: 'failed', result_message: 'repository_missing' })).toBe(
+			'No repository at this location.'
+		);
+	});
 });

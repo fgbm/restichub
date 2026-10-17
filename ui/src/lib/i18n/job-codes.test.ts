@@ -52,6 +52,7 @@ const RESULT_MESSAGES = [
 	'step_not_started',
 	'wrong_password',
 	'repository_missing',
+	'repository_deleted',
 	'hook_failed',
 	'stalled',
 	'max_duration_exceeded',

@@ -118,6 +118,11 @@ pub(super) const LABELS: &[(&str, &str, &str)] = &[
         "профиль удалён",
     ),
     (
+        "repository_deleted",
+        "the repository is deleted",
+        "репозиторий удалён",
+    ),
+    (
         "repository_changed",
         "the profile uses another repository",
         "профиль использует другой репозиторий",
