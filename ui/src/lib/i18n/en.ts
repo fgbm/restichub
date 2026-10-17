@@ -588,13 +588,23 @@ export const en = {
 	'repositories.testAccess': 'Test access',
 	'repositories.initializeTitle': 'Initialize the repository?',
 	'repositories.initializeBody':
-		'The control plane sends the repository password to the selected host, which runs restic init. Keep a copy of the repository password outside ResticHub. If the control plane is lost, you cannot open the snapshots without the password.',
+		'The control plane sends the repository password to the maintenance host, which runs restic init. Keep a copy of the repository password outside ResticHub. If the control plane is lost, you cannot open the snapshots without the password.',
 	'repositories.testAccessTitle': 'Test the access',
 	'repositories.testAccessBody':
 		'The selected host opens the repository and reads its configuration. The test is read-only.',
 	'repositories.jobHost': 'Host',
 	'repositories.jobHostHint': 'The host that runs the job. The default is the maintenance host.',
 	'repositories.jobHostRequired': 'Select a host.',
+	'repositories.jobHostInit':
+		'The control plane runs the initialization only on the maintenance host of the repository.',
+	'repositories.jobHostLocal':
+		'A local path is on one host, so the access test runs on the maintenance host.',
+	'repositories.jobNoHostTitle': 'The repository has no maintenance host',
+	'repositories.jobNoHostInit':
+		'The initialization runs only on the maintenance host. Select it on the repository page.',
+	'repositories.jobNoHostLocal':
+		'The access test of a local path runs only on the maintenance host. Select it on the repository page.',
+	'repositories.jobNoHostLink': 'Select the maintenance host',
 	'repositories.jobStart': 'Start',
 	'repositories.jobRunning': 'The job runs on the host. This dialog shows the result.',
 	'repositories.jobDone': 'The job finished.',

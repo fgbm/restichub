@@ -86,7 +86,8 @@ test('the repository init dialog picks a host and shows the job result', async (
 	await expect(
 		dialog.getByText('Keep a copy of the repository password outside ResticHub.')
 	).toBeVisible();
-	await expect(page.locator('#job-host')).not.toHaveValue('');
+	// The init runs on the maintenance host only, so the dialog shows it and offers no choice.
+	await expect(page.locator('#job-host')).toHaveValue('nas-backup');
 	await dialog.getByRole('button', { name: 'Start' }).click();
 	await expect(dialog.getByText('The repository is ready.')).toBeVisible({ timeout: 10_000 });
 	await page.keyboard.press('Escape');
