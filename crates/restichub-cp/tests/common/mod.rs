@@ -511,9 +511,10 @@ pub async fn seed_secret(db: &Database, tenant: TenantId, name: &str) -> restich
     id
 }
 
-/// Inserts a local repository row of a tenant and returns its identifier.
+/// Inserts a rest-server repository row of a tenant and returns its identifier.
 ///
-/// A test uses it only for a route fixture. The bound secret must already exist in the tenant.
+/// A test uses it only for a route fixture. The bound secret must already exist in the tenant. A
+/// remote backend takes a plan on any host, unlike a local one.
 pub async fn seed_repository(
     db: &Database,
     tenant: TenantId,
@@ -531,9 +532,9 @@ pub async fn seed_repository(
         &NewRepository {
             id,
             name,
-            backend: restichub_db::BackendKind::Local,
+            backend: restichub_db::BackendKind::Rest,
             settings: RepositorySettings {
-                local_path: Some("/mnt/backup/restic"),
+                rest_endpoint: Some("https://rest.example.net/seed"),
                 ..RepositorySettings::default()
             },
             secrets: RepositorySecrets {

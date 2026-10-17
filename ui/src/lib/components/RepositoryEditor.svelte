@@ -85,6 +85,9 @@
 	const canWrite = $derived(getSession()?.role === 'admin');
 	// The location of an initialized repository cannot change in this version.
 	const locationLocked = $derived(existing?.initialized === true);
+	// A local path is on the disk of one host, so that host is part of the location (FR-RP-08).
+	const isLocal = $derived(kind === 'local');
+	const hostLocked = $derived(isLocal && locationLocked);
 	const showSchedules = $derived(!existing || maintenance !== null);
 	const allOpen = $derived(SECTIONS.every((key) => open[key]));
 
@@ -95,9 +98,12 @@
 	]);
 
 	const agentOptions = $derived<SelectOption[]>([
-		{ value: '', label: t('repositories.maintenanceHostNone') },
+		...(isLocal ? [] : [{ value: '', label: t('repositories.maintenanceHostNone') }]),
 		...agents
-			.filter((agent) => agent.status === 'active')
+			.filter(
+				(agent) =>
+					agent.status === 'active' || (hostLocked && agent.id === existing?.maintenance_agent_id)
+			)
 			.map((agent) => ({ value: agent.id, label: agent.hostname }))
 	]);
 
@@ -177,14 +183,22 @@
 			: { text: t('repositories.maintenanceHostNone'), state: 'warn' }
 	});
 
-	const titles: Record<SectionKey, MessageKey> = {
+	const titles = $derived<Record<SectionKey, MessageKey>>({
 		basics: 'rp.section.basics',
 		location: 'rp.section.location',
 		access: 'rp.section.access',
 		retention: 'repositories.maintenance.retention',
 		check: 'repositories.maintenance.check',
-		host: 'repositories.maintenanceHost'
-	};
+		host: isLocal ? 'repositories.repositoryHost' : 'repositories.maintenanceHost'
+	});
+
+	const hostHelp = $derived<MessageKey>(
+		hostLocked
+			? 'repositories.repositoryHostLocked'
+			: isLocal
+				? 'repositories.repositoryHostHint'
+				: 'repositories.maintenanceHostHint'
+	);
 
 	const jobStatusLabels: Record<JobStatus, MessageKey> = {
 		queued: 'repositories.job.queued',
@@ -744,15 +758,19 @@
 		title={t(titles.host)}
 		summary={summaries.host.text}
 		state={summaries.host.state}
+		required={isLocal}
 		bind:open={open.host}
 	>
 		<Select
 			id="repo-agent"
-			label={t('repositories.maintenanceHost')}
-			help={t('repositories.maintenanceHostHint')}
+			label={t(titles.host)}
+			help={t(hostHelp)}
 			options={agentOptions}
+			placeholder={isLocal ? t('repositories.hostPlaceholder') : undefined}
 			error={fieldError(formProblem, 'maintenance_agent_id')}
 			bind:value={maintenanceAgentId}
+			disabled={hostLocked}
+			required={isLocal}
 		/>
 		{#if showSchedules && !maintenanceAgentId}
 			<Alert tone="attention" icon="alert" title={t('repositories.maintenance.noHostTitle')}>

@@ -143,6 +143,7 @@ A user can be a member of more than one tenant. In the MVP a role applies to the
 | FR-RP-07 | One restic key for each agent, so that agent revocation can also remove its key. | L |
 | FR-RP-08 | Each repository has one maintenance agent. Only this agent runs `forget`, `prune` and `check`. A dedicated host is recommended. | M |
 | FR-RP-09 | Capacity tracking: size, growth, bucket quota, alert near the limit. | 1.0 |
+| FR-RP-10 | A local repository is bound to one host, the repository host. This host is its maintenance host, and every job of the repository runs on it. The host is necessary at the creation and cannot change after the initialization, except by the replace of a host record (ADR-0046). | M |
 
 ### 3.6. Profiles and compiler
 

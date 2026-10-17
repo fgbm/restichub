@@ -19,7 +19,8 @@ use uuid::Uuid;
 use queue_support::{Env, test_queue};
 
 async fn initialized_repository(env: &Env, agent: AgentId) -> Uuid {
-    let repository = env.create_repository(agent, "pw").await;
+    // A remote backend: the tests run backups on hosts other than the maintenance agent.
+    let repository = env.create_rest_repository(agent, "user", "pw").await;
     let mut tx = env.scoped().await;
     sqlx::query("UPDATE repositories SET initialized = true WHERE id = $1")
         .bind(repository)

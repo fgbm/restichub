@@ -8,6 +8,7 @@
 import { render, screen, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApiError } from '#lib/api/index.ts';
 import Plans from './+page.svelte';
 
 const mocks = vi.hoisted(() => ({
@@ -123,6 +124,25 @@ describe('the Plans screen', () => {
 		await waitFor(() => expect(mocks.runPlan).toHaveBeenCalledWith('pl_1'));
 		await waitFor(() =>
 			expect(mocks.pushToast).toHaveBeenCalledWith('success', expect.stringContaining('queued'))
+		);
+	});
+
+	it('ac_rp_07 shows why a plan on another host than its local repository does not run', async () => {
+		const user = userEvent.setup();
+		mocks.listPlans.mockResolvedValue([plan()]);
+		mocks.runPlan.mockRejectedValue(
+			new ApiError({ status: 409, code: 'not_repository_host', title: 'Conflict' })
+		);
+		render(Plans);
+
+		await screen.findByText('nightly-web');
+		await user.click(screen.getByRole('button', { name: 'Run now' }));
+
+		await waitFor(() =>
+			expect(mocks.pushToast).toHaveBeenCalledWith(
+				'danger',
+				expect.stringContaining('another host than its local repository')
+			)
 		);
 	});
 

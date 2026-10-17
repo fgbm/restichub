@@ -866,7 +866,7 @@ async fn an_initialized_repository_is_not_re_initialized() {
     db.cleanup().await;
 }
 
-/// A local-path repository needs a maintenance agent.
+/// A local-path repository needs a maintenance agent: the path is on the disk of that host.
 #[tokio::test]
 async fn a_local_repository_needs_a_maintenance_agent() {
     let Some(db) = common::test_db().await else {
@@ -874,8 +874,7 @@ async fn a_local_repository_needs_a_maintenance_agent() {
     };
     let setup = setup(&db).await;
     let app = api_router(setup.listener.state.clone());
-    // A local repository without a maintenance agent.
-    let (status, _, repository) = send(
+    let (status, _, problem) = send(
         &app,
         request(
             "POST",
@@ -889,27 +888,10 @@ async fn a_local_repository_needs_a_maintenance_agent() {
         ),
     )
     .await;
-    assert_eq!(status, StatusCode::CREATED, "{repository}");
-    let repository_id = repository
-        .get("id")
-        .and_then(Value::as_str)
-        .expect("the repository id")
-        .to_owned();
-
-    let (status, _, problem) = send(
-        &app,
-        request(
-            "POST",
-            &format!("/api/v1/repositories/{repository_id}/test-access"),
-            Some(&setup.admin),
-            Some(json!({})),
-        ),
-    )
-    .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
     assert_eq!(
         problem.get("field").and_then(Value::as_str),
-        Some("agent_id")
+        Some("maintenance_agent_id")
     );
 
     db.cleanup().await;

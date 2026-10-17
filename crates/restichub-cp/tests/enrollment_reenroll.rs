@@ -277,6 +277,10 @@ async fn ac_id_09_replace_moves_plans_and_maintenance_references_and_revokes_the
         )
         .await
         .expect("cannot create the repository");
+        // AC-RP-08: the host of an initialized local repository moves with the replace.
+        restichub_db::repositories::set_initialized(&mut tx, id, true)
+            .await
+            .expect("cannot mark the repository initialized");
         tx.commit().await.expect("cannot commit");
         id
     };

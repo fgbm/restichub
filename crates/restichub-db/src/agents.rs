@@ -208,6 +208,26 @@ pub async fn get_for_update(tx: &mut TenantTx<'_>, id: AgentId) -> Result<Option
     Ok(row.map(Agent::from))
 }
 
+/// Reads one agent with the lock that a new foreign key to the row takes anyway. A caller takes it
+/// before its other locks, so the lock order matches a replace (agent, then plans and repositories).
+pub async fn get_for_key_share(
+    tx: &mut TenantTx<'_>,
+    id: AgentId,
+) -> Result<Option<Agent>, DbError> {
+    let row = sqlx::query_as::<_, AgentRow>(concat!(
+        "SELECT ",
+        agent_columns!(),
+        " FROM agents a ",
+        duplicate_join!(),
+        " WHERE a.id = $1 FOR KEY SHARE OF a"
+    ))
+    .bind(id)
+    .fetch_optional(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(row.map(Agent::from))
+}
+
 /// Keeps a rotated certificate as pending. A later request replaces an earlier pending one
 /// (ADR-0026).
 pub async fn set_pending_certificate(
