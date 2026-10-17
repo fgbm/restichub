@@ -84,7 +84,7 @@ To check the connection:
 
 <Screen name="hosts-list-online" alt="The list of hosts with three online hosts" />
 
-The control plane sends a heartbeat every 30 seconds and closes the stream after three heartbeats without an answer. A host is online while its stream is open. When the stream closes, the host list, the host page and the Overview show the host offline at once. If the connection is lost without a close, the control plane finds the loss in approximately 40 seconds (HTTP/2 ping). The heartbeat limit is 2 minutes. The alert "Host offline" waits for its own limit (see [Alerts](/restichub/guides/alerts/)).
+The control plane sends a heartbeat every 30 seconds and closes the stream after three heartbeats without an answer. A host is online while its stream is open. When the stream closes, the host list and the host page show the host offline at once. The Overview shows the change at once on the control plane instance that held the stream. A different instance shows it in no more than 15 seconds. If the control plane stops without a close of its streams, the hosts stay online for no more than 90 seconds. If the connection is lost without a close, the control plane finds the loss in approximately 40 seconds (HTTP/2 ping). The heartbeat limit is 2 minutes. The alert "Host offline" waits for its own limit (see [Alerts](/restichub/guides/alerts/)).
 
 The agent writes one line when the control plane greets it:
 
