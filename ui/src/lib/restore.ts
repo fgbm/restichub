@@ -219,10 +219,10 @@ export function filtersFromQuery(query: { get(name: string): string | null }): R
 	};
 }
 
-/** The patterns of an exclude field: one per comma or line, without blanks. */
+/** The patterns of an exclude field: one for each line, without blanks. A pattern can hold a comma. */
 export function parsePatterns(text: string): string[] {
 	return text
-		.split(/[,\n]/)
+		.split('\n')
 		.map((item) => item.trim())
 		.filter((item) => item !== '');
 }

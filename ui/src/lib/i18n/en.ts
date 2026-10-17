@@ -52,6 +52,11 @@ export const en = {
 
 	// Common
 	'common.actions': 'Actions',
+	'tagInput.placeholder': 'Add a value and press Enter',
+	'tagInput.remove': 'Remove {value}',
+	'tagInput.invalid': '{value}: {reason}',
+	'tagInput.tooLong': 'At most {max} characters.',
+	'tagInput.tooMany': 'At most {max} values.',
 	'common.cancel': 'Cancel',
 	'common.clear': 'Clear',
 	'common.close': 'Close',
@@ -463,7 +468,8 @@ export const en = {
 		'This action revokes the host "{name}". The control plane closes its stream and refuses the next connection. Continue?',
 	'hosts.revoked': 'The host is revoked.',
 	'hosts.labels': 'Labels',
-	'hosts.labelsPlaceholder': 'e.g. web, prod',
+	'hosts.labelsPlaceholder': 'Add a label and press Enter',
+	'hosts.labelInvalid': 'Use only the letters a-z, the digits 0-9 and the hyphen.',
 	'hosts.createToken': 'Create token',
 	'hosts.tokenTitle': 'Copy the enrollment token',
 	'hosts.tokenValue': 'Enrollment token',
@@ -1249,10 +1255,10 @@ export const en = {
 	'restore.dialog.modeVerify': 'Restore, then verify',
 	'restore.dialog.modeRestore': 'Restore',
 	'restore.dialog.wholeSnapshot': 'Whole snapshot',
-	'restore.dialog.excludesPlaceholder': 'e.g. *.tmp, /var/cache',
+	'restore.dialog.excludesPlaceholder': 'e.g. *.tmp\n/var/cache',
 	'restore.dialog.excludes': 'Exclude paths',
 	'restore.dialog.excludesHelp':
-		'Optional. restic patterns such as *.tmp or /var/cache, separated by commas. The restore skips the paths that match.',
+		'Optional. restic patterns such as *.tmp or /var/cache, one for each line. The restore skips the paths that match.',
 	'restore.dialog.rootsLabel': 'Restore roots',
 	'restore.dialog.rootsRule':
 		'A host restores only inside its restore roots. It does not replace the files of the agent itself.',
@@ -1402,7 +1408,8 @@ export const en = {
 	'channels.kind.webhook': 'Webhook',
 	'channels.target': 'Target',
 	'channels.recipients': 'Recipients',
-	'channels.recipientsHint': 'One address in each line. At most 20.',
+	'channels.recipientsHint': 'At most 20 addresses.',
+	'channels.recipientInvalid': 'This is not an email address.',
 	'channels.url': 'Webhook URL',
 	'channels.urlHint': 'An https address. After you save, the path and the query stay hidden.',
 	'channels.urlEditHint': 'Leave empty to keep the saved URL.',
@@ -1713,9 +1720,8 @@ export const en = {
 	'pe.excludes.filesHelp': 'The path to a file with patterns on the host.',
 	'pe.tags.lead':
 		'Labels of the snapshots of this profile. The retention rules and the searches use them.',
-	'pe.tags.help': 'Separate tags with a comma, a space or Enter. Each tag becomes a chip.',
+	'pe.tags.help': 'Press Enter, a comma or a space after each tag.',
 	'pe.tags.placeholder': 'Add a tag and press Enter',
-	'pe.tags.remove': 'Remove the tag {tag}',
 	'pe.options.vssHelp': 'Windows only: a copy of a consistent volume snapshot.',
 	'pe.options.oneFsHelp': 'Mounted volumes inside the paths are skipped.',
 	'pe.options.cachesHelp': 'Directories with a CACHEDIR.TAG file are skipped.',
@@ -1776,7 +1782,7 @@ export const en = {
 	'pe.rule.within.invalid': 'The period is not valid. For example: 30d, 6m, 1y2m7d3h.',
 	'pe.rule.tags.title': 'Tags that are never deleted',
 	'pe.rule.tags.text':
-		'A snapshot with any of these tags stays always, whatever the other rules decide. Enter tags with a comma or a space: each one becomes a chip.',
+		'A snapshot with any of these tags stays always, whatever the other rules decide.',
 	'pe.rule.group.title': 'What counts as one group',
 	'pe.rule.group.text':
 		'The rules apply to each group of snapshots on its own, so the copies of different hosts or paths do not push each other out. If you select nothing, restic groups by host and paths.',

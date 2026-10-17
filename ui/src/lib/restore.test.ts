@@ -163,12 +163,12 @@ describe('restore page helpers (FR-RS-01, FR-RS-02)', () => {
 	});
 
 	it('fr_rs_04_splits_exclude_patterns', () => {
-		expect(parsePatterns(' *.tmp, /var/cache\n,, node_modules ')).toEqual([
+		expect(parsePatterns(' *.tmp\n/var/cache\n\n node_modules ')).toEqual([
 			'*.tmp',
 			'/var/cache',
 			'node_modules'
 		]);
-		expect(parsePatterns('a\nb')).toEqual(['a', 'b']);
+		expect(parsePatterns('a,b\nc d')).toEqual(['a,b', 'c d']);
 		expect(parsePatterns('  ')).toEqual([]);
 	});
 

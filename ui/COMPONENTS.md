@@ -127,6 +127,26 @@ The bar shows a chip with a × button for each applied filter and a Reset button
 
 To keep the filters in the query string, use `queryFilters(keys)` from `$lib/stores/query-filters.svelte.ts`. It reads the keys from the address. `update(patch)` writes them back at once and replaces the history entry. A change of a filter sets the `page` key to the first page. `$lib/filters.ts` has the helpers for a client-side filter: `matchesSearch`, `splitList`, `inPeriod` and `facetCounts`.
 
+## TagInput
+
+`TagInput` (`$lib/components/ui`) is the field for a set of values: labels, tags, host names and email addresses. Each value shows as a chip with a × button. Do not ask for one text with separators (UI principles 3.11). A list of paths or patterns stays a text area with one value on each line, because a path can hold a comma or a space.
+
+| Property                                      | Function                                                                                    |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `value`                                       | The values, a string array. It is bindable. Send the same array to the API.                 |
+| `label`, `help`, `error`, `id`, `placeholder` | As in `TextField`. An `error` from the server replaces the reason of the field.             |
+| `separator`                                   | A regular expression for the characters that end a value. By default, a comma or a space.   |
+| `check(value)`                                | Returns the reason why a value is not valid, or `null`.                                     |
+| `maxLength`                                   | The maximum number of characters in one value. Set it to the limit of the server.           |
+| `max`                                         | The maximum number of values. Set it to the limit of the server.                            |
+| `mono`                                        | Shows the values in the monospace font, for example labels, host names and email addresses. |
+
+- A separator, Enter or the loss of focus adds the value. A paste of `a, b` adds two values.
+- A value that is already in the list is not added again.
+- A value that is not valid stays in the field. The field shows the value and the reason, for example "Bad_label: Use only the letters a-z, the digits 0-9 and the hyphen." When the text changes, the reason goes away.
+- The × button of a chip removes the value. Backspace in an empty field removes the last value. Enter in an empty field sends the form.
+- Each × button has the accessible name "Remove <value>". The field has `aria-invalid` and refers to the reason with `aria-describedby`. The reason has the `alert` role.
+
 ## Forms
 
 `NewPasswordField` (`$lib/components/ui`) is the field for each new password. Use it for the initial setup, a new user, a password reset and the grant of the Platform Admin right. Below the field, it shows the password rule of the server from `$lib/password-policy.ts` and the progress, for example "6 of 12 characters" (UI principles 5.1). The text is in the danger tone after the person leaves the field or after a submit attempt (`submitted`). A value that is too long shows the danger tone at once. An `error` from the server replaces the text.
@@ -142,5 +162,6 @@ The rules are in `eslint-rules/ui-principles.js`, and `npm run lint` runs them i
 - `ui/no-row-actions-snippet`: the older `rowActions` snippet.
 - `ui/no-back-link`: a link with a back text, a back message key or an `arrow-left` icon.
 - `ui/no-load-more`: a "Load more" text or a `loadMore` or `showMore` message key.
+- `ui/no-separated-text`: a text in the message catalogs that asks for values with separators, for example "через запятую" or "comma-separated". Use `TagInput`.
 
 Each screen obeys these rules. Do not add an exception to `eslint.config.js`. The file tree (`SnapshotTree`) is the only exception of `ui/no-load-more`, because a file tree is not a list page (UI principles 2.15).

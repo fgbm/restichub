@@ -68,5 +68,11 @@ export default tseslint.config(
 		files: ['src/lib/components/SnapshotTree.svelte'],
 		rules: { 'ui/no-load-more': 'off' }
 	},
+	{
+		// design/style/ui-principles.md, 3.11: a set of values is entered with the tag input.
+		files: ['src/lib/i18n/en.ts', 'src/lib/i18n/ru.ts'],
+		plugins: { ui: uiPrinciples },
+		rules: { 'ui/no-separated-text': 'error' }
+	},
 	prettier
 );
