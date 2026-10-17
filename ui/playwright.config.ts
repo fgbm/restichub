@@ -6,8 +6,9 @@ const baseURL = `http://127.0.0.1:${port}`;
 
 export default defineConfig({
 	testDir: './e2e',
-	// The smoke test needs a real control plane: playwright.smoke.config.ts runs it.
-	testIgnore: /smoke.*\.spec\.ts/,
+	// The smoke test needs a real control plane: playwright.smoke.config.ts runs it. The
+	// documentation screenshots need the pinned image: playwright.docs.config.ts runs them.
+	testIgnore: [/smoke.*\.spec\.ts/, /docs-screens\.spec\.ts/],
 	timeout: 30_000,
 	fullyParallel: true,
 	use: {
