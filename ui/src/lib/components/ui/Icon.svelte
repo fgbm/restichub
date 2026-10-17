@@ -55,7 +55,7 @@
 <!-- The HTML wrapper rotates, not the SVG: a browser may run an animation of an SVG element on
      the main thread, and then the spinner stops while a list renders. -->
 {#if spin}
-	<span class="spin">{@render glyph()}</span>
+	<span class="spin rh-spinner">{@render glyph()}</span>
 {:else}
 	{@render glyph()}
 {/if}

@@ -46,7 +46,7 @@
 	{...rest}
 >
 	{#if loading}
-		<span class="btn__spinner" aria-hidden="true"></span>
+		<span class="btn__spinner rh-spinner" aria-hidden="true"></span>
 	{:else if icon}
 		<Icon name={icon} size={iconOnly && size === 'sm' ? 'xs' : 'md'} />
 	{/if}

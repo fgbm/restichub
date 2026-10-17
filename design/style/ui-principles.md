@@ -45,4 +45,4 @@ Use the shared components of [ui/COMPONENTS.md](../../ui/COMPONENTS.md). They ap
 
 1. Use Lucide icons only. Do not draw an SVG by hand.
 2. Do not put a colored stripe at the left edge of a panel, a callout or a row.
-3. Use one duration token for each spinner. The reduced-motion setting stops the spinners.
+3. Use one duration token for each spinner (`--rh-spin-duration`). A spinner shows the status of work that runs now, thus it is not decoration. When the reduced-motion setting is on, a spinner continues to turn at half speed (`--rh-spin-duration-reduced`). All other motion stops: a skeleton shows a static block and a transition is almost instant. Each spinner has the `rh-spinner` class.

@@ -43,6 +43,12 @@
 		border-radius: var(--rh-radius-pill);
 	}
 
+	@media (prefers-reduced-motion: reduce) {
+		.skeleton::after {
+			animation: none;
+		}
+	}
+
 	@keyframes skeleton-shimmer {
 		to {
 			transform: translateX(100%);
