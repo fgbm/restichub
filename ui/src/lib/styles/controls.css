@@ -82,8 +82,25 @@
 .rh-select:disabled,
 .rh-textarea:disabled {
 	background-color: var(--rh-color-canvas-subtle);
-	color: var(--rh-color-text-subtle);
+	color: var(--rh-color-text-muted);
 	cursor: not-allowed;
+}
+
+.rh-input-wrap {
+	position: relative;
+	display: block;
+}
+
+/* Stays muted and italic, so an empty locked field does not read as a stored value. */
+.rh-input-wrap__empty {
+	position: absolute;
+	left: calc(var(--rh-space-3) + var(--rh-border-width));
+	top: 50%;
+	transform: translateY(-50%);
+	pointer-events: none;
+	color: var(--rh-color-text-subtle);
+	font-size: var(--rh-font-size-base);
+	font-style: italic;
 }
 
 .rh-input--mono {

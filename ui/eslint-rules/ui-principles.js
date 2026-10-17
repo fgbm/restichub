@@ -139,14 +139,14 @@ const noLoadMore = {
 const SEPARATED_TEXT =
 	/через (точку с )?запятую|разделённ\S* запят|comma[- ]separated|separated (by|with) (a )?commas?/iu;
 
-/** UI principles 3.8: a set of values is entered with TagInput, so no text asks for separators. */
+/** UI principles 3.10: a set of values is entered with TagInput, so no text asks for separators. */
 const noSeparatedText = {
 	meta: {
 		type: 'problem',
 		schema: [],
 		messages: {
 			separated:
-				'Enter a set of values with TagInput, not as text with separators (design/style/ui-principles.md, 3.8).'
+				'Enter a set of values with TagInput, not as text with separators (design/style/ui-principles.md, 3.10).'
 		}
 	},
 	create(context) {

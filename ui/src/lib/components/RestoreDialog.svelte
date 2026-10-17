@@ -173,10 +173,13 @@
 		<Select
 			id="restore-agent"
 			label={t('restore.dialog.agent')}
-			help={localOnly ? t('restore.dialog.agentLocal') : t('restore.dialog.agentHelp')}
+			help={agentOptions.length === 0
+				? t('restore.dialog.agentNone')
+				: localOnly
+					? t('restore.dialog.agentLocal')
+					: t('restore.dialog.agentHelp')}
 			error={fieldError(problem, 'agent_id')}
 			options={agentOptions}
-			placeholder={agentOptions.length === 0 ? t('restore.dialog.agentNone') : undefined}
 			bind:value={agentId}
 			disabled={agentOptions.length === 0}
 		/>
@@ -185,7 +188,9 @@
 				id="restore-target"
 				label={t('restore.dialog.target')}
 				help={t('restore.dialog.targetHelp')}
-				placeholder={windows ? 'D:\\restore' : t('restore.dialog.targetPlaceholder')}
+				placeholder={windows
+					? t('common.example', { value: 'D:\\restore' })
+					: t('restore.dialog.targetPlaceholder')}
 				error={relative
 					? t('restore.dialog.targetRelative')
 					: outside

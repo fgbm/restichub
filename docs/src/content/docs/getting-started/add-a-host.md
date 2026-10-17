@@ -1,0 +1,105 @@
+---
+title: Add a host
+description: Register a host with the control plane and check the connection.
+---
+
+An agent registers by hand with a one-time enrollment token. A person on the host unpacks the agent package anywhere, for example in the Downloads folder, and runs one command. The command `register` does everything: it installs the agent, enrolls the host, starts the service and reports the connection.
+
+## The registration command
+
+The Web UI shows the full command in the dialog "Add a host". Select "Add host" on the "Hosts" screen to open it. The command uses the control plane URL and the token:
+
+```sh
+restichub-agent register --url https://<control-plane> --token <token>
+```
+
+- `--url` is the control plane URL. The scheme must be `https`.
+- `--token` is the one-time enrollment token. This is the usual way to pass the token.
+- `--token-file PATH` reads the token from a file. A script uses this option.
+- `--token-stdin` reads the token from the standard input.
+- `--ca-file PATH` verifies the control plane with the CA in the file. Without this option the agent uses the system root certificates.
+- `--force` replaces an existing identity. Use it to register the host again.
+- `--no-service` enrolls the host and installs no service. Run `install-service` later.
+- `--trust-server-scripts` turns on the local trust mode before the token is used. The control plane can then run any command on this host, as root or LocalSystem. Without this option the mode is off. See [Scripts](/restichub/guides/scripts/).
+- `--restic-archive PATH`, `--restic-sums PATH` and `--restic-sums-sig PATH` give the restic release files of an offline host (see [The restic binary](/restichub/reference/agent-packages/#the-restic-binary)). Give all three or none.
+
+Run the command as `root` on Linux, or in an elevated PowerShell on Windows ("Run as administrator"). You can run it from any folder. The agent checks the rights, creates its directories and proves that it can write there before it contacts the control plane. A failed check does not use the token.
+
+Give the token with exactly one of `--token`, `--token-file` and `--token-stdin`. The command refuses to run when an agent identity already exists on the host, unless you pass `--force`.
+
+The command installs restic when the host has none. This step runs after the checks of the rights and the directories, and before the request to the control plane. A host without internet access and without the offline files fails here, and the token stays unused.
+
+When the enrollment succeeds, the command starts the service and waits up to 60 seconds for the connection to the control plane. Then it prints a summary:
+
+```text
+registered as backup-host-01 (agent id 0192f1e0-0000-7000-8000-000000000001)
+organization:  0192f1e0-0000-7000-8000-000000000002
+service:       installed and running
+connection:    connected to https://<control-plane>
+```
+
+If a step fails, the summary names what failed and the next command to run. The exit code is not zero when the agent is not connected. The identity stays, so the next command is `install-service` or `status`, not a new registration.
+
+After `register --no-service` the command prints that the service is not installed and names `install-service` as the next command.
+
+After a successful registration, the host appears on the "Hosts" screen with the status "Waiting for connection". The status changes to "Online" when the agent opens its stream.
+
+The token is single use. The control plane consumes the token at the first successful registration. A used token, an expired token and a revoked token give a clear error.
+
+## The host clock
+
+The host clock must be within 5 minutes of the control plane clock. The control plane issues a certificate that starts 5 minutes before the issue time. The agent accepts a certificate that starts up to 5 minutes after the host time. A larger difference makes the certificate unusable.
+
+Before it sends the token, the agent reads the time from the answer of the control plane. If the difference is more than 5 minutes, the agent stops and shows the local time, the control plane time and the difference. The token stays unused. The agent also shows which certificate is not valid when the check of the issued certificate fails.
+
+The stream to the control plane uses the verification of the TLS library, which has no tolerance. Keep the host clock correct for the whole life of the agent.
+
+To check and fix the clock:
+
+- Windows: run `w32tm /query /status` in an elevated PowerShell, then `w32tm /resync`. Or open Settings, Time & language, Date & time, and select "Sync now". Set the time zone too.
+- Linux: run `timedatectl status` and look for `System clock synchronized: yes`. Run `timedatectl set-ntp true` to enable the time sync. With chrony, run `chronyc makestep`.
+
+## Check the connection
+
+The agent connects to the control plane after the service starts. The agent keeps one stream open and answers the heartbeat of the control plane. The stream uses mTLS. The agent verifies the control plane with the installation root CA only, never with the system root certificates.
+
+To check the connection:
+
+1. Open the "Hosts" screen in the Web UI.
+2. Find the host by its name.
+3. Read the status. A host that enrolled but did not connect yet shows "Waiting for connection". The status is "Online" after the first connection.
+4. Read the second line of the row, for example `contact 24 s ago · linux · amd64 · agent 0.4.2, 0.5.0 is available`. The text `0.5.0 is available` shows an agent package older than the control plane (see [Agent and control plane versions](/restichub/reference/agent-version-compatibility/)).
+5. Select the host name to open the host page. The section "General" shows the "Agent version" and the mark "Update available". An offline host shows the time "Last seen".
+
+The control plane sends a heartbeat every 30 seconds and closes the stream after three heartbeats without an answer. The Overview counts a host as online when the control plane heard from it in the last 90 seconds. The alert "Host offline" waits for its own limit (see [Alerts](/restichub/guides/alerts/)).
+
+The agent writes one line when the control plane greets it:
+
+```text
+the control plane greeted the agent
+```
+
+An agent with a revoked or an unknown certificate writes this line:
+
+```text
+the control plane refused the agent identity; check that the agent is enrolled and not revoked
+```
+
+The agent then waits 60 seconds and tries again. Register the host again after a revoke (see [Enroll a host again](/restichub/guides/enroll-a-host-again/)).
+
+## Next step
+
+Add a repository and initialize it from this host. See [Add a repository](/restichub/guides/add-a-repository/).
+
+## Related
+
+- [Manual agent registration and service install](https://github.com/fgbm/restichub/blob/main/design/adr/0032-manual-agent-registration-and-service-install.md)
+- [Agent downloads restic](https://github.com/fgbm/restichub/blob/main/design/adr/0038-agent-downloads-restic.md)
+- [Agent commands and files](/restichub/reference/agent-commands/)
+- [Agent logs](/restichub/reference/agent-logs/)
+- [Agent packages](/restichub/reference/agent-packages/)
+- [Enroll a host again and find duplicate hosts](/restichub/guides/enroll-a-host-again/)
+- [Environment variables](/restichub/reference/environment-variables/)
+- [Agent enrollment rate limit](/restichub/operations/enrollment-rate-limit/)
+- [Agent certificate rotation](/restichub/operations/certificate-rotation/)
+- [Agent and control plane versions](/restichub/reference/agent-version-compatibility/)

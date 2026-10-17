@@ -129,7 +129,7 @@ To keep the filters in the query string, use `queryFilters(keys)` from `$lib/sto
 
 ## TagInput
 
-`TagInput` (`$lib/components/ui`) is the field for a set of values: labels, tags, host names and email addresses. Each value shows as a chip with a × button. Do not ask for one text with separators (UI principles 3.8). A list of paths or patterns stays a text area with one value on each line, because a path can hold a comma or a space.
+`TagInput` (`$lib/components/ui`) is the field for a set of values: labels, tags, host names and email addresses. Each value shows as a chip with a × button. Do not ask for one text with separators (UI principles 3.10). A list of paths or patterns stays a text area with one value on each line, because a path can hold a comma or a space.
 
 | Property                                      | Function                                                                                    |
 | --------------------------------------------- | ------------------------------------------------------------------------------------------- |

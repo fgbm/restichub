@@ -34,12 +34,14 @@
 	const helpId = $derived(`${inputId}-help`);
 	const errorId = $derived(`${inputId}-error`);
 	const describedBy = $derived(error ? errorId : help ? helpId : undefined);
+	const emptyId = $derived(`${inputId}-empty`);
 
 	let query = $state('');
 	let touched = $state(false);
 	let open = $state(false);
 
 	const selectedLabel = $derived(options.find((option) => option.value === value)?.label ?? '');
+	const showEmpty = $derived(disabled && selectedLabel === '');
 	const shown = $derived(
 		touched && query.trim() !== ''
 			? options.filter((option) => option.label.toLowerCase().includes(query.trim().toLowerCase()))
@@ -68,9 +70,9 @@
 			<Primitive.Input
 				id={inputId}
 				class="rh-input rh-combobox__input"
-				{placeholder}
+				placeholder={disabled ? undefined : placeholder}
 				aria-invalid={error ? 'true' : undefined}
-				aria-describedby={describedBy}
+				aria-describedby={showEmpty ? `${describedBy ?? ''} ${emptyId}`.trim() : describedBy}
 				aria-required={required ? 'true' : undefined}
 				onclick={() => (open = true)}
 				oninput={(event) => {
@@ -85,6 +87,9 @@
 			>
 				<Icon name="chevron-down" />
 			</Primitive.Trigger>
+			{#if showEmpty}
+				<span class="rh-input-wrap__empty" id={emptyId}>{t('common.notSet')}</span>
+			{/if}
 		</div>
 		<Primitive.Portal>
 			<Primitive.Content class="rh-combobox__list" sideOffset={4}>

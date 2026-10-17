@@ -1,0 +1,45 @@
+---
+title: Watch and cancel jobs
+description: Find a job, read its steps and its log, and cancel it.
+---
+
+The list "Jobs" shows each job of the organization. For the states and the rules of the queue, see [Job lifecycle](/restichub/concepts/job-lifecycle/).
+
+The list "Jobs" groups the jobs in the tabs "All", "Running", "Failed", "With warnings" and "Succeeded". Each tab shows the number of its jobs.
+
+## Job detail
+
+Select the name of a job in the list "Jobs". The page of the job opens at `/jobs/<id>`. The header shows the plan (or the kind of the job), the status, the host and the trigger. While the job runs, it also shows the step number. The button "Run again" starts the plan again. The button "Cancel job" is available while the job can still change. The panel "About this job" holds these fields:
+
+| Field | Meaning |
+|---|---|
+| Job ID | The identifier of the job. |
+| Kind | `backup`, `check`, `restore` and so on. |
+| Plan, Host, Repository | The objects of the job. |
+| Trigger | "Schedule", "Manual run" or "Maintenance". |
+| Queued | The time when the job entered the queue. |
+| Started, Finished | The start and end times. |
+| Accept until | The end of the acceptance window. The field shows while the job is waiting or sent. |
+| Limit | Shows for a running job only. The line "Maximum: ..." or "No maximum" shows the maximum duration. The line "No progress: ..." shows the stall timeout. Without both limits the field says "Stops when restic makes no progress". |
+| Attempt | The attempt number. The field shows after a lock retry. |
+| Signing key | The first 8 characters of the identifier of the key that signed the job. The button next to it copies the whole identifier. Use it to find the jobs of a key after a [key compromise](/restichub/operations/job-signing-key-compromise/). |
+| Duration | The run time. |
+
+The panel "Steps" lists every step of the job in run order, also the steps that did not start. Each step shows its status. A script step shows the badge "Script" and its phase. Select a step to read its own log.
+
+A failed job shows a reason under its title. [Status and reason codes](/restichub/reference/status-codes/) lists the step statuses and the reasons.
+
+## Cancel
+
+An Operator can cancel a job. To cancel a job:
+
+1. Open the page of the job.
+2. Select "Cancel job".
+3. In the dialog "Cancel the job?", select "Cancel job".
+
+The result depends on the state of the job:
+
+- A waiting job ends at once with the result `cancelled`.
+- For a sent or running job, the control plane marks the job and sends a cancel message to the agent. The queue never sends a marked job. If the agent confirms a marked job late, the control plane sends the cancel message again. A marked job that the agent never confirmed fails with the result `cancelled` when its lease ends. If the agent of a running job is offline, the control plane answers with HTTP 409 `agent_offline`.
+- Only an Admin can cancel an `unlock_all` job.
+- A job in a final state cannot be cancelled.

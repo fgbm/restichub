@@ -64,5 +64,5 @@ The registration makes a new agent identity. The old host entry stays in the lis
 
 ## Related pages
 
-- [Register an agent](/restichub/operations/register-an-agent/)
-- [Agent revocation](/restichub/operations/agent-revocation/)
+- [Register an agent](/restichub/getting-started/add-a-host/)
+- [Agent revocation](/restichub/guides/agent-revocation/)

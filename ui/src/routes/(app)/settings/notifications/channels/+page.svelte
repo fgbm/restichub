@@ -432,7 +432,7 @@
 			label={t('channels.recipients')}
 			help={t('channels.recipientsHint')}
 			error={fieldError(formProblem, 'recipients')}
-			placeholder="ops@example.com"
+			placeholder={t('common.example', { value: 'ops@example.com' })}
 			mono
 			max={MAX_RECIPIENTS}
 			separator={/[\s,;]+/}
@@ -445,7 +445,7 @@
 			label={t('channels.url')}
 			help={editing ? t('channels.urlEditHint') : t('channels.urlHint')}
 			error={urlError}
-			placeholder="https://hooks.example.com/…"
+			placeholder={t('common.example', { value: 'https://hooks.example.com/…' })}
 			bind:value={url}
 			required={!editing}
 		/>
