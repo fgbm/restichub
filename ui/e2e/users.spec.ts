@@ -62,8 +62,14 @@ test('the own platform account disables the actions that the API refuses', async
 	).toBeDisabled();
 	await page.getByRole('button', { name: 'More actions for Anna Petrova' }).click();
 	await expect(page.getByRole('menuitem', { name: /Disable user/ })).toContainText(
-		'This is your account'
+		'You cannot disable your own account'
 	);
+	await expect(
+		page.getByRole('menuitem', { name: /Remove the Platform Admin right/ })
+	).toContainText('You cannot remove your own Platform Admin right');
+	await page.keyboard.press('Escape');
+	// A lower own role is allowed after a confirmation.
+	await expect(page.getByLabel('Role in the organization acme')).toBeEnabled();
 });
 
 test('an organization member opens as a page with its role', async ({ page }) => {

@@ -162,7 +162,7 @@ describe('the Repositories screen maintenance', () => {
 			screen.queryByRole('button', { name: 'More actions for repo-a' })
 		).not.toBeInTheDocument();
 		expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
-		await user.click(screen.getByRole('button', { name: 'Run retention now' }));
+		await user.click(screen.getByRole('button', { name: 'Delete expired snapshots now' }));
 
 		await waitFor(() => expect(mocks.runMaintenance).toHaveBeenCalledWith('r_1', 'retention'));
 		await waitFor(() =>
@@ -202,7 +202,7 @@ describe('the Repositories screen maintenance', () => {
 		render(Repositories);
 
 		await screen.findByText('repo-a');
-		await screen.findByRole('button', { name: 'Run retention now' });
+		await screen.findByRole('button', { name: 'Delete expired snapshots now' });
 		expect(screen.queryByRole('button', { name: 'Unlock all' })).not.toBeInTheDocument();
 	});
 

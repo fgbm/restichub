@@ -311,11 +311,20 @@ export const en = {
 	'platformUsers.lastAdminHint': 'This is the last Platform Admin',
 	'platformUsers.roleIn': 'Role in the organization {name}',
 	'platformUsers.removeFrom': 'Remove from the organization {name}',
-	'platformUsers.removeSelfHint': 'You cannot remove your own membership',
+	'platformUsers.removeSelfHint':
+		'You cannot remove your own membership in the organization of this session',
 	'platformUsers.removeTitle': 'Remove from the organization?',
 	'platformUsers.removeBody':
 		'{name} loses the access to the organization {org}. The account stays; you can add the membership again.',
 	'platformUsers.removeConfirm': 'Remove',
+	'platformUsers.removeSelfBody':
+		'You lose the access to the organization {org}. You can add the membership again on this page.',
+	'platformUsers.lowerSelfTitle': 'Lower your own role?',
+	'platformUsers.lowerSelfBody':
+		'Your role in the organization {org} becomes "{role}". You can raise it again on this page.',
+	'platformUsers.lowerSelfConfirm': 'Lower the role',
+	'platformUsers.revokeSelfHint': 'You cannot remove your own Platform Admin right',
+	'platformUsers.disableSelfHint': 'You cannot disable your own account',
 	'platformUsers.revokeTitle': 'Remove the Platform Admin right?',
 	'platformUsers.revokeBody':
 		'{name} can no longer manage the organizations and the users of the installation. The memberships do not change.',
@@ -530,7 +539,6 @@ export const en = {
 	'repositories.maintenanceHostHint': 'This host runs forget, prune and check for the repository.',
 	'repositories.maintenanceHostNone': 'None',
 	'repositories.maintenanceMissing': 'No maintenance host',
-	'repositories.maintenance.title': 'Maintenance',
 	'repositories.maintenance.description':
 		'The maintenance host runs these tasks on a schedule. A backup host never runs them.',
 	'repositories.maintenance.noHostTitle': 'No maintenance host',
@@ -539,9 +547,9 @@ export const en = {
 	'repositories.maintenance.timeZone': 'Time zone',
 	'repositories.maintenance.timeZoneHint':
 		'An IANA name, such as Europe/Berlin. It applies to both schedules.',
-	'repositories.maintenance.retention': 'Retention',
+	'repositories.maintenance.retention': 'Retention rules',
 	'repositories.maintenance.retentionHint':
-		'Runs forget for every profile with a retention, then prune.',
+		'Deletes the snapshots by the retention rules of the profiles (forget), then frees the space (prune).',
 	'repositories.maintenance.check': 'Check',
 	'repositories.maintenance.checkHint': 'Checks the structure of the repository.',
 	'repositories.maintenance.cron': 'Cron expression',
@@ -556,7 +564,7 @@ export const en = {
 	'repositories.maintenance.nextRunsEmpty': 'No run is planned.',
 	'repositories.maintenance.last': 'Last run',
 	'repositories.maintenance.lastNone': 'No run yet',
-	'repositories.runRetention': 'Run retention now',
+	'repositories.runRetention': 'Delete expired snapshots now',
 	'repositories.runCheck': 'Run check now',
 	'repositories.maintenanceQueued': 'The maintenance job is queued.',
 	'repositories.status': 'Status',
@@ -734,7 +742,7 @@ export const en = {
 	'jobs.kind.test_access': 'Test access',
 	'jobs.kind.backup': 'Backup',
 	'jobs.kind.check': 'Check',
-	'jobs.kind.forget': 'Forget',
+	'jobs.kind.forget': 'Delete expired snapshots',
 	'jobs.kind.prune': 'Prune',
 	'jobs.kind.restore': 'Restore',
 	'jobs.kind.unlock': 'Unlock',
@@ -1700,7 +1708,7 @@ export const en = {
 	'rp.summary.accessKeep': 'The stored secrets stay as they are',
 	'rp.summary.accessReplace': 'A secret will be replaced',
 	'rp.summary.off': 'Off',
-	'rp.check.zone': 'The schedule uses the time zone of the Maintenance section: {zone}.',
+	'rp.check.zone': 'The schedule uses the time zone of the Retention rules section: {zone}.',
 	'rp.side.result': 'What you get',
 	'rp.save.dirty': 'The changes are not saved.',
 	'rp.save.readonly': 'Your role cannot change a repository.',

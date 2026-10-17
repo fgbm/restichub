@@ -1,0 +1,34 @@
+---
+title: Trust model
+description: What the control plane signs, what the agent checks, and which limits stay on the host.
+---
+
+import Diagram from '../../../components/Diagram.astro';
+
+The control plane tells a host what to do. The host keeps its own limits. This page shows where the boundary is.
+
+<Diagram name="trust-model" label="The trust boundary between the control plane and a host" />
+
+## The control plane
+
+- The control plane signs each job with the job signing key. The signature covers the steps and the text of each script.
+- The control plane sends the repository password and the backend credentials with the job. They are for this job only.
+- Each step is a restic command of a fixed type. A job cannot hold a free-form command.
+
+## The agent
+
+- The agent checks the signature, the addressee, the expiry time and the replay journal. A job that fails a check does not run.
+- The agent runs a script only when the local trust mode is on. Only root or an Administrator can turn the mode on. A job cannot change it.
+- If the mode is off, the agent refuses a job with a script. The reason is `server_scripts_disabled`.
+- A restore writes only below the restore roots of the host.
+- The agent does not store the secrets of a job.
+
+## What the signature does not stop
+
+The signature protects the job on the network. It does not stop a person who controls the control plane or its database. That person can send any typed step, and any script to a host with the trust mode. Read [Security for operators](/restichub/operations/security-for-operators/) for the controls that reduce this risk.
+
+## Related
+
+- [Server scripts](/restichub/guides/scripts/)
+- [Restore roots](/restichub/guides/restore/#restore-roots)
+- [Job signing key compromise](/restichub/operations/job-signing-key-compromise/)

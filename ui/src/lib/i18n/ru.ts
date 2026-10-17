@@ -318,11 +318,19 @@ export const ru: Record<MessageKey, string> = {
 	'platformUsers.lastAdminHint': 'Это последний администратор платформы',
 	'platformUsers.roleIn': 'Роль в организации {name}',
 	'platformUsers.removeFrom': 'Убрать из организации {name}',
-	'platformUsers.removeSelfHint': 'Нельзя убрать своё членство',
+	'platformUsers.removeSelfHint': 'Нельзя убрать своё членство в организации текущего сеанса',
 	'platformUsers.removeTitle': 'Убрать из организации?',
 	'platformUsers.removeBody':
 		'{name} потеряет доступ к организации {org}. Учётная запись останется; членство можно добавить снова.',
 	'platformUsers.removeConfirm': 'Убрать',
+	'platformUsers.removeSelfBody':
+		'Вы потеряете доступ к организации {org}. Членство можно добавить снова на этой странице.',
+	'platformUsers.lowerSelfTitle': 'Понизить свою роль?',
+	'platformUsers.lowerSelfBody':
+		'Ваша роль в организации {org} станет «{role}». Повысить её снова можно на этой странице.',
+	'platformUsers.lowerSelfConfirm': 'Понизить роль',
+	'platformUsers.revokeSelfHint': 'Нельзя снять с себя право администратора платформы',
+	'platformUsers.disableSelfHint': 'Нельзя отключить свою учётную запись',
 	'platformUsers.revokeTitle': 'Забрать право администратора платформы?',
 	'platformUsers.revokeBody':
 		'{name} больше не сможет управлять организациями и пользователями установки. Членство в организациях не изменится.',
@@ -538,7 +546,6 @@ export const ru: Record<MessageKey, string> = {
 	'repositories.maintenanceHostHint': 'Этот хост выполняет forget, prune и check для репозитория.',
 	'repositories.maintenanceHostNone': 'Нет',
 	'repositories.maintenanceMissing': 'Нет хоста обслуживания',
-	'repositories.maintenance.title': 'Обслуживание',
 	'repositories.maintenance.description':
 		'Хост обслуживания выполняет эти задачи по расписанию. Хост резервного копирования их не выполняет.',
 	'repositories.maintenance.noHostTitle': 'Нет хоста обслуживания',
@@ -547,9 +554,9 @@ export const ru: Record<MessageKey, string> = {
 	'repositories.maintenance.timeZone': 'Часовой пояс',
 	'repositories.maintenance.timeZoneHint':
 		'Имя IANA, например Europe/Berlin. Действует для обоих расписаний.',
-	'repositories.maintenance.retention': 'Хранение',
+	'repositories.maintenance.retention': 'Правила хранения',
 	'repositories.maintenance.retentionHint':
-		'Выполняет forget для каждого профиля с политикой хранения, затем prune.',
+		'Удаляет снимки по правилам хранения профилей (forget), затем освобождает место (prune).',
 	'repositories.maintenance.check': 'Проверка',
 	'repositories.maintenance.checkHint': 'Проверяет структуру репозитория.',
 	'repositories.maintenance.cron': 'Выражение cron',
@@ -563,7 +570,7 @@ export const ru: Record<MessageKey, string> = {
 	'repositories.maintenance.nextRunsEmpty': 'Запусков не запланировано.',
 	'repositories.maintenance.last': 'Последний запуск',
 	'repositories.maintenance.lastNone': 'Запусков ещё не было',
-	'repositories.runRetention': 'Запустить хранение сейчас',
+	'repositories.runRetention': 'Удалить устаревшие снимки сейчас',
 	'repositories.runCheck': 'Запустить проверку сейчас',
 	'repositories.maintenanceQueued': 'Задание обслуживания поставлено в очередь.',
 	'repositories.status': 'Состояние',
@@ -741,7 +748,7 @@ export const ru: Record<MessageKey, string> = {
 	'jobs.kind.test_access': 'Проверка доступа',
 	'jobs.kind.backup': 'Резервная копия',
 	'jobs.kind.check': 'Проверка',
-	'jobs.kind.forget': 'Удаление снимков (forget)',
+	'jobs.kind.forget': 'Удаление устаревших снимков',
 	'jobs.kind.prune': 'Очистка',
 	'jobs.kind.restore': 'Восстановление',
 	'jobs.kind.unlock': 'Снятие блокировок',
@@ -1711,7 +1718,7 @@ export const ru: Record<MessageKey, string> = {
 	'rp.summary.accessKeep': 'Сохранённые секреты не меняются',
 	'rp.summary.accessReplace': 'Секрет будет заменён',
 	'rp.summary.off': 'Выключено',
-	'rp.check.zone': 'Расписание идёт в часовом поясе раздела «Обслуживание»: {zone}.',
+	'rp.check.zone': 'Расписание идёт в часовом поясе раздела «Правила хранения»: {zone}.',
 	'rp.side.result': 'Что получится',
 	'rp.save.dirty': 'Изменения не сохранены.',
 	'rp.save.readonly': 'Ваша роль не позволяет менять репозиторий.',

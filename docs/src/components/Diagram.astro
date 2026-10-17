@@ -1,0 +1,19 @@
+---
+// Renders a diagram of src/diagrams at build time. The page language selects the source file.
+import { renderDiagram } from '../lib/diagram.mjs';
+import { pageLang, withUiText } from '../lib/ui-text';
+
+interface Props {
+	name: string;
+	label: string;
+}
+
+const sources = import.meta.glob<string>('../diagrams/*.mmd', { query: '?raw', import: 'default', eager: true });
+const { name, label } = Astro.props;
+const lang = pageLang(Astro.locals);
+const source = sources[`../diagrams/${name}.${lang}.mmd`];
+if (source === undefined) throw new Error(`no diagram ${name}.${lang}.mmd`);
+const svg = renderDiagram(withUiText(lang, source), label);
+---
+
+<figure class="rh-figure"><Fragment set:html={svg} /></figure>

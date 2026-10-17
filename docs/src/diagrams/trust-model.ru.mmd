@@ -1,0 +1,22 @@
+flowchart TB
+  subgraph cp [Сервер управления]
+    admin[{{users.role.admin}} пишет профили и скрипты сервера]
+    sign[Ключ подписи заданий подписывает каждое задание]
+    secret[Секреты репозитория только для этого задания]
+  end
+  subgraph host [Хост]
+    verify[Агент проверяет подпись, адресата, срок и журнал повторов]
+    steps[Типизированные шаги restic]
+    trust[Режим доверия включён?]
+    script[Скрипт работает от root или LocalSystem]
+    refuse[Агент отклоняет задание]
+    roots[Восстановление пишет только в корни восстановления]
+  end
+  admin --> sign
+  sign ==>|подписанное задание по mTLS| verify
+  secret -.->|на хосте не хранятся| verify
+  verify --> steps
+  verify -->|в задании есть скрипт| trust
+  trust -->|да| script
+  trust -->|нет| refuse
+  steps -->|восстановление| roots

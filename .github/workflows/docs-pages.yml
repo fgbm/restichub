@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - 'docs/**'
+      # The site quotes the UI labels.
+      - 'ui/src/lib/i18n/**'
       - '.github/workflows/docs-pages.yml'
   workflow_dispatch:
 

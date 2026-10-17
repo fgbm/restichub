@@ -4,6 +4,7 @@
  * The mock starts with no alert and no channel. A review capture or an e2e test sets the storage
  * key to see a filled list.
  */
+import { docsAlerts, docsMode } from './mock-docs';
 import type {
 	Agent,
 	Alert,
@@ -74,6 +75,7 @@ function sampleEnabled(): boolean {
 }
 
 function sampleAlerts(): Alert[] {
+	if (docsMode()) return docsAlerts();
 	if (!sampleEnabled()) return [];
 	return [
 		{

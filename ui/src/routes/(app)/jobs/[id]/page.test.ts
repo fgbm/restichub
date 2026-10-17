@@ -554,7 +554,7 @@ describe('the job detail screen', () => {
 		expect(screen.getByText('0 of 3 complete')).toBeInTheDocument();
 		// The steps that did not start show as queued.
 		expect(screen.getAllByText('queued')).toHaveLength(2);
-		expect(screen.getByText('Forget')).toBeInTheDocument();
+		expect(screen.getByText('Delete expired snapshots')).toBeInTheDocument();
 		expect(screen.getByText('Prune')).toBeInTheDocument();
 		expect(screen.getByRole('progressbar', { name: 'Steps' })).toHaveValue(0.5 / 3);
 	});
