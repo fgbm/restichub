@@ -108,29 +108,26 @@ jobs:
           sudo systemctl restart restichub-agent
           test "$(systemctl is-active restichub-agent)" = active
           scripts/install-smoke.sh connected "$since" 60
-      # The restore guide tells the administrator to add /home or /root to the restore roots for
-      # an in-place restore there. The check uses the file, not the exit code of systemd-run.
-      - name: ReadWritePaths lifts ProtectHome=read-only for /home and /root, the root / does not (ADR-0045)
+      # ProtectHome=read-only wins over ReadWritePaths on the same path, so the restore guide gives
+      # no in-place restore below /home and /root. A root-owned directory below /home is writable,
+      # which a repository root needs. The check uses the file, not the exit code of systemd-run.
+      - name: ReadWritePaths lifts ProtectHome=read-only only below /home and /root (ADR-0045)
         run: |
           set -euo pipefail
-          sandbox=(sudo systemd-run --quiet --wait --collect -p ProtectSystem=strict -p ProtectHome=read-only)
           below="$(sudo mktemp -d /home/restichub-smoke.XXXXXX)"
-          for writable in /home /root "$below"; do
-            file="$writable/restichub-smoke-file"
-            "${sandbox[@]}" -p "ReadWritePaths=$writable" touch "$file" || true
-            if ! sudo test -f "$file"; then
-              echo "ReadWritePaths=$writable must make $file writable under ProtectHome=read-only" >&2
-              exit 1
-            fi
+          failed=0
+          for case in "/home /home no" "/root /root no" "$below $below yes" "/ /root no"; do
+            read -r writable dir expected <<<"$case"
+            file="$dir/restichub-smoke-file"
+            sudo systemd-run --quiet --wait --collect -p ProtectSystem=strict \
+              -p ProtectHome=read-only -p "ReadWritePaths=$writable" touch "$file" || true
+            if sudo test -f "$file"; then actual=yes; else actual=no; fi
             sudo rm -f "$file"
+            echo "ReadWritePaths=$writable: $dir writable: $actual (expected $expected)"
+            if [ "$actual" != "$expected" ]; then failed=1; fi
           done
           sudo rmdir "$below"
-          "${sandbox[@]}" -p ReadWritePaths=/ touch /root/restichub-smoke-slash || true
-          if sudo test -e /root/restichub-smoke-slash; then
-            echo "ReadWritePaths=/ must not make /root writable under ProtectHome=read-only" >&2
-            exit 1
-          fi
-          echo "ReadWritePaths lifts ProtectHome for /home, /root and a directory below /home; / does not"
+          exit "$failed"
       - name: A local repository below a repository root inits and backs up (ADR-0045)
         run: |
           set -euo pipefail
@@ -451,7 +448,7 @@ jobs:
           Write-Host '--- the events of the agent in the scanned window'
           $events = @(Get-WinEvent -FilterHashtable @{LogName='ResticHub'; ProviderName='ResticHub Agent'; StartTime=$start.ToLocalTime()} -ErrorAction SilentlyContinue)
           $events | Format-Table -AutoSize -Wrap TimeCreated, Id, LevelDisplayName, Message
-          if (-not ($events | Where-Object { $_.LevelDisplayName -eq 'Warning' -and $_.Message -match 'not absolute paths' })) {
+          if (-not ($events | Where-Object { $_.LevelDisplayName -eq 'Warning' -and $_.Message -match 'not plain absolute paths' })) {
             throw 'the ResticHub log holds no readable warning of the agent'
           }
           # Get-WinEvent refuses a provider of another log, so wevtutil searches the Application log.
