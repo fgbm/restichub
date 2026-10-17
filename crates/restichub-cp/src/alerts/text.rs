@@ -110,7 +110,7 @@ fn job_kind_name(language: Language, kind: Option<JobKind>) -> &'static str {
             JobKind::TestAccess => "access test",
             JobKind::Backup => "backup",
             JobKind::Check => "check",
-            JobKind::Forget => "forget",
+            JobKind::Forget => "delete expired snapshots",
             JobKind::Prune => "prune",
             JobKind::Restore => "restore",
             JobKind::Snapshots => "snapshot list",
@@ -124,7 +124,7 @@ fn job_kind_name(language: Language, kind: Option<JobKind>) -> &'static str {
             JobKind::TestAccess => "проверка доступа",
             JobKind::Backup => "резервное копирование",
             JobKind::Check => "проверка",
-            JobKind::Forget => "очистка снимков",
+            JobKind::Forget => "удаление устаревших снимков",
             JobKind::Prune => "очистка репозитория",
             JobKind::Restore => "восстановление",
             JobKind::Snapshots => "список снимков",
@@ -236,6 +236,18 @@ mod tests {
             Some("прервано перезапуском агента")
         );
         assert_eq!(error_label(Language::En, "restic said no"), None);
+    }
+
+    #[test]
+    fn the_forget_job_has_the_ui_label() {
+        assert_eq!(
+            job_kind_name(Language::En, Some(JobKind::Forget)),
+            "delete expired snapshots"
+        );
+        assert_eq!(
+            job_kind_name(Language::Ru, Some(JobKind::Forget)),
+            "удаление устаревших снимков"
+        );
     }
 
     #[test]
