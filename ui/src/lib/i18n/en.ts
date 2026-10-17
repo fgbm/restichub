@@ -586,6 +586,9 @@ export const en = {
 		'ResticHub shows this value never again after you save it. You can only replace it.',
 	'repositories.s3AccessKey': 'S3 access key',
 	'repositories.s3SecretKey': 'S3 secret key',
+	'repositories.restUsername': 'User name',
+	'repositories.restUsernameHint':
+		'Optional. The account in the .htpasswd file of the rest-server. It is not a secret.',
 	'repositories.restPassword': 'REST server password',
 	'repositories.restPasswordHint':
 		'Optional. The control plane sends it to the agent with each job.',

@@ -30,6 +30,8 @@ pub const MAX_SECRET_VALUE: usize = 64 * 1024;
 pub const MAX_REPOSITORY_NAME: usize = 48;
 /// Limit in characters of a backend endpoint.
 pub const MAX_ENDPOINT: usize = 2048;
+/// Limit in characters of a rest-server user name.
+pub const MAX_REST_USERNAME: usize = 255;
 /// Limit in characters of an S3 bucket name.
 pub const MAX_BUCKET: usize = 63;
 /// Limit in characters of an S3 key prefix.
@@ -352,6 +354,27 @@ pub fn validate_endpoint(field: &'static str, value: &str) -> Result<String, Val
     Ok(value.to_owned())
 }
 
+/// Validates the user name of a rest-server account and returns the trimmed value.
+///
+/// An empty value is no user name. HTTP basic authentication ends the user name at the first `:`,
+/// so the value holds no `:` (RFC 7617).
+pub fn validate_rest_username(
+    field: &'static str,
+    value: &str,
+) -> Result<Option<String>, ValidationError> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Ok(None);
+    }
+    if value.chars().count() > MAX_REST_USERNAME {
+        return Err(ValidationError::new(field, Reason::TooLong));
+    }
+    if has_forbidden(value) || value.contains(':') {
+        return Err(ValidationError::new(field, Reason::InvalidCharacter));
+    }
+    Ok(Some(value.to_owned()))
+}
+
 /// Validates an S3 bucket name and returns the trimmed value.
 ///
 /// The rules follow the S3 naming rules: 3 to 63 characters from `a-z`, `0-9`, `.` and `-`, and the
@@ -461,11 +484,12 @@ mod tests {
     use time::OffsetDateTime;
 
     use super::{
-        MAX_BUCKET, MAX_DISPLAY_NAME, MAX_EMAIL, MAX_REPOSITORY_NAME, MAX_SECRET_NAME,
-        MAX_SECRET_VALUE, MAX_TENANT_NAME, MAX_USERNAME, validate_bucket, validate_display_name,
-        validate_email, validate_endpoint, validate_expiry, validate_local_path,
-        validate_repository_name, validate_s3_prefix, validate_secret_name, validate_secret_value,
-        validate_tenant_name, validate_token_name, validate_username,
+        MAX_BUCKET, MAX_DISPLAY_NAME, MAX_EMAIL, MAX_REPOSITORY_NAME, MAX_REST_USERNAME,
+        MAX_SECRET_NAME, MAX_SECRET_VALUE, MAX_TENANT_NAME, MAX_USERNAME, validate_bucket,
+        validate_display_name, validate_email, validate_endpoint, validate_expiry,
+        validate_local_path, validate_repository_name, validate_rest_username, validate_s3_prefix,
+        validate_secret_name, validate_secret_value, validate_tenant_name, validate_token_name,
+        validate_username,
     };
 
     const FIELD: &str = "value";
@@ -595,6 +619,18 @@ mod tests {
         assert!(validate_endpoint(FIELD, "https://u:p@h.example.net").is_err());
         assert!(validate_endpoint(FIELD, "https://h.example.net?x=1").is_err());
         assert!(validate_endpoint(FIELD, "https://h.example.net#frag").is_err());
+    }
+
+    #[test]
+    fn a_rest_username_has_no_colon() {
+        assert_eq!(
+            validate_rest_username(FIELD, "  backup  "),
+            Ok(Some("backup".to_owned()))
+        );
+        assert_eq!(validate_rest_username(FIELD, "   "), Ok(None));
+        assert!(validate_rest_username(FIELD, "user:name").is_err());
+        assert!(validate_rest_username(FIELD, "user\nname").is_err());
+        assert!(validate_rest_username(FIELD, &"u".repeat(MAX_REST_USERNAME + 1)).is_err());
     }
 
     #[test]

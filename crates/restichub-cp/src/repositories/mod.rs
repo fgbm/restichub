@@ -268,9 +268,13 @@ pub async fn update_repository(
     };
     let backend = match backend {
         Some(settings) => {
-            let validated = validate_backend(settings)?;
+            let keeps_username = matches!(settings, BackendSettings::Rest { username: None, .. });
+            let mut validated = validate_backend(settings)?;
             if validated.kind != current.backend {
                 return Err(ApiError::invalid_field("backend", Reason::Unknown));
+            }
+            if keeps_username {
+                validated.rest_username = current.rest_username.clone();
             }
             validated
         }

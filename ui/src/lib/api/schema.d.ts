@@ -1826,6 +1826,11 @@ export interface components {
             endpoint: string;
             /** @enum {string} */
             kind: "rest";
+            /**
+             * @description In an update, an absent field keeps the stored user name; `null` or an empty string
+             *     clears it.
+             */
+            username?: string | null;
         } | {
             /** @enum {string} */
             kind: "local";

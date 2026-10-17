@@ -8,6 +8,7 @@ mod queue_support;
 
 use std::time::Duration;
 
+use restichub_proto::agent::v1::repository_access::BackendCredentials;
 use restichub_proto::agent::v1::step;
 use serde_json::json;
 
@@ -59,6 +60,36 @@ async fn ac_pr_03_the_job_carries_only_the_secrets_of_its_own_repository() {
         !String::from_utf8_lossy(&signed.job).contains("canary-secret-of-b"),
         "the secret of another repository never reaches the job"
     );
+    env.db.cleanup().await;
+}
+
+#[tokio::test]
+async fn ac_rp_01_a_rest_job_carries_the_user_name_and_the_password() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let mut agent = env.connect_agent("rest-host").await;
+    let repository = env
+        .create_rest_repository(agent.id, "backup", "rest-canary-password")
+        .await;
+    let profile = env.create_profile(repository, json!({})).await;
+    let plan = env.create_plan(profile, agent.id).await;
+
+    env.run_plan(plan).await;
+    env.pass().await;
+
+    let signed = agent.job().await;
+    let job = env.verify(&signed, &agent).await;
+    let access = &job.repositories[0];
+    assert_eq!(access.location, "rest:https://rest.example.net/main");
+    match &access.backend_credentials {
+        Some(BackendCredentials::Rest(credentials)) => {
+            assert_eq!(credentials.username, "backup");
+            assert_eq!(credentials.password, "rest-canary-password");
+        }
+        other => panic!("the job holds no rest credentials: {other:?}"),
+    }
     env.db.cleanup().await;
 }
 

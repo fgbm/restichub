@@ -10,12 +10,8 @@ A repository is the place where restic stores the snapshots. The control plane k
 - Enroll at least one host, and make sure that its status is "Online". See [Register an agent](/restichub/getting-started/add-a-host/). This host becomes the maintenance host.
 - Prepare a backend that the host can reach on the network:
   - An S3-compatible storage: a bucket, an access key and a secret key with the permission to read, write, list and delete objects in the bucket.
-  - A [rest-server](https://github.com/restic/rest-server). Give each repository its own path, for example `https://rest.example.com:8000/fs-01`.
+  - A [rest-server](https://github.com/restic/rest-server). Give each repository its own path, for example `https://rest.example.com:8000/fs-01`. If the rest-server uses an `.htpasswd` file, prepare the user name and the password of one account in the file.
 - Sign in as an Admin. Only an Admin creates a repository.
-
-:::caution
-ResticHub sends the REST server password without a user name. A rest-server with an `.htpasswd` file refuses the requests. In this version, run rest-server with `--no-auth` on a private network only, or use an S3-compatible storage.
-:::
 
 ## The fields of the backend
 
@@ -27,9 +23,12 @@ ResticHub sends the REST server password without a user name. A rest-server with
 | S3-compatible | "Region" | Optional. The region of the bucket, for example `us-east-1` |
 | S3-compatible | "S3 access key", "S3 secret key" | The credentials of the bucket |
 | REST server | "Endpoint" | The address of the repository on the rest-server, for example `https://rest.example.com:8000/fs-01` |
-| REST server | "REST server password" | Optional. See the caution above |
+| REST server | "User name" | Optional. The user name of the account in the `.htpasswd` file of the rest-server |
+| REST server | "REST server password" | Optional. The password of the same account |
 
-An "Endpoint" uses the scheme `https` or `http`. It cannot hold a user name, a query or a fragment.
+An "Endpoint" uses the scheme `https` or `http`. It cannot hold a user name, a password, a query or a fragment. Enter the credentials of the rest-server in the fields "User name" and "REST server password" in the section "Access".
+
+The user name is not a secret: the repository page shows it, and you can change it at any time. The password is a secret. The agent gives both values to restic in the environment variables `RESTIC_REST_USERNAME` and `RESTIC_REST_PASSWORD`, never in the command line. A rest-server with `--no-auth` needs no credentials.
 
 ## Create the repository
 

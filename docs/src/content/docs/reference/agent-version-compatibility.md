@@ -47,3 +47,7 @@ The allow-list hooks no longer exist. The control plane drops the hook section o
 A plan that ran a hook now runs without it, and its jobs can still succeed. Check the audit log after the upgrade. Move each hook to a server script on a host with the trust mode. See [Server scripts](/restichub/guides/scripts/).
 
 The agent no longer reads the file `restichub-agent-hooks.toml`. When the file still exists, the agent writes a warning with its path at each start. Delete the file when you no longer need it.
+
+### User name of a rest-server
+
+Before this release, ResticHub sent the REST server password without a user name, so a rest-server with an `.htpasswd` file refused each job. For each REST server repository with a password, enter the user name of the account in the field "User name".
