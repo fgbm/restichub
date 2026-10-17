@@ -27,7 +27,7 @@ fn unit_path() -> PathBuf {
 ///
 /// `ProtectSystem=strict` and `ProtectHome=read-only` make the whole file system read-only except
 /// the identity directory, the cache directory and `writable_roots`: the restore roots (FR-RS-03)
-/// and the repository roots (ADR-0044). `ProtectSystem=strict` alone leaves `/home`, `/root` and
+/// and the repository roots (ADR-0045). `ProtectSystem=strict` alone leaves `/home`, `/root` and
 /// `/run/user` writable. A read of a backup source stays possible.
 #[must_use]
 pub fn unit_contents(exe: &Path, config_dir: &Path, writable_roots: &[PathBuf]) -> String {
@@ -84,7 +84,7 @@ pub fn unit_contents(exe: &Path, config_dir: &Path, writable_roots: &[PathBuf]) 
 }
 
 /// The roots that the installed unit cannot write, because the operator added them after
-/// `install-service` (FR-RS-03, ADR-0044). Restic fails with `EROFS` on such a root.
+/// `install-service` (FR-RS-03, ADR-0045). Restic fails with `EROFS` on such a root.
 #[must_use]
 pub fn roots_missing_from_installed_unit(roots: &[PathBuf]) -> Vec<PathBuf> {
     match std::fs::read_to_string(unit_path()) {
@@ -208,7 +208,7 @@ fn refuse_rejected_roots(config: &Path) -> Result<()> {
 }
 
 /// The repository roots of the host, each created with the access of root only when it is missing
-/// (ADR-0044). A root that another account can change, a system directory and a root on the files
+/// (ADR-0045). A root that another account can change, a system directory and a root on the files
 /// of the agent stop the install.
 fn repository_roots(config: &Path, restic: &Path) -> Result<Vec<PathBuf>> {
     let file = crate::repository_roots::roots_file_for(config);
@@ -420,7 +420,7 @@ mod tests {
     }
 
     #[test]
-    fn adr_0044_the_unit_can_write_every_repository_root() {
+    fn adr_0045_the_unit_can_write_every_repository_root() {
         let unit = unit_contents(
             Path::new("/opt/restichub-agent/restichub-agent"),
             Path::new("/etc/restichub-agent"),
@@ -461,7 +461,7 @@ mod tests {
     }
 
     #[test]
-    fn adr_0044_a_restore_root_that_overlaps_a_repository_root_is_refused() {
+    fn adr_0045_a_restore_root_that_overlaps_a_repository_root_is_refused() {
         let repository = [PathBuf::from("/srv/repos")];
         for restore in ["/srv", "/srv/repos", "/srv/repos/fs-01", "/srv//repos/"] {
             assert_eq!(
@@ -479,7 +479,7 @@ mod tests {
     }
 
     #[test]
-    fn adr_0044_the_restore_root_slash_stays_allowed_next_to_a_repository_root() {
+    fn adr_0045_the_restore_root_slash_stays_allowed_next_to_a_repository_root() {
         let restore = [
             PathBuf::from("/"),
             PathBuf::from("/var/lib/restichub-restore"),

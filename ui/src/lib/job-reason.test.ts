@@ -53,7 +53,7 @@ describe('jobReason', () => {
 		);
 	});
 
-	it('tells a deleted repository from a location without a repository (ADR-0044)', () => {
+	it('tells a deleted repository from a location without a repository (ADR-0045)', () => {
 		expect(jobReason({ result_code: 'failed', result_message: 'repository_deleted' })).toBe(
 			'The repository is deleted.'
 		);

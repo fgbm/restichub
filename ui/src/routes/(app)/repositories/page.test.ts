@@ -252,7 +252,7 @@ describe('the host of an init and an access test', () => {
 		);
 	});
 
-	it('adr_0044 names the repository roots file when the host refuses a local path', async () => {
+	it('adr_0045 names the repository roots file when the host refuses a local path', async () => {
 		const refused = {
 			id: 'j_1',
 			status: 'failed',

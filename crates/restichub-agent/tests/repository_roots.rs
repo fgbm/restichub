@@ -1,4 +1,4 @@
-//! The repository roots of a host against a scripted restic (ADR-0044).
+//! The repository roots of a host against a scripted restic (ADR-0045).
 
 #![allow(clippy::expect_used)]
 
@@ -23,7 +23,7 @@ async fn next_message(rx: &mut mpsc::Receiver<AgentMessage>) -> AgentMessage {
 /// The agent refuses a local repository outside the roots before restic starts, and an init below
 /// a root runs: its access test reports the missing repository with its own code.
 #[tokio::test(flavor = "multi_thread")]
-async fn adr_0044_a_local_repository_outside_the_roots_is_rejected_before_restic() {
+async fn adr_0045_a_local_repository_outside_the_roots_is_rejected_before_restic() {
     let dir = temp_config_dir("repository-roots-agent");
     std::fs::create_dir_all(&dir).expect("cannot create the configuration directory");
     // A canonical Windows path has the verbatim prefix, which the job validator refuses.

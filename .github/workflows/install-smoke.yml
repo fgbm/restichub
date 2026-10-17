@@ -108,7 +108,7 @@ jobs:
           sudo systemctl restart restichub-agent
           test "$(systemctl is-active restichub-agent)" = active
           scripts/install-smoke.sh connected "$since" 60
-      - name: A local repository below a repository root inits and backs up (ADR-0044)
+      - name: A local repository below a repository root inits and backs up (ADR-0045)
         run: |
           set -euo pipefail
           root=/srv/restichub-smoke-repositories

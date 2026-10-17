@@ -411,7 +411,7 @@ fn ac_rp_01_maps_the_init_chain_to_a_job_outcome() {
 }
 
 #[test]
-fn adr_0044_a_read_only_local_repository_has_its_own_error_code() {
+fn adr_0045_a_read_only_local_repository_has_its_own_error_code() {
     let read_only = Progress {
         stopped_code: Some(1),
         repository_read_only: true,

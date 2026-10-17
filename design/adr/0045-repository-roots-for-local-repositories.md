@@ -1,4 +1,4 @@
-# ADR-0044: Repository roots for local repositories
+# ADR-0045: Repository roots for local repositories
 
 - Status: accepted
 - Date: 2026-10-17

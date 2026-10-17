@@ -109,7 +109,8 @@ pub struct AgentView {
     pub control_plane_version: String,
     pub version_status: crate::agent_version::AgentVersionStatus,
     pub status: AgentStatus,
-    /// Whether the control plane saw the host within the online window of the dashboard. Always
+    /// Whether the host has an open stream to a control plane instance, as the database records it.
+    /// After an instance stops without a close, the value stays true for up to 90 seconds. Always
     /// false for a revoked host.
     pub online: bool,
     pub last_seen_at: Option<String>,
@@ -163,7 +164,12 @@ impl AgentView {
             ),
             status: agent.status,
             online: agent.status == AgentStatus::Active
-                && crate::dashboard::is_online(agent.first_connected_at, agent.last_seen_at, now),
+                && crate::dashboard::is_online(
+                    agent.first_connected_at,
+                    agent.stream_open,
+                    agent.last_seen_at,
+                    now,
+                ),
             last_seen_at: agent.last_seen_at.map(format_time),
             first_connected_at: agent.first_connected_at.map(format_time),
             created_at: format_time(agent.created_at),

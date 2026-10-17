@@ -140,7 +140,7 @@ pub(crate) fn protected_paths(config_dir: &Path, cache_dir: &Path, program: &Pat
     protected
 }
 
-/// A restore never writes into a repository root, even below a restore root `/` (ADR-0044).
+/// A restore never writes into a repository root, even below a restore root `/` (ADR-0045).
 fn restore_protected(mut protected: Vec<PathBuf>, repository_roots: Vec<PathBuf>) -> Vec<PathBuf> {
     protected.extend(repository_roots);
     protected
@@ -599,7 +599,7 @@ mod tests {
     }
 
     #[test]
-    fn adr_0044_a_restore_into_a_repository_root_is_refused() {
+    fn adr_0045_a_restore_into_a_repository_root_is_refused() {
         let base = temp_dir("repository-root");
         let config = base.join("config");
         let repos = base.join("repos");

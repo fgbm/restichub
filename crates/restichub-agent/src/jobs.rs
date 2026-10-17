@@ -133,7 +133,7 @@ pub struct Jobs {
     /// The roots where a restore may write and the files of the agent that it may never touch
     /// (FR-RS-03, ADR-0035).
     restore: Arc<RestoreAccess>,
-    /// Where a local backend may lie on a Linux host (ADR-0044).
+    /// Where a local backend may lie on a Linux host (ADR-0045).
     repository: Arc<RepositoryAccess>,
     /// The agent reads it again at each job (FR-HK-08).
     scripts: Arc<ScriptStore>,
@@ -239,7 +239,7 @@ impl Jobs {
         self
     }
 
-    /// Replaces the roots of the local repositories (ADR-0044).
+    /// Replaces the roots of the local repositories (ADR-0045).
     #[must_use]
     pub fn with_repository_access(mut self, access: RepositoryAccess) -> Self {
         self.repository = Arc::new(access);
@@ -339,7 +339,7 @@ impl Jobs {
                 .await;
             return;
         }
-        // The sandbox of the service would stop restic with a read-only error (ADR-0044).
+        // The sandbox of the service would stop restic with a read-only error (ADR-0045).
         if let Some((location, reason)) = self.repository.denied(validated.job()) {
             tracing::warn!(
                 %reason,

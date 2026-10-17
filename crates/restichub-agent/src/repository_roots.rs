@@ -1,4 +1,4 @@
-//! Where a local repository may lie on a Linux host (ADR-0044).
+//! Where a local repository may lie on a Linux host (ADR-0045).
 //!
 //! The systemd unit mounts the file system read-only, so restic writes a local repository only
 //! below a path that `install-service` lists in `ReadWritePaths`. Only root configures these roots,
@@ -195,7 +195,7 @@ mod tests {
     }
 
     #[test]
-    fn adr_0044_the_roots_file_is_a_sibling_of_the_config_dir() {
+    fn adr_0045_the_roots_file_is_a_sibling_of_the_config_dir() {
         assert_eq!(
             roots_file_for(Path::new("/etc/restichub-agent")),
             PathBuf::from("/etc/restichub-agent-repository-roots.txt")
@@ -203,7 +203,7 @@ mod tests {
     }
 
     #[test]
-    fn adr_0044_a_local_repository_outside_the_roots_is_refused() {
+    fn adr_0045_a_local_repository_outside_the_roots_is_refused() {
         let base = temp_dir("outside");
         let root = base.join("repos");
         std::fs::create_dir_all(&root).expect("cannot create the root");
@@ -223,7 +223,7 @@ mod tests {
     }
 
     #[test]
-    fn adr_0044_a_remote_repository_needs_no_root() {
+    fn adr_0045_a_remote_repository_needs_no_root() {
         let access = RepositoryAccess::new(Vec::new(), Vec::new());
         assert_eq!(
             access.denied(&job(&[
@@ -236,7 +236,7 @@ mod tests {
     }
 
     #[test]
-    fn adr_0044_a_repository_on_the_files_of_the_agent_is_refused() {
+    fn adr_0045_a_repository_on_the_files_of_the_agent_is_refused() {
         let base = temp_dir("protected");
         let config = base.join("config");
         std::fs::create_dir_all(&config).expect("cannot create the config");
@@ -250,13 +250,13 @@ mod tests {
     }
 
     #[test]
-    fn adr_0044_an_unrestricted_access_accepts_every_path() {
+    fn adr_0045_an_unrestricted_access_accepts_every_path() {
         assert_eq!(RepositoryAccess::unrestricted().check("/srv/repo"), Ok(()));
         assert!(RepositoryAccess::unrestricted().roots().is_empty());
     }
 
     #[test]
-    fn adr_0044_a_roots_file_that_another_account_can_change_is_ignored() {
+    fn adr_0045_a_roots_file_that_another_account_can_change_is_ignored() {
         use std::os::unix::fs::PermissionsExt as _;
         let base = temp_dir("untrusted");
         let file = base.join("roots.txt");
@@ -270,7 +270,7 @@ mod tests {
     }
 
     #[test]
-    fn adr_0044_the_filesystem_root_and_system_directories_are_refused_as_roots() {
+    fn adr_0045_the_filesystem_root_and_system_directories_are_refused_as_roots() {
         let base = temp_dir("system-roots");
         let config = base.join("config");
         let protected = vec![config.clone(), PathBuf::from("/opt/restichub-agent")];
@@ -311,7 +311,7 @@ mod tests {
     }
 
     #[test]
-    fn adr_0044_the_repository_roots_file_is_a_protected_path() {
+    fn adr_0045_the_repository_roots_file_is_a_protected_path() {
         let base = temp_dir("roots-file");
         let config = base.join("config");
         std::fs::create_dir_all(&config).expect("cannot create the config");

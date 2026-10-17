@@ -59,7 +59,7 @@ pub(super) enum StepError {
     /// answer (FR-RP-02).
     RepositoryMissing,
     /// restic could not write a local repository because the path is read-only for the agent
-    /// (ADR-0044).
+    /// (ADR-0045).
     ReadOnly,
     Failed,
     Cancelled,
@@ -562,7 +562,7 @@ impl Jobs {
     }
 }
 
-/// True for a restic error line that reports `EROFS` on a path of a local repository (ADR-0044).
+/// True for a restic error line that reports `EROFS` on a path of a local repository (ADR-0045).
 ///
 /// `repositories` holds paths in the form of [`clean_path`], the form that restic prints.
 fn names_read_only_repository(line: &str, repositories: &[String]) -> bool {
@@ -664,7 +664,7 @@ mod tests {
     }
 
     #[test]
-    fn adr_0044_a_read_only_error_on_a_local_repository_is_recognized() {
+    fn adr_0045_a_read_only_error_on_a_local_repository_is_recognized() {
         let repositories = ["/var/spool/restichub/local-test".to_owned()];
         for line in [
             "Fatal: create repository at /var/spool/restichub/local-test failed: mkdir /var/spool/restichub: read-only file system",
@@ -687,7 +687,7 @@ mod tests {
     }
 
     #[test]
-    fn adr_0044_a_read_only_error_matches_a_location_with_extra_separators() {
+    fn adr_0045_a_read_only_error_matches_a_location_with_extra_separators() {
         for location in [
             "/var/spool/restichub/local-test/",
             "/var/spool//restichub/local-test",

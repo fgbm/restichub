@@ -153,7 +153,7 @@ pub fn check_install_location(restic: &Path) -> Result<()> {
 }
 
 /// Logs a warning for each restore or repository root that the installed service cannot write
-/// (FR-RS-03, ADR-0044).
+/// (FR-RS-03, ADR-0045).
 ///
 /// A root added to a roots file after `install-service` stays read-only for the service until
 /// the operator runs `install-service` again.

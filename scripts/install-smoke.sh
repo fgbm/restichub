@@ -216,7 +216,7 @@ wait_refused() {
 
 # The installed service inits a local repository below the repository root $1 and backs up the
 # directory $2 into it. A repository at $3, outside the roots, gets the refusal of the host
-# (ADR-0044).
+# (ADR-0045).
 local_repository() {
 	local root="$1" source="$2" outside="$3" agent repository profile plan id
 	agent="$(agent_json | jq -r '.items[0].id')"

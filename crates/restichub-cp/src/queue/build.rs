@@ -450,7 +450,7 @@ mod tests {
     }
 
     #[test]
-    fn adr_0044_a_deleted_repository_has_its_own_code() {
+    fn adr_0045_a_deleted_repository_has_its_own_code() {
         // The agent reports `repository_missing` for restic exit code 10.
         assert_eq!(Refusal::RepositoryDeleted.code(), "repository_deleted");
         assert_eq!(

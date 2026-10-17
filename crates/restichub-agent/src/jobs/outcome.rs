@@ -24,7 +24,7 @@ pub(super) struct Progress {
     pub(super) limit: Option<StepError>,
     /// A restic step failed before the process started.
     pub(super) restic_not_started: bool,
-    /// A restic step could not write the local repository (ADR-0044).
+    /// A restic step could not write the local repository (ADR-0045).
     pub(super) repository_read_only: bool,
 }
 
