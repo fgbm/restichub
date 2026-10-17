@@ -269,7 +269,7 @@ fn link_count(_path: &Path, metadata: &std::fs::Metadata) -> Result<u64> {
 
 #[cfg(windows)]
 fn link_count(path: &Path, _metadata: &std::fs::Metadata) -> Result<u64> {
-    Ok(crate::winsec::entry::Entry::inspect(path)?.map_or(1, |entry| u64::from(entry.links())))
+    Ok(crate::winsec::Entry::inspect(path)?.map_or(1, |entry| u64::from(entry.links())))
 }
 
 #[cfg(not(any(unix, windows)))]

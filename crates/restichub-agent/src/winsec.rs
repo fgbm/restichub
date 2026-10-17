@@ -54,7 +54,7 @@ use windows_sys::Win32::System::SystemServices::{
 };
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
-pub(crate) mod entry;
+mod entry;
 mod image;
 
 pub(crate) use entry::{Entry, Exposure, Rights};
