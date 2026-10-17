@@ -1366,23 +1366,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/secrets/{id}/usage": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Names the objects that block the delete of a secret. */
-        get: operations["secret_usage"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/secrets/{id}/value": {
         parameters: {
             query?: never;
@@ -2056,6 +2039,7 @@ export interface components {
         CreateChannelRequest: {
             enabled?: boolean;
             kind: components["schemas"]["ChannelKind"];
+            /** @description Free text of 1 to 100 characters. Unique in the tenant, ignoring the letter case. Holds no control or format character. */
             name: string;
             /** @description Required for an email channel: 1 to 20 addresses. */
             recipients?: string[];
@@ -2097,6 +2081,7 @@ export interface components {
             cron: string;
             enabled?: boolean;
             missed_run_policy: components["schemas"]["MissedRunPolicy"];
+            /** @description Free text of 1 to 100 characters. Unique in the tenant, ignoring the letter case. Holds no control or format character. */
             name: string;
             profile_id: string;
             /**
@@ -2113,7 +2098,7 @@ export interface components {
             check?: components["schemas"]["CheckOptions"] | null;
             exclude_files?: string[];
             excludes?: string[];
-            /** @description Holds 1 to 48 characters from `a-z`, `0-9`, `.`, `_` and `-`. */
+            /** @description Free text of 1 to 100 characters. Unique in the tenant, ignoring the letter case. Holds no control or format character. */
             name: string;
             options?: components["schemas"]["BackupOptions"];
             paths?: components["schemas"]["ProfilePaths"];
@@ -2372,7 +2357,7 @@ export interface components {
         /** @enum {string} */
         EnvKind: "string" | "secret_ref";
         /** @enum {string} */
-        ErrorCode: "not_found" | "service_unavailable" | "internal_error" | "unauthenticated" | "invalid_credentials" | "forbidden" | "csrf_required" | "conflict" | "invalid_argument" | "payload_too_large" | "tenant_key_missing" | "ambiguous_credentials" | "method_not_allowed" | "rate_limited" | "busy" | "shared_account" | "username_taken" | "email_taken" | "agent_offline" | "already_queued" | "agent_capability_missing" | "restore_target_denied" | "token_used" | "token_already_revoked" | "token_expired" | "agent_recently_online" | "setup_already_done" | "invalid_setup_token" | "repository_host_locked" | "not_repository_host" | "repository_in_use" | "repository_has_active_job" | "profile_in_use" | "secret_in_use" | "last_admin" | "own_account_protected" | "platform_tenant_protected";
+        ErrorCode: "not_found" | "service_unavailable" | "internal_error" | "unauthenticated" | "invalid_credentials" | "forbidden" | "csrf_required" | "conflict" | "invalid_argument" | "payload_too_large" | "tenant_key_missing" | "ambiguous_credentials" | "method_not_allowed" | "rate_limited" | "busy" | "shared_account" | "username_taken" | "email_taken" | "agent_offline" | "already_queued" | "agent_capability_missing" | "restore_target_denied" | "token_used" | "token_already_revoked" | "token_expired" | "agent_recently_online" | "setup_already_done" | "invalid_setup_token" | "repository_host_locked" | "not_repository_host" | "repository_in_use" | "repository_has_active_job" | "profile_in_use" | "secret_in_use" | "last_admin" | "own_account_protected" | "platform_tenant_protected" | "repository_location_taken";
         /** @description One value of a filter with the number of rows that hold it. */
         FacetValue: {
             /** Format: int64 */
@@ -2967,6 +2952,11 @@ export interface components {
             blockers?: components["schemas"]["Blockers"] | null;
             /** @description In snake_case. */
             code: components["schemas"]["ErrorCode"];
+            /**
+             * @description The name of the repository that holds the location; only `repository_location_taken` sets
+             *     it.
+             */
+            existing_name?: string | null;
             /** @description Set by `invalid_argument`, `username_taken` and `email_taken`. */
             field?: string | null;
             /** @description In snake_case; only `invalid_argument` sets it. */
@@ -3108,6 +3098,11 @@ export interface components {
             lock_state: components["schemas"]["LockState"];
             maintenance_agent_id?: string | null;
             name: string;
+            /**
+             * @description The names of the other repositories that hold the same location (FR-RP-11). Only the list
+             *     fills it; a duplicate came from before the rule.
+             */
+            shares_location_with: string[];
             /**
              * Format: int64
              * @description From the newest snapshot listing of the Restore screen, kept for 7 days. Null without a
@@ -3594,6 +3589,7 @@ export interface components {
         };
         UpdateChannelRequest: {
             enabled?: boolean | null;
+            /** @description Free text of 1 to 100 characters. Unique in the tenant, ignoring the letter case. Holds no control or format character. */
             name?: string | null;
             /** @description The full new address list of an email channel. */
             recipients?: string[] | null;
@@ -3624,6 +3620,7 @@ export interface components {
             cron: string;
             enabled?: boolean;
             missed_run_policy: components["schemas"]["MissedRunPolicy"];
+            /** @description Free text of 1 to 100 characters. Unique in the tenant, ignoring the letter case. Holds no control or format character. */
             name?: string | null;
             profile_id: string;
             /**
@@ -3638,6 +3635,7 @@ export interface components {
             check?: components["schemas"]["CheckOptions"] | null;
             exclude_files?: string[];
             excludes?: string[];
+            /** @description Free text of 1 to 100 characters. Unique in the tenant, ignoring the letter case. Holds no control or format character. */
             name?: string | null;
             options?: components["schemas"]["BackupOptions"];
             paths?: components["schemas"]["ProfilePaths"];
@@ -9384,56 +9382,6 @@ export interface operations {
             };
             /** @description An object uses the secret (`secret_in_use`). The body lists the objects. */
             409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemBody"];
-                };
-            };
-        };
-    };
-    secret_usage: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description The identifier of the secret. */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description What blocks the delete now. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["UsageView"];
-                };
-            };
-            /** @description The request is not authenticated. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemBody"];
-                };
-            };
-            /** @description The role is not sufficient. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemBody"];
-                };
-            };
-            /** @description The secret is not found. */
-            404: {
                 headers: {
                     [name: string]: unknown;
                 };

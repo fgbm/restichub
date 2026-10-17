@@ -1207,6 +1207,8 @@ export const ru: Record<MessageKey, string> = {
 		'На хосте работает старый агент, он не умеет это делать. Обновите пакет агента и повторите.',
 	'error.restore_target_denied':
 		'Хост не восстанавливает в этот путь. Используйте корень восстановления хоста. Корень добавляет администратор на хосте.',
+	'error.repository_location_taken':
+		'Репозиторий «{name}» уже занимает это расположение. Укажите другое расположение или используйте существующий репозиторий.',
 	'error.repository_host_locked':
 		'Хост инициализированного локального репозитория нельзя изменить. Снимки лежат на диске этого хоста.',
 	'error.not_repository_host':
@@ -1507,6 +1509,7 @@ export const ru: Record<MessageKey, string> = {
 	'channels.filters': 'Фильтры каналов',
 	'channels.name': 'Название',
 	'channels.namePlaceholder': 'например, ops-mail',
+	'names.help': 'Любой текст, до 100 символов. Имя уникально, регистр букв не важен.',
 	'channels.kind': 'Тип',
 	'channels.kind.email': 'Почта',
 	'channels.kind.webhook': 'Вебхук',
@@ -1823,7 +1826,6 @@ export const ru: Record<MessageKey, string> = {
 	'pe.section.check': 'Проверка репозитория',
 	'pe.section.scripts': 'Скрипты на хосте',
 	'pe.section.limits': 'Лимиты выполнения',
-	'pe.name.help': 'Короткое имя, по нему профиль находят в списке и в планах.',
 	'pe.paths.lead':
 		'Что копировать. По одному пути в строке. Пути «Для всех систем» берутся на любом хосте, остальные только на своей системе.',
 	'pe.excludes.lead':
@@ -2081,6 +2083,9 @@ export const ru: Record<MessageKey, string> = {
 	'hosts.status.outdated': 'Агент устарел',
 	'plans.ok': 'В норме',
 	'repositories.status.ready': 'Готов',
+	'repositories.status.sharedLocation': 'Общее расположение',
+	'repositories.sharedLocation':
+		'Это расположение занимает другой репозиторий: {names}. Два репозитория в одном месте делят блокировки и снимки. Удалите один из них.',
 	'alerts.status.resolved': 'Закрыто',
 	'channels.disabled': 'Отключён',
 	'channels.send': 'Отправлять оповещения',

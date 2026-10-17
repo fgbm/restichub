@@ -332,14 +332,18 @@ async fn ac_pf_02_the_save_validation_points_to_the_field() {
     let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
     let repository_id = repository_fixture(db.database(), tenant).await;
 
-    // Upper-case letters are refused in a name.
+    // A bidirectional override is refused in a name.
     let (status, _, problem) = send(
         &app,
         request(
             "POST",
             "/api/v1/profiles",
             Some(&cookie),
-            Some(profile_body("Upper", &repository_id, json!(["/srv"]))),
+            Some(profile_body(
+                "up\u{202E}per",
+                &repository_id,
+                json!(["/srv"]),
+            )),
         ),
     )
     .await;

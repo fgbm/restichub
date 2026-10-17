@@ -65,6 +65,7 @@ pub enum ErrorCode {
     LastAdmin,
     OwnAccountProtected,
     PlatformTenantProtected,
+    RepositoryLocationTaken,
 }
 
 impl ErrorCode {
@@ -107,6 +108,7 @@ impl ErrorCode {
             Self::LastAdmin => "last_admin",
             Self::OwnAccountProtected => "own_account_protected",
             Self::PlatformTenantProtected => "platform_tenant_protected",
+            Self::RepositoryLocationTaken => "repository_location_taken",
         }
     }
 }
@@ -120,9 +122,12 @@ pub struct ApiError {
     title: &'static str,
     field: Option<String>,
     reason: Option<Reason>,
+    /// The name of the repository that holds the location. Only `repository_location_taken` sets it.
+    existing_name: Option<String>,
     /// The `Retry-After` header value in seconds. Only `rate_limited` and `busy` set it.
     retry_after: Option<u64>,
-    blockers: Option<Blockers>,
+    // Boxed so that `Result<_, ApiError>` stays below the `result_large_err` limit.
+    blockers: Option<Box<Blockers>>,
     /// The internal detail. The response body never holds it; the mapper logs it with the request
     /// ID. The value holds no secret: every constructor takes a message, never a value.
     cause: Option<String>,
@@ -136,6 +141,7 @@ impl ApiError {
             title,
             field: None,
             reason: None,
+            existing_name: None,
             retry_after: None,
             blockers: None,
             cause: None,
@@ -411,6 +417,19 @@ impl ApiError {
         error
     }
 
+    /// Creates a `409 repository_location_taken` error on a location field: another repository of
+    /// the tenant holds the location (FR-RP-11).
+    pub fn repository_location_taken(field: &'static str, existing_name: String) -> Self {
+        let mut error = Self::new(
+            StatusCode::CONFLICT,
+            ErrorCode::RepositoryLocationTaken,
+            "Conflict",
+        );
+        error.field = Some(field.to_owned());
+        error.existing_name = Some(existing_name);
+        error
+    }
+
     /// Creates a `409 not_repository_host` error: the plan runs on another host than its local
     /// repository, so a job cannot reach the path.
     pub fn not_repository_host() -> Self {
@@ -425,7 +444,7 @@ impl ApiError {
     /// translates the code and links the records (NFR-DOC-04).
     pub fn blocked(code: ErrorCode, blockers: Blockers) -> Self {
         let mut error = Self::new(StatusCode::CONFLICT, code, "Conflict");
-        error.blockers = Some(blockers);
+        error.blockers = Some(Box::new(blockers));
         error
     }
 
@@ -545,7 +564,8 @@ impl IntoResponse for ApiError {
             request_id: String::new(),
             field: self.field,
             reason: self.reason.map(|reason| reason.as_str().to_owned()),
-            blockers: self.blockers,
+            blockers: self.blockers.map(|blockers| *blockers),
+            existing_name: self.existing_name,
         };
         let mut response = (
             self.status,
@@ -584,6 +604,10 @@ pub struct ProblemBody {
     /// set it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub blockers: Option<Blockers>,
+    /// The name of the repository that holds the location; only `repository_location_taken` sets
+    /// it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub existing_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize, ToSchema)]

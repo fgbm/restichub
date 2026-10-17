@@ -13,7 +13,7 @@ import type {
 	ScriptTemplate,
 	Secret,
 	UpdateJobTemplateRequest,
-	UpdateScriptTemplateRequest,
+	UpdateScriptTemplateRequest
 } from './types';
 
 function problem(code: string, field: string, reason: string): Error {

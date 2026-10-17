@@ -3,6 +3,7 @@
 	import { beforeNavigate, goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { ApiError, fieldError, service } from '#lib/api/index.ts';
+	import { defaultPlanName, nameError } from '#lib/names.ts';
 	import type {
 		Agent,
 		ApiProblem,
@@ -67,6 +68,8 @@
 	);
 
 	let name = $state('');
+	let nameEdited = $state(false);
+	let planNames = $state<string[]>([]);
 	let profileId = $state('');
 	let agentId = $state('');
 	let cron = $state('');
@@ -214,6 +217,7 @@
 				service.listRepositories().catch(() => [])
 			]);
 			profiles = profileList;
+			planNames = planList.map((item) => item.name);
 			agents = agentList;
 			repositories = repositoryList;
 			if (planId) {
@@ -235,6 +239,7 @@
 				profileId = profiles[0]?.id ?? '';
 				agentId = hostChoices.find((agent) => hostReason(agent) === null)?.id ?? '';
 				timeZone = browserTimeZone();
+				name = defaultPlanName(hostName, profileName, planNames);
 			}
 			baseline = stateKey;
 		} catch (problem) {
@@ -245,6 +250,12 @@
 	}
 
 	onMount(load);
+
+	// A new plan gets a name from the host and the profile until the user types one.
+	$effect(() => {
+		if (loading || planId || nameEdited) return;
+		name = defaultPlanName(hostName, profileName, planNames);
+	});
 
 	beforeNavigate(({ cancel }) => {
 		if (dirty && !saved && !window.confirm(t('rp.unsaved'))) cancel();
@@ -444,8 +455,10 @@
 		<TextField
 			id="plan-name"
 			label={t('plans.plan')}
-			error={fieldError(formProblem, 'name')}
+			help={t('names.help')}
+			error={nameError(name) ?? fieldError(formProblem, 'name')}
 			bind:value={name}
+			oninput={() => (nameEdited = true)}
 			required
 		/>
 	</ProfileSection>

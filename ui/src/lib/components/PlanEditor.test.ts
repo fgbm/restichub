@@ -152,6 +152,7 @@ describe('the plan page', () => {
 		render(PlanEditor);
 
 		expect(await screen.findByRole('heading', { level: 1, name: 'New plan' })).toBeInTheDocument();
+		await user.clear(input('#plan-name'));
 		await user.type(input('#plan-name'), 'nightly-web');
 		await user.type(input('#plan-cron'), '0 2 * * *');
 		// A new plan starts with the browser zone, so the test replaces it.
@@ -347,6 +348,46 @@ describe('the plan page', () => {
 				expect.objectContaining({ enabled: false })
 			)
 		);
+	});
+
+	it('fr_sc_01 names a new plan from the host and the profile and follows a change of the profile', async () => {
+		const user = userEvent.setup();
+		render(PlanEditor);
+
+		await screen.findByRole('heading', { level: 1, name: 'New plan' });
+		await waitFor(() => expect(input('#plan-name')).toHaveValue('win-fs01 | web-daily'));
+		await pickProfile(user, 'db-hourly');
+		await waitFor(() => expect(input('#plan-name')).toHaveValue('win-fs01 | db-hourly'));
+	});
+
+	it('fr_sc_01 makes the default name unique among the plans', async () => {
+		mocks.listPlans.mockResolvedValue([plan({ name: 'WIN-FS01 | Web-Daily' })]);
+		render(PlanEditor);
+
+		await screen.findByRole('heading', { level: 1, name: 'New plan' });
+		await waitFor(() => expect(input('#plan-name')).toHaveValue('win-fs01 | web-daily (2)'));
+	});
+
+	it('fr_sc_01 keeps the name that the user typed when the profile changes', async () => {
+		const user = userEvent.setup();
+		render(PlanEditor);
+
+		await screen.findByRole('heading', { level: 1, name: 'New plan' });
+		await waitFor(() => expect(input('#plan-name')).toHaveValue('win-fs01 | web-daily'));
+		await user.type(input('#plan-name'), '!');
+		await pickProfile(user, 'db-hourly');
+		await waitFor(() => expect(input('#plan-profile')).toHaveTextContent('db-hourly'));
+		expect(input('#plan-name')).toHaveValue('win-fs01 | web-daily!');
+	});
+
+	it('fr_sc_01 does not change the name of a stored plan', async () => {
+		const user = userEvent.setup();
+		render(PlanEditor, { planId: 'pl_1' });
+
+		await screen.findByRole('heading', { level: 1, name: 'nightly-web' });
+		await pickProfile(user, 'db-hourly');
+		await waitFor(() => expect(input('#plan-profile')).toHaveTextContent('db-hourly'));
+		expect(input('#plan-name')).toHaveValue('nightly-web');
 	});
 
 	it('fr_sc_01 shows the source section before the basics', async () => {

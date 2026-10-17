@@ -30,6 +30,20 @@ If the control plane cannot build a job, the job fails with a reason code:
 | `secret_unavailable` | A secret of the repository cannot be read. |
 | `signing_failed` | The control plane could not sign the job. |
 
+## Refused repository locations
+
+A tenant holds one repository for each location. A create or an update that names a location of another repository gives `409` with the code `repository_location_taken`. The problem names the location field and holds `existing_name`, the name of the repository that holds the location.
+
+| Backend | The location is | The field |
+|---|---|---|
+| S3 | The endpoint, the bucket and the prefix | `backend.bucket` |
+| rest | The URL | `backend.endpoint` |
+| Local | The host and the path | `backend.path` |
+
+The control plane folds the spelling before it compares. It ignores the case of the host, the default port, a trailing slash and a `.` segment.
+
+A repository that exists already stays as it is. The control plane logs a warning for it at the start, and the list marks it as a shared location.
+
 ## Reasons and result codes
 
 A failed or refused job shows a reason under its title on the page of the job. These are the texts:

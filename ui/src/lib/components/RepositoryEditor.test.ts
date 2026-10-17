@@ -78,6 +78,7 @@ function repository(overrides: Record<string, unknown> = {}) {
 		created_at: '2026-10-01T00:00:00Z',
 		updated_at: '2026-10-01T00:00:00Z',
 		created_by: 'u_01',
+		shares_location_with: [],
 		...overrides
 	};
 }
@@ -277,6 +278,40 @@ describe('the repository page', () => {
 
 		expect(
 			await screen.findByText(/A plan of the repository runs on another host/)
+		).toBeInTheDocument();
+	});
+
+	it('fr_rp_11 names the repository that holds the location the form tried to save', async () => {
+		const user = userEvent.setup();
+		mocks.listRepositories.mockResolvedValue([repository({ initialized: false })]);
+		const { ApiError } = await import('#lib/api/index.ts');
+		mocks.updateRepository.mockRejectedValue(
+			new ApiError({
+				title: 'Conflict',
+				status: 409,
+				code: 'repository_location_taken',
+				field: 'backend.path',
+				existingName: 'repo-b'
+			})
+		);
+		render(RepositoryEditor, { repositoryId: 'r_1' });
+
+		const path = await screen.findByLabelText(/Path/);
+		await user.clear(path);
+		await user.type(path, '/srv/backup/other');
+		await user.click(screen.getByRole('button', { name: 'Save' }));
+
+		expect(
+			await screen.findByText(/The repository "repo-b" already uses this location/)
+		).toBeInTheDocument();
+	});
+
+	it('fr_rp_11 warns about a repository that shares its location', async () => {
+		mocks.listRepositories.mockResolvedValue([repository({ shares_location_with: ['repo-b'] })]);
+		render(RepositoryEditor, { repositoryId: 'r_1' });
+
+		expect(
+			await screen.findByText(/Another repository uses this location: repo-b/)
 		).toBeInTheDocument();
 	});
 

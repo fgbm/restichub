@@ -751,7 +751,7 @@ export const en = {
 	'jobs.status.expired': 'Expired',
 	'jobs.status.dead_letter': 'Gave up',
 	'jobs.status.cancelled': 'Cancelled',
-	'jobs.status.succeeded_with_warnings': 'With warnings',
+	'jobs.status.succeeded_with_warnings': 'Warnings',
 	'jobs.statusFull.succeeded_with_warnings': 'Succeeded with warnings',
 	'jobs.kind.init': 'Initialize',
 	'jobs.kind.test_access': 'Test access',
@@ -1200,6 +1200,8 @@ export const en = {
 		'The host runs an older agent that cannot do this. Update the agent package and try again.',
 	'error.restore_target_denied':
 		'The host does not restore to this path. Use a restore root of the host. An administrator adds a root on the host.',
+	'error.repository_location_taken':
+		'The repository "{name}" already uses this location. Use another location or the existing repository.',
 	'error.repository_host_locked':
 		'The host of an initialized local repository cannot change. The snapshots are on the disk of this host.',
 	'error.not_repository_host':
@@ -1498,6 +1500,8 @@ export const en = {
 	'channels.filters': 'Channel filters',
 	'channels.name': 'Name',
 	'channels.namePlaceholder': 'e.g. ops-mail',
+	'names.help':
+		'Any text, up to 100 characters. The name is unique; the letter case does not matter.',
 	'channels.kind': 'Type',
 	'channels.kind.email': 'Email',
 	'channels.kind.webhook': 'Webhook',
@@ -1813,7 +1817,6 @@ export const en = {
 	'pe.section.check': 'Repository check',
 	'pe.section.scripts': 'Scripts on the host',
 	'pe.section.limits': 'Run limits',
-	'pe.name.help': 'A short name. The lists and the plans show it.',
 	'pe.paths.lead':
 		'What to back up, one path for each line. The paths for all systems apply on any host. The other paths apply on their own system only.',
 	'pe.excludes.lead':
@@ -2072,6 +2075,9 @@ export const en = {
 	'hosts.status.outdated': 'Agent too old',
 	'plans.ok': 'OK',
 	'repositories.status.ready': 'Ready',
+	'repositories.status.sharedLocation': 'Shared location',
+	'repositories.sharedLocation':
+		'Another repository uses this location: {names}. Two repositories at one location share locks and snapshots. Delete one of them.',
 	'alerts.status.resolved': 'Resolved',
 	'channels.disabled': 'Disabled',
 	'channels.send': 'Send alerts',
@@ -2318,7 +2324,7 @@ export const en = {
 	'repositories.sort.lastCheck': 'Last check',
 	'plans.tab.attention': 'Need attention',
 	'plans.sort.lastSuccess': 'Last backup',
-	'jobs.tab.warnings': 'With warnings',
+	'jobs.tab.warnings': 'Warnings',
 	'jobs.sort.duration': 'Duration',
 	'jobs.sort.finished': 'Finished',
 	'jobs.searchByName': 'Search by plan, host or repository',

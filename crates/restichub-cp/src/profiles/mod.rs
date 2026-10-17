@@ -57,11 +57,6 @@ use settings::{
     parse_profile_id, profile_value, save_warnings, stored_value, validate_create, validate_update,
 };
 
-/// Validates a name with the rule of a profile name (FR-SC-01). The caller stores the trimmed value.
-pub(crate) fn validate_name(value: &str) -> Result<String, ApiError> {
-    settings::validate_profile_name("name", value)
-}
-
 /// Query parameters of the list endpoint (FR-PF-01).
 #[derive(Debug, Default, Deserialize, IntoParams)]
 #[serde(deny_unknown_fields)]

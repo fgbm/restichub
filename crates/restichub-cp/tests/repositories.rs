@@ -28,7 +28,7 @@ fn s3_body(name: &str, password: &str, access: &str, secret: &str) -> Value {
             "kind": "s3",
             "endpoint": "https://s3.example.net",
             "bucket": "backups-prod",
-            "prefix": "snapshots"
+            "prefix": format!("snapshots-{name}")
         },
         "password": password,
         "s3_access_key": access,
@@ -480,14 +480,12 @@ async fn a_rename_allows_the_old_name_and_a_taken_name_gives_409() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+    // The renamed repository still holds the old location, so the new one takes another prefix.
+    let mut reuse = s3_body("s3-prod", "p", "a", "s");
+    reuse["backend"]["prefix"] = json!("reused");
     let (status, _, _) = send(
         &app,
-        request(
-            "POST",
-            "/api/v1/repositories",
-            Some(&cookie),
-            Some(s3_body("s3-prod", "p", "a", "s")),
-        ),
+        request("POST", "/api/v1/repositories", Some(&cookie), Some(reuse)),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED);

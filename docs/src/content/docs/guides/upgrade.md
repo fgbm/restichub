@@ -126,6 +126,7 @@ Upgrade the agents only after the new control plane works.
 
 ## Upgrade notes since 0.1.0-rc.4
 
+- Names may now contain any text. The name of a profile, a plan or an alert channel is 1 to 100 characters, with any letters, spaces and emoji. It is unique in the tenant, and the letter case does not matter. A migration replaces the old unique keys. The names that you made before stay valid.
 - Three database migrations run at the first start. They add indexes and fields of the lists, and the password reset of a platform account.
 - On Windows, `install-service` and `register` repair the access control of `%ProgramData%\ResticHub`. Read the output: it prints one line for each top-level directory, and one line for each removal and each warning. Add `--verbose` to print each repaired item. An open `%ProgramFiles%\ResticHub` is moved aside and made again, so run the command from the unpacked package. If a process keeps that folder open, the command repairs it in place and prints a warning. Until you restart the computer and run the command again, the service starts only by hand.
 - The Windows service restarts after each failure, after 5, 30 and then 60 seconds. It does not restart after the exit code 78, as on Linux.

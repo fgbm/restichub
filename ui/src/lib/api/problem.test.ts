@@ -42,6 +42,17 @@ describe('fieldError', () => {
 		expect(fieldError(taken, 'username')).toBeUndefined();
 	});
 
+	it('fr_rp_11 names the repository that holds a taken location', () => {
+		const taken: ApiProblem = {
+			status: 409,
+			code: 'repository_location_taken',
+			title: 'Conflict',
+			field: 'backend.path',
+			existingName: 'repo-b'
+		};
+		expect(fieldError(taken, 'backend.path')).toContain('"repo-b"');
+	});
+
 	it('returns undefined for another field', () => {
 		expect(fieldError(problem('username'), 'password')).toBeUndefined();
 		expect(fieldError(null, 'username')).toBeUndefined();

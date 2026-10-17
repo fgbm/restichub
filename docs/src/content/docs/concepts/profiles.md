@@ -11,7 +11,7 @@ The profile editor is one page. Select "Add profile" on the "Profiles" screen, o
 
 | Section | What you set |
 |---|---|
-| Main | The name of the profile and its repository. The name is how you find the profile in the list and in plans. |
+| Main | The name of the profile and its repository. The name is how you find the profile in the list and in plans. A name is any text of 1 to 100 characters, with letters of any script, spaces and emoji. It is unique in the tenant, and the letter case does not matter. |
 | What to back up | One path in each line. The paths for "All systems" apply on every host. The other paths apply only on their own system (Windows, Linux or macOS). |
 | Exclusions | Patterns such as `*.tmp`, or paths. One entry in each line. You can also give the path of a file on the host that holds a list of patterns ("Exclude files"). |
 | Tags | The tags of the snapshots of this profile. The retention rules and the searches use them. Type a tag and press Enter, or separate tags with a comma or a space. Each tag becomes a chip. Select the cross on a chip to remove the tag. |

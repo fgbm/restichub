@@ -226,7 +226,7 @@ describe('the Jobs screen', () => {
 		});
 		render(Jobs);
 
-		const pill = await screen.findByText('With warnings', { selector: '.status' });
+		const pill = await screen.findByText('Warnings', { selector: '.status' });
 		expect(pill).toHaveClass('status--warning');
 		expect(pill).toHaveAttribute('title', 'Succeeded with warnings');
 		expect(pill).toHaveAttribute('aria-label', 'Succeeded with warnings');
@@ -328,7 +328,7 @@ describe('the Jobs screen', () => {
 		expect(screen.getByRole('button', { name: /^Running/ })).toHaveTextContent('2');
 		expect(screen.getByRole('button', { name: /^All/ })).toHaveTextContent('124');
 		expect(screen.getByRole('button', { name: /^Succeeded/ })).toHaveTextContent('10,000+');
-		const warnings = screen.getByRole('button', { name: /^With warnings/ });
+		const warnings = screen.getByRole('button', { name: /^Warnings/ });
 		expect(warnings).toHaveTextContent('1');
 		expect(warnings.querySelector('.count')).not.toHaveClass('count--danger');
 

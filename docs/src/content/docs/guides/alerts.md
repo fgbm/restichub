@@ -48,6 +48,10 @@ The control plane stores each message in a queue before it sends it. A failed se
 
 Two control plane instances send each message once. A crash between the send and the record can repeat a send, so a receiver must accept a repeat. The webhook payload holds the field `id` for this purpose.
 
+## Name a channel
+
+The name of a channel is any text of 1 to 100 characters. It is unique in the tenant, and the letter case does not matter. The name holds no control character and no bidirectional control character. The messages show the name as plain text.
+
 ## Turn a channel off
 
 The last field of a channel form is the switch **Send alerts**. When it is off, the channel gets no alert and no test message, and the list shows the pill **Disabled** for the channel. The row action **Disable** does the same.

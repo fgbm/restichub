@@ -451,8 +451,9 @@ async fn fr_rs_04_the_restore_api_refuses_a_bad_request() {
     assert_eq!(error["code"], "agent_offline");
 
     // A repository that is not initialized gives HTTP 409.
+    let fresh_path = location.join("fresh");
     let fresh = env
-        .create_repository_at(agent.id, "pw", location.to_str().expect("a path"))
+        .create_repository_at(agent.id, "pw", fresh_path.to_str().expect("a path"))
         .await;
     let (status, _) = env
         .call(

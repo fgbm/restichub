@@ -13,6 +13,7 @@
 //! The control plane runs no init, test-access, forget, prune or check step here: they need the
 //! agent (see the epic issue). The repository therefore starts in the `not initialized` state.
 
+pub(crate) mod location;
 mod settings;
 
 use axum::Json;
@@ -69,11 +70,15 @@ pub async fn list_repositories(
             Ok((list, health_repo::health(tx, &ids).await?))
         })
         .await?;
+    let sharing = location::sharing_names(&list);
     let items = list
         .iter()
-        .map(|repository| {
+        .zip(sharing)
+        .map(|(repository, shares)| {
             let facts = health.iter().find(|facts| facts.id == repository.id);
-            RepositoryView::new(repository, facts)
+            let mut view = RepositoryView::new(repository, facts);
+            view.shares_location_with = shares;
+            view
         })
         .collect();
     Ok(Json(RepositoryListResponse { items }))
@@ -163,6 +168,13 @@ pub async fn create_repository(
     let owner = repository_id.to_string();
     let mut tx = state.db().begin_tenant(context.tenant_id).await?;
     ensure_agent(&mut tx, maintenance_agent_id).await?;
+    location::ensure_location_free(
+        &mut tx,
+        &location::key_of_backend(&backend, maintenance_agent_id),
+        backend.kind,
+        None,
+    )
+    .await?;
 
     let password_secret = create_bound_secret(
         &mut tx,
@@ -318,6 +330,15 @@ pub async fn update_repository(
         if restichub_db::jobs::has_active_for_repository(&mut tx, repository_id).await? {
             return Err(ApiError::conflict());
         }
+    }
+    if location_changed {
+        location::ensure_location_free(
+            &mut tx,
+            &location::key_of_backend(&backend, agent),
+            backend.kind,
+            Some(repository_id),
+        )
+        .await?;
     }
     if host_changed {
         let Some(host) = agent else {

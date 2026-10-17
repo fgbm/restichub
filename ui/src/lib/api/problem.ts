@@ -20,6 +20,8 @@ export interface ApiProblem {
 	reason?: string;
 	/** The records that block a delete. */
 	blockers?: Blockers;
+	/** The repository that holds a taken location. */
+	existingName?: string;
 }
 
 function asString(value: unknown): string | undefined {
@@ -44,7 +46,8 @@ export function parseProblem(body: unknown, status: number): ApiProblem {
 			type: asString(wire.type),
 			field: asString(wire.field),
 			reason: asString(wire.reason),
-			blockers: wire.blockers ?? undefined
+			blockers: wire.blockers ?? undefined,
+			existingName: asString(wire.existing_name)
 		};
 	}
 	return {
@@ -65,6 +68,9 @@ export function fieldError(
 	field: string
 ): string | undefined {
 	if (!problem || problem.field !== field) return undefined;
+	if (problem.code === 'repository_location_taken') {
+		return t('error.repository_location_taken', { name: problem.existingName ?? '' });
+	}
 	const byCode = problem.code === 'invalid_argument' ? undefined : tErrorCode(problem.code);
 	return tErrorReason(problem.reason) ?? byCode ?? t('error.field');
 }

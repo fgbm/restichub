@@ -48,11 +48,11 @@ describe('job states', () => {
 		}
 	});
 
-	it('shows success with warnings as With warnings in the warning tone with the full meaning', () => {
+	it('shows success with warnings as Warnings in the warning tone with the full meaning', () => {
 		const state = jobState({ status: 'succeeded', result_code: 'succeeded_with_warnings' });
 		expect(pillOf(state)).toEqual({
 			tone: 'warning',
-			label: 'With warnings',
+			label: 'Warnings',
 			full: 'Succeeded with warnings'
 		});
 	});
@@ -132,6 +132,13 @@ describe('other entity states', () => {
 			icon: 'lock-keyhole'
 		});
 		expect(pillOf(repositoryState({ initialized: true, lock_state: 'held' }))).toBeNull();
+	});
+
+	it('fr_rp_11 ranks a shared location before the other repository states', () => {
+		expect(repositoryState({ initialized: false, shares_location_with: ['repo-b'] })).toMatchObject(
+			{ key: 'sharedLocation', tone: 'warning' }
+		);
+		expect(repositoryState({ initialized: true, shares_location_with: [] }).key).toBe('ready');
 	});
 
 	it('warns about an API token that expires within 14 days', () => {

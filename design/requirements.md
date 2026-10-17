@@ -144,6 +144,7 @@ A user can be a member of more than one tenant. In the MVP a role applies to the
 | FR-RP-08 | Each repository has one maintenance agent. Only this agent runs `forget`, `prune` and `check`. A dedicated host is recommended. | M |
 | FR-RP-09 | Capacity tracking: size, growth, bucket quota, alert near the limit. | 1.0 |
 | FR-RP-10 | A local repository is bound to one host, the repository host. This host is its maintenance host, and every job of the repository runs on it. The host is necessary at the creation and cannot change after the initialization, except by the replace of a host record (ADR-0046). | M |
+| FR-RP-11 | A tenant holds one repository for each location. The location of an S3 repository is the endpoint, the bucket and the prefix. The location of a rest repository is the URL. The location of a local repository is the host and the path. The CP folds the spelling of a location (host case, default port, trailing slash) before it compares. A create or an update to a location that another repository holds is refused with `repository_location_taken`. The CP does not change a duplicate that exists already; it warns at the start and marks it in the list. | M |
 
 ### 3.6. Profiles and compiler
 

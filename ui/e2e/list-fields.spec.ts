@@ -68,7 +68,7 @@ test('fr_ui_01 the job tabs show the server counts and a tab narrows the list', 
 	await signIn(page);
 	await open(page, 'Jobs');
 	const tabs = page.getByRole('group', { name: 'States' });
-	const warnings = tabs.getByRole('button', { name: /^With warnings \d+$/ });
+	const warnings = tabs.getByRole('button', { name: /^Warnings \d+$/ });
 	await expect(warnings).toBeVisible();
 	await expect(tabs.getByRole('button', { name: /^Failed \d+$/ })).toBeVisible();
 	await warnings.click();
