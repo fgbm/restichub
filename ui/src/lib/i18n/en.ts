@@ -2053,7 +2053,7 @@ export const en = {
 	'repositories.sort.name': 'Name',
 	'repositories.meta.maintenance': 'maintenance on {name}',
 	'repositories.meta.noMaintenance': 'no maintenance host',
-	'hosts.tab.active': 'Active',
+	'hosts.tab.active': 'All',
 	'hosts.tab.offline': 'Offline',
 	'hosts.tab.revoked': 'Revoked',
 	'hosts.sort.name': 'Name',
