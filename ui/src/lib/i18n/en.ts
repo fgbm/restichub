@@ -1887,6 +1887,7 @@ export const en = {
 		'Keep all snapshots that are not older than this period than the newest snapshot. The count starts at the newest snapshot, not at today. For example <code>30d</code> is 30 days and <code>1y2m</code> is a year and two months.',
 	'pe.rule.within.hint': 'For example: 30d, 1y2m',
 	'pe.rule.within.invalid': 'The period is not valid. For example: 30d, 6m, 1y2m7d3h.',
+	'pe.rules.title': 'Rules',
 	'pe.rule.tags.title': 'Tags that are never deleted',
 	'pe.rule.tags.text':
 		'A snapshot with any of these tags stays always, whatever the other rules decide.',
