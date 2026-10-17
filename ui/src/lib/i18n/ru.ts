@@ -2049,7 +2049,7 @@ export const ru: Record<MessageKey, string> = {
 	'repositories.sort.name': 'Имя',
 	'repositories.meta.maintenance': 'обслуживает {name}',
 	'repositories.meta.noMaintenance': 'нет хоста обслуживания',
-	'hosts.tab.active': 'Действующие',
+	'hosts.tab.active': 'Все',
 	'hosts.tab.offline': 'Не в сети',
 	'hosts.tab.revoked': 'Отозваны',
 	'hosts.sort.name': 'Имя',
