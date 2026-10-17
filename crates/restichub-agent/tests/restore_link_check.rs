@@ -203,3 +203,26 @@ async fn fr_ag_10_a_cancel_during_the_link_check_cancels_the_step() {
     assert_eq!(result.step("restore").status, StepStatus::Cancelled as i32);
     assert_eq!(fixture.commands(), vec!["ls".to_owned()]);
 }
+
+/// AC-AG-05: a failed listing keeps the restic exit code that names the cause.
+#[tokio::test(flavor = "multi_thread")]
+async fn ac_ag_05_a_failed_listing_keeps_the_restic_exit_code() {
+    for (code, status) in [
+        (10, StepStatus::ConfigError),
+        (11, StepStatus::Retry),
+        (12, StepStatus::ConfigError),
+    ] {
+        let fixture = Fixture::new(&format!("link-check-exit-{code}"), 3);
+        std::fs::write(
+            format!("{}.restichub-code-ls", fixture.repository.display()),
+            code.to_string(),
+        )
+        .expect("cannot write the code");
+        let jobs = program_jobs(&fixture.dir).with_restore_link_rule(true);
+        let result = run(&jobs, &fixture.job(&format!("job-exit-{code}"), |_| {})).await;
+        let step = result.step("restore");
+        assert_eq!(step.status, status as i32, "code {code}");
+        assert_eq!(step.exit_code, code, "code {code}");
+        assert_eq!(fixture.commands(), vec!["ls".to_owned()]);
+    }
+}

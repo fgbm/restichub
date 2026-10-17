@@ -789,7 +789,7 @@ export const en = {
 	'jobs.reason.succeeded_with_warnings': 'Finished with warnings.',
 	'jobs.errorCode.interrupted': 'interrupted by an agent restart',
 	'jobs.errorCode.step_failed': 'restic error',
-	'jobs.errorCode.step_not_started': 'restic did not start',
+	'jobs.errorCode.step_not_started': 'The step did not start',
 	'jobs.errorCode.wrong_password': 'wrong password or keys',
 	'jobs.errorCode.repository_missing': 'repository not found',
 	'jobs.errorCode.hook_failed': 'script or hook error',

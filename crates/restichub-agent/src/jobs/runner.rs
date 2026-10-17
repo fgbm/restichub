@@ -199,7 +199,7 @@ impl StepOutcome {
         Some(detail)
     }
 
-    fn from_exit(code: i32) -> Self {
+    pub(super) fn from_exit(code: i32) -> Self {
         let outcome = Self::new(status_for_exit(code), code);
         if code == 10 {
             Self {

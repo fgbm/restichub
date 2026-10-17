@@ -262,6 +262,15 @@ impl Jobs {
                 StepOutcome::not_started_because(&reason)
             }
             None if code == 0 => return None,
+            // The codes that name the repository or its lock keep their meaning (AC-AG-05).
+            None if matches!(code, 10..=12) => {
+                log.push(
+                    step_id,
+                    LogStream::Agent,
+                    &cannot_check_text(&format!("restic ls exited with the code {code}")),
+                );
+                StepOutcome::from_exit(code)
+            }
             None => cannot_check(&format!("restic ls exited with the code {code}")),
         })
     }

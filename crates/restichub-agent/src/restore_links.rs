@@ -85,11 +85,22 @@ fn literal_prefix(pattern: &str, flavor: PathFlavor) -> Option<(Vec<String>, boo
         PathFlavor::Posix => &['/'],
     };
     let rest = pattern.strip_prefix(separators)?;
+    // restic cleans the pattern first: a `..` can move the path out of the leading components,
+    // and a UNC volume turns into an empty part, which restic reads as `**`.
+    if flavor == PathFlavor::Windows && rest.starts_with(separators) {
+        return None;
+    }
     let mut prefix = Vec::new();
     for part in rest.split(separators).filter(|part| !part.is_empty()) {
+        if part == ".." {
+            return None;
+        }
+        if part == "." {
+            continue;
+        }
         let wildcard = part.contains(['*', '?', '[', '$'])
             || (flavor == PathFlavor::Posix && part.contains('\\'));
-        if wildcard || part == "." || part == ".." {
+        if wildcard {
             return Some((prefix, false));
         }
         prefix.push(part.to_owned());
@@ -367,6 +378,19 @@ mod tests {
             exclude.writes(&parts("/C/data/a.txt")),
             "restic compares the case"
         );
+    }
+
+    #[test]
+    fn fr_rs_03_a_pattern_that_restic_rewrites_selects_the_rewritten_path() {
+        let dotdot = Selection::new(&strings(&["/C/../D/x"]), &[], PathFlavor::Posix);
+        assert!(dotdot.writes(&parts("/D/x")));
+        let unc = Selection::new(&strings(&[r"\\srv\share"]), &[], PathFlavor::Windows);
+        assert!(unc.writes(&parts("/C/a/srv/share")));
+        let dots = Selection::new(&strings(&["/./srv//app/./x"]), &[], PathFlavor::Posix);
+        assert!(dots.writes(&parts("/srv/app/x/y")));
+        assert!(!dots.writes(&parts("/srv/other")));
+        let exclude = Selection::new(&[], &strings(&["/srv/../etc"]), PathFlavor::Posix);
+        assert!(exclude.writes(&parts("/etc/passwd")));
     }
 
     #[test]
