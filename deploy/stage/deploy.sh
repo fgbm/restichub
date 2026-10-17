@@ -4,6 +4,10 @@
 # Run this script from the workstation. It copies the deployment files, creates
 # the environment file on the server if it is missing, pulls the image and
 # starts the stack. The script prints no secret.
+#
+# Usage: deploy.sh [<commit>]. The stack runs the image `sha-<commit>`. The
+# commit comes from the argument, else from STAGE_IMAGE_SHA, else it is the
+# local main.
 
 set -euo pipefail
 
@@ -31,6 +35,40 @@ dir=/opt/restichub
 compose="$dir/compose.yaml"
 
 repo_root="$(cd "$here/../.." && pwd)"
+
+image_repo=fgbm/restichub-cp
+commit="${1:-${STAGE_IMAGE_SHA:-main}}"
+if ! sha="$(git -C "$repo_root" rev-parse --verify --quiet "$commit^{commit}")"; then
+	case "$commit" in
+	*[!0-9a-f]*) sha="" ;;
+	*) if [ "${#commit}" -eq 40 ]; then sha="$commit"; else sha=""; fi ;;
+	esac
+fi
+if [ -z "$sha" ]; then
+	echo "$commit is not a commit in $repo_root and not a full commit hash" >&2
+	exit 1
+fi
+tag="sha-$sha"
+
+# The workflow `Images` publishes the tag some minutes after CI passes on main.
+wait_minutes="${STAGE_IMAGE_WAIT_MINUTES:-30}"
+echo "== wait for the image ghcr.io/$image_repo:$tag (at most $wait_minutes min) =="
+deadline=$(($(date +%s) + wait_minutes * 60))
+while :; do
+	token="$(curl -fsS "https://ghcr.io/token?scope=repository:$image_repo:pull" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')" || token=""
+	if [ -n "$token" ] && curl -fsS -o /dev/null -I \
+		-H "Authorization: Bearer $token" \
+		-H "Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json" \
+		"https://ghcr.io/v2/$image_repo/manifests/$tag" 2>/dev/null; then
+		break
+	fi
+	if [ "$(date +%s)" -ge "$deadline" ]; then
+		echo "the image $tag is not in the registry after $wait_minutes min; check the CI and Images runs of $sha" >&2
+		exit 1
+	fi
+	echo "the image $tag is not published yet; next check in 30 s"
+	sleep 30
+done
 
 echo "== copy the deployment files to $host:$dir =="
 ssh "$host" "install -d -m 0700 -o root -g root '$dir'"
@@ -60,8 +98,8 @@ ssh "$host" "chmod 0644 '$dir/compose.yaml'"
 # a single-quoted value as it is, so `$` and `#` in a password stay as typed. Compose has no
 # escape for a single quote inside single quotes, so such a value is refused.
 alert_vars="RESTICHUB_PUBLIC_ORIGIN RESTICHUB_NOTIFICATIONS_LANGUAGE RESTICHUB_SMTP_HOST RESTICHUB_SMTP_PORT RESTICHUB_SMTP_SECURITY RESTICHUB_SMTP_USERNAME RESTICHUB_SMTP_PASSWORD RESTICHUB_SMTP_FROM RESTICHUB_WEBHOOK_ALLOW_HTTP RESTICHUB_WEBHOOK_ALLOW_NETWORKS"
-alert_lines="$(mktemp)"
-trap 'rm -f "$alert_lines"' EXIT
+env_lines="$(mktemp)"
+trap 'rm -f "$env_lines"' EXIT
 alert_names=""
 for name in $alert_vars; do
 	value="${!name:-}"
@@ -76,13 +114,14 @@ for name in $alert_vars; do
 		exit 1
 		;;
 	esac
-	printf "%s='%s'\n" "$name" "$value" >>"$alert_lines"
+	printf "%s='%s'\n" "$name" "$value" >>"$env_lines"
 	alert_names="${alert_names:+$alert_names|}$name"
 done
-if [ -n "$alert_names" ]; then
-	echo "== set the alert settings on the server =="
-	ssh "$host" "cd '$dir' && umask 077 && { grep -v -E '^($alert_names)=' .env || true; cat; } > .env.new && mv .env.new .env" <"$alert_lines"
-fi
+# The tag goes to the environment file, so a later `docker compose up` on the server keeps the
+# pinned image.
+printf "RESTICHUB_IMAGE_TAG='%s'\n" "$tag" >>"$env_lines"
+echo "== set the image tag and the alert settings on the server =="
+ssh "$host" "cd '$dir' && umask 077 && { grep -v -E '^(RESTICHUB_IMAGE_TAG${alert_names:+|$alert_names})=' .env || true; cat; } > .env.new && mv .env.new .env" <"$env_lines"
 
 echo "== pull the image and start the stack =="
 ssh "$host" "docker compose -f '$compose' pull"

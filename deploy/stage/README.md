@@ -56,7 +56,7 @@ The host is the SSH alias of the staging server. The deploy script fails if the 
    deploy/stage/deploy.sh
    ```
 
-   The script copies the files to `/opt/restichub`. It creates `.env` if the file is missing. It pulls the image and starts the stack. It waits for the control plane.
+   The script waits until the image of the commit is in the registry. It copies the files to `/opt/restichub`. It creates `.env` if the file is missing. It pulls the image and starts the stack. It waits for the control plane. See [The image tag](#the-image-tag).
 
 2. Read the one-time setup token on the server:
 
@@ -109,7 +109,18 @@ Do the rollback in this order:
 
 ## The image tag
 
-The stack uses the tag `edge` by default. Set `RESTICHUB_IMAGE_TAG` in `.env` to a tag `sha-<short>` to deploy one commit. The workflow `Images` publishes both tags.
+The workflow `Images` publishes the image of each commit on main after CI passes. The image gets the tags `sha-<full hash>` and `sha-<short hash>`. These tags do not change. The tag `edge` moves only forward: to the tip of main or to a commit that comes after the commit of the current `edge`.
+
+`deploy.sh` deploys the image of one commit. The commit is the local `main` by default. To deploy a different commit, give it as the argument or in `STAGE_IMAGE_SHA`:
+
+```sh
+deploy/stage/deploy.sh 0123456789abcdef0123456789abcdef01234567
+STAGE_IMAGE_SHA=origin/main deploy/stage/deploy.sh
+```
+
+The script accepts a revision of the local repository or a full commit hash. It waits for the tag `sha-<full hash>` in the registry for 30 minutes at most. `STAGE_IMAGE_WAIT_MINUTES` changes the limit. If the tag does not appear, the script stops before it changes the server. Then examine the runs of CI and `Images` for the commit.
+
+The script writes the tag to `RESTICHUB_IMAGE_TAG` in `.env` on the server. A later `docker compose up` on the server keeps the same image.
 
 ## The tenancy mode
 
