@@ -330,9 +330,10 @@ describe('the Hosts screen', () => {
 
 		await user.clear(input);
 		await user.type(input, '   ');
-		await waitFor(() =>
-			expect(within(dialog).getByRole('button', { name: 'Rename' })).toBeDisabled()
-		);
+		await user.click(within(dialog).getByRole('button', { name: 'Rename' }));
+		expect(await within(dialog).findByText('This field is required.')).toBeVisible();
+		expect(input).toHaveFocus();
+		expect(mocks.renameAgent).not.toHaveBeenCalled();
 
 		await user.clear(input);
 		await user.type(input, '  new-name  ');
@@ -550,6 +551,57 @@ describe('the Hosts screen', () => {
 		await waitFor(() =>
 			expect(screen.queryByText('Pending registrations')).not.toBeInTheDocument()
 		);
+	});
+
+	it('fr_id_01 sends the labels of the Add host dialog as an array', async () => {
+		const user = userEvent.setup();
+		mocks.createEnrollmentToken.mockResolvedValue({
+			id: 'e_1',
+			token: 're_SECRETVALUE',
+			display_prefix: 'SECRETVA',
+			labels: ['test', 'timeweb'],
+			expires_at: FUTURE,
+			created_at: PAST,
+			replaces_agent_id: null
+		});
+		render(Hosts);
+
+		await user.click(await screen.findByRole('button', { name: 'Add host' }));
+		const dialog = await screen.findByRole('dialog');
+		const field = within(dialog).getByLabelText('Labels');
+		await user.type(field, 'test, timeweb, Bad_label,');
+		expect(within(dialog).getByRole('alert')).toHaveTextContent(
+			'Bad_label: Use only the letters a-z, the digits 0-9 and the hyphen.'
+		);
+		expect(field).toHaveValue('Bad_label,');
+		await user.clear(field);
+		await user.click(within(dialog).getByRole('button', { name: 'Remove test' }));
+		await user.type(field, 'test ');
+		await user.click(within(dialog).getByRole('button', { name: 'Create token' }));
+
+		await within(dialog).findByDisplayValue('re_SECRETVALUE');
+		expect(mocks.createEnrollmentToken).toHaveBeenCalledWith({ labels: ['timeweb', 'test'] });
+	});
+
+	it('fr_id_01 sends no labels when the Add host dialog has none', async () => {
+		const user = userEvent.setup();
+		mocks.createEnrollmentToken.mockResolvedValue({
+			id: 'e_1',
+			token: 're_SECRETVALUE',
+			display_prefix: 'SECRETVA',
+			labels: [],
+			expires_at: FUTURE,
+			created_at: PAST,
+			replaces_agent_id: null
+		});
+		render(Hosts);
+
+		await user.click(await screen.findByRole('button', { name: 'Add host' }));
+		const dialog = await screen.findByRole('dialog');
+		await user.click(within(dialog).getByRole('button', { name: 'Create token' }));
+
+		await within(dialog).findByDisplayValue('re_SECRETVALUE');
+		expect(mocks.createEnrollmentToken).toHaveBeenCalledWith({ labels: undefined });
 	});
 
 	it('tells in the Add host dialog that the host used the token (FR-ID-01)', async () => {

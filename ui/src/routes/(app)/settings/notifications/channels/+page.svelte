@@ -16,22 +16,26 @@
 		Checkbox,
 		CopyField,
 		Dialog,
-		Field,
 		FilterBar,
 		ListView,
 		Select,
+		TagInput,
 		TextField
 	} from '#lib/components/ui/index.ts';
 	import type { FilterFacet, ListMeta, RowAction, SelectOption } from '#lib/components/ui/index.ts';
 	import { ago, changedAt } from '#lib/list-format.ts';
 	import { channelState, iconOf, pillOf } from '#lib/vocabulary.ts';
 	import { facetCounts, matchesSearch, splitList } from '#lib/filters.ts';
+	import { emptyError, focusFirstInvalid } from '#lib/form.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { t, tChannelError, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
 	const FIELDS = ['name', 'kind', 'recipients', 'url'];
+	// The server takes at most 20 recipients and keeps these characters out of the SMTP envelope.
+	const MAX_RECIPIENTS = 20;
+	const ADDRESS = /^[^\s@<>,;"]+@[^\s@<>,;"]+$/;
 
 	let channels = $state<NotificationChannel[]>([]);
 	let emailConfigured = $state(true);
@@ -41,12 +45,13 @@
 	let formOpen = $state(false);
 	let editing = $state<NotificationChannel | null>(null);
 	let saving = $state(false);
+	let formSubmitted = $state(false);
 	let formError = $state<string | null>(null);
 	let formProblem = $state<ApiProblem | null>(null);
 	let name = $state('');
 	let kind = $state<ChannelKind>('email');
 	let enabled = $state(true);
-	let recipients = $state('');
+	let recipients = $state<string[]>([]);
 	let url = $state('');
 
 	let secret = $state<string | null>(null);
@@ -188,10 +193,11 @@
 		name = '';
 		kind = 'email';
 		enabled = true;
-		recipients = '';
+		recipients = [];
 		url = '';
 		formError = null;
 		formProblem = null;
+		formSubmitted = false;
 	}
 
 	function openCreate(): void {
@@ -206,15 +212,12 @@
 		name = channel.name;
 		kind = channel.kind;
 		enabled = channel.enabled;
-		recipients = channel.recipients.join('\n');
+		recipients = [...channel.recipients];
 		formOpen = true;
 	}
 
-	function recipientList(): string[] {
-		return recipients
-			.split(/[\n,;]+/)
-			.map((address) => address.trim())
-			.filter((address) => address !== '');
+	function checkAddress(address: string): string | null {
+		return ADDRESS.test(address) ? null : t('channels.recipientInvalid');
 	}
 
 	function showSecret(value: string | null | undefined): void {
@@ -229,6 +232,8 @@
 	});
 
 	async function save(): Promise<void> {
+		formSubmitted = true;
+		if (focusFirstInvalid([['channel-name', name === '']])) return;
 		saving = true;
 		formError = null;
 		formProblem = null;
@@ -236,13 +241,13 @@
 			let saved;
 			if (editing) {
 				const patch: UpdateChannelRequest = { name, enabled };
-				if (editing.kind === 'email') patch.recipients = recipientList();
+				if (editing.kind === 'email') patch.recipients = [...recipients];
 				else if (url.trim()) patch.url = url.trim();
 				saved = await service.updateChannel(editing.id, patch);
 			} else {
 				const request: CreateChannelRequest =
 					kind === 'email'
-						? { name, kind, enabled, recipients: recipientList() }
+						? { name, kind, enabled, recipients: [...recipients] }
 						: { name, kind, enabled, url: url.trim() };
 				saved = await service.createChannel(request);
 			}
@@ -415,7 +420,7 @@
 		id="channel-name"
 		label={t('channels.name')}
 		placeholder={t('channels.namePlaceholder')}
-		error={fieldError(formProblem, 'name')}
+		error={emptyError(formSubmitted, name) ?? fieldError(formProblem, 'name')}
 		bind:value={name}
 		required
 	/>
@@ -427,19 +432,18 @@
 		bind:value={kind}
 	/>
 	{#if kind === 'email'}
-		<Field
+		<TagInput
+			id="channel-recipients"
 			label={t('channels.recipients')}
 			help={t('channels.recipientsHint')}
 			error={fieldError(formProblem, 'recipients')}
-			for="channel-recipients"
-		>
-			<textarea
-				id="channel-recipients"
-				class="rh-textarea rh-input--mono"
-				rows="3"
-				placeholder={t('common.example', { value: 'ops@example.com' })}
-				bind:value={recipients}></textarea>
-		</Field>
+			placeholder={t('common.example', { value: 'ops@example.com' })}
+			mono
+			max={MAX_RECIPIENTS}
+			separator={/[\s,;]+/}
+			check={checkAddress}
+			bind:value={recipients}
+		/>
 	{:else}
 		<TextField
 			id="channel-url"
@@ -466,7 +470,7 @@
 			</span>
 		{/if}
 		<Button onclick={() => (formOpen = false)}>{t('common.cancel')}</Button>
-		<Button type="submit" variant="primary" loading={saving} disabled={!name}>
+		<Button type="submit" variant="primary" loading={saving}>
 			{t('common.save')}
 		</Button>
 	{/snippet}

@@ -21,7 +21,7 @@ The control plane rotates the issuing CA by itself. Do not rotate the issuing CA
 ## Before you start
 
 - Plan a maintenance window. Every agent must register again, so no agent runs a job until you finish.
-- Copy the control plane database and the key encryption key (KEK).
+- Copy the control plane database and the key encryption key (KEK). Keep the copy of the KEK apart from the database copy.
 - Make one enrollment token for each host. See [Register an agent](/restichub/getting-started/add-a-host/).
 
 ## Procedure

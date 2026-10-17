@@ -7,6 +7,8 @@ hero:
   tagline: "The control plane keeps profiles, schedules and secrets. A thin agent on each host runs restic."
 ---
 
+import Diagram from '../../components/Diagram.astro';
+
 <div class="rh-cards">
 <a class="rh-card" href="/restichub/getting-started/install-control-plane/"><span class="rh-step">1</span><strong>Install the control plane</strong><span>Start the server and open the web interface.</span></a>
 <a class="rh-card" href="/restichub/getting-started/add-a-host/"><span class="rh-step">2</span><strong>Add a host</strong><span>Register an agent with a one-time token.</span></a>
@@ -15,16 +17,9 @@ hero:
 
 ## How it works
 
-<div class="rh-how">
-<svg viewBox="-2 0 764 120" role="img" aria-label="How ResticHub works">
-<defs><marker id="rh-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 10 5 0 10z" class="head"/></marker></defs>
-<rect class="lead" x="0" y="20" width="170" height="80" rx="8"/><text x="85" y="55">Control plane</text><text class="sub" x="85" y="76">schedules, secrets</text>
-<rect class="box" x="214" y="20" width="150" height="80" rx="8"/><text x="289" y="55">Agent</text><text class="sub" x="289" y="76">on each host</text>
-<rect class="box" x="394" y="20" width="150" height="80" rx="8"/><text x="469" y="55">restic</text><text class="sub" x="469" y="76">runs the backup</text>
-<rect class="box" x="606" y="20" width="150" height="80" rx="8"/><text x="681" y="55">Repository</text><text class="sub" x="681" y="76">stores the data</text>
-<path class="arrow" d="M170 60H212" marker-end="url(#rh-ah)"/><path class="arrow" d="M364 60H392" marker-end="url(#rh-ah)"/><path class="arrow" d="M544 60H604" marker-end="url(#rh-ah)"/>
-</svg>
-</div>
+<Diagram name="architecture" label="The connections between the browser, the control plane, the agents and the repositories" />
+
+The agent opens the connection to the control plane. The control plane never connects to a host. The backup data goes from the host to the repository directly.
 
 :::caution
 ResticHub is pre-release. The MVP is built and is in acceptance testing on real hosts. There is no stable release yet, and the interfaces can still change.

@@ -10,10 +10,12 @@
 		Button,
 		Checkbox,
 		Dialog,
+		Field,
 		Select,
 		TextField
 	} from '#lib/components/ui/index.ts';
 	import type { SelectOption } from '#lib/components/ui/index.ts';
+	import { emptyError, focusFirstInvalid } from '#lib/form.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
 	import {
@@ -54,6 +56,7 @@
 	let verify = $state(false);
 	let submitting = $state(false);
 	let problem = $state<ApiProblem | null>(null);
+	let submitted = $state(false);
 	let failure = $state<string | null>(null);
 
 	// A repository with a local path lives on one host, so only its maintenance host can read it.
@@ -97,7 +100,7 @@
 			: landingPath(trimmed, paths[0] ?? snapshot.paths[0] ?? '', windows)
 	);
 	const mode = $derived(dryRun ? 'modeDryRun' : verify ? 'modeVerify' : 'modeRestore');
-	const blocked = $derived(!agentId || trimmed === '' || relative || outside || roots.length === 0);
+	const blocked = $derived(!agentId || relative || outside || roots.length === 0);
 	let suggested = '';
 
 	// The target follows the suggestion of the selected host until the person types another one.
@@ -124,10 +127,12 @@
 		verify = false;
 		problem = null;
 		failure = null;
+		submitted = false;
 	});
 
 	async function submit(): Promise<void> {
-		if (blocked) return;
+		submitted = true;
+		if (focusFirstInvalid([['restore-target', trimmed === '']]) || blocked) return;
 		submitting = true;
 		problem = null;
 		failure = null;
@@ -190,11 +195,12 @@
 				placeholder={windows
 					? t('common.example', { value: 'D:\\restore' })
 					: t('restore.dialog.targetPlaceholder')}
-				error={relative
-					? t('restore.dialog.targetRelative')
-					: outside
-						? t('restore.dialog.targetOutside')
-						: fieldError(problem, 'target')}
+				error={emptyError(submitted, trimmed) ??
+					(relative
+						? t('restore.dialog.targetRelative')
+						: outside
+							? t('restore.dialog.targetOutside')
+							: fieldError(problem, 'target'))}
 				mono
 				autocomplete="off"
 				bind:value={target}
@@ -231,16 +237,19 @@
 			</Alert>
 		{/if}
 		{#if wholeSnapshot}
-			<TextField
-				id="restore-excludes"
+			<Field
 				label={t('restore.dialog.excludes')}
 				help={t('restore.dialog.excludesHelp')}
 				error={fieldError(problem, 'excludes')}
-				placeholder={t('restore.dialog.excludesPlaceholder')}
-				mono
-				autocomplete="off"
-				bind:value={excludeText}
-			/>
+				for="restore-excludes"
+			>
+				<textarea
+					id="restore-excludes"
+					class="rh-textarea rh-input--mono"
+					rows="2"
+					placeholder={t('restore.dialog.excludesPlaceholder')}
+					bind:value={excludeText}></textarea>
+			</Field>
 		{/if}
 		<Select
 			id="restore-overwrite"

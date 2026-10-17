@@ -186,7 +186,7 @@ describe('Snapshot page', () => {
 		render(Snapshot);
 		const dialog = await openDialog(user);
 		const field = within(dialog).getByLabelText('Exclude paths');
-		await user.type(field, '*.tmp, /var/cache');
+		await user.type(field, '*.tmp{Enter}/var/cache');
 		expect(within(dialog).getByText('Whole snapshot', { selector: 'span' })).toBeVisible();
 		await user.click(within(dialog).getByRole('button', { name: 'Start restore' }));
 		await waitFor(() =>

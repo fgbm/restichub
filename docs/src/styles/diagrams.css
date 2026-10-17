@@ -1,0 +1,30 @@
+/* Diagrams of src/diagrams. The SVG uses these variables, so the theme switch recolours it. */
+.rh-figure { margin: 1.5rem 0; overflow-x: auto; }
+.rh-diagram {
+	display: block;
+	max-width: 100%;
+	height: auto;
+	--bg: var(--sl-color-bg);
+	--fg: var(--sl-color-white);
+	--line: var(--sl-color-gray-3);
+	--accent: var(--sl-color-accent);
+	--muted: var(--sl-color-gray-2);
+	--surface: var(--sl-color-gray-6);
+	--border: var(--sl-color-gray-4);
+	/* The derivation of beautiful-mermaid 1.1.3, without its remote font import. */
+	--_text: var(--fg);
+	--_text-sec: var(--muted);
+	--_text-muted: var(--muted);
+	--_text-faint: color-mix(in srgb, var(--fg) 25%, var(--bg));
+	--_line: var(--line);
+	--_arrow: var(--accent);
+	--_node-fill: var(--surface);
+	--_node-stroke: var(--border);
+	--_group-fill: var(--bg);
+	--_group-hdr: color-mix(in srgb, var(--fg) 5%, var(--bg));
+	--_inner-stroke: color-mix(in srgb, var(--fg) 12%, var(--bg));
+	--_key-badge: color-mix(in srgb, var(--fg) 10%, var(--bg));
+}
+.rh-diagram text { font-family: var(--__sl-font); }
+/* A message label of a sequence diagram can cross a lifeline. The halo keeps it readable. */
+.rh-diagram .message text { paint-order: stroke; stroke: var(--bg); stroke-width: 4px; stroke-linejoin: round; }

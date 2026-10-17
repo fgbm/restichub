@@ -1,0 +1,22 @@
+flowchart TB
+  subgraph cp [Control plane]
+    admin[An {{users.role.admin}} writes profiles and server scripts]
+    sign[The job signing key signs each job]
+    secret[Repository secrets for this job only]
+  end
+  subgraph host [Host]
+    verify[The agent checks the signature, addressee, expiry and replay journal]
+    steps[Typed restic steps]
+    trust[Is the local trust mode on?]
+    script[The script runs as root or LocalSystem]
+    refuse[The agent refuses the job]
+    roots[A restore writes only below the restore roots]
+  end
+  admin --> sign
+  sign ==>|signed job over mTLS| verify
+  secret -.->|not stored on the host| verify
+  verify --> steps
+  verify -->|the job has a script| trust
+  trust -->|yes| script
+  trust -->|no| refuse
+  steps -->|restore| roots

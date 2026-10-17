@@ -52,6 +52,11 @@ export const ru: Record<MessageKey, string> = {
 	'settings.group.access': 'Доступ',
 
 	// Common
+	'tagInput.placeholder': 'Добавьте значение и нажмите Enter',
+	'tagInput.remove': 'Убрать {value}',
+	'tagInput.invalid': '{value}: {reason}',
+	'tagInput.tooLong': 'Не больше {max} символов.',
+	'tagInput.tooMany': 'Не больше {max} значений.',
 	'common.actions': 'Действия',
 	'common.cancel': 'Отмена',
 	'common.clear': 'Очистить',
@@ -141,13 +146,19 @@ export const ru: Record<MessageKey, string> = {
 		'Создайте первого администратора платформы. Используйте одноразовый токен настройки.',
 	'setup.descriptionSingle':
 		'Создайте первого администратора. Используйте одноразовый токен настройки.',
-	'setup.tokenHint': 'Найдите значение в журнале контрольной плоскости (`docker compose logs cp`).',
+	'setup.tokenHint': 'Найдите значение в журнале сервера управления (`docker compose logs cp`).',
 	'setup.setupToken': 'Токен настройки',
 	'setup.username': 'Имя пользователя',
 	'setup.displayName': 'Отображаемое имя',
 	'setup.password': 'Пароль',
 	'setup.confirmPassword': 'Повторите пароль',
-	'setup.passwordHint': 'Используйте 12 символов или больше.',
+	'password.rule': 'Не меньше {min} символов.',
+	'password.progress': '{count} из {min} символов',
+	'password.enough.one': '{n} символ — достаточно',
+	'password.enough.few': '{n} символа — достаточно',
+	'password.enough.many': '{n} символов — достаточно',
+	'password.enough.other': '{n} символа — достаточно',
+	'password.tooLong': 'Пароль слишком длинный: не больше {max} байт.',
 	'setup.passwordMismatch': 'Пароли не совпадают.',
 	'setup.submit': 'Создать администратора платформы',
 	'setup.submitSingle': 'Создать администратора',
@@ -278,7 +289,7 @@ export const ru: Record<MessageKey, string> = {
 	'platformUsers.username': 'Имя пользователя',
 	'platformUsers.displayName': 'Отображаемое имя',
 	'platformUsers.email': 'Электронная почта',
-	'platformUsers.emailHint': 'Необязательно. Используется приглашениями в версии 1.0.',
+	'platformUsers.emailHint': 'Необязательно.',
 	'platformUsers.password': 'Пароль',
 	'platformUsers.organizations': 'Организации',
 	'platformUsers.noOrganizations': 'Нет организации',
@@ -349,7 +360,7 @@ export const ru: Record<MessageKey, string> = {
 	'tokens.valueOnceTitle': 'Скопируйте значение токена',
 	'tokens.valueOnceBody': 'Это значение показывается один раз',
 	'tokens.valueOnceText':
-		'Скопируйте его и сохраните. Панель управления не может показать его снова.',
+		'Скопируйте его и сохраните. Сервер управления не может показать его снова.',
 
 	'nav.secrets': 'Секреты',
 	'secrets.title': 'Секреты',
@@ -463,10 +474,11 @@ export const ru: Record<MessageKey, string> = {
 	'hosts.revokeAgent': 'Отозвать агент',
 	'hosts.revokeTitle': 'Отозвать хост?',
 	'hosts.revokeBody':
-		'Это действие отзовёт хост «{name}». Панель управления закроет его поток и отклонит следующее подключение. Продолжить?',
+		'Это действие отзовёт хост «{name}». Сервер управления закроет его поток и отклонит следующее подключение. Продолжить?',
 	'hosts.revoked': 'Хост отозван.',
 	'hosts.labels': 'Метки',
-	'hosts.labelsPlaceholder': 'например, web, prod',
+	'hosts.labelsPlaceholder': 'Добавьте метку и нажмите Enter',
+	'hosts.labelInvalid': 'Только латинские буквы a-z, цифры 0-9 и дефис.',
 	'hosts.createToken': 'Создать токен',
 	'hosts.tokenTitle': 'Скопируйте токен регистрации',
 	'hosts.tokenValue': 'Токен регистрации',
@@ -494,12 +506,12 @@ export const ru: Record<MessageKey, string> = {
 	// Repositories
 	'repositories.title': 'Репозитории',
 	'repositories.description':
-		'Каждый репозиторий хранит одно хранилище restic. Панель управления хранит секреты и хост обслуживания.',
+		'Каждый репозиторий хранит одно хранилище restic. Сервер управления хранит секреты и хост обслуживания.',
 	'repositories.add': 'Добавить репозиторий',
 	'repositories.addFirst': 'Добавить первый репозиторий',
 	'repositories.addTitle': 'Добавить репозиторий',
 	'repositories.addDescription':
-		'Введите адрес хранилища и учётные данные. Панель управления шифрует каждое значение секрета.',
+		'Введите адрес хранилища и учётные данные. Сервер управления шифрует каждое значение секрета.',
 	'repositories.editTitle': 'Изменить репозиторий',
 	'repositories.editDescription': 'Оставьте поле секрета пустым, чтобы сохранить текущее значение.',
 	'repositories.emptyTitle': 'Репозиториев пока нет',
@@ -561,15 +573,14 @@ export const ru: Record<MessageKey, string> = {
 	'repositories.passwordHint':
 		'Сохраните копию этого пароля вне ResticHub. Если сервер управления потерян, без пароля снимки открыть нельзя.',
 	'repositories.passwordKeepHint': 'Оставьте поле пустым, чтобы сохранить текущее значение.',
-	'repositories.passwordLocked':
-		'Пароль репозитория нельзя заменить в этой версии. Ротация появится в следующем выпуске.',
+	'repositories.passwordLocked': 'Пароль репозитория нельзя заменить.',
 	'repositories.secretHint':
 		'ResticHub больше никогда не показывает это значение после сохранения. Его можно только заменить.',
 	'repositories.s3AccessKey': 'Ключ доступа S3',
 	'repositories.s3SecretKey': 'Секретный ключ S3',
 	'repositories.restPassword': 'Пароль REST-сервера',
 	'repositories.restPasswordHint':
-		'Необязательно. Панель управления отправляет его агенту с каждым заданием.',
+		'Необязательно. Сервер управления отправляет его агенту с каждым заданием.',
 	'repositories.created': 'Репозиторий создан.',
 	'repositories.updated': 'Репозиторий изменён.',
 	'repositories.deleted': 'Репозиторий удалён.',
@@ -590,13 +601,23 @@ export const ru: Record<MessageKey, string> = {
 	'repositories.testAccess': 'Проверить доступ',
 	'repositories.initializeTitle': 'Инициализировать репозиторий?',
 	'repositories.initializeBody':
-		'Сервер управления передаст пароль репозитория выбранному хосту, и хост выполнит restic init. Сохраните копию пароля репозитория вне ResticHub. Если сервер управления будет потерян, без пароля открыть снимки не удастся.',
+		'Сервер управления передаст пароль репозитория хосту обслуживания, и хост выполнит restic init. Сохраните копию пароля репозитория вне ResticHub. Если сервер управления будет потерян, без пароля открыть снимки не удастся.',
 	'repositories.testAccessTitle': 'Проверить доступ',
 	'repositories.testAccessBody':
 		'Выбранный хост откроет репозиторий и прочитает его конфигурацию. Проверка только читает данные.',
 	'repositories.jobHost': 'Хост',
 	'repositories.jobHostHint': 'Хост, который выполнит задание. По умолчанию — хост обслуживания.',
 	'repositories.jobHostRequired': 'Выберите хост.',
+	'repositories.jobHostInit':
+		'Сервер управления выполняет инициализацию только на хосте обслуживания репозитория.',
+	'repositories.jobHostLocal':
+		'Локальный путь находится на одном хосте, поэтому доступ проверяется на хосте обслуживания.',
+	'repositories.jobNoHostTitle': 'У репозитория нет хоста обслуживания',
+	'repositories.jobNoHostInit':
+		'Инициализация выполняется только на хосте обслуживания. Укажите его на странице репозитория.',
+	'repositories.jobNoHostLocal':
+		'Локальный путь проверяется только на хосте обслуживания. Укажите его на странице репозитория.',
+	'repositories.jobNoHostLink': 'Указать хост обслуживания',
 	'repositories.jobStart': 'Запустить',
 	'repositories.jobRunning': 'Задание выполняется на хосте. В этом окне появится результат.',
 	'repositories.jobDone': 'Задание завершено.',
@@ -616,12 +637,12 @@ export const ru: Record<MessageKey, string> = {
 	'repositories.result.succeeded_with_warnings': 'Задание завершено с предупреждениями.',
 	'repositories.result.repository_locked': 'Репозиторий заблокирован другим процессом.',
 	'repositories.result.incompatible':
-		'Версия restic на узле слишком старая для этого задания. Обновите restic на узле.',
+		'Версия restic на хосте слишком старая для этого задания. Обновите restic на хосте.',
 	'repositories.result.access_error':
 		'Репозитория нет по этому пути на этом хосте. Проверьте путь, точку монтирования и хост.',
 	'repositories.jobExpired': 'Срок задания истёк до ответа хоста. Запустите его снова.',
 	'repositories.locationLocked':
-		'Путь инициализированного репозитория нельзя изменить в этой версии. Там лежат снимки.',
+		'Путь инициализированного репозитория нельзя изменить. Там лежат снимки.',
 
 	// Profiles
 	'profiles.title': 'Профили',
@@ -826,7 +847,6 @@ export const ru: Record<MessageKey, string> = {
 	'jobs.reason.unsupported_kind':
 		'Очередь не выполняет задания этого вида. Обновите сервер управления или агент.',
 	'jobDetail.notFound': 'Такого задания нет.',
-	'jobDetail.live': 'в реальном времени',
 	'jobDetail.refresh': 'Обновить',
 	'jobDetail.summary': 'Итоги',
 	'jobDetail.summaryHint': 'Статистика из итогов restic',
@@ -1243,10 +1263,10 @@ export const ru: Record<MessageKey, string> = {
 	'restore.dialog.modeVerify': 'Восстановление и проверка',
 	'restore.dialog.modeRestore': 'Восстановление',
 	'restore.dialog.wholeSnapshot': 'Весь снимок',
-	'restore.dialog.excludesPlaceholder': 'например, *.tmp, /var/cache',
+	'restore.dialog.excludesPlaceholder': 'например, *.tmp\n/var/cache',
 	'restore.dialog.excludes': 'Исключить пути',
 	'restore.dialog.excludesHelp':
-		'Необязательно. Шаблоны restic, например *.tmp или /var/cache, через запятую. Восстановление пропустит подходящие пути.',
+		'Необязательно. Шаблоны restic, например *.tmp или /var/cache, по одному в строке. Восстановление пропустит подходящие пути.',
 	'restore.dialog.rootsLabel': 'Корни восстановления',
 	'restore.dialog.rootsRule':
 		'Хост восстанавливает только внутрь корней. Файлы самого агента хост не заменяет.',
@@ -1353,9 +1373,9 @@ export const ru: Record<MessageKey, string> = {
 	'alerts.cond.stale_lock':
 		'Блокировка репозитория устарела уже {elapsed} (порог {threshold} мин).',
 	'alerts.cond.job_dead_letter':
-		'Задача «{what}» остановлена после повторных попыток из-за блокировки репозитория.',
-	'alerts.cond.job_warnings': 'Задача «{what}» завершилась с предупреждениями.',
-	'alerts.cond.job_failed': 'Задача «{what}» завершилась ошибкой ({code}).',
+		'Задание «{what}» остановлено после повторных попыток из-за блокировки репозитория.',
+	'alerts.cond.job_warnings': 'Задание «{what}» завершилось с предупреждениями.',
+	'alerts.cond.job_failed': 'Задание «{what}» завершилось ошибкой ({code}).',
 
 	// Alert rules (FR-MN-03)
 	'rules.title': 'Правила оповещений',
@@ -1397,7 +1417,8 @@ export const ru: Record<MessageKey, string> = {
 	'channels.kind.webhook': 'Вебхук',
 	'channels.target': 'Адресат',
 	'channels.recipients': 'Получатели',
-	'channels.recipientsHint': 'Один адрес в строке. Не больше 20.',
+	'channels.recipientsHint': 'Не больше 20 адресов.',
+	'channels.recipientInvalid': 'Это не адрес электронной почты.',
 	'channels.url': 'URL вебхука',
 	'channels.urlHint': 'Адрес https. После сохранения путь и параметры остаются скрытыми.',
 	'channels.urlEditHint': 'Оставьте поле пустым, чтобы сохранить текущий URL.',
@@ -1642,8 +1663,8 @@ export const ru: Record<MessageKey, string> = {
 	'hp.danger.revoke': 'Отозвать агент. Хост больше не подключается.',
 	'hp.state.title': 'Состояние',
 	'hp.state.connection': 'Связь',
-	'hp.state.online': 'На связи',
-	'hp.state.offline': 'Не на связи',
+	'hp.state.online': 'В сети',
+	'hp.state.offline': 'Не в сети',
 	'hp.state.unknown': 'Неизвестно',
 	'hp.state.alerts': 'Открытые оповещения',
 	'hp.state.alertsNone': 'Нет',
@@ -1709,9 +1730,8 @@ export const ru: Record<MessageKey, string> = {
 		'Что пропустить. Шаблоны вида <code>*.tmp</code> или пути. По одной записи в строке.',
 	'pe.excludes.filesHelp': 'Путь к файлу со списком шаблонов на хосте.',
 	'pe.tags.lead': 'Метки снимков этого профиля. По ним снимки ищут и отбирают правила хранения.',
-	'pe.tags.help': 'Через запятую, пробел или Enter. Каждый тег станет чипом.',
+	'pe.tags.help': 'После каждого тега нажмите Enter, запятую или пробел.',
 	'pe.tags.placeholder': 'Добавьте тег и нажмите Enter',
-	'pe.tags.remove': 'Убрать тег {tag}',
 	'pe.options.vssHelp': 'Только Windows: копия согласованного снимка тома.',
 	'pe.options.oneFsHelp': 'Подключённые тома внутри путей пропускаются.',
 	'pe.options.cachesHelp': 'Пропускаются каталоги с файлом CACHEDIR.TAG.',
@@ -1773,7 +1793,7 @@ export const ru: Record<MessageKey, string> = {
 	'pe.rule.within.invalid': 'Не разобрать срок. Пример: 30d, 6m, 1y2m7d3h.',
 	'pe.rule.tags.title': 'Теги, которые не удаляются',
 	'pe.rule.tags.text':
-		'Снимок с любым из этих тегов остаётся всегда, что бы ни решили остальные правила. Вводите теги через запятую или пробел: каждый станет чипом.',
+		'Снимок с любым из этих тегов остаётся всегда, что бы ни решили остальные правила.',
 	'pe.rule.group.title': 'Что считать одной группой',
 	'pe.rule.group.text':
 		'Правила применяются к каждой группе снимков отдельно, поэтому копии разных хостов или путей не вытесняют друг друга. Если ничего не отмечено, используется группировка по умолчанию: хост и пути.',

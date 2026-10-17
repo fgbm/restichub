@@ -23,7 +23,7 @@
 		FilterBar,
 		ListView,
 		Panel,
-		TextField
+		TagInput
 	} from '#lib/components/ui/index.ts';
 	import type { FilterFacet, ListMeta, RowAction } from '#lib/components/ui/index.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
@@ -44,7 +44,7 @@
 	let creating = $state(false);
 	let createError = $state<string | null>(null);
 	let createProblem = $state<ApiProblem | null>(null);
-	let labels = $state('');
+	let labels = $state<string[]>([]);
 	let createdToken = $state<EnrollmentTokenCreated | null>(null);
 
 	let cancelTarget = $state<EnrollmentToken | null>(null);
@@ -465,8 +465,14 @@
 		return off;
 	});
 
+	// The server takes a label of 1 to 63 characters from a-z, 0-9 and the hyphen.
+	const MAX_LABEL = 63;
+	function checkLabel(label: string): string | null {
+		return /^[a-z0-9-]+$/.test(label) ? null : t('hosts.labelInvalid');
+	}
+
 	function openAdd(): void {
-		labels = '';
+		labels = [];
 		createError = null;
 		createProblem = null;
 		createdToken = null;
@@ -478,12 +484,8 @@
 		createError = null;
 		createProblem = null;
 		try {
-			const parsed = labels
-				.split(',')
-				.map((label) => label.trim())
-				.filter((label) => label.length > 0);
 			createdToken = await service.createEnrollmentToken({
-				labels: parsed.length > 0 ? parsed : undefined
+				labels: labels.length > 0 ? labels : undefined
 			});
 			pushToast('success', t('hosts.tokenCreated'));
 			// The new token shows in the pending list behind the dialog.
@@ -659,12 +661,15 @@
 			{#if createError}
 				<Alert tone="danger" title={createError} />
 			{/if}
-			<TextField
+			<TagInput
 				id="host-labels"
 				label={t('hosts.labels')}
 				error={fieldError(createProblem, 'labels')}
 				bind:value={labels}
 				placeholder={t('hosts.labelsPlaceholder')}
+				mono
+				maxLength={MAX_LABEL}
+				check={checkLabel}
 			/>
 		{/if}
 		{#snippet footer()}

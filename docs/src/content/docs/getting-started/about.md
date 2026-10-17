@@ -58,13 +58,13 @@ Three of the tools use restic: [Backrest](https://github.com/garethgeorge/backre
 
 | | ResticHub | Backrest | resticprofile | Arkeep | Kopia | UrBackup | Bareos |
 |---|---|---|---|---|---|---|---|
-| Backup engine | restic | restic | restic | restic, rclone | Kopia | UrBackup, files and images | Bareos |
+| Backup engine | restic | restic | restic | restic. rclone is a backend of restic | Kopia | UrBackup, files and images | Bareos |
 | Central control of many hosts | Yes | Optional [multihost sync](https://garethgeorge.github.io/backrest/docs/multihost) between full instances | No, one configuration file on each host | Yes | Optional server mode | Yes | Yes |
 | Where the schedule runs | Control plane | Each instance ([issue #68](https://github.com/garethgeorge/backrest/issues/68)) | Scheduler of the operating system | Server | Policy, which the Kopia process on the host runs ([FAQ](https://kopia.io/docs/faqs/)) | Server | Director |
 | Connection direction | Agent to control plane, outbound only | Instance to instance | Not applicable | Agent to server, outbound only | Host to repository server | LAN: server finds the hosts. Internet: host to server ([manual](https://www.urbackup.org/administration_manual.html)) | Director to file daemon by default. Client-initiated connection is optional ([network setup](https://docs.bareos.org/TasksAndConcepts/NetworkSetup.html)) |
-| Storage credentials on the host | Only in memory during a job | In the local configuration | In the local configuration | - | Not necessary with the repository server | Not necessary, the server keeps the storage | Not necessary, the storage daemon keeps the storage |
-| Windows VSS | Yes, profile option | - | - | - | Yes, [policy option](https://kopia.io/docs/reference/command-line/common/policy-set) | Yes ([features](https://www.urbackup.org/features.html)) | Yes ([Windows](https://docs.bareos.org/TasksAndConcepts/TheWindowsVersionOfBareos.html)) |
-| Organizations and roles | Organizations; Admin, Operator, Viewer | Permissions for each paired instance | Not applicable | Local accounts and OpenID Connect | Access rules for each `user@host` | - | - |
+| Storage credentials on the host | Only in memory during a job | In the local configuration | In the local configuration | Only in memory during a job | Not necessary with the repository server | Not necessary, the server keeps the storage | Not necessary, the storage daemon keeps the storage |
+| Windows VSS | Yes, profile option | - | - | Yes, always on for Windows agents ([source](https://github.com/arkeep-io/arkeep/blob/74315b0/agent/internal/restic/wrapper.go#L266)) | Yes, [policy option](https://kopia.io/docs/reference/command-line/common/policy-set) | Yes ([features](https://www.urbackup.org/features.html)) | Yes ([Windows](https://docs.bareos.org/TasksAndConcepts/TheWindowsVersionOfBareos.html)) |
+| Organizations and roles | Organizations; Admin, Operator, Viewer | Permissions for each paired instance | Not applicable | No organizations. Roles: admin and read-only user. Local accounts with TOTP, OpenID Connect ([security](https://arkeep.io/docs/concepts/security/)) | Access rules for each `user@host` | - | - |
 | Audit log | Yes | - | Not applicable | Yes | - | - | - |
 | Alerts | Failed job, RPO violation, offline host, stale lock; email, webhook | Discord, Slack, Shoutrrr, Gotify, Healthchecks | Status file, Prometheus, HTTP hooks | Email, webhook, Healthchecks | - | Email when a host has no backup for a set time | - |
 | License | Apache 2.0 | GPL 3.0 | GPL 3.0 | Apache 2.0 | Apache 2.0 | AGPL 3.0 or later | AGPL 3.0 |
@@ -72,9 +72,11 @@ Three of the tools use restic: [Backrest](https://github.com/garethgeorge/backre
 
 </div>
 
-restic itself can make a VSS snapshot on Windows with the `--use-fs-snapshot` option. The restic-based tools can pass restic options. The table shows a dash for them because their documentation does not show VSS as a separate function.
+restic itself can make a VSS snapshot on Windows with the `--use-fs-snapshot` option. The restic-based tools can pass restic options. The table shows a dash for Backrest and resticprofile because their documentation does not show VSS as a separate function.
 
-The most similar tool is Arkeep. It also has a server that schedules each job and agents that connect outbound with mutual TLS. The differences are in the focus. Arkeep finds Docker containers and volumes, supports OpenID Connect and SFTP today, and plans inventory and update orchestration. ResticHub puts the focus on Windows hosts, organizations with roles, secrets for one job only, signed jobs and the trust mode for scripts. Arkeep sends an anonymous daily ping by default, and you can turn it off ([README](https://github.com/arkeep-io/arkeep)). ResticHub sends no telemetry.
+The most similar tool is Arkeep. It also has a server that schedules each job and agents that connect outbound with mutual TLS. Like the ResticHub agent, the Arkeep agent keeps the storage credentials only in memory during a job. Arkeep puts the focus on Docker and finds containers and volumes, supports OpenID Connect and SFTP today, and plans inventory and update orchestration. ResticHub puts the focus on organizations with roles.
+
+The Arkeep security model is much weaker: one shared secret enrolls all agents, and each host keeps this secret in a file ([agent-systemd](https://arkeep.io/docs/installation/agent-systemd/)). Agent certificates are valid for 10 years without rotation or revocation ([source](https://github.com/arkeep-io/arkeep/blob/74315b0/server/internal/grpc/certs.go#L46)), and jobs have no signature ([source](https://github.com/arkeep-io/arkeep/blob/74315b0/shared/proto/agent.proto#L197)). The server sends shell commands in hooks, and agents run them without the consent of the host ([security](https://arkeep.io/docs/concepts/security/)). Arkeep turns on telemetry by default ([telemetry](https://arkeep.io/docs/reference/telemetry/)); ResticHub sends no telemetry. The Arkeep agent for Windows runs as a console program, not as a service ([source](https://github.com/arkeep-io/arkeep/blob/74315b0/agent/cmd/agent/main.go)). ResticHub uses one-time enrollment tokens, certificate rotation and revocation, signed jobs, the local trust mode for scripts, and native Windows and Linux services.
 
 ## When to choose another tool
 

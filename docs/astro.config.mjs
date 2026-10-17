@@ -2,6 +2,7 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import starlightLinksValidator from 'starlight-links-validator';
+import { fileURLToPath } from 'node:url';
 
 const group = (en, ru, slugs) => ({
 	label: en,
@@ -46,6 +47,11 @@ export default defineConfig({
 	site: 'https://fgbm.github.io',
 	base: '/restichub',
 	redirects,
+	vite: {
+		define: {
+			'import.meta.env.UI_I18N_DIR': JSON.stringify(fileURLToPath(new URL('../ui/src/lib/i18n/', import.meta.url))),
+		},
+	},
 	integrations: [
 		starlight({
 			title: 'ResticHub',
@@ -57,7 +63,7 @@ export default defineConfig({
 				ru: { label: 'Русский', lang: 'ru' },
 			},
 			plugins: [starlightLinksValidator()],
-			customCss: ['./src/styles/base.css', './src/styles/theme.css'],
+			customCss: ['./src/styles/base.css', './src/styles/theme.css', './src/styles/diagrams.css'],
 			expressiveCode: { frames: false, styleOverrides: { borderRadius: '6px' } },
 			social: [
 				{ icon: 'github', label: 'GitHub', href: 'https://github.com/fgbm/restichub' },
@@ -87,6 +93,7 @@ export default defineConfig({
 					'concepts/profiles',
 					'concepts/plans',
 					'concepts/repositories',
+					'concepts/trust-model',
 				]),
 				group('Operations and security', 'Эксплуатация и безопасность', [
 					'operations/certificate-rotation',
