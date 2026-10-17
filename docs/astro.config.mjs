@@ -77,6 +77,7 @@ export default defineConfig({
 					'getting-started/migrate-from-resticprofile',
 				]),
 				group('Guides', 'Руководства', [
+					'guides/automatic-enrollment',
 					'guides/add-a-repository',
 					'guides/jobs',
 					'guides/restore',
