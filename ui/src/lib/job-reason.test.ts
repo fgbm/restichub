@@ -4,7 +4,7 @@
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { setLocale } from '#lib/i18n/index.ts';
-import { jobReason } from './job-reason';
+import { jobDetailReason, jobReason, notStartedReason } from './job-reason';
 
 afterEach(() => setLocale('en'));
 
@@ -51,5 +51,37 @@ describe('jobReason', () => {
 		expect(jobReason({ result_code: 'failed', result_message: 'brand_new_code' })).toBe(
 			'brand_new_code'
 		);
+	});
+});
+
+describe('the reason of a step that did not start', () => {
+	const step = (params: Record<string, string>) => ({
+		error_code: 'step_not_started',
+		error_params: params
+	});
+
+	it('fr_ag_09_names_the_cause_that_the_agent_sent', () => {
+		const job = {
+			result_code: 'failed' as const,
+			result_message: 'step_not_started',
+			result_params: null,
+			steps: [{ error_code: null, error_params: {} }, step({ reason: 'cannot protect C:\\x' })]
+		};
+		expect(notStartedReason(job.steps[1])).toBe('cannot protect C:\\x');
+		expect(jobDetailReason(job)).toBe('restic did not start: cannot protect C:\\x');
+	});
+
+	it('fr_ag_09_keeps_the_general_text_without_a_cause', () => {
+		expect(notStartedReason(step({}))).toBeNull();
+		expect(
+			notStartedReason({ error_code: 'step_failed', error_params: { reason: 'x' } })
+		).toBeNull();
+		const job = {
+			result_code: 'failed' as const,
+			result_message: 'step_not_started',
+			result_params: null,
+			steps: [step({ reason: '  ' })]
+		};
+		expect(jobDetailReason(job)).toBe('restic did not start. Read the job log.');
 	});
 });

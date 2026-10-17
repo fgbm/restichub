@@ -12,6 +12,7 @@
 		name,
 		lines,
 		live = false,
+		empty,
 		onCopy
 	}: {
 		stepId: string;
@@ -20,6 +21,8 @@
 		lines: JobLogLine[];
 		/** The step is running: the log offers to follow its end. */
 		live?: boolean;
+		/** The note of an empty log, when the page knows more than the log. */
+		empty?: string;
 		onCopy: (lines: JobLogLine[]) => void;
 	} = $props();
 
@@ -48,7 +51,7 @@
 
 <div class="step-log" data-testid={`step-log-${stepId}`}>
 	{#if lines.length === 0}
-		<p class="step-log__note">{t('jobDetail.stepLogEmpty')}</p>
+		<p class="step-log__note">{empty ?? t('jobDetail.stepLogEmpty')}</p>
 	{:else}
 		<div class="step-log__bar">
 			<select

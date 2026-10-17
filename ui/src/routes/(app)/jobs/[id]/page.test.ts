@@ -368,6 +368,41 @@ describe('the job detail screen', () => {
 		expect(screen.getByText(/exit code 12/)).toBeInTheDocument();
 	});
 
+	it('fr_ag_09_shows_why_restic_did_not_start_in_the_step_and_the_header', async () => {
+		const reason =
+			'restic did not start: cannot protect the directory C:\\ProgramData\\ResticHub; run `restichub-agent install-service` as an administrator';
+		mocks.getJob.mockResolvedValue(
+			job({
+				status: 'failed',
+				result_code: 'failed',
+				result_message: 'step_not_started',
+				summary: null,
+				steps: [
+					{
+						step_id: 'backup',
+						status: 'failed',
+						exit_code: -1,
+						started_at: '2026-10-14T10:01:00Z',
+						finished_at: '2026-10-14T10:01:00Z',
+						error_code: 'step_not_started',
+						error_params: { reason },
+						possible_stale_lock: false,
+						output: { kind: 'none' }
+					}
+				]
+			})
+		);
+		mocks.getJobLogs.mockResolvedValue(logPage([]));
+		render(JobDetailPage);
+
+		expect(await screen.findByText(`restic did not start: ${reason}`)).toBeInTheDocument();
+		expect(screen.getByText(`The step did not start: ${reason}`)).toBeInTheDocument();
+		expect(
+			await screen.findByText('The step wrote no log line. The cause is above.')
+		).toBeInTheDocument();
+		expect(screen.queryByText('The step wrote no log line.')).not.toBeInTheDocument();
+	});
+
 	it('tells that the retention deleted the log and keeps the summary', async () => {
 		mocks.getJobLogs.mockResolvedValue(logPage([], { purged: true }));
 		render(JobDetailPage);
