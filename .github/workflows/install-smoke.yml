@@ -21,6 +21,7 @@ on:
       - rust-toolchain.toml
       - packaging/**
       - scripts/install-smoke.sh
+      - scripts/install-smoke-windows.ps1
       - .github/**
   workflow_dispatch:
 
@@ -299,6 +300,7 @@ jobs:
       - name: An install with restic in an old location migrates
         shell: pwsh
         run: |
+          . scripts/install-smoke-windows.ps1
           $dir = Join-Path $env:ProgramFiles 'ResticHub\Agent'
           $agent = Join-Path $dir 'restichub-agent.exe'
           $restic = Join-Path $dir 'restic.exe'
@@ -309,7 +311,7 @@ jobs:
           foreach ($old in $olds) {
             $since = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
             $hash = (Get-FileHash $restic -Algorithm SHA256).Hash
-            Stop-Service restichub-agent
+            Stop-AgentService
             New-Item -ItemType Directory -Force $old | Out-Null
             Move-Item $restic (Join-Path $old 'restic.exe')
             & $agent install-service
@@ -325,6 +327,7 @@ jobs:
       - name: The service moves restic by itself at the start
         shell: pwsh
         run: |
+          . scripts/install-smoke-windows.ps1
           $dir = Join-Path $env:ProgramFiles 'ResticHub\Agent'
           $restic = Join-Path $dir 'restic.exe'
           $olds = @(
@@ -333,7 +336,7 @@ jobs:
           )
           foreach ($old in $olds) {
             $since = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
-            Stop-Service restichub-agent
+            Stop-AgentService
             New-Item -ItemType Directory -Force $old | Out-Null
             Move-Item $restic (Join-Path $old 'restic.exe')
             Start-Service restichub-agent
@@ -350,20 +353,26 @@ jobs:
       - name: The service starts when an old restic file stays in place
         shell: pwsh
         run: |
+          . scripts/install-smoke-windows.ps1
           $dir = Join-Path $env:ProgramFiles 'ResticHub\Agent'
           $old = Join-Path $dir 'bin\restic.exe'
           $since = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
-          Stop-Service restichub-agent
+          Stop-AgentService
           New-Item -ItemType Directory -Force (Join-Path $dir 'bin') | Out-Null
           Copy-Item (Join-Path $dir 'restic.exe') $old
           attrib +r $old
           Start-Service restichub-agent
           bash scripts/install-smoke.sh connected $since 60
           if ((Get-Service restichub-agent).Status -ne 'Running') { throw 'not running' }
-          # The service may remove the old file between a check and the delete.
-          attrib -r $old 2>$null | Out-Null
-          Remove-Item $old -Force -ErrorAction SilentlyContinue
-          Remove-Item (Join-Path $dir 'bin') -Force -ErrorAction SilentlyContinue
+          # The service may remove the old file at any time, so a missing file is fine. A failed
+          # attrib must not leave its exit code as the exit code of the step.
+          if (Test-Path $old) {
+            attrib -r $old 2>$null | Out-Null
+            Remove-Item $old -Force -ErrorAction SilentlyContinue
+          }
+          $bin = Join-Path $dir 'bin'
+          if (Test-Path $bin) { Remove-Item $bin -Force -ErrorAction SilentlyContinue }
+          $global:LASTEXITCODE = 0
       - name: A second install-service works while the service runs (FR-IN-08)
         shell: pwsh
         run: |
