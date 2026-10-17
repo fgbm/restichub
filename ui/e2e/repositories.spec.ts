@@ -137,7 +137,7 @@ test('the repository maintenance shows the warning, edits the schedules and runs
 
 	// Run now needs an initialized repository.
 	await page.getByRole('button', { name: 'More actions for repo-m' }).click();
-	await expect(page.getByRole('menuitem', { name: 'Run retention now' })).toHaveCount(0);
+	await expect(page.getByRole('menuitem', { name: 'Delete expired snapshots now' })).toHaveCount(0);
 	await page.getByRole('menuitem', { name: 'Initialize' }).click();
 	const job = page.getByRole('dialog', { name: 'Initialize the repository?' });
 	await job.getByRole('button', { name: 'Start' }).click();
@@ -145,7 +145,7 @@ test('the repository maintenance shows the warning, edits the schedules and runs
 	await page.keyboard.press('Escape');
 
 	await page.getByRole('button', { name: 'More actions for repo-m' }).click();
-	await page.getByRole('menuitem', { name: 'Run retention now' }).click();
+	await page.getByRole('menuitem', { name: 'Delete expired snapshots now' }).click();
 	await expect(page.getByText('The maintenance job is queued.')).toBeVisible();
 
 	// Unlock all asks for the repository name in a centered danger dialog.

@@ -63,7 +63,7 @@ export default defineConfig({
 				ru: { label: 'Русский', lang: 'ru' },
 			},
 			plugins: [starlightLinksValidator()],
-			customCss: ['./src/styles/base.css', './src/styles/theme.css', './src/styles/diagrams.css'],
+			customCss: ['./src/styles/base.css', './src/styles/theme.css', './src/styles/diagrams.css', './src/styles/screens.css'],
 			expressiveCode: { frames: false, styleOverrides: { borderRadius: '6px' } },
 			social: [
 				{ icon: 'github', label: 'GitHub', href: 'https://github.com/fgbm/restichub' },
@@ -106,6 +106,7 @@ export default defineConfig({
 					'operations/alert-configuration',
 				]),
 				group('Reference', 'Справочник', [
+					'reference/ui-tour',
 					'reference/agent-commands',
 					'reference/agent-packages',
 					'reference/agent-logs',

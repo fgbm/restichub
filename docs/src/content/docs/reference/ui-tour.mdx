@@ -1,0 +1,90 @@
+---
+title: Tour of the web interface
+description: Where each function of the web interface is, and how the lists and the record pages work.
+---
+
+import Screen from '../../../components/Screen.astro';
+
+The top bar shows the organization, the path to the current page, the theme switch and your account menu. Below the top bar, the tabs open the areas of the organization. Your role decides which tabs you see.
+
+## Lists
+
+All lists work in the same way:
+
+- The search box above the list finds a record by its name and by the related names.
+- The state tabs show a counter for each group, for example "Running" or "Failed".
+- The filters on the right side narrow the list, for example by host or by repository. Each applied filter shows a chip. "Reset" removes all filters.
+- The sort menu changes the order of the list.
+- A long list has numbered pages. The line below the list shows "Showing 1 to 25 of 146".
+
+## Record pages
+
+Select the name of a record to open its page, for example the page of a job or a profile. A form page has sections that you can expand and collapse. The panel on the right side shows the result of the form. The bar at the bottom holds "Save" and "Cancel".
+
+## Overview
+
+The overview shows the hosts online, the plans at risk, the open alerts and the recent failed jobs.
+
+<Screen name="overview" alt="The overview with the counters of hosts, plans and alerts" />
+
+## Hosts
+
+The list shows each host with its last contact, system and agent version. "Add host" makes a one-time enrollment token. See [Add a host](/restichub/getting-started/add-a-host/).
+
+<Screen name="hosts-list-online" alt="The list of hosts with three online hosts" />
+
+## Repositories
+
+The list shows the repositories of the organization. Select a name to change the location, the access or the maintenance. See [Add a repository](/restichub/guides/add-a-repository/).
+
+<Screen name="repositories-list" alt="The list of repositories" />
+
+## Profiles
+
+A profile tells what to back up, where, and how long to keep the snapshots. See [Profiles](/restichub/concepts/profiles/).
+
+<Screen name="profiles-list" alt="The list of profiles" />
+
+## Plans
+
+A plan runs a profile on a host by a schedule. See [Plans](/restichub/concepts/plans/).
+
+<Screen name="plans-list" alt="The list of plans" />
+
+## Jobs
+
+The list shows each run of a plan and each manual operation, the newest first. Select a name to read the steps and the log of the job. See [Watch and cancel jobs](/restichub/guides/jobs/).
+
+<Screen name="jobs-list" alt="The list of jobs with the state tabs and the filters" />
+
+## Restore
+
+Select a repository and a snapshot. The snapshot page shows the tree of files, and "Restore…" starts a restore. An Admin and an Operator see this tab. See [Restore](/restichub/guides/restore/).
+
+<Screen name="restore-snapshot" alt="The page of a snapshot with the tree of files" />
+
+## Alerts
+
+The list shows the open and the resolved alerts. See [Alerts and notification channels](/restichub/guides/alerts/).
+
+<Screen name="alerts-list" alt="The list of alerts with one open alert" />
+
+## Audit
+
+The audit log shows each recorded operation with its actor. It opens with the last 30 days. Search finds a record by the name of the object or of the actor.
+
+<Screen name="audit-log" alt="The audit log grouped by day" />
+
+## Settings
+
+Only an Admin sees "Settings". The page has three groups:
+
+- "Access": "Users", "API tokens" and "Secrets".
+- "Notifications": "Channels" and "Alert rules".
+- "Scripts": "Script templates" and "Job templates".
+
+<Screen name="settings-access" alt="The settings page with the list of users" />
+
+## Platform administration
+
+A Platform Admin also sees "Platform administration" in the organization menu of the top bar. It holds "Organizations", "Users" and "Audit" of the whole installation. See [Users](/restichub/guides/users/).

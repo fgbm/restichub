@@ -179,7 +179,7 @@
 		basics: 'rp.section.basics',
 		location: 'rp.section.location',
 		access: 'rp.section.access',
-		retention: 'repositories.maintenance.title',
+		retention: 'repositories.maintenance.retention',
 		check: 'repositories.maintenance.check',
 		host: 'repositories.maintenanceHost'
 	};

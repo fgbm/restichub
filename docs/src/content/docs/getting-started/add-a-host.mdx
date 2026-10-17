@@ -4,7 +4,7 @@ description: Register a host with the control plane and check the connection.
 ---
 
 import Diagram from '../../../components/Diagram.astro';
-
+import Screen from '../../../components/Screen.astro';
 
 An agent registers by hand with a one-time enrollment token. A person on the host unpacks the agent package anywhere, for example in the Downloads folder, and runs one command. The command `register` does everything: it installs the agent, enrolls the host, starts the service and reports the connection.
 
@@ -15,6 +15,8 @@ The Web UI shows the full command in the dialog "Add a host". Select "Add host" 
 ```sh
 restichub-agent register --url https://<control-plane> --token <token>
 ```
+
+<Screen name="hosts-add-command" alt="The dialog Add a host with the enrollment token and the register command" />
 
 - `--url` is the control plane URL. The scheme must be `https`.
 - `--token` is the one-time enrollment token. This is the usual way to pass the token.
@@ -79,6 +81,8 @@ To check the connection:
 3. Read the status. A host that enrolled but did not connect yet shows "Waiting for connection". The status is "Online" after the first connection.
 4. Read the second line of the row, for example `contact 24 s ago · linux · amd64 · agent 0.4.2, 0.5.0 is available`. The text `0.5.0 is available` shows an agent package older than the control plane (see [Agent and control plane versions](/restichub/reference/agent-version-compatibility/)).
 5. Select the host name to open the host page. The section "General" shows the "Agent version" and the mark "Update available". An offline host shows the time "Last seen".
+
+<Screen name="hosts-list-online" alt="The list of hosts with three online hosts" />
 
 The control plane sends a heartbeat every 30 seconds and closes the stream after three heartbeats without an answer. The Overview counts a host as online when the control plane heard from it in the last 90 seconds. The alert "Host offline" waits for its own limit (see [Alerts](/restichub/guides/alerts/)).
 

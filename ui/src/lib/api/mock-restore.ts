@@ -2,6 +2,7 @@
  * Sample data of the Restore screen for the mock service: the snapshots of a repository and a
  * snapshot tree with a large directory (FR-RS-01, FR-RS-02). Development and tests use it only.
  */
+import { docsMode } from './mock-docs';
 import type { LsView, NodeItem, SnapshotItem, SnapshotsQuery } from './types';
 
 const HOUR = 3_600_000;
@@ -63,6 +64,11 @@ function manySnapshots(): SnapshotItem[] {
 
 /** The snapshots of a repository, the newest first. */
 export function makeSnapshots(): SnapshotItem[] {
+	if (docsMode()) {
+		return [0, 1, 2, 3, 4, 5, 6, 7].map((day) =>
+			snapshot(day, 'web-01', ['web'], ['/srv/www', '/etc/nginx'], day * 24 + 5.3)
+		);
+	}
 	if (typeof localStorage !== 'undefined' && localStorage.getItem(MANY_SNAPSHOTS_KEY) === 'many') {
 		return manySnapshots();
 	}
