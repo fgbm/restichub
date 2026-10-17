@@ -330,6 +330,34 @@ pub async fn replace_secret_value(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Names the objects that block the delete of a secret.
+#[utoipa::path(
+    get,
+    path = "/api/v1/secrets/{id}/usage",
+    security(("cookie" = []), ("bearer" = [])),
+    params(("id" = String, Path, description = "The identifier of the secret.")),
+    responses(
+        (status = 200, description = "What blocks the delete now.", body = crate::delete_check::UsageView),
+        crate::error::ProtectedResponses,
+        (status = 404, description = "The secret is not found.", body = crate::error::ProblemBody)
+    )
+)]
+pub async fn secret_usage(
+    State(state): State<AppState>,
+    context: RequestContext,
+    Path(id): Path<String>,
+) -> Result<Json<crate::delete_check::UsageView>, ApiError> {
+    context.authorize(Operation::SecretsRead)?;
+    let secret_id = parse_secret_id(&id)?;
+    let mut tx = state.db().begin_tenant(context.tenant_id).await?;
+    if repo::get(&mut tx, secret_id).await?.is_none() {
+        return Err(ApiError::not_found());
+    }
+    let block = crate::delete_check::secret_block(&mut tx, secret_id).await?;
+    tx.commit().await?;
+    Ok(Json(block.into()))
+}
+
 /// Removes a secret of the tenant.
 #[utoipa::path(
     delete,
@@ -340,7 +368,7 @@ pub async fn replace_secret_value(
         (status = 204, description = "The secret is removed."),
         crate::error::ProtectedResponses,
         (status = 404, description = "The secret is not found.", body = crate::error::ProblemBody),
-        (status = 409, description = "An object uses the secret.", body = crate::error::ProblemBody)
+        (status = 409, description = "An object uses the secret (`secret_in_use`). The body lists the objects.", body = crate::error::ProblemBody)
     )
 )]
 pub async fn delete_secret(
@@ -356,8 +384,8 @@ pub async fn delete_secret(
         return Err(ApiError::not_found());
     };
     // A profile names a hook secret inside its JSON, so no foreign key refuses the delete.
-    if !repo::list_usage(&mut tx, Some(secret_id)).await?.is_empty() {
-        return Err(ApiError::conflict());
+    if let Some(block) = crate::delete_check::secret_block(&mut tx, secret_id).await? {
+        return Err(block.into_error());
     }
     repo::delete(&mut tx, secret_id).await.map_err(|error| {
         // A repository binds the secret, so the row cannot go. The foreign key refuses the delete.

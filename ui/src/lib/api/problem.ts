@@ -8,6 +8,7 @@
  */
 import { t, tErrorCode, tErrorReason } from '#lib/i18n/index.ts';
 import type { components } from './schema';
+import type { Blockers } from './types';
 
 export interface ApiProblem {
 	status: number;
@@ -17,6 +18,8 @@ export interface ApiProblem {
 	type?: string;
 	field?: string;
 	reason?: string;
+	/** The records that block a delete. */
+	blockers?: Blockers;
 }
 
 function asString(value: unknown): string | undefined {
@@ -40,7 +43,8 @@ export function parseProblem(body: unknown, status: number): ApiProblem {
 			requestId: asString(wire.request_id),
 			type: asString(wire.type),
 			field: asString(wire.field),
-			reason: asString(wire.reason)
+			reason: asString(wire.reason),
+			blockers: wire.blockers ?? undefined
 		};
 	}
 	return {

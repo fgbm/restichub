@@ -39,6 +39,7 @@ use serde::Deserialize;
 use utoipa::IntoParams;
 
 use crate::context::{Operation, RequestContext};
+use crate::delete_check;
 use crate::error::{ApiError, map_write_error};
 use crate::json::ApiJson;
 use crate::secrets::actor_user;
@@ -304,6 +305,34 @@ pub async fn update_profile(
     }))
 }
 
+/// Names the plans that block the delete of a profile.
+#[utoipa::path(
+    get,
+    path = "/api/v1/profiles/{id}/usage",
+    security(("cookie" = []), ("bearer" = [])),
+    params(("id" = String, Path, description = "The identifier of the profile.")),
+    responses(
+        (status = 200, description = "What blocks the delete now.", body = delete_check::UsageView),
+        crate::error::ProtectedResponses,
+        (status = 404, description = "The profile is not found.", body = crate::error::ProblemBody)
+    )
+)]
+pub async fn profile_usage(
+    State(state): State<AppState>,
+    context: RequestContext,
+    Path(id): Path<String>,
+) -> Result<Json<delete_check::UsageView>, ApiError> {
+    context.authorize(Operation::ProfilesRead)?;
+    let profile_id = parse_profile_id(&id)?;
+    let mut tx = state.db().begin_tenant(context.tenant_id).await?;
+    if repo::get(&mut tx, profile_id).await?.is_none() {
+        return Err(ApiError::not_found());
+    }
+    let block = delete_check::profile_block(&mut tx, profile_id).await?;
+    tx.commit().await?;
+    Ok(Json(block.into()))
+}
+
 /// Removes a profile.
 #[utoipa::path(
     delete,
@@ -313,7 +342,8 @@ pub async fn update_profile(
     responses(
         (status = 204, description = "The profile is removed."),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The profile is not found.", body = crate::error::ProblemBody)
+        (status = 404, description = "The profile is not found.", body = crate::error::ProblemBody),
+        (status = 409, description = "A plan holds the profile (`profile_in_use`). The body lists the plans.", body = crate::error::ProblemBody)
     )
 )]
 pub async fn delete_profile(
@@ -329,8 +359,8 @@ pub async fn delete_profile(
     };
     // A plan binds the profile. Remove or repoint the plans first, so the foreign key never blocks
     // the delete with an internal error (FR-SC-11).
-    if restichub_db::plans::is_profile_used(&mut tx, profile_id).await? {
-        return Err(ApiError::conflict());
+    if let Some(block) = delete_check::profile_block(&mut tx, profile_id).await? {
+        return Err(block.into_error());
     }
     repo::delete(&mut tx, profile_id)
         .await

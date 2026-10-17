@@ -13,7 +13,8 @@ import type {
 	ScriptTemplate,
 	Secret,
 	UpdateJobTemplateRequest,
-	UpdateScriptTemplateRequest
+	UpdateScriptTemplateRequest,
+	UsageView
 } from './types';
 
 function problem(code: string, field: string, reason: string): Error {
@@ -343,6 +344,17 @@ export class MockScripts {
 		);
 	}
 
+	secretUsage(id: string): UsageView {
+		const secret = this.secrets.find((item) => item.id === id);
+		if (!secret) throw problem('not_found', 'id', 'unknown');
+		return secret.used_by.length === 0
+			? { blocked_by: null, blockers: { items: [], total: 0 } }
+			: {
+					blocked_by: 'secret_in_use',
+					blockers: { items: secret.used_by, total: secret.used_by.length }
+				};
+	}
+
 	deleteSecret(id: string): void {
 		const secret = this.secrets.find((item) => item.id === id);
 		if (!secret) throw problem('not_found', 'id', 'unknown');
@@ -352,8 +364,9 @@ export class MockScripts {
 					type: 'about:blank',
 					title: 'Conflict',
 					status: 409,
-					code: 'conflict',
-					request_id: ''
+					code: 'secret_in_use',
+					request_id: '',
+					blockers: { items: secret.used_by, total: secret.used_by.length }
 				}
 			});
 		}

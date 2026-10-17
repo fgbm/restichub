@@ -98,6 +98,7 @@ import type {
 	UpdateMaintenanceRequest,
 	UpdateRepositoryRequest,
 	UpdateUserRequest,
+	UsageView,
 	User,
 	UserListResponse
 } from './types';
@@ -152,6 +153,8 @@ export interface ApiService {
 	createRepository(request: CreateRepositoryRequest): Promise<Repository>;
 	updateRepository(id: string, request: UpdateRepositoryRequest): Promise<Repository>;
 	deleteRepository(id: string): Promise<void>;
+	/** What blocks the delete of the repository now. */
+	repositoryUsage(id: string): Promise<UsageView>;
 
 	/** Starts an init job on an agent (FR-RP-02). */
 	initRepository(id: string, request?: JobActionRequest): Promise<Job>;
@@ -191,6 +194,8 @@ export interface ApiService {
 	createProfile(request: CreateProfileRequest): Promise<ProfileResponse>;
 	updateProfile(id: string, request: UpdateProfileRequest): Promise<ProfileResponse>;
 	deleteProfile(id: string): Promise<void>;
+	/** What blocks the delete of the profile now. */
+	profileUsage(id: string): Promise<UsageView>;
 	/** The compiled steps of a profile for one agent, with masked secrets (FR-PF-04). */
 	previewProfile(id: string, agentId: string): Promise<PreviewResponse>;
 
@@ -214,6 +219,8 @@ export interface ApiService {
 	replaceSecretValue(id: string, value: string): Promise<void>;
 	/** Removes a secret. The control plane refuses it while an object uses the secret. */
 	deleteSecret(id: string): Promise<void>;
+	/** What blocks the delete of the secret now. */
+	secretUsage(id: string): Promise<UsageView>;
 
 	/** The built-in and the own script templates (FR-HK-12). */
 	listScriptTemplates(): Promise<ScriptTemplate[]>;
@@ -352,6 +359,7 @@ const httpService: ApiService = {
 	updateRepository: (id, request) =>
 		api.patch<Repository>(endpoints.repositories.byId(id), request),
 	deleteRepository: (id) => api.delete<void>(endpoints.repositories.byId(id)),
+	repositoryUsage: (id) => api.get<UsageView>(endpoints.repositories.usage(id)),
 
 	initRepository: (id, request) => api.post<Job>(endpoints.repositories.init(id), request ?? {}),
 	testAccessRepository: (id, request) =>
@@ -387,6 +395,7 @@ const httpService: ApiService = {
 	createProfile: (request) => api.post<ProfileResponse>(endpoints.profiles.create, request),
 	updateProfile: (id, request) => api.patch<ProfileResponse>(endpoints.profiles.byId(id), request),
 	deleteProfile: (id) => api.delete<void>(endpoints.profiles.byId(id)),
+	profileUsage: (id) => api.get<UsageView>(endpoints.profiles.usage(id)),
 	previewProfile: (id, agentId) =>
 		api.post<PreviewResponse>(endpoints.profiles.preview(id), {
 			agent_id: agentId
@@ -405,6 +414,7 @@ const httpService: ApiService = {
 	createSecret: (request) => api.post<Secret>(endpoints.secrets.create, request),
 	replaceSecretValue: (id, value) => api.put<void>(endpoints.secrets.value(id), { value }),
 	deleteSecret: (id) => api.delete<void>(endpoints.secrets.byId(id)),
+	secretUsage: (id) => api.get<UsageView>(endpoints.secrets.usage(id)),
 
 	listScriptTemplates: () =>
 		api

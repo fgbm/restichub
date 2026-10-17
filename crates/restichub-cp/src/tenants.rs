@@ -23,7 +23,7 @@ use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
 use crate::context::{Operation, RequestContext};
-use crate::error::{ApiError, map_write_error};
+use crate::error::{ApiError, ErrorCode, map_write_error};
 use crate::json::ApiJson;
 use crate::server::AppState;
 use crate::validation;
@@ -198,7 +198,7 @@ pub async fn suspend_tenant(
     context.authorize(Operation::PlatformTenantsWrite)?;
     let tenant_id = parse_tenant_id(&id)?;
     if tenant_id == PLATFORM_TENANT_ID {
-        return Err(ApiError::conflict());
+        return Err(ApiError::protected(ErrorCode::PlatformTenantProtected));
     }
     let event = context.audit_event(AuditAction::TenantSuspend, "tenant", tenant_id.as_uuid());
     transition(
@@ -272,7 +272,7 @@ pub async fn delete_tenant(
     context.authorize(Operation::PlatformTenantsWrite)?;
     let tenant_id = parse_tenant_id(&id)?;
     if tenant_id == PLATFORM_TENANT_ID {
-        return Err(ApiError::conflict());
+        return Err(ApiError::protected(ErrorCode::PlatformTenantProtected));
     }
     let event = context.audit_event(AuditAction::TenantDelete, "tenant", tenant_id.as_uuid());
     transition(

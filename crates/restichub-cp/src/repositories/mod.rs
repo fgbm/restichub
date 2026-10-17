@@ -27,6 +27,7 @@ use restichub_db::{BackendKind, RepositoryId};
 use restichub_secrets::SecretPurpose;
 
 use crate::context::{Operation, RequestContext};
+use crate::delete_check;
 use crate::error::{ApiError, map_write_error};
 use crate::json::ApiJson;
 use crate::secrets::{actor_user, create_bound_secret};
@@ -410,6 +411,34 @@ pub async fn update_repository(
     Ok(Json(RepositoryView::new(&updated, health.first())))
 }
 
+/// Names the records that block the delete of a repository.
+#[utoipa::path(
+    get,
+    path = "/api/v1/repositories/{id}/usage",
+    security(("cookie" = []), ("bearer" = [])),
+    params(("id" = String, Path, description = "The identifier of the repository.")),
+    responses(
+        (status = 200, description = "What blocks the delete now.", body = delete_check::UsageView),
+        crate::error::ProtectedResponses,
+        (status = 404, description = "The repository is not found.", body = crate::error::ProblemBody)
+    )
+)]
+pub async fn repository_usage(
+    State(state): State<AppState>,
+    context: RequestContext,
+    Path(id): Path<String>,
+) -> Result<Json<delete_check::UsageView>, ApiError> {
+    context.authorize(Operation::RepositoriesRead)?;
+    let repository_id = parse_repository_id(&id)?;
+    let mut tx = state.db().begin_tenant(context.tenant_id).await?;
+    if repo::get(&mut tx, repository_id).await?.is_none() {
+        return Err(ApiError::not_found());
+    }
+    let block = delete_check::repository_block(&mut tx, repository_id).await?;
+    tx.commit().await?;
+    Ok(Json(block.into()))
+}
+
 /// Removes a repository and its bound secrets.
 #[utoipa::path(
     delete,
@@ -420,7 +449,7 @@ pub async fn update_repository(
         (status = 204, description = "The repository is removed."),
         crate::error::ProtectedResponses,
         (status = 404, description = "The repository is not found.", body = crate::error::ProblemBody),
-        (status = 409, description = "An active job or a profile holds the repository.", body = crate::error::ProblemBody)
+        (status = 409, description = "A profile holds the repository (`repository_in_use`), or an active job does (`repository_has_active_job`). The body lists the records.", body = crate::error::ProblemBody)
     )
 )]
 pub async fn delete_repository(
@@ -434,14 +463,11 @@ pub async fn delete_repository(
     let Some(current) = repo::get_for_update(&mut tx, repository_id).await? else {
         return Err(ApiError::not_found());
     };
-    // A profile binds the repository. Remove or repoint the profiles first, so the foreign key
-    // never blocks the delete with an internal error.
-    if restichub_db::profiles::is_repository_used(&mut tx, repository_id).await? {
-        return Err(ApiError::conflict());
-    }
-    // An active job holds the repository, so the agent never loses it in the middle of a job.
-    if restichub_db::jobs::has_active_for_repository(&mut tx, repository_id).await? {
-        return Err(ApiError::conflict());
+    // A profile binds the repository, and an active job holds it so the agent never loses it in
+    // the middle of a job. The check also keeps the foreign key from blocking the delete with an
+    // internal error.
+    if let Some(block) = delete_check::repository_block(&mut tx, repository_id).await? {
+        return Err(block.into_error());
     }
     // The finished jobs keep their history with a null link (migration 0030).
     repo::delete(&mut tx, repository_id)

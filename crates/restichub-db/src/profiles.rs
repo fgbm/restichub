@@ -17,6 +17,7 @@ use uuid::Uuid;
 
 use crate::DbError;
 use crate::ids::{ProfileId, RepositoryId, UserId};
+use crate::referrers::Referrers;
 use crate::tx::TenantTx;
 
 pub const DEFAULT_PAGE_LIMIT: i64 = 50;
@@ -338,20 +339,20 @@ pub async fn delete(tx: &mut TenantTx<'_>, id: ProfileId) -> Result<bool, DbErro
     Ok(result.rows_affected() == 1)
 }
 
-/// True when a profile of the tenant binds the repository.
+/// Lists the profiles of the tenant that bind the repository.
 ///
 /// A repository that a profile uses cannot be removed until the profile is removed or repointed.
-pub async fn is_repository_used(
+pub async fn referrers_of_repository(
     tx: &mut TenantTx<'_>,
     repository: RepositoryId,
-) -> Result<bool, DbError> {
-    let (bound,): (bool,) =
-        sqlx::query_as("SELECT EXISTS (SELECT 1 FROM profiles WHERE repository_id = $1)")
-            .bind(repository)
-            .fetch_one(tx.as_conn())
-            .await
-            .map_err(DbError::Query)?;
-    Ok(bound)
+) -> Result<Referrers, DbError> {
+    crate::referrers::fetch(
+        tx,
+        "SELECT id, name, count(*) OVER () FROM profiles WHERE repository_id = $1 \
+         ORDER BY lower(name), id LIMIT $2",
+        repository.as_uuid(),
+    )
+    .await
 }
 
 #[derive(sqlx::FromRow)]

@@ -416,7 +416,6 @@ export const en = {
 	'secrets.deleteInUseTitle': 'The secret is in use',
 	'secrets.deleteInUseBody':
 		'You cannot delete {name} while these objects use it. Remove the secret from them first.',
-	'secrets.deleteRefused': 'An object uses the secret, so ResticHub cannot delete it.',
 	'secrets.deleted': 'The secret is deleted.',
 
 	// Hosts
@@ -1205,6 +1204,26 @@ export const en = {
 		'The host of an initialized local repository cannot change. The snapshots are on the disk of this host.',
 	'error.not_repository_host':
 		'The plan runs on another host than its local repository. Open the plan and select the repository host.',
+	'error.repository_in_use':
+		'Profiles use this repository. Switch them to another repository or delete them.',
+	'error.repository_has_active_job':
+		'A job runs on this repository now. Wait until it ends or cancel the job.',
+	'error.profile_in_use': 'Plans use this profile. Switch them to another profile or delete them.',
+	'error.secret_in_use': 'Objects use this secret. Remove the secret from them first.',
+	'error.last_admin':
+		'This is the last Admin of the organization. Make another user an Admin first.',
+	'error.own_account_protected':
+		'You cannot remove, disable or demote your own account. Ask another Admin to do it.',
+	'error.platform_tenant_protected': 'The platform organization cannot be suspended or deleted.',
+	'deleteBlocked.checking': 'Checking what uses it…',
+	'deleteBlocked.more': 'and {n} more',
+	'deleteBlocked.disabled': 'Remove the cause above first.',
+	'deleteBlocked.kind.repository': 'Repository',
+	'deleteBlocked.kind.channel': 'Channel',
+	'deleteBlocked.kind.profile': 'Profile',
+	'deleteBlocked.kind.job_template': 'Job template',
+	'deleteBlocked.kind.plan': 'Plan',
+	'deleteBlocked.kind.job': 'Job',
 	'error.internal_error':
 		'The control plane has an internal problem. Try again later. If the problem stays, ask the administrator to read the log.',
 	'error.network': 'The control plane did not answer. Check the network and try again.',

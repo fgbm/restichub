@@ -34,6 +34,7 @@
 	import { t, tErrorCode, tOr, type MessageKey } from '#lib/i18n/index.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
+	import { fromRefusal, fromUsage, type BlockedView } from '#lib/delete-check.ts';
 
 	let repositories = $state<Repository[]>([]);
 	let agents = $state<Agent[]>([]);
@@ -42,6 +43,8 @@
 
 	let deleteTarget = $state<Repository | null>(null);
 	let deleteOpen = $state(false);
+	let deleteBlocked = $state<BlockedView | null>(null);
+	let deleteChecking = $state(false);
 	let deleting = $state(false);
 
 	let unlockTarget = $state<Repository | null>(null);
@@ -290,10 +293,7 @@
 				icon: 'trash',
 				danger: true,
 				hidden: !canWrite,
-				onSelect: () => {
-					deleteTarget = repository;
-					deleteOpen = true;
-				}
+				onSelect: () => void openDelete(repository)
 			}
 		];
 	}
@@ -353,6 +353,21 @@
 		}
 	}
 
+	async function openDelete(repository: Repository): Promise<void> {
+		deleteTarget = repository;
+		deleteBlocked = null;
+		deleteChecking = true;
+		deleteOpen = true;
+		try {
+			const blocked = fromUsage(await service.repositoryUsage(repository.id));
+			if (deleteTarget?.id === repository.id) deleteBlocked = blocked;
+		} catch {
+			// The delete reports the refusal itself, so a failed check opens the plain dialog.
+		} finally {
+			deleteChecking = false;
+		}
+	}
+
 	async function confirmDelete(): Promise<void> {
 		if (!deleteTarget) return;
 		deleting = true;
@@ -363,7 +378,8 @@
 			deleteTarget = null;
 			await load();
 		} catch (problem) {
-			pushToast('danger', messageOf(problem));
+			deleteBlocked = fromRefusal(problem);
+			if (!deleteBlocked) pushToast('danger', messageOf(problem));
 		} finally {
 			deleting = false;
 		}
@@ -556,6 +572,8 @@
 		confirmLabel={t('repositories.delete')}
 		tone="danger"
 		loading={deleting}
+		blocked={deleteBlocked}
+		checking={deleteChecking}
 		onConfirm={confirmDelete}
 	/>
 

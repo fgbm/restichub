@@ -42,6 +42,7 @@
 	import type { CreatablePurpose } from '#lib/secrets.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
+	import { fromRefusal } from '#lib/delete-check.ts';
 
 	const canWrite = $derived(['admin', 'platform_admin'].includes(getSession()?.role ?? ''));
 
@@ -221,12 +222,6 @@
 		return t('table.error');
 	}
 
-	// A conflict on delete means a user of the secret appeared after the list was read.
-	function isConflict(problem: unknown): boolean {
-		const status = (problem as { problem?: { status?: number } } | null)?.problem?.status;
-		return status === 409;
-	}
-
 	async function load(): Promise<void> {
 		loading = true;
 		error = null;
@@ -320,10 +315,15 @@
 			pushToast('success', t('secrets.deleted'));
 			await load();
 		} catch (problem) {
-			pushToast('danger', isConflict(problem) ? t('secrets.deleteRefused') : messageOf(problem));
-			if (isConflict(problem)) {
-				deleteOpen = false;
+			if (fromRefusal(problem)) {
+				// A user of the secret appeared after the list was read: reload, and the dialog shows
+				// the in-use view with the objects that the server names.
+				const id = deleteTarget?.id;
 				await load();
+				deleteTarget = secrets.find((item) => item.id === id) ?? null;
+				if (!deleteTarget) deleteOpen = false;
+			} else {
+				pushToast('danger', messageOf(problem));
 			}
 		} finally {
 			deleting = false;

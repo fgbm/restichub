@@ -108,6 +108,7 @@ import type {
 	UpdateProfileRequest,
 	UpdateRepositoryRequest,
 	UpdateUserRequest,
+	UsageView,
 	User
 } from './types';
 
@@ -969,6 +970,19 @@ function isTerminal(status: JobStatus): boolean {
 	);
 }
 
+function notFound(): ApiError {
+	return new ApiError({ status: 404, code: 'not_found', title: 'Not Found' });
+}
+
+function blockedError(usage: UsageView): ApiError {
+	return new ApiError({
+		status: 409,
+		code: usage.blocked_by ?? 'conflict',
+		title: 'Conflict',
+		blockers: usage.blockers
+	});
+}
+
 export class MockApiService {
 	private users: User[] = makeUsers();
 	private tenants: Tenant[] = makeTenants();
@@ -1419,7 +1433,24 @@ export class MockApiService {
 		return updated;
 	}
 
+	async repositoryUsage(id: string): Promise<UsageView> {
+		if (!this.repositories.some((item) => item.id === id)) throw notFound();
+		const profiles = this.profiles.filter((item) => item.repository_id === id);
+		if (profiles.length === 0) return { blocked_by: null, blockers: { items: [], total: 0 } };
+		return {
+			blocked_by: 'repository_in_use',
+			blockers: {
+				items: profiles
+					.slice(0, 10)
+					.map((item) => ({ kind: 'profile', id: item.id, name: item.name })),
+				total: profiles.length
+			}
+		};
+	}
+
 	async deleteRepository(id: string): Promise<void> {
+		const usage = await this.repositoryUsage(id);
+		if (usage.blocked_by) throw blockedError(usage);
 		this.repositories = this.repositories.filter((item) => item.id !== id);
 	}
 
@@ -1994,7 +2025,22 @@ export class MockApiService {
 		return { profile: updated, warnings: warningsFor(updated), plan_warnings: [] };
 	}
 
+	async profileUsage(id: string): Promise<UsageView> {
+		if (!this.profiles.some((item) => item.id === id)) throw notFound();
+		const plans = this.plans.filter((item) => item.profile_id === id);
+		if (plans.length === 0) return { blocked_by: null, blockers: { items: [], total: 0 } };
+		return {
+			blocked_by: 'profile_in_use',
+			blockers: {
+				items: plans.slice(0, 10).map((item) => ({ kind: 'plan', id: item.id, name: item.name })),
+				total: plans.length
+			}
+		};
+	}
+
 	async deleteProfile(id: string): Promise<void> {
+		const usage = await this.profileUsage(id);
+		if (usage.blocked_by) throw blockedError(usage);
 		this.profiles = this.profiles.filter((item) => item.id !== id);
 	}
 
@@ -2062,6 +2108,10 @@ export class MockApiService {
 
 	async replaceSecretValue(id: string): Promise<void> {
 		this.scriptMock.replaceSecretValue(id);
+	}
+
+	async secretUsage(id: string): Promise<UsageView> {
+		return this.scriptMock.secretUsage(id);
 	}
 
 	async deleteSecret(id: string): Promise<void> {

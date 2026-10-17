@@ -314,6 +314,15 @@ export type SecretUsage = components['schemas']['SecretUsageView'];
 
 export type SecretUsageKind = components['schemas']['SecretUsageKind'];
 
+/** The records that block a delete, from a usage route or a refused delete. */
+export type Blocker = components['schemas']['Blocker'];
+
+export type BlockerKind = components['schemas']['BlockerKind'];
+
+export type Blockers = components['schemas']['Blockers'];
+
+export type UsageView = components['schemas']['UsageView'];
+
 export type SecretListResponse = components['schemas']['SecretListResponse'];
 
 export type CreateSecretRequest = components['schemas']['CreateSecretRequest'];

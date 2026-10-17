@@ -39,3 +39,19 @@ A failed or refused job shows a reason under its title on the page of the job. T
 An alert about a failed job uses a short text of the code:
 
 <UiTable prefix="jobs.errorCode." code="Code" text="Text in the alert" />
+
+## Refused deletes
+
+If a record blocks a delete, the control plane answers `409 Conflict` with a code. The web interface asks `GET /api/v1/repositories/{id}/usage`, `/profiles/{id}/usage` or `/secrets/{id}/usage` before it asks you to confirm. The answer has the same shape as the refusal: `blocked_by` holds the code, or null if the delete is allowed.
+
+The problem body of a code that names records has a `blockers` object. It holds at most 10 records, each with `kind`, `id` and `name`, and `total`, the count of all the records.
+
+| Code | Meaning |
+|---|---|
+| `repository_in_use` | A profile uses the repository. Switch the profiles to another repository, or delete them. |
+| `repository_has_active_job` | A job runs on the repository. Wait until it ends, or cancel it. |
+| `profile_in_use` | A plan uses the profile. Switch the plans to another profile, or delete them. |
+| `secret_in_use` | A repository, a channel, a profile or a job template uses the secret. |
+| `last_admin` | The user is the last Admin of the organization. |
+| `own_account_protected` | You cannot remove, disable or demote your own account. |
+| `platform_tenant_protected` | The platform organization cannot be suspended or deleted. |

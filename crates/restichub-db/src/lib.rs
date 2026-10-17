@@ -38,6 +38,7 @@ pub mod metrics;
 pub mod plans;
 pub mod profiles;
 pub mod queue;
+pub mod referrers;
 pub mod repositories;
 pub mod repository_health;
 pub mod restore;

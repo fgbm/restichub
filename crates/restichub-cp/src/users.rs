@@ -21,7 +21,7 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::context::{Operation, RequestContext, allowed_role, ensure_target_not_above_actor};
-use crate::error::ApiError;
+use crate::error::{ApiError, ErrorCode};
 use crate::jobs::format_time;
 use crate::json::ApiJson;
 use crate::password;
@@ -264,7 +264,7 @@ pub async fn update_user(
     // The caller cannot remove its own administrator rights: the session would keep a role that the
     // membership no longer grants (ADR-0025).
     if context.actor == Actor::User(user_id) && (role_lost_admin || disabling) {
-        return Err(ApiError::conflict());
+        return Err(ApiError::protected(ErrorCode::OwnAccountProtected));
     }
     // The guard applies to an active Admin only. A disabled membership is not the last Admin.
     let active_admin = member.role.is_admin() && !member.disabled && !member.account_disabled;
@@ -356,7 +356,7 @@ pub async fn delete_user(
     // The caller cannot disable its own membership: the session would keep a role that the
     // membership no longer grants (ADR-0025).
     if context.actor == Actor::User(user_id) {
-        return Err(ApiError::conflict());
+        return Err(ApiError::protected(ErrorCode::OwnAccountProtected));
     }
     let active_admin = member.role.is_admin() && !member.disabled && !member.account_disabled;
     if active_admin {
@@ -450,7 +450,7 @@ pub async fn reset_password(
 
 async fn guard_last_admin(tx: &mut TenantTx<'_>) -> Result<(), ApiError> {
     if memberships::count_admins(tx).await? <= 1 {
-        return Err(ApiError::conflict());
+        return Err(ApiError::protected(ErrorCode::LastAdmin));
     }
     Ok(())
 }

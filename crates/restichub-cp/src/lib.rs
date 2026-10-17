@@ -21,6 +21,7 @@ pub mod clock;
 pub mod config;
 pub mod context;
 pub mod dashboard;
+pub mod delete_check;
 pub mod delivery;
 pub mod enrollment;
 pub mod enrollment_tokens;

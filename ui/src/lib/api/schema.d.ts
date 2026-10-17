@@ -1039,6 +1039,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/profiles/{id}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Names the plans that block the delete of a profile. */
+        get: operations["profile_usage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/repositories": {
         parameters: {
             query?: never;
@@ -1251,6 +1268,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/repositories/{id}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Names the records that block the delete of a repository. */
+        get: operations["repository_usage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/script-templates": {
         parameters: {
             query?: never;
@@ -1327,6 +1361,23 @@ export interface paths {
         post?: never;
         /** Removes a secret of the tenant. */
         delete: operations["delete_secret"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/secrets/{id}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Names the objects that block the delete of a secret. */
+        get: operations["secret_usage"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1904,6 +1955,23 @@ export interface components {
             /** Format: int64 */
             tree_blobs: number;
         };
+        Blocker: {
+            id: string;
+            kind: components["schemas"]["BlockerKind"];
+            /** @description The name of the record. A job has its kind as the name. */
+            name: string;
+        };
+        /**
+         * @description The kind of a record that blocks a delete.
+         * @enum {string}
+         */
+        BlockerKind: "repository" | "channel" | "profile" | "job_template" | "plan" | "job";
+        /** @description At most `restichub_db::referrers::REFERRER_LIMIT` records, and the count of all of them. */
+        Blockers: {
+            items: components["schemas"]["Blocker"][];
+            /** Format: int64 */
+            total: number;
+        };
         /**
          * @description Progress of a browse request at the moment of the read.
          * @enum {string}
@@ -2307,7 +2375,7 @@ export interface components {
         /** @enum {string} */
         EnvKind: "string" | "secret_ref";
         /** @enum {string} */
-        ErrorCode: "not_found" | "service_unavailable" | "internal_error" | "unauthenticated" | "invalid_credentials" | "forbidden" | "csrf_required" | "conflict" | "invalid_argument" | "payload_too_large" | "tenant_key_missing" | "ambiguous_credentials" | "method_not_allowed" | "rate_limited" | "busy" | "shared_account" | "username_taken" | "email_taken" | "agent_offline" | "already_queued" | "agent_capability_missing" | "restore_target_denied" | "token_used" | "token_already_revoked" | "token_expired" | "agent_recently_online" | "setup_already_done" | "invalid_setup_token" | "repository_host_locked" | "not_repository_host";
+        ErrorCode: "not_found" | "service_unavailable" | "internal_error" | "unauthenticated" | "invalid_credentials" | "forbidden" | "csrf_required" | "conflict" | "invalid_argument" | "payload_too_large" | "tenant_key_missing" | "ambiguous_credentials" | "method_not_allowed" | "rate_limited" | "busy" | "shared_account" | "username_taken" | "email_taken" | "agent_offline" | "already_queued" | "agent_capability_missing" | "restore_target_denied" | "token_used" | "token_already_revoked" | "token_expired" | "agent_recently_online" | "setup_already_done" | "invalid_setup_token" | "repository_host_locked" | "not_repository_host" | "repository_in_use" | "repository_has_active_job" | "profile_in_use" | "secret_in_use" | "last_admin" | "own_account_protected" | "platform_tenant_protected";
         /** @description One value of a filter with the number of rows that hold it. */
         FacetValue: {
             /** Format: int64 */
@@ -2899,6 +2967,7 @@ export interface components {
             maintenance: boolean;
         };
         ProblemBody: {
+            blockers?: components["schemas"]["Blockers"] | null;
             /** @description In snake_case. */
             code: components["schemas"]["ErrorCode"];
             /** @description Set by `invalid_argument`, `username_taken` and `email_taken`. */
@@ -3618,6 +3687,11 @@ export interface components {
             disabled?: boolean | null;
             display_name?: string | null;
             role?: components["schemas"]["Role"] | null;
+        };
+        /** @description The answer of a usage route: what blocks the delete now. */
+        UsageView: {
+            blocked_by?: components["schemas"]["ErrorCode"] | null;
+            blockers: components["schemas"]["Blockers"];
         };
         UserListResponse: {
             items: components["schemas"]["UserView"][];
@@ -7574,6 +7648,15 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemBody"];
                 };
             };
+            /** @description A plan holds the profile (`profile_in_use`). The body lists the plans. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
         };
     };
     update_profile: {
@@ -7671,6 +7754,56 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The profile is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    profile_usage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the profile. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description What blocks the delete now. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageView"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -7896,7 +8029,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemBody"];
                 };
             };
-            /** @description An active job or a profile holds the repository. */
+            /** @description A profile holds the repository (`repository_in_use`), or an active job does (`repository_has_active_job`). The body lists the records. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -8731,6 +8864,56 @@ export interface operations {
             };
         };
     };
+    repository_usage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the repository. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description What blocks the delete now. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageView"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The repository is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
     list_script_templates: {
         parameters: {
             query?: never;
@@ -9202,8 +9385,58 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemBody"];
                 };
             };
-            /** @description An object uses the secret. */
+            /** @description An object uses the secret (`secret_in_use`). The body lists the objects. */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    secret_usage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the secret. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description What blocks the delete now. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageView"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The secret is not found. */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

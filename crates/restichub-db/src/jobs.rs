@@ -16,6 +16,7 @@ use uuid::Uuid;
 use crate::DbError;
 use crate::enums::{JobKind, JobResultCode, JobStatus};
 use crate::ids::{AgentId, JobId, PlanId, RepositoryId, UserId};
+use crate::referrers::Referrers;
 use crate::tx::TenantTx;
 
 /// The columns of a [`Job`], in the order of the row type. A prefix such as `"j."` qualifies each
@@ -393,6 +394,15 @@ pub async fn list_for_plan(tx: &mut TenantTx<'_>, plan_id: PlanId) -> Result<Vec
     Ok(rows.into_iter().map(Job::from).collect())
 }
 
+macro_rules! active_for_repository {
+    () => {
+        "repository_id = $1 \
+         AND status IN ('queued', 'sent', 'running') \
+         AND (kind IN ('init', 'test_access', 'forget', 'prune', 'check') \
+              OR (kind = 'backup' AND status IN ('sent', 'running')))"
+    };
+}
+
 /// True when the repository holds an active maintenance job, or a sent or running backup.
 ///
 /// A queued backup does not lock the repository location: several backup jobs may run on one
@@ -402,17 +412,34 @@ pub async fn has_active_for_repository(
     tx: &mut TenantTx<'_>,
     repository_id: RepositoryId,
 ) -> Result<bool, DbError> {
-    let (active,): (bool,) = sqlx::query_as(
-        "SELECT EXISTS (SELECT 1 FROM jobs WHERE repository_id = $1 \
-         AND status IN ('queued', 'sent', 'running') \
-         AND (kind IN ('init', 'test_access', 'forget', 'prune', 'check') \
-              OR (kind = 'backup' AND status IN ('sent', 'running'))))",
-    )
+    let (active,): (bool,) = sqlx::query_as(concat!(
+        "SELECT EXISTS (SELECT 1 FROM jobs WHERE ",
+        active_for_repository!(),
+        ")"
+    ))
     .bind(repository_id)
     .fetch_one(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
     Ok(active)
+}
+
+/// Lists the jobs that `has_active_for_repository` counts, oldest first. The name of a job is its
+/// kind.
+pub async fn active_for_repository(
+    tx: &mut TenantTx<'_>,
+    repository_id: RepositoryId,
+) -> Result<Referrers, DbError> {
+    crate::referrers::fetch(
+        tx,
+        concat!(
+            "SELECT id, kind::text, count(*) OVER () FROM jobs WHERE ",
+            active_for_repository!(),
+            " ORDER BY created_at, id LIMIT $2"
+        ),
+        repository_id.as_uuid(),
+    )
+    .await
 }
 
 /// Moves the queued jobs of a plan to the terminal `failed` status with the `cancelled` result.

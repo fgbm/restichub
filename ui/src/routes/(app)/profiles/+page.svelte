@@ -14,6 +14,7 @@
 	import { plural } from '#lib/list-format.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
+	import { fromRefusal, fromUsage, type BlockedView } from '#lib/delete-check.ts';
 	import { ENTITY_ICONS } from '#lib/vocabulary.ts';
 
 	let profiles = $state<Profile[]>([]);
@@ -24,6 +25,8 @@
 
 	let deleteTarget = $state<Profile | null>(null);
 	let deleteOpen = $state(false);
+	let deleteBlocked = $state<BlockedView | null>(null);
+	let deleteChecking = $state(false);
 	let deleting = $state(false);
 
 	const canWrite = $derived(['admin', 'operator'].includes(getSession()?.role ?? ''));
@@ -176,11 +179,7 @@
 				hint: used ? t('profiles.deleteInUse') : undefined,
 				icon: 'trash',
 				danger: true,
-				disabled: used,
-				onSelect: () => {
-					deleteTarget = profile;
-					deleteOpen = true;
-				}
+				onSelect: () => void openDelete(profile)
 			}
 		];
 	}
@@ -222,6 +221,21 @@
 		void goto(resolve('/(app)/profiles/new'));
 	}
 
+	async function openDelete(profile: Profile): Promise<void> {
+		deleteTarget = profile;
+		deleteBlocked = null;
+		deleteChecking = true;
+		deleteOpen = true;
+		try {
+			const blocked = fromUsage(await service.profileUsage(profile.id));
+			if (deleteTarget?.id === profile.id) deleteBlocked = blocked;
+		} catch {
+			// The delete reports the refusal itself, so a failed check opens the plain dialog.
+		} finally {
+			deleteChecking = false;
+		}
+	}
+
 	async function confirmDelete(): Promise<void> {
 		if (!deleteTarget) return;
 		deleting = true;
@@ -232,7 +246,8 @@
 			deleteTarget = null;
 			await load();
 		} catch (problem) {
-			pushToast('danger', messageOf(problem));
+			deleteBlocked = fromRefusal(problem);
+			if (!deleteBlocked) pushToast('danger', messageOf(problem));
 		} finally {
 			deleting = false;
 		}
@@ -300,6 +315,8 @@
 		confirmLabel={t('profiles.delete')}
 		tone="danger"
 		loading={deleting}
+		blocked={deleteBlocked}
+		checking={deleteChecking}
 		onConfirm={confirmDelete}
 	/>
 </Page>

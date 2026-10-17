@@ -504,6 +504,12 @@ pub const ROUTES: &[Route] = &[
     },
     Route {
         method: "get",
+        path: "/api/v1/secrets/{id}/usage",
+        access: Access::Protected(Operation::SecretsRead),
+        handler: || routes!(crate::secrets::secret_usage),
+    },
+    Route {
+        method: "get",
         path: "/api/v1/repositories",
         access: Access::Protected(Operation::RepositoriesRead),
         handler: || routes!(crate::repositories::list_repositories),
@@ -537,6 +543,12 @@ pub const ROUTES: &[Route] = &[
         path: "/api/v1/repositories/{id}",
         access: Access::Protected(Operation::RepositoriesWrite),
         handler: || routes!(crate::repositories::delete_repository),
+    },
+    Route {
+        method: "get",
+        path: "/api/v1/repositories/{id}/usage",
+        access: Access::Protected(Operation::RepositoriesRead),
+        handler: || routes!(crate::repositories::repository_usage),
     },
     Route {
         method: "post",
@@ -693,6 +705,12 @@ pub const ROUTES: &[Route] = &[
         path: "/api/v1/profiles/{id}",
         access: Access::Protected(Operation::ProfilesWrite),
         handler: || routes!(crate::profiles::delete_profile),
+    },
+    Route {
+        method: "get",
+        path: "/api/v1/profiles/{id}/usage",
+        access: Access::Protected(Operation::ProfilesRead),
+        handler: || routes!(crate::profiles::profile_usage),
     },
     Route {
         method: "post",
