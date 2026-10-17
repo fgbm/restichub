@@ -248,14 +248,14 @@
 			{
 				id: 'retention',
 				label: t('repositories.runRetention'),
-				icon: 'refresh',
+				icon: 'eraser',
 				hidden: !maintained,
 				onSelect: () => void runTask(repository, 'retention')
 			},
 			{
 				id: 'check',
 				label: t('repositories.runCheck'),
-				icon: 'refresh',
+				icon: 'shield-check',
 				hidden: !maintained,
 				onSelect: () => void runTask(repository, 'check')
 			},
@@ -269,7 +269,7 @@
 			{
 				id: 'test',
 				label: t('repositories.testAccess'),
-				icon: 'eye',
+				icon: 'plug-zap',
 				hidden: !canWrite,
 				onSelect: () => openJob(repository, 'test_access')
 			},
@@ -572,7 +572,7 @@
 				{t('repositories.initializeBody')}
 			</Alert>
 		{:else}
-			<Alert tone="info" icon="eye" title={t('repositories.testAccess')}>
+			<Alert tone="info" icon="plug-zap" title={t('repositories.testAccess')}>
 				{t('repositories.testAccessBody')}
 			</Alert>
 		{/if}
