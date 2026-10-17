@@ -9,7 +9,7 @@ A plan assigns one profile to one agent with a schedule. The control plane keeps
 
 | Field | Meaning |
 |---|---|
-| Name | The name of the plan. It is any text of 1 to 100 characters. It is unique in the tenant, and the letter case does not matter. |
+| Name | The name of the plan. It is any text of 1 to 100 characters. It is unique in the tenant, and the letter case does not matter. A new plan gets the name `<host> | <profile>` until you type a name. |
 | Profile | The backup definition that the control plane compiles for each job. The field shows the repository of each profile and the backend kind. For a local repository, it also shows the repository host. The search finds a profile by its name or by its repository. |
 | Host | The agent that runs the plan. |
 | Cron expression | Five fields: minute, hour, day of month, month, day of week. |

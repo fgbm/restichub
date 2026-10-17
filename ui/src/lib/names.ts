@@ -29,3 +29,19 @@ export function nameError(value: string): string | undefined {
 	const problem = nameProblem(value);
 	return problem && problem !== 'empty' ? t(`reason.${problem}`) : undefined;
 }
+
+/**
+ * The name of a new plan before the user types one: `<host> | <profile>`, unique among the
+ * known plan names without regard to case, and within the length limit.
+ */
+export function defaultPlanName(host: string, profile: string, taken: readonly string[]): string {
+	if (!host.trim() || !profile.trim()) return '';
+	const used = new Set(taken.map((name) => name.trim().toLowerCase()));
+	const fit = (text: string, room: number) => [...text].slice(0, room).join('').trim();
+	const base = `${host.trim()} | ${profile.trim()}`;
+	for (let n = 1; ; n += 1) {
+		const suffix = n === 1 ? '' : ` (${n})`;
+		const candidate = fit(base, MAX_RECORD_NAME - suffix.length) + suffix;
+		if (!used.has(candidate.toLowerCase())) return candidate;
+	}
+}
