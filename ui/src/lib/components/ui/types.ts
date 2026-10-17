@@ -13,7 +13,18 @@ export type RecordPart = string | { tag: string };
 export interface RecordOption extends SelectOption {
 	/** The closed field shows the first part after the label. */
 	description?: RecordPart[];
+	/** The text after the label in the closed field. Default: the first part of `description`. */
+	detail?: string;
+	/** A status dot before the label. `state` gives the same fact in words. */
+	dot?: RecordDot;
+	/** The state in words at the right of the option. */
+	state?: string;
+	disabled?: boolean;
+	/** Why the option cannot be selected; it shows below the option. */
+	reason?: string;
 }
+
+export type RecordDot = 'success' | 'warning' | 'neutral';
 
 export type BadgeTone = 'neutral' | 'accent' | 'success' | 'warning' | 'danger' | 'info';
 

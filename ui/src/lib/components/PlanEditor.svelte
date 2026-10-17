@@ -13,6 +13,7 @@
 		Repository,
 		UpdatePlanRequest
 	} from '#lib/api/index.ts';
+	import HostPicker from './HostPicker.svelte';
 	import ProfilePicker from './ProfilePicker.svelte';
 	import ProfileSection from './ProfileSection.svelte';
 	import { RecordPage, SummaryPanel } from './layout/index.ts';
@@ -21,6 +22,7 @@
 	import { formatLocalTime, formatTimeInZone } from '#lib/format.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
+	import type { HostRef } from '#lib/host-picker.ts';
 	import type { SummaryState } from '#lib/profile-form.ts';
 	import {
 		browserTimeZone,
@@ -92,15 +94,15 @@
 	const localHost = $derived(localHostOf(repository));
 	// The stored host of a plan stays an option, so the field shows the real value and its error
 	// instead of a silent move to another host.
-	const agentOptions = $derived<SelectOption[]>(
-		agents
-			.filter(
-				(agent) =>
-					(agent.status === 'active' && (localHost === null || agent.id === localHost)) ||
-					agent.id === existing?.agent_id
-			)
-			.map((agent) => ({ value: agent.id, label: agent.hostname }))
+	const hostChoices = $derived(
+		agents.filter((agent) => agent.status === 'active' || agent.id === existing?.agent_id)
 	);
+	function hostReason(agent: HostRef): string | null {
+		if (localHost === null || agent.id === localHost) return null;
+		return localHost === ''
+			? t('pl.source.localNoHost', { name: repositoryName })
+			: t('hostPicker.localRepository', { repository: repositoryName, host: localHostName });
+	}
 	const hostMismatch = $derived(
 		localHost !== null && agentId !== localHost ? t('reason.not_repository_host') : undefined
 	);
@@ -229,7 +231,7 @@
 				rpoHours = found.rpo_seconds ? String(found.rpo_seconds / 3600) : '';
 			} else {
 				profileId = profiles[0]?.id ?? '';
-				agentId = agentOptions[0]?.value ?? '';
+				agentId = hostChoices.find((agent) => hostReason(agent) === null)?.id ?? '';
 				timeZone = browserTimeZone();
 			}
 			baseline = stateKey;
@@ -434,10 +436,10 @@
 				onchange={selectProfile}
 				required
 			/>
-			<Select
+			<HostPicker
 				id="plan-agent"
-				label={t('plans.host')}
-				options={agentOptions}
+				hosts={hostChoices}
+				reason={hostReason}
 				error={fieldError(formProblem, 'agent_id') ?? hostMismatch}
 				bind:value={agentId}
 				required

@@ -107,7 +107,8 @@ async function capture(
 		.getByRole('navigation', { name: labels.nav })
 		.getByRole('link', { name: labels.jobs, exact: true })
 		.click();
-	await page.getByRole('table').getByText('win-fs01').first().waitFor();
+	await page.getByRole('heading', { level: 1, name: labels.jobs }).waitFor();
+	await page.getByRole('main').getByText('win-fs01').first().waitFor();
 	await shot(page, `jobs-list${suffix}`, scheme);
 }
 

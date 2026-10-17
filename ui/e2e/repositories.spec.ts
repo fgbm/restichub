@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { pickRecord } from './pickers';
 
 // The Repositories screen lists the repositories of the organization. A repository is created and
 // edited on its own page and deleted in a dialog (FR-RP-01, FR-RP-05).
@@ -103,7 +104,7 @@ test('the repository init dialog picks a host and shows the job result', async (
 	await page.locator('#repo-password').fill('repo-password');
 	await page.locator('#repo-s3-access-key').fill('access-key');
 	await page.locator('#repo-s3-secret-key').fill('secret-key');
-	await page.locator('#repo-agent').selectOption({ label: 'nas-backup' });
+	await pickRecord(page, page.locator('#repo-agent'), 'nas-backup');
 	await page.getByRole('button', { name: 'Save', exact: true }).click();
 	await expect(page.getByText('Not initialized')).toBeVisible();
 
@@ -116,7 +117,8 @@ test('the repository init dialog picks a host and shows the job result', async (
 		dialog.getByText('Keep a copy of the repository password outside ResticHub.')
 	).toBeVisible();
 	// The init runs on the maintenance host only, so the dialog shows it and offers no choice.
-	await expect(page.locator('#job-host')).toHaveValue('nas-backup');
+	await expect(page.locator('#job-host')).toContainText('nas-backup');
+	await expect(page.locator('#job-host')).toBeDisabled();
 	await dialog.getByRole('button', { name: 'Start' }).click();
 	await expect(dialog.getByText('The repository is ready.')).toBeVisible({ timeout: 10_000 });
 	await page.keyboard.press('Escape');
@@ -144,7 +146,7 @@ async function addRepository(page: Page, name: string, host: string | null): Pro
 		await page.locator('#repo-endpoint').fill(`https://rest.example.net/${name}`);
 	}
 	await page.locator('#repo-password').fill('repo-password');
-	if (host) await page.locator('#repo-agent').selectOption({ label: host });
+	if (host) await pickRecord(page, page.locator('#repo-agent'), host);
 	await page.getByRole('button', { name: 'Save', exact: true }).click();
 	await expect(page.getByText(name, { exact: true })).toBeVisible();
 }

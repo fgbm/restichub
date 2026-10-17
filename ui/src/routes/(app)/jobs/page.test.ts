@@ -10,6 +10,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '#lib/api/index.ts';
 import Jobs from './+page.svelte';
 
+const HOST = {
+	status: 'active',
+	os: 'linux',
+	arch: 'amd64',
+	labels: [],
+	online: true,
+	first_connected_at: '2026-01-01T00:00:00Z',
+	last_seen_at: '2026-01-01T00:00:00Z'
+};
+
 const mocks = vi.hoisted(() => ({
 	listJobs: vi.fn(),
 	cancelJob: vi.fn(),
@@ -114,7 +124,7 @@ describe('the Jobs screen', () => {
 		vi.clearAllMocks();
 		session.role = 'operator';
 		mocks.listJobs.mockResolvedValue({ items: [], next_cursor: null, total: 0 });
-		mocks.listAgents.mockResolvedValue([{ id: 'a_1', hostname: 'win-fs01' }]);
+		mocks.listAgents.mockResolvedValue([{ ...HOST, id: 'a_1', hostname: 'win-fs01' }]);
 	});
 
 	it('lists a job with its status, plan, host and repository', async () => {
