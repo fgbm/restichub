@@ -131,11 +131,18 @@ pub fn install(restic: &Path) -> Result<()> {
         ServiceManagerAccess::CONNECT | ServiceManagerAccess::CREATE_SERVICE,
     )
     .context("cannot open the service manager; run as an administrator")?;
+    // Until a clean run after a restart, a process that kept the program directory open during a
+    // repair in place can still add a library there, so the boot must not start the service (T20).
+    let start_type = if crate::program_repair::manual_start()? {
+        ServiceStartType::OnDemand
+    } else {
+        ServiceStartType::AutoStart
+    };
     let info = ServiceInfo {
         name: OsString::from(SERVICE_NAME),
         display_name: OsString::from("ResticHub Agent"),
         service_type: ServiceType::OWN_PROCESS,
-        start_type: ServiceStartType::AutoStart,
+        start_type,
         error_control: ServiceErrorControl::Normal,
         executable_path: exe,
         launch_arguments: vec![OsString::from("run")],
@@ -191,25 +198,50 @@ fn failure_actions() -> ServiceFailureActions {
     }
 }
 
-fn stop_and_wait(service: &windows_service::service::Service) -> Result<()> {
-    let status = service.query_status()?;
-    if status.current_state == ServiceState::Stopped {
-        return Ok(());
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StopStep {
+    Done,
+    Wait,
+    Stop,
+}
+
+/// A service that starts or stops already accepts no stop control, so the command waits for it.
+fn stop_step(state: ServiceState) -> StopStep {
+    match state {
+        ServiceState::Stopped => StopStep::Done,
+        ServiceState::StartPending | ServiceState::StopPending => StopStep::Wait,
+        _ => StopStep::Stop,
     }
+}
+
+fn stop_and_wait(service: &windows_service::service::Service) -> Result<()> {
+    let deadline = std::time::Instant::now() + STOP_WAIT;
     // The process reports the stopped state before it exits, and until then its image and its
     // restic keep files of the program directory open. The handle is opened before the stop, so a
     // reused process id cannot take its place.
-    let process = status.process_id.and_then(open_process);
-    service.stop().context("cannot stop the service")?;
-    let deadline = std::time::Instant::now() + STOP_WAIT;
-    let late = || {
-        anyhow::anyhow!(
-            "the service {SERVICE_NAME} did not stop in time; start it by hand after it stops"
-        )
-    };
-    while service.query_status()?.current_state != ServiceState::Stopped {
+    let mut process = None;
+    let mut sent = false;
+    loop {
+        let status = service.query_status()?;
+        let step = stop_step(status.current_state);
+        if step == StopStep::Done {
+            break;
+        }
+        if process.is_none() {
+            process = status.process_id.and_then(open_process);
+        }
+        if step == StopStep::Stop
+            && !sent
+            && let Err(error) = service.stop()
+        {
+            // The state can change between the query and the control.
+            if stop_step(service.query_status()?.current_state) == StopStep::Stop {
+                return Err(error).context("cannot stop the service");
+            }
+        }
+        sent |= step == StopStep::Stop;
         if std::time::Instant::now() >= deadline {
-            return Err(late());
+            return Err(late_stop());
         }
         std::thread::sleep(Duration::from_millis(500));
     }
@@ -219,9 +251,17 @@ fn stop_and_wait(service: &windows_service::service::Service) -> Result<()> {
             deadline.saturating_duration_since(std::time::Instant::now()),
         )
     {
-        return Err(late());
+        return Err(late_stop());
     }
     Ok(())
+}
+
+/// The tree stays as it was, so the advice is a new run and never a start from it.
+fn late_stop() -> anyhow::Error {
+    anyhow::anyhow!(
+        "the service {SERVICE_NAME} did not stop in {} seconds; wait until `Get-Service {SERVICE_NAME}` shows Stopped, then run the command again",
+        STOP_WAIT.as_secs()
+    )
 }
 
 #[allow(unsafe_code)]
@@ -335,6 +375,7 @@ pub fn uninstall() -> Result<()> {
             if error.raw_os_error() == Some(ERROR_SERVICE_DOES_NOT_EXIST) =>
         {
             println!("the service {SERVICE_NAME} is not installed");
+            crate::program_repair::forget()?;
             return crate::logging::remove_event_source();
         }
         Err(error) => return Err(error.into()),
@@ -343,6 +384,7 @@ pub fn uninstall() -> Result<()> {
     // The stopping service still writes events, so the source goes only after it stopped.
     stop_and_wait(&service)?;
     crate::logging::remove_event_source()?;
+    crate::program_repair::forget()?;
     println!("the service {SERVICE_NAME} is removed");
     Ok(())
 }
@@ -350,6 +392,24 @@ pub fn uninstall() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fr_in_07_a_service_that_starts_or_stops_is_waited_for_and_not_sent_a_stop() {
+        assert_eq!(stop_step(ServiceState::Stopped), StopStep::Done);
+        assert_eq!(stop_step(ServiceState::StopPending), StopStep::Wait);
+        assert_eq!(stop_step(ServiceState::StartPending), StopStep::Wait);
+        for state in [
+            ServiceState::Running,
+            ServiceState::Paused,
+            ServiceState::PausePending,
+            ServiceState::ContinuePending,
+        ] {
+            assert_eq!(stop_step(state), StopStep::Stop, "{state:?}");
+        }
+        let advice = late_stop().to_string();
+        assert!(advice.contains("run the command again"), "{advice}");
+        assert!(!advice.contains("start it"), "{advice}");
+    }
 
     #[test]
     fn fr_ag_01_every_failure_restarts_the_service() {

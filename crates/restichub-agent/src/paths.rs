@@ -197,7 +197,7 @@ impl ProgramRebuild {
             return None;
         };
         Some(format!(
-            "warning: a process kept {} open ({holders}); restart the computer and run install-service again; it must print no repaired or moved lines",
+            "warning: a process kept {} open ({holders}), so it was repaired in place; until the computer restarts, that process can add a file there, so the service starts only by hand; close that process or remove it from the startup, restart the computer and run install-service again; it prints no repaired or moved lines and sets the automatic start again",
             dir.display()
         ))
     }
@@ -215,9 +215,9 @@ impl ProgramRebuild {
 ///
 /// # Errors
 ///
-/// Returns an error when a level has another owner, when the running image is inside the open
-/// directory, when the service does not stop, or when the directory neither moves nor takes the
-/// repair in place, for example because it holds a file that the agent does not know.
+/// Returns an error when the running image or the current directory is inside the open
+/// directory, when it holds a name that the agent does not know, when the service does not stop,
+/// or when the directory neither moves nor takes the repair in place.
 pub fn rebuild_program_dir(
     config: &Path,
     running: &Path,
@@ -252,7 +252,7 @@ pub fn rebuild_program_dir(
 ///
 /// # Errors
 ///
-/// Returns an error with the path of the first such entry.
+/// Returns an error that names each entry that the check refuses.
 pub fn check_program_files() -> Result<()> {
     #[cfg(windows)]
     {

@@ -11,8 +11,9 @@ use crate::cli::{InstallOptions, RegisterOptions, ResticFileOptions, UpdateOptio
 use crate::enroll::{Client, Facts};
 use crate::identity::{StoredIdentity, StoredSigningKeys, generate_key_and_csr};
 use crate::machine_id::MachineId;
-use crate::paths::{ProgramRebuild, UntrustedIdentity};
+use crate::paths::UntrustedIdentity;
 use crate::preflight::ChangeableIdentity;
+use crate::program_repair::HostRecord;
 use crate::restic::{Restic, ResticBinary};
 use crate::restic_install::Installer;
 use crate::restic_release::Supply;
@@ -148,7 +149,7 @@ pub fn register(options: &RegisterOptions, dir: &Path) -> Result<()> {
     check_register_input(options, dir)?;
     // Every check and repair that can refuse runs before `--force` removes an identity that another
     // account could change, so a refusal leaves the old files in place (T20, FR-IN-07).
-    let rebuilt = prepare_program(dir, &HostService)?;
+    let program = crate::program_repair::prepare(dir, &HostService)?;
     // The tree check runs before the copy: the move of an old restic reads from it, so a directory
     // that another account can write must be refused before anything leaves it (T20, FR-IN-07).
     crate::preflight::prepare_directories(
@@ -158,12 +159,16 @@ pub fn register(options: &RegisterOptions, dir: &Path) -> Result<()> {
         options.verbose,
     )?;
     place_program()?;
+    // The token is spent only for a tree that the service may start from.
+    if !options.no_service {
+        program.check_before_start()?;
+    }
     let installer = Installer::host()?;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .context("cannot start the runtime")?;
-    runtime.block_on(async {
+    let registered = runtime.block_on(async {
         let supply = crate::restic_install::supply(&options.restic)?;
         provision_and_register(
             options,
@@ -173,10 +178,17 @@ pub fn register(options: &RegisterOptions, dir: &Path) -> Result<()> {
             &supply,
         )
         .await
-    })?;
+    });
+    if program.rebuilt.replaced() {
+        registered.context("the service stays stopped until this command succeeds")?;
+    } else {
+        registered?;
+    }
     let restic = ResticBinary::installed(&installer.layout)?;
     if !options.no_service {
-        crate::paths::check_program_files()?;
+        program
+            .start_service_from_tree(&HostRecord, crate::paths::check_program_files)
+            .context(REGISTERED_NOT_STARTED)?;
     }
     let report = start_after_register(
         options,
@@ -185,11 +197,13 @@ pub fn register(options: &RegisterOptions, dir: &Path) -> Result<()> {
         restic.path(),
         WaitOptions::default(),
     )?;
-    if let Some(warning) = rebuilt.warning() {
+    if let Some(warning) = program.warning() {
         println!("{warning}");
     }
     finish_setup(report.as_ref(), hostname().ok().as_deref())
 }
+
+const REGISTERED_NOT_STARTED: &str = "the agent is registered, but the service is not started; fix the cause and run: restichub-agent install-service";
 
 /// Checks the input, installs restic when it is absent and enrolls this host (FR-IN-07, ADR-0038).
 ///
@@ -205,7 +219,9 @@ pub async fn provision_and_register(
 ) -> Result<()> {
     check_register_input(options, dir)?;
     crate::preflight::prepare_directories(dir, cache, untrusted(options), options.verbose)?;
-    installer.ensure(supply).await?;
+    installer.ensure(supply).await.context(
+        "restic is not installed, so the agent did not register and the token is not used",
+    )?;
     let restic = ResticBinary::installed(&installer.layout)?;
     // The location rules run before the token is spent, so a refused location never leaves an
     // enrolled host without a service (T20, FR-IN-07).
@@ -282,39 +298,6 @@ pub fn start_after_register(
         .context("the agent is registered, but the service is not ready; fix the cause and run: restichub-agent install-service")
 }
 
-/// Makes an open program directory again, checks it and reads the service state, so that the later
-/// copy meets no refusal (FR-IN-07, T20).
-fn prepare_program(config: &Path, manager: &dyn ServiceManager) -> Result<ProgramRebuild> {
-    let running = crate::self_install::running_image()?;
-    // A running service and its restic keep the directory in use. The command restarts the service
-    // at the end anyway.
-    let rebuilt = crate::paths::rebuild_program_dir(
-        config,
-        running.path(),
-        &mut || {
-            if manager.state()?.running {
-                manager.stop()?;
-            }
-            Ok(())
-        },
-        &mut |line| println!("{line}"),
-    )?;
-    crate::paths::ensure_program_dir(&crate::paths::restic_dir())?;
-    crate::paths::ensure_program_dir(&crate::paths::program_dir())?;
-    if rebuilt.replaced() {
-        // The installed service starts from this path also when a later check refuses the identity.
-        crate::self_install::copy_agent(&crate::self_install::Placement::host(), &running)?;
-        println!(
-            "the agent is installed in {}",
-            crate::paths::program_dir().display()
-        );
-    }
-    manager
-        .state()
-        .context("cannot read the state of the agent service")?;
-    Ok(rebuilt)
-}
-
 /// Copies the running agent into the program directory and moves an old restic there (FR-IN-07).
 fn place_program() -> Result<()> {
     let source = crate::self_install::running_image()?;
@@ -379,7 +362,7 @@ fn finish_setup(report: Option<&SetupReport>, hostname: Option<&str>) -> Result<
 pub fn install_service(options: &InstallOptions) -> Result<()> {
     crate::preflight::ensure_elevated()?;
     let dir = crate::paths::config_dir();
-    let rebuilt = prepare_program(&dir, &HostService)?;
+    let program = crate::program_repair::prepare(&dir, &HostService)?;
     prepare_install(
         &dir,
         &crate::paths::cache_dir(),
@@ -388,10 +371,10 @@ pub fn install_service(options: &InstallOptions) -> Result<()> {
     )?;
     place_program()?;
     let restic = ensure_restic(&options.restic)?;
-    crate::paths::check_program_files()?;
+    program.start_service_from_tree(&HostRecord, crate::paths::check_program_files)?;
     let report =
         crate::setup::install_and_wait(&HostService, &dir, restic.path(), WaitOptions::default())?;
-    if let Some(warning) = rebuilt.warning() {
+    if let Some(warning) = program.warning() {
         println!("{warning}");
     }
     finish_setup(Some(&report), hostname().ok().as_deref())

@@ -108,12 +108,16 @@ pub(crate) fn holders(files: &[PathBuf]) -> Result<Vec<Holder>> {
 }
 
 fn holder(info: &RM_PROCESS_INFO) -> Holder {
+    // The process sets its own name, and the text goes to the console of an administrator.
     let text = |units: &[u16]| {
         let end = units
             .iter()
             .position(|unit| *unit == 0)
             .unwrap_or(units.len());
         String::from_utf16_lossy(&units[..end])
+            .chars()
+            .map(|c| if c.is_control() { '?' } else { c })
+            .collect::<String>()
     };
     let service = text(&info.strServiceShortName);
     let app = text(&info.strAppName);
@@ -158,5 +162,19 @@ mod tests {
         let found = holders(std::slice::from_ref(&file)).expect("the list must be read");
         assert!(found.is_empty(), "{found:?}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn fr_in_07_a_holder_name_reaches_the_console_without_control_characters() {
+        let mut info = RM_PROCESS_INFO::default();
+        for (slot, unit) in info
+            .strAppName
+            .iter_mut()
+            .zip("tool\u{1b}[2J\r\nname".encode_utf16())
+        {
+            *slot = unit;
+        }
+        info.Process.dwProcessId = 7;
+        assert_eq!(holder(&info).to_string(), "tool?[2J??name (PID 7)");
     }
 }
