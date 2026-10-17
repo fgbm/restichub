@@ -13,6 +13,7 @@
 		Repository,
 		UpdatePlanRequest
 	} from '#lib/api/index.ts';
+	import ProfilePicker from './ProfilePicker.svelte';
 	import ProfileSection from './ProfileSection.svelte';
 	import { RecordPage, SummaryPanel } from './layout/index.ts';
 	import { Alert, Button, Checkbox, ConfirmDialog, Select, TextField } from './ui/index.ts';
@@ -79,9 +80,6 @@
 	const canWrite = $derived(['admin', 'operator'].includes(getSession()?.role ?? ''));
 	const allOpen = $derived(SECTIONS.every((key) => open[key]));
 
-	const profileOptions = $derived<SelectOption[]>(
-		profiles.map((profile) => ({ value: profile.id, label: profile.name }))
-	);
 	function repositoryOf(id: string): Repository | undefined {
 		const repositoryId = profiles.find((profile) => profile.id === id)?.repository_id;
 		return repositories.find((item) => item.id === repositoryId);
@@ -207,7 +205,8 @@
 				service.listPlans(),
 				service.listProfiles(),
 				service.listAgents(),
-				// The repository name is only a hint in the summary, so its failure does not block the form.
+				// The repository is only a hint in the profile field and the summary, so its failure does not
+				// block the form.
 				service.listRepositories().catch(() => [])
 			]);
 			profiles = profileList;
@@ -229,7 +228,7 @@
 				enabled = found.enabled;
 				rpoHours = found.rpo_seconds ? String(found.rpo_seconds / 3600) : '';
 			} else {
-				profileId = profileOptions[0]?.value ?? '';
+				profileId = profiles[0]?.id ?? '';
 				agentId = agentOptions[0]?.value ?? '';
 				timeZone = browserTimeZone();
 			}
@@ -425,13 +424,14 @@
 		bind:open={open.source}
 	>
 		<div class="grid2">
-			<Select
+			<ProfilePicker
 				id="plan-profile"
-				label={t('plans.profile')}
-				options={profileOptions}
+				{profiles}
+				{repositories}
+				{agents}
 				error={fieldError(formProblem, 'profile_id')}
 				bind:value={profileId}
-				onchange={(event) => selectProfile(event.currentTarget.value)}
+				onchange={selectProfile}
 				required
 			/>
 			<Select
@@ -449,8 +449,6 @@
 			<p class="muted">
 				{t('pl.source.localHost', { name: repositoryName, host: localHostName })}
 			</p>
-		{:else if repositoryName}
-			<p class="muted">{t('pl.source.repository', { name: repositoryName })}</p>
 		{/if}
 	</ProfileSection>
 

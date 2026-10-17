@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { ApiError, service } from '#lib/api/index.ts';
-	import type { Plan } from '#lib/api/index.ts';
+	import type { Agent, Plan, Profile, Repository } from '#lib/api/index.ts';
 	import { Page } from '#lib/components/layout/index.ts';
 	import { Button, FilterBar, ListView } from '#lib/components/ui/index.ts';
 	import type { FilterFacet, ListMeta, RowAction } from '#lib/components/ui/index.ts';
@@ -11,12 +11,16 @@
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { getLocale, t, tErrorCode } from '#lib/i18n/index.ts';
 	import { ago } from '#lib/list-format.ts';
+	import { profileDescription } from '#lib/profile-picker.ts';
 	import { describeCron } from '#lib/schedule.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 	import { iconOf, pillOf, planState } from '#lib/vocabulary.ts';
 
 	let plans = $state<Plan[]>([]);
+	let profiles = $state<Profile[]>([]);
+	let repositories = $state<Repository[]>([]);
+	let agents = $state<Agent[]>([]);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 
@@ -33,9 +37,19 @@
 		{
 			key: 'profile',
 			label: t('plans.profile'),
-			options: facetCounts(plans, (plan) => [plan.profile_name])
+			search: true,
+			options: facetCounts(plans, (plan) => [plan.profile_name]).map((option) => ({
+				...option,
+				description: describeProfile(option.value)
+			}))
 		}
 	]);
+
+	function describeProfile(name: string) {
+		const id = plans.find((plan) => plan.profile_name === name)?.profile_id;
+		const profile = profiles.find((item) => item.id === id);
+		return profile ? profileDescription(profile, repositories, agents) : undefined;
+	}
 
 	const matching = $derived(
 		plans.filter((plan) => {
@@ -142,7 +156,13 @@
 		loading = true;
 		error = null;
 		try {
-			plans = await service.listPlans();
+			// The profile facet shows the repository of each profile only as a hint.
+			[plans, profiles, repositories, agents] = await Promise.all([
+				service.listPlans(),
+				service.listProfiles().catch(() => []),
+				service.listRepositories().catch(() => []),
+				service.listAgents().catch(() => [])
+			]);
 		} catch (problem) {
 			error = messageOf(problem);
 		} finally {

@@ -182,6 +182,16 @@ const SAMPLE_PLANS_KEY = 'restichub.mock.plans';
 // see a profile with scripts, its plan and a finished job with a log for each step (FR-HK-11).
 const SAMPLE_SCRIPTS_KEY = 'restichub.mock.scripts';
 
+// A review capture sets this storage key, besides the profile and the repository keys, to see a
+// profile on each backend kind: S3, REST and a local path.
+const SAMPLE_BACKENDS_KEY = 'restichub.mock.backends';
+
+function backendsSample(): boolean {
+	return (
+		typeof localStorage !== 'undefined' && localStorage.getItem(SAMPLE_BACKENDS_KEY) === 'sample'
+	);
+}
+
 function scriptsSample(): boolean {
 	return (
 		typeof localStorage !== 'undefined' && localStorage.getItem(SAMPLE_SCRIPTS_KEY) === 'sample'
@@ -367,7 +377,22 @@ function makeRepositories(): Repository[] {
 			lock_state: 'stale',
 			last_check: { finished_at: iso(60 * 24 * 6), result: 'passed' },
 			snapshot_count: 62
-		})
+		}),
+		...(backendsSample()
+			? [
+					repository(
+						'r_3',
+						'rest-main',
+						{ kind: 'rest', endpoint: 'https://rest.example.net' },
+						'2',
+						{
+							lock_state: 'free',
+							last_check: { finished_at: iso(60 * 24), result: 'passed' },
+							snapshot_count: 31
+						}
+					)
+				]
+			: [])
 	];
 }
 
@@ -462,7 +487,22 @@ function makeProfiles(): Profile[] {
 			updated_at: iso(60 * 6),
 			created_by: 'u_01'
 		}
-	].filter((item) => item.id !== 'p_3' || scriptsSample());
+	]
+		.filter((item) => item.id !== 'p_3' || scriptsSample())
+		.flatMap((item) =>
+			backendsSample() && item.id === 'p_2'
+				? [
+						{ ...item, repository_id: 'r_3' },
+						{
+							...item,
+							id: 'p_4',
+							name: 'nas-files',
+							repository_id: 'r_2',
+							paths: { all: ['/srv/files'], windows: [], linux: [], macos: [] }
+						}
+					]
+				: [item]
+		);
 }
 
 /// The sample scripts of the profile `db-nightly`: a check and a dump before the backup, and a

@@ -83,6 +83,12 @@ function plan(overrides: Record<string, unknown> = {}) {
 const input = (selector: string) =>
 	document.querySelector<HTMLInputElement>(selector) as HTMLInputElement;
 
+async function pickProfile(user: ReturnType<typeof userEvent.setup>, name: string): Promise<void> {
+	await user.click(input('#plan-profile'));
+	const label = await screen.findByText(name, { selector: '.rh-record__option-label' });
+	await user.click(label.closest('[role="option"]')!);
+}
+
 describe('the plan page', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
@@ -136,6 +142,17 @@ describe('the plan page', () => {
 		expect(mocks.goto).toHaveBeenCalledWith('/(app)/plans');
 	});
 
+	it('fr_sc_01 shows the repository of each profile in the profile field', async () => {
+		const user = userEvent.setup();
+		render(PlanEditor, { planId: 'pl_1' });
+
+		await screen.findByRole('heading', { level: 1, name: 'nightly-web' });
+		expect(input('#plan-profile')).toHaveTextContent(/web-daily\s*· repo-a/);
+		await user.click(input('#plan-profile'));
+		const label = await screen.findByText('db-hourly', { selector: '.rh-record__option-label' });
+		expect(label.closest('[role="option"]')).toHaveTextContent(/repo-a\s*REST/);
+	});
+
 	it('fr_sc_01 offers only the active hosts', async () => {
 		render(PlanEditor);
 
@@ -172,7 +189,7 @@ describe('the plan page', () => {
 
 		const host = await screen.findByLabelText(/Host/, { selector: 'select' });
 		expect(within(host).getAllByRole('option')).toHaveLength(2);
-		await user.selectOptions(screen.getByLabelText(/Profile/, { selector: 'select' }), 'p_2');
+		await pickProfile(user, 'nas-files');
 
 		await waitFor(() => expect(host).toHaveValue('a_3'));
 		expect(
@@ -244,7 +261,7 @@ describe('the plan page', () => {
 		render(PlanEditor);
 
 		const host = await screen.findByLabelText(/Host/, { selector: 'select' });
-		await user.selectOptions(screen.getByLabelText(/Profile/, { selector: 'select' }), 'p_2');
+		await pickProfile(user, 'nas-files');
 
 		await waitFor(() => expect(within(host).queryAllByRole('option')).toHaveLength(0));
 		expect((host as HTMLSelectElement).value).toBe('');
@@ -261,7 +278,7 @@ describe('the plan page', () => {
 		).toBeInTheDocument();
 		expect(input('#plan-cron').value).toBe('0 2 * * *');
 		expect(screen.getAllByText('repo-a').length).toBeGreaterThan(0);
-		await user.selectOptions(input('#plan-profile'), 'p_2');
+		await pickProfile(user, 'db-hourly');
 		await user.click(screen.getByRole('button', { name: 'Save' }));
 
 		await waitFor(() =>

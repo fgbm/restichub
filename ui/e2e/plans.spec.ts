@@ -15,6 +15,7 @@ async function seed(page: Page): Promise<void> {
 	await page.addInitScript(() => {
 		localStorage.setItem('restichub.mock.agents', 'sample');
 		localStorage.setItem('restichub.mock.profiles', 'sample');
+		localStorage.setItem('restichub.mock.repositories', 'sample');
 	});
 }
 
@@ -35,7 +36,13 @@ test('the plans screen creates and deletes a plan', async ({ page }) => {
 	await expect(page.getByRole('heading', { level: 1, name: 'New plan' })).toBeVisible();
 	await expect(page).toHaveTitle(`New plan · ResticHub`);
 	await page.locator('#plan-name').fill('nightly-web');
-	await page.locator('#plan-profile').selectOption({ label: 'web-daily' });
+	// The profile field shows where each profile writes and finds a profile by its repository.
+	await page.locator('#plan-profile').click();
+	await page.getByRole('combobox', { name: 'Find: Profile' }).fill('offsite');
+	const option = page.getByRole('option', { name: 'web-daily' });
+	await expect(option).toContainText('offsite-s3');
+	await option.click();
+	await expect(page.locator('#plan-profile')).toContainText('web-daily · offsite-s3');
 	await page.locator('#plan-agent').selectOption({ label: 'win-fs01' });
 	await page.locator('#plan-cron').fill('0 2 * * *');
 	await page.locator('#plan-time-zone').fill('Europe/Berlin');

@@ -6,6 +6,15 @@ export interface SelectOption {
 	label: string;
 }
 
+/** A part of the secondary line of a record: a muted text or a small tag chip. */
+export type RecordPart = string | { tag: string };
+
+/** A native select cannot draw a secondary line, so only `RecordPicker` takes this type. */
+export interface RecordOption extends SelectOption {
+	/** The closed field shows the first part after the label. */
+	description?: RecordPart[];
+}
+
 export type BadgeTone = 'neutral' | 'accent' | 'success' | 'warning' | 'danger' | 'info';
 
 export type StatusTone =
@@ -169,6 +178,8 @@ export interface FilterOption {
 	label?: string;
 	/** The number of items with this value. */
 	count?: number;
+	/** A secondary line below the label; the facet search also matches it. */
+	description?: RecordPart[];
 }
 
 export interface FilterFacet {
@@ -184,4 +195,6 @@ export interface FilterFacet {
 	mono?: boolean;
 	/** A short muted line at the top of the popover. */
 	hint?: string;
+	/** Show the search field at any number of options. Default: from seven options. */
+	search?: boolean;
 }
