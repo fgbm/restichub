@@ -170,6 +170,9 @@ pub(crate) fn prepare(config: &Path, manager: &dyn ServiceManager) -> Result<Pre
         time::OffsetDateTime::now_utc().unix_timestamp(),
         &mut |line| println!("{line}"),
     )?;
+    if prepared.policy == Policy::AwaitRestart {
+        crate::service::set_manual_start()?;
+    }
     crate::paths::ensure_program_dir(&crate::paths::restic_dir())?;
     crate::paths::ensure_program_dir(&crate::paths::program_dir())?;
     if prepared.rebuilt.replaced() {

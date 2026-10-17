@@ -9,6 +9,8 @@
 #   install-smoke.sh connected    wait until the control plane lists the agent as connected
 #   install-smoke.sh canary-jobs  run ten jobs on three repositories whose passwords are canaries
 #   install-smoke.sh one-job DIR  create a local repository below DIR and run init and test-access
+#   install-smoke.sh backup ROOT SOURCE OS
+#                                 back up SOURCE into a local repository below ROOT
 #   install-smoke.sh local-repository ROOT SOURCE OUTSIDE
 #                                 back up into a local repository below ROOT; refuse OUTSIDE
 #   install-smoke.sh cp-logs      print the log of the control plane
@@ -229,16 +231,15 @@ wait_refused() {
 	fi
 }
 
-# The installed service inits a local repository below the repository root $1 and backs up the
-# directory $2 into it. A repository at $3, outside the roots, gets the refusal of the host
-# (ADR-0045).
-local_repository() {
-	local root="$1" source="$2" outside="$3" agent repository profile plan id
+# The installed service inits a local repository below $1 and backs up the directory $2 into it
+# through a plan. $3 is the operating system of the paths in the profile.
+backup() {
+	local root="$1" source="$2" os="$3" agent repository profile plan id
 	agent="$(agent_json | jq -r '.items[0].id')"
 	repository="$(create_local_repository local-test "$root/local-test" "$agent")"
 	run_job "$repository" init
-	profile="$(jq -nc --arg repository "$repository" --arg path "$source" \
-		'{name: "local-test", repository_id: $repository, paths: {linux: [$path]}}' |
+	profile="$(jq -nc --arg repository "$repository" --arg path "$source" --arg os "$os" \
+		'{name: "local-test", repository_id: $repository, paths: {($os): [$path]}}' |
 		curl -fsS "${csrf[@]}" -b "$jar" -H 'content-type: application/json' \
 			"$web/api/v1/profiles" --data-binary @- | jq -r .profile.id)"
 	plan="$(jq -nc --arg profile "$profile" --arg agent "$agent" \
@@ -247,6 +248,16 @@ local_repository() {
 			"$web/api/v1/plans" --data-binary @- | jq -r .plan.id)"
 	id="$(curl -fsS "${csrf[@]}" -b "$jar" -X POST "$web/api/v1/plans/$plan/run" | jq -r .id)"
 	wait_job "$id"
+	echo "the backup job $id succeeded"
+}
+
+# The installed service inits a local repository below the repository root $1 and backs up the
+# directory $2 into it. A repository at $3, outside the roots, gets the refusal of the host
+# (ADR-0045).
+local_repository() {
+	local root="$1" source="$2" outside="$3" agent repository id
+	backup "$root" "$source" linux
+	agent="$(agent_json | jq -r '.items[0].id')"
 	repository="$(create_local_repository outside "$outside" "$agent")"
 	id="$(start_job "$repository" init)"
 	wait_refused "$id" repository_path_denied
@@ -261,6 +272,7 @@ token) shift; token "$@" ;;
 connected) shift; connected "$@" ;;
 canary-jobs) shift; canary_jobs "$@" ;;
 one-job) shift; one_job "$@" ;;
+backup) shift; backup "$@" ;;
 local-repository) shift; local_repository "$@" ;;
 cp-logs) cat "$smoke_dir/cp.log" ;;
 *) echo "unknown command: ${1:-}" >&2; exit 2 ;;

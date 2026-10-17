@@ -138,19 +138,7 @@ pub fn install(restic: &Path) -> Result<()> {
     } else {
         ServiceStartType::AutoStart
     };
-    let info = ServiceInfo {
-        name: OsString::from(SERVICE_NAME),
-        display_name: OsString::from("ResticHub Agent"),
-        service_type: ServiceType::OWN_PROCESS,
-        start_type,
-        error_control: ServiceErrorControl::Normal,
-        executable_path: exe,
-        launch_arguments: vec![OsString::from("run")],
-        dependencies: vec![],
-        // A missing account runs the service as LocalSystem (FR-AG-01).
-        account_name: None,
-        account_password: None,
-    };
+    let info = service_info(start_type);
     // STOP is needed because a reinstall restarts a running service.
     let access = ServiceAccess::QUERY_STATUS
         | ServiceAccess::CHANGE_CONFIG
@@ -181,6 +169,43 @@ pub fn install(restic: &Path) -> Result<()> {
         .start(&[] as &[&OsStr])
         .context("cannot start the service")?;
     Ok(())
+}
+
+fn service_info(start_type: ServiceStartType) -> ServiceInfo {
+    ServiceInfo {
+        name: OsString::from(SERVICE_NAME),
+        display_name: OsString::from("ResticHub Agent"),
+        service_type: ServiceType::OWN_PROCESS,
+        start_type,
+        error_control: ServiceErrorControl::Normal,
+        executable_path: crate::paths::agent_exe(),
+        launch_arguments: vec![OsString::from("run")],
+        dependencies: vec![],
+        // A missing account runs the service as LocalSystem (FR-AG-01).
+        account_name: None,
+        account_password: None,
+    }
+}
+
+/// Lets an installed service start only by hand; an absent service is not an error.
+///
+/// # Errors
+///
+/// Returns an error when the service exists and its configuration cannot be changed.
+pub fn set_manual_start() -> Result<()> {
+    let manager = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)
+        .context("cannot open the service manager; run as an administrator")?;
+    match manager.open_service(SERVICE_NAME, ServiceAccess::CHANGE_CONFIG) {
+        Ok(service) => service
+            .change_config(&service_info(ServiceStartType::OnDemand))
+            .context("cannot set the manual start of the service"),
+        Err(windows_service::Error::Winapi(error))
+            if error.raw_os_error() == Some(ERROR_SERVICE_DOES_NOT_EXIST) =>
+        {
+            Ok(())
+        }
+        Err(error) => Err(error.into()),
+    }
 }
 
 /// The service restarts after each failure. The service control manager repeats the last action for
