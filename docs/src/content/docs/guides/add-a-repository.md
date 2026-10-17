@@ -58,9 +58,9 @@ The agent service on Linux runs in a systemd sandbox. The sandbox makes the file
 
 Do these steps on the maintenance host before you initialize the repository:
 
-1. Write the parent directory of the repository on one line of the file `/etc/restichub-agent-repository-roots.txt`, for example `/var/spool/restichub`. Each line holds one absolute path. A line that starts with `#` is a comment.
+1. Write the parent directory of the repository on one line of the file `/etc/restichub-agent-repository-roots.txt`, for example `/srv/restichub` or `/var/spool/restichub`. Each line holds one absolute path. A line that starts with `#` is a comment.
 2. Make sure that root owns the file and that no other account can write it: `sudo chown root:root /etc/restichub-agent-repository-roots.txt` and `sudo chmod 0644 /etc/restichub-agent-repository-roots.txt`.
-3. Run `sudo restichub-agent install-service`. The command adds each root to `ReadWritePaths` of the systemd unit and restarts the service. It creates a missing root with access for root only.
+3. Run `sudo restichub-agent install-service`. The command adds each root to `ReadWritePaths` of the systemd unit and restarts the service. It creates a missing root with access for root only, and each missing parent with mode `0755`.
 
 Run `install-service` again after each change of the file. The agent writes a warning to the log at each start for a root that the installed unit cannot write.
 
@@ -68,7 +68,13 @@ A root and each existing parent directory must belong to root. No group or other
 
 The agent refuses a local repository outside the roots before restic starts. The job fails with the reason `repository_path_denied`, and the screen names the file. The agent also refuses a path that holds or lies inside its own files.
 
-The repository roots are not restore roots. A restore cannot write below a repository root, unless the path is also in the restore roots file. See [Restore roots](/restichub/guides/restore/#restore-roots).
+A root cannot be `/`, a system directory (`/etc`, `/usr`, `/bin`, `/sbin`, `/lib`, `/lib64`, `/boot`, `/proc`, `/sys`, `/dev`, `/run`), a directory that holds one of them, a directory `/var/lib/restichub*` or a directory of the agent. Each root becomes writable for restic, so such a root would open the system files. The agent ignores such a root and logs a warning that names the line. `install-service` stops with a message.
+
+The unit sets `ProtectHome=read-only`. The service reads a backup source below `/home`, but it writes below `/home`, `/root` and `/run/user` only in a root. A directory of a user account, for example `/home/<user>`, cannot hold a root, because it does not belong to root. Use a directory that root owns, for example `/srv/restichub`.
+
+Do not put a local repository inside the directory of another local repository. The agent does not refuse it, but restic then finds the files of the second repository among the files of the first one.
+
+The repository roots are not restore roots. A restore never writes into a repository root, also with the restore root `/`. `install-service` refuses a restore root and a repository root when one holds the other. See [Restore roots](/restichub/guides/restore/#restore-roots).
 
 On Windows the service has no such sandbox. A local repository can use any path that the service account can write, and the agent does not read the repository roots file.
 
