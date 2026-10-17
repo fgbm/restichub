@@ -584,7 +584,10 @@ async fn ac_hk_07_a_plan_for_a_host_without_the_trust_mode_is_refused() {
     let env = Env::start(db, test_queue()).await;
     let trusting = env.connect_agent_trusting("host-on", true, bash()).await;
     let closed = env.connect_agent_trusting("host-off", false, bash()).await;
-    let repository = env.create_repository(trusting.id, "pw").await;
+    // A remote backend, so the plan of either host passes the repository host rule.
+    let repository = env
+        .create_rest_repository(trusting.id, "user", "pw")
+        .await;
     let profile = env
         .create_profile(
             repository,
