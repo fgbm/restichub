@@ -17,7 +17,7 @@
 	import type { KeyValueItem, MenuItem, RowAction, SelectOption, TableColumn } from './ui/index.ts';
 	import { formatTime, relativeTime } from '#lib/format.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
-	import { getSession } from '#lib/stores/session.svelte.ts';
+	import { getSession, loadSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 	import { platformChangeLock, platformResetLock } from '#lib/user-locks.ts';
 	import { userState } from '#lib/vocabulary.ts';
@@ -47,8 +47,12 @@
 	let removeOpen = $state(false);
 	let removing = $state(false);
 
+	let lowerTarget = $state<{ member: PlatformMembership; role: Role } | null>(null);
+	let lowerOpen = $state(false);
+
 	const selfId = $derived(getSession()?.user?.id ?? null);
 	const self = $derived(user?.id === selfId);
+	const sessionTenantId = $derived(getSession()?.tenant?.id ?? null);
 	const name = $derived(user?.display_name ?? '');
 
 	const roleLabels = $derived<Record<Role, string>>({
@@ -103,7 +107,7 @@
 					: t('platformUsers.grantAdmin'),
 				icon: 'shield',
 				disabled: Boolean(changeLock),
-				hint: changeLock ?? undefined,
+				hint: (self ? t('platformUsers.revokeSelfHint') : changeLock) ?? undefined,
 				onSelect: () =>
 					account.platform_admin ? dialogs?.openRevoke(account) : dialogs?.openGrant(account)
 			},
@@ -113,7 +117,7 @@
 				tone: account.disabled ? 'default' : 'danger',
 				separatorBefore: true,
 				disabled: Boolean(changeLock),
-				hint: changeLock ?? undefined,
+				hint: (self ? t('platformUsers.disableSelfHint') : changeLock) ?? undefined,
 				onSelect: () => void dialogs?.toggleDisabled(account)
 			}
 		];
@@ -150,26 +154,44 @@
 	]);
 
 	function rowActions(member: PlatformMembership): RowAction[] {
+		// The API refuses only the own membership in the organization of this session (HTTP 409).
+		const sessionOrg = self && member.tenant_id === sessionTenantId;
 		return [
 			{
 				id: 'remove',
 				label: t('platformUsers.removeFrom', { name: member.tenant_name }),
 				icon: 'trash',
 				danger: true,
-				disabled: self,
-				hint: self ? t('platformUsers.removeSelfHint') : undefined,
+				disabled: sessionOrg,
+				hint: sessionOrg ? t('platformUsers.removeSelfHint') : undefined,
 				onSelect: () => openRemove(member)
 			}
 		];
 	}
 
-	// The own role may only rise, as on the organization screens. The server allows a lower role;
-	// the owner chose not to offer it here.
-	function roleOptionsOf(member: PlatformMembership): SelectOption[] {
-		if (!self) return roleOptions;
-		return roleOptions.filter(
-			(option) => ROLE_RANK[option.value as Role] >= ROLE_RANK[member.role]
-		);
+	function selectRole(member: PlatformMembership, role: Role): void {
+		if (self && ROLE_RANK[role] < ROLE_RANK[member.role]) {
+			roleDrafts[member.tenant_id] = role;
+			lowerTarget = { member, role };
+			lowerOpen = true;
+			return;
+		}
+		void changeRole(member, role);
+	}
+
+	// A dismissed confirmation returns the select to the saved role.
+	$effect(() => {
+		if (lowerOpen || !lowerTarget) return;
+		roleDrafts[lowerTarget.member.tenant_id] = lowerTarget.member.role;
+		lowerTarget = null;
+	});
+
+	async function confirmLower(): Promise<void> {
+		if (!lowerTarget) return;
+		const { member, role } = lowerTarget;
+		lowerTarget = null;
+		lowerOpen = false;
+		await changeRole(member, role);
 	}
 
 	async function changeRole(member: PlatformMembership, role: Role): Promise<void> {
@@ -180,6 +202,8 @@
 			await service.setPlatformMembershipRole(user.id, member.tenant_id, { role });
 			member.role = role;
 			pushToast('success', t('platformUsers.roleChanged'));
+			// The navigation and the actions follow the role of the session.
+			if (self && member.tenant_id === sessionTenantId) await loadSession();
 		} catch (problem) {
 			roleDrafts[member.tenant_id] = member.role;
 			pushToast('danger', messageOf(problem));
@@ -285,12 +309,11 @@
 	<Select
 		class="role-select"
 		aria-label={t('platformUsers.roleIn', { name: member.tenant_name })}
-		title={self && member.role === 'admin' ? t('users.selfHint') : undefined}
-		options={roleOptionsOf(member)}
+		options={roleOptions}
 		value={roleDrafts[member.tenant_id] ?? member.role}
-		disabled={roleBusy !== null || (self && member.role === 'admin')}
+		disabled={roleBusy !== null}
 		onchange={(event) =>
-			changeRole(member, (event.currentTarget as HTMLSelectElement).value as Role)}
+			selectRole(member, (event.currentTarget as HTMLSelectElement).value as Role)}
 	/>
 {/snippet}
 
@@ -375,11 +398,25 @@
 	bind:open={removeOpen}
 	icon="octagon"
 	title={t('platformUsers.removeTitle')}
-	message={t('platformUsers.removeBody', { name, org: removeTarget?.tenant_name ?? '' })}
+	message={self
+		? t('platformUsers.removeSelfBody', { org: removeTarget?.tenant_name ?? '' })
+		: t('platformUsers.removeBody', { name, org: removeTarget?.tenant_name ?? '' })}
 	confirmLabel={t('platformUsers.removeConfirm')}
 	tone="danger"
 	loading={removing}
 	onConfirm={confirmRemove}
+/>
+
+<ConfirmDialog
+	bind:open={lowerOpen}
+	icon="alert"
+	title={t('platformUsers.lowerSelfTitle')}
+	message={t('platformUsers.lowerSelfBody', {
+		org: lowerTarget?.member.tenant_name ?? '',
+		role: lowerTarget ? roleLabels[lowerTarget.role] : ''
+	})}
+	confirmLabel={t('platformUsers.lowerSelfConfirm')}
+	onConfirm={confirmLower}
 />
 
 <PlatformUserDialogs bind:this={dialogs} onchanged={load} />
