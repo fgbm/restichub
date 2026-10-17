@@ -128,7 +128,7 @@ The new agent on Linux writes a local repository only below a repository root. T
 Do these steps on each Linux host that keeps a local repository:
 
 1. Open "Repositories" and find each repository with the backend kind "Local path" on this host.
-2. If the path of a repository lies below a directory that another account owns, for example `/home/<user>/backup`, move the repository to a directory that root owns. The agent refuses a root with such a parent, because that account could replace a directory with a link. For example:
+2. Check the path of each repository. If another account owns a parent directory, for example `/home/<user>`, move the repository to a directory that root owns. The agent refuses such a root, because that account could replace a directory with a link. For example:
 
    ```sh
    sudo systemctl stop restichub-agent
