@@ -525,6 +525,51 @@ jobs:
       - run: npm run build
       - run: npm audit --audit-level=high
 
+  # The documentation frames of the UI. A difference is a report, not a failure: the owner of the
+  # change runs scripts/docs-screens.sh and commits the new frames. Keep the image tag the same as
+  # the version of @playwright/test in ui/package.json.
+  docs-screens:
+    name: Docs screenshots
+    needs: changes
+    if: needs.changes.outputs.ui == 'true'
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.0-noble
+      options: --ipc=host
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check the demo data and the alt texts against the deny list
+        env:
+          DOCS_DENYLIST: ${{ secrets.DOCS_DENYLIST }}
+        working-directory: .
+        run: |
+          [ -n "$DOCS_DENYLIST" ] || { echo "DOCS_DENYLIST is not set"; exit 0; }
+          printf '%s\n' "$DOCS_DENYLIST" | tr ',' '\n' | sed '/^$/d' > "$RUNNER_TEMP/deny"
+          if grep -rniF -f "$RUNNER_TEMP/deny" ui/src/lib/api/mock-docs.ts ui/e2e/docs-screens.spec.ts docs/src/content > /dev/null; then
+            echo "::error::the demo data or a page holds a word of the deny list"
+            exit 1
+          fi
+      - run: npm ci
+      - run: VITE_USE_MOCK=true npm run build
+      - name: Compare the frames
+        id: compare
+        continue-on-error: true
+        run: HOME=/root npx playwright test -c playwright.docs.config.ts
+      - name: Report the differences
+        if: steps.compare.outcome == 'failure'
+        run: |
+          echo "::warning::the UI no longer matches the documentation frames"
+          echo "The UI no longer matches the documentation frames. Run scripts/docs-screens.sh and commit the frames. The artifact docs-screens-diff holds the differences." >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.compare.outcome == 'failure'
+        with:
+          name: docs-screens-diff
+          path: ui/test-results
+          retention-days: 14
+
   ui-csp:
     name: Web UI CSP
     needs: changes

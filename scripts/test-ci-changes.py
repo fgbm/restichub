@@ -28,6 +28,11 @@ class Classify(unittest.TestCase):
         self.assertEqual(picked("design/requirements.md"), {"docs"})
         self.assertEqual(picked("README.md"), {"docs"})
 
+    def test_docs_inputs_outside_docs(self):
+        self.assertEqual(picked("ui/src/lib/i18n/en.ts"), {"ui", "openapi", "site"})
+        self.assertIn("rust", picked("docs/src/diagrams/job-lifecycle.en.mmd"))
+        self.assertNotIn("rust", picked("docs/src/diagrams/architecture.en.mmd"))
+
     def test_control_plane_skips_windows(self):
         got = picked("crates/restichub-cp/src/lib.rs")
         self.assertIn("rust", got)

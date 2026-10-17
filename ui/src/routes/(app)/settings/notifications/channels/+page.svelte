@@ -16,10 +16,10 @@
 		Checkbox,
 		CopyField,
 		Dialog,
-		Field,
 		FilterBar,
 		ListView,
 		Select,
+		TagInput,
 		TextField
 	} from '#lib/components/ui/index.ts';
 	import type { FilterFacet, ListMeta, RowAction, SelectOption } from '#lib/components/ui/index.ts';
@@ -33,6 +33,9 @@
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
 	const FIELDS = ['name', 'kind', 'recipients', 'url'];
+	// The server takes at most 20 recipients and keeps these characters out of the SMTP envelope.
+	const MAX_RECIPIENTS = 20;
+	const ADDRESS = /^[^\s@<>,;"]+@[^\s@<>,;"]+$/;
 
 	let channels = $state<NotificationChannel[]>([]);
 	let emailConfigured = $state(true);
@@ -48,7 +51,7 @@
 	let name = $state('');
 	let kind = $state<ChannelKind>('email');
 	let enabled = $state(true);
-	let recipients = $state('');
+	let recipients = $state<string[]>([]);
 	let url = $state('');
 
 	let secret = $state<string | null>(null);
@@ -190,7 +193,7 @@
 		name = '';
 		kind = 'email';
 		enabled = true;
-		recipients = '';
+		recipients = [];
 		url = '';
 		formError = null;
 		formProblem = null;
@@ -209,15 +212,12 @@
 		name = channel.name;
 		kind = channel.kind;
 		enabled = channel.enabled;
-		recipients = channel.recipients.join('\n');
+		recipients = [...channel.recipients];
 		formOpen = true;
 	}
 
-	function recipientList(): string[] {
-		return recipients
-			.split(/[\n,;]+/)
-			.map((address) => address.trim())
-			.filter((address) => address !== '');
+	function checkAddress(address: string): string | null {
+		return ADDRESS.test(address) ? null : t('channels.recipientInvalid');
 	}
 
 	function showSecret(value: string | null | undefined): void {
@@ -241,13 +241,13 @@
 			let saved;
 			if (editing) {
 				const patch: UpdateChannelRequest = { name, enabled };
-				if (editing.kind === 'email') patch.recipients = recipientList();
+				if (editing.kind === 'email') patch.recipients = [...recipients];
 				else if (url.trim()) patch.url = url.trim();
 				saved = await service.updateChannel(editing.id, patch);
 			} else {
 				const request: CreateChannelRequest =
 					kind === 'email'
-						? { name, kind, enabled, recipients: recipientList() }
+						? { name, kind, enabled, recipients: [...recipients] }
 						: { name, kind, enabled, url: url.trim() };
 				saved = await service.createChannel(request);
 			}
@@ -432,19 +432,18 @@
 		bind:value={kind}
 	/>
 	{#if kind === 'email'}
-		<Field
+		<TagInput
+			id="channel-recipients"
 			label={t('channels.recipients')}
 			help={t('channels.recipientsHint')}
 			error={fieldError(formProblem, 'recipients')}
-			for="channel-recipients"
-		>
-			<textarea
-				id="channel-recipients"
-				class="rh-textarea rh-input--mono"
-				rows="3"
-				placeholder={t('common.example', { value: 'ops@example.com' })}
-				bind:value={recipients}></textarea>
-		</Field>
+			placeholder={t('common.example', { value: 'ops@example.com' })}
+			mono
+			max={MAX_RECIPIENTS}
+			separator={/[\s,;]+/}
+			check={checkAddress}
+			bind:value={recipients}
+		/>
 	{:else}
 		<TextField
 			id="channel-url"

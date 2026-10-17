@@ -62,8 +62,14 @@ test('the own platform account disables the actions that the API refuses', async
 	).toBeDisabled();
 	await page.getByRole('button', { name: 'More actions for Anna Petrova' }).click();
 	await expect(page.getByRole('menuitem', { name: /Disable user/ })).toContainText(
-		'This is your account'
+		'You cannot disable your own account'
 	);
+	await expect(
+		page.getByRole('menuitem', { name: /Remove the Platform Admin right/ })
+	).toContainText('You cannot remove your own Platform Admin right');
+	await page.keyboard.press('Escape');
+	// A lower own role is allowed after a confirmation.
+	await expect(page.getByLabel('Role in the organization acme')).toBeEnabled();
 });
 
 test('an organization member opens as a page with its role', async ({ page }) => {
@@ -80,4 +86,29 @@ test('an organization member opens as a page with its role', async ({ page }) =>
 	await role.selectOption('viewer');
 	await expect(page.getByText('The role is changed.')).toBeVisible();
 	await expect(page.getByText('Read only, including the organization audit log.')).toBeVisible();
+});
+
+test('ac_au_10 a taken name or email marks only the field that the server names', async ({
+	page
+}) => {
+	await signIn(page);
+	await openPlatformUsers(page);
+	await page.getByRole('button', { name: 'Create user' }).click();
+	const dialog = page.getByRole('dialog');
+	const username = dialog.locator('#platform-user-username');
+	const email = dialog.locator('#platform-user-email');
+	await username.fill('boris');
+	await dialog.locator('#platform-user-display-name').fill('Boris Again');
+	await dialog.locator('#platform-user-password').fill('a long enough password');
+	await dialog.getByRole('button', { name: 'Create user' }).click();
+	await expect(username).toHaveAttribute('aria-invalid', 'true');
+	await expect(dialog.getByText('This user name is taken.')).toBeVisible();
+	await expect(email).not.toHaveAttribute('aria-invalid', 'true');
+
+	await username.fill('carol');
+	await email.fill('anna@example.com');
+	await dialog.getByRole('button', { name: 'Create user' }).click();
+	await expect(email).toHaveAttribute('aria-invalid', 'true');
+	await expect(dialog.getByText('This email is taken.')).toBeVisible();
+	await expect(username).not.toHaveAttribute('aria-invalid', 'true');
 });

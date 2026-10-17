@@ -6,7 +6,7 @@
  * problem holds the `field` that failed and an optional `reason` code, so a form
  * shows the message next to the input.
  */
-import { t, tErrorReason } from '#lib/i18n/index.ts';
+import { t, tErrorCode, tErrorReason } from '#lib/i18n/index.ts';
 import type { components } from './schema';
 
 export interface ApiProblem {
@@ -61,7 +61,8 @@ export function fieldError(
 	field: string
 ): string | undefined {
 	if (!problem || problem.field !== field) return undefined;
-	return tErrorReason(problem.reason) ?? t('error.field');
+	const byCode = problem.code === 'invalid_argument' ? undefined : tErrorCode(problem.code);
+	return tErrorReason(problem.reason) ?? byCode ?? t('error.field');
 }
 
 /**

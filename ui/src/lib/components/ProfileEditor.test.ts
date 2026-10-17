@@ -311,9 +311,9 @@ describe('Profile editor tags and limits', () => {
 		await screen.findByLabelText(/^Profile/);
 		await u.click(screen.getByRole('switch', { name: 'Turn on the section "Tags"' }));
 		await u.type(document.getElementById('profile-tags') as HTMLElement, 'web, nightly db ');
-		expect(screen.getByRole('button', { name: 'Remove the tag web' })).toBeInTheDocument();
-		expect(screen.getByRole('button', { name: 'Remove the tag nightly' })).toBeInTheDocument();
-		expect(screen.getByRole('button', { name: 'Remove the tag db' })).toBeInTheDocument();
+		expect(screen.getByRole('button', { name: 'Remove web' })).toBeInTheDocument();
+		expect(screen.getByRole('button', { name: 'Remove nightly' })).toBeInTheDocument();
+		expect(screen.getByRole('button', { name: 'Remove db' })).toBeInTheDocument();
 	});
 
 	it('omits the empty limit fields on an update', async () => {

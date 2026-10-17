@@ -1,0 +1,26 @@
+---
+// A frame of the web interface from src/assets/screens, in the language of the page. The light
+// and the dark frame follow the theme switch of the site (ui/e2e/docs-screens.spec.ts makes them).
+import type { ImageMetadata } from 'astro';
+import { Image } from 'astro:assets';
+import { pageLang } from '../lib/ui-text';
+
+interface Props {
+	name: string;
+	alt: string;
+}
+
+const frames = import.meta.glob<ImageMetadata>('../assets/screens/*.png', { import: 'default', eager: true });
+const { name, alt } = Astro.props;
+const lang = pageLang(Astro.locals);
+const frame = (theme: string) => {
+	const image = frames[`../assets/screens/${name}-${lang}-${theme}.png`];
+	if (image === undefined) throw new Error(`no frame ${name}-${lang}-${theme}.png`);
+	return image;
+};
+---
+
+<figure class="rh-screen">
+	<Image class="rh-screen__light" src={frame('light')} alt={alt} widths={[640, 1280]} sizes="(min-width: 50rem) 46rem, 100vw" />
+	<Image class="rh-screen__dark" src={frame('dark')} alt={alt} widths={[640, 1280]} sizes="(min-width: 50rem) 46rem, 100vw" />
+</figure>

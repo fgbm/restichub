@@ -410,6 +410,27 @@ impl CreateAccountStatus {
     }
 }
 
+/// An account field that a unique index of the installation holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccountField {
+    Username,
+    Email,
+}
+
+impl AccountField {
+    /// The field of the unique index that the error violates, or `None` for any other error.
+    pub fn of_unique_violation(error: &DbError) -> Option<Self> {
+        if !error.is_unique_violation() {
+            return None;
+        }
+        match error.unique_constraint().as_deref() {
+            Some("users_username_lower_unique") => Some(Self::Username),
+            Some("users_email_lower_unique") => Some(Self::Email),
+            _ => None,
+        }
+    }
+}
+
 /// Reads the accounts of the installation for the platform administration.
 pub async fn list_platform_accounts(
     tx: &mut PlatformTx<'_>,
@@ -572,11 +593,12 @@ pub async fn grant_platform_admin(
 
 /// Writes the email address of an account for the platform administration.
 ///
-/// The unique index of the email makes a duplicate a database error with SQLSTATE 23505.
+/// `None` removes the address. The unique index of the email makes a duplicate a database error
+/// with SQLSTATE 23505.
 pub async fn platform_set_email(
     tx: &mut TenantTx<'_>,
     id: UserId,
-    email: &str,
+    email: Option<&str>,
 ) -> Result<WriteStatus, DbError> {
     let (status,): (String,) = sqlx::query_as("SELECT auth_platform_set_email($1, $2)")
         .bind(id)

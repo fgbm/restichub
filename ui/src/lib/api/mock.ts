@@ -8,6 +8,18 @@ import { ApiError } from './errors';
 import { filterSnapshots, inRange, listDirectory, makeSnapshots } from './mock-restore';
 import { MockAlerts } from './mock-alerts';
 import { MockScripts } from './mock-scripts';
+import {
+	docsAgents,
+	docsAudit,
+	docsJobs,
+	docsMemberships,
+	docsMode,
+	docsPlans,
+	docsProfiles,
+	docsRepositories,
+	docsSetupMode,
+	docsTenants
+} from './mock-docs';
 import type {
 	Agent,
 	AgentListResponse,
@@ -190,6 +202,7 @@ function platformAdminNoOrg(): boolean {
 }
 
 function makeAgents(): Agent[] {
+	if (docsMode()) return docsAgents();
 	if (typeof localStorage === 'undefined' || localStorage.getItem(SAMPLE_AGENTS_KEY) !== 'sample') {
 		return [];
 	}
@@ -308,6 +321,7 @@ function makeAgents(): Agent[] {
 }
 
 function makeRepositories(): Repository[] {
+	if (docsMode()) return docsRepositories();
 	if (
 		typeof localStorage === 'undefined' ||
 		localStorage.getItem(SAMPLE_REPOSITORIES_KEY) !== 'sample'
@@ -358,6 +372,7 @@ function makeRepositories(): Repository[] {
 }
 
 function makeProfiles(): Profile[] {
+	if (docsMode()) return docsProfiles();
 	if (
 		typeof localStorage === 'undefined' ||
 		localStorage.getItem(SAMPLE_PROFILES_KEY) !== 'sample'
@@ -517,6 +532,7 @@ function sampleScripts(): ScriptDef[] {
 /// One sample plan that binds the first profile to the first agent (FR-SC-01). A review capture or
 /// an e2e test sets the storage key to see it.
 function makePlans(): Plan[] {
+	if (docsMode()) return docsPlans(nextFireTime);
 	if (typeof localStorage === 'undefined' || localStorage.getItem(SAMPLE_PLANS_KEY) !== 'sample') {
 		return [];
 	}
@@ -570,6 +586,7 @@ function makePlans(): Plan[] {
 /// Sample jobs of the sample plan, one for each lifecycle state that the Jobs screen shows
 /// (FR-SC-09). The sample plan storage key shows them too.
 function makeJobs(): MockJob[] {
+	if (docsMode()) return docsJobs();
 	if (typeof localStorage === 'undefined' || localStorage.getItem(SAMPLE_PLANS_KEY) !== 'sample') {
 		return [];
 	}
@@ -669,6 +686,7 @@ function makeUsers(): User[] {
 
 /** The memberships of the caller (ADR-0025). */
 function makeMemberships(): TenantAccess[] {
+	if (docsMode()) return docsMemberships();
 	return [
 		{ id: 't_01', name: 'acme', role: 'admin' },
 		{ id: 't_02', name: 'globex', role: 'operator' },
@@ -682,6 +700,7 @@ function makeMemberships(): TenantAccess[] {
 }
 
 function makeTenants(): Tenant[] {
+	if (docsMode()) return docsTenants();
 	return [
 		{
 			id: 't_01',
@@ -779,6 +798,7 @@ function makeTokens(): ApiToken[] {
 }
 
 function makeAudit(): AuditRecord[] {
+	if (docsMode()) return docsAudit();
 	return [
 		{
 			id: 'a_01',
@@ -931,10 +951,11 @@ export class MockApiService {
 	private currentTenant = 't_01';
 	// The mock stands for a ready instance, so the setup screen stays reachable at its own route.
 	// A fresh page starts without a session, the way the real installation does. With the session
-	// key set the sign-in state survives a page load, so a direct visit keeps the session.
-	private setupDone = true;
+	// key or the docs key set the sign-in state survives a page load, so a direct visit keeps the
+	// session.
+	private setupDone = !docsSetupMode();
 	private signedIn =
-		platformAdminNoOrg() &&
+		(platformAdminNoOrg() || docsMode()) &&
 		typeof sessionStorage !== 'undefined' &&
 		sessionStorage.getItem(SESSION_SIGNED_IN_KEY) === '1';
 
@@ -970,7 +991,7 @@ export class MockApiService {
 	async signIn(_request: SignInRequest): Promise<Me> {
 		void _request;
 		this.signedIn = true;
-		if (platformAdminNoOrg() && typeof sessionStorage !== 'undefined') {
+		if ((platformAdminNoOrg() || docsMode()) && typeof sessionStorage !== 'undefined') {
 			sessionStorage.setItem(SESSION_SIGNED_IN_KEY, '1');
 		}
 		return this.me();
@@ -2205,13 +2226,18 @@ export class MockApiService {
 				(user) => user.username.toLowerCase() === request.username.toLowerCase()
 			)
 		) {
-			throw new Error('username_taken');
+			throw new ApiError({
+				status: 409,
+				code: 'username_taken',
+				title: 'Conflict',
+				field: 'username'
+			});
 		}
 		if (
 			request.email &&
 			this.platformUsers.some((user) => user.email?.toLowerCase() === request.email?.toLowerCase())
 		) {
-			throw new Error('email_taken');
+			throw new ApiError({ status: 409, code: 'email_taken', title: 'Conflict', field: 'email' });
 		}
 		const memberships = (request.memberships ?? []).map((membership) => ({
 			tenant_id: membership.tenant_id,

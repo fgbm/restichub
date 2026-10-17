@@ -1,0 +1,13 @@
+sequenceDiagram
+  participant A as {{users.role.admin}} in the web interface
+  participant CP as Control plane
+  participant H as Agent on the host
+  A->>CP: 1. {{hosts.addTitle}}
+  CP-->>A: 2. register command with a one-time token
+  A->>H: 3. run register on the host
+  H->>H: 4. make a key pair and a CSR
+  H->>CP: 5. HTTPS 443: token and CSR
+  CP-->>H: 6. certificate, CA chain, job signing keys
+  H->>H: 7. pin the root CA, start the service
+  H->>CP: 8. gRPC stream, mTLS 8443
+  CP-->>A: 9. {{hosts.status.online}}

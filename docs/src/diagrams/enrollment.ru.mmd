@@ -1,0 +1,13 @@
+sequenceDiagram
+  participant A as {{users.role.admin}} в веб-интерфейсе
+  participant CP as Сервер управления
+  participant H as Агент на хосте
+  A->>CP: 1. {{hosts.addTitle}}
+  CP-->>A: 2. команда register с одноразовым токеном
+  A->>H: 3. запуск register на хосте
+  H->>H: 4. пара ключей и CSR
+  H->>CP: 5. HTTPS 443: токен и CSR
+  CP-->>H: 6. сертификат, цепочка CA, ключи подписи заданий
+  H->>H: 7. закрепление корневого CA, запуск службы
+  H->>CP: 8. поток gRPC, mTLS 8443
+  CP-->>A: 9. {{hosts.status.online}}

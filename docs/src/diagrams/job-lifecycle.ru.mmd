@@ -1,0 +1,19 @@
+stateDiagram-v2
+  direction TB
+  state "{{jobs.status.queued}} · queued" as queued
+  state "{{jobs.status.sent}} · sent" as sent
+  state "{{jobs.status.running}} · running" as running
+  state "{{jobs.status.succeeded}} · succeeded" as succeeded
+  state "{{jobs.status.failed}} · failed" as failed
+  state "{{jobs.status.expired}} · expired" as expired
+  state "{{jobs.status.dead_letter}} · dead_letter" as dead_letter
+
+  [*] --> queued: расписание, «{{plans.run}}», обслуживание
+  queued --> expired: окно приёма истекло
+  queued --> failed: отказ, отменено
+  queued --> sent: подписано и отправлено
+  sent --> failed: нет подтверждения, отменено
+  sent --> running: агент подтвердил
+  running --> failed: шаг не выполнен, завис, хост потерян
+  running --> succeeded: шаги завершены
+  running --> dead_letter: блокировка после последней попытки

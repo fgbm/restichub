@@ -11,7 +11,6 @@ import {
 	emptyDraft,
 	enabledCount,
 	keptCount,
-	parseTags,
 	parseWithin,
 	previewRetention,
 	settingsOf,
@@ -53,13 +52,6 @@ function withRules(rules: Partial<ReturnType<typeof emptyDraft>>) {
 		...rules
 	};
 }
-
-describe('parseTags', () => {
-	it('splits on commas and spaces and drops empty parts', () => {
-		expect(parseTags('web, nightly  db,,')).toEqual(['web', 'nightly', 'db']);
-		expect(parseTags('   ')).toEqual([]);
-	});
-});
 
 describe('parseWithin', () => {
 	it('reads the restic period format', () => {

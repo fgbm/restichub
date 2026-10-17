@@ -12,9 +12,9 @@ use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use restichub_db::audit::{Actor, AuditAction, AuditEvent, diff};
-use restichub_db::users::WriteStatus;
+use restichub_db::users::{AccountField, WriteStatus};
 use restichub_db::{
-    DbError, PLATFORM_TENANT_ID, Role, TenantTx, UserId, auth, memberships, sessions, users,
+    PLATFORM_TENANT_ID, Role, TenantTx, UserId, auth, memberships, sessions, users,
 };
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -129,7 +129,7 @@ pub async fn create_user(
     // The username is unique in the installation (ADR-0025). A tenant Admin cannot add an existing
     // account: a name that exists gives HTTP 409 `username_taken`.
     if users::find_account(state.db(), &username).await?.is_some() {
-        return Err(ApiError::username_taken());
+        return Err(ApiError::taken(AccountField::Username));
     }
 
     let password_hash =
@@ -148,7 +148,7 @@ pub async fn create_user(
         role,
     )
     .await
-    .map_err(map_username_taken)?;
+    .map_err(ApiError::account_write)?;
     let mut event = context.audit_event(AuditAction::UserCreate, "user", user_id.as_uuid());
     event.diff = Some(diff(
         None,
@@ -490,15 +490,6 @@ fn check_create_user_limit(state: &AppState, context: &RequestContext) -> Result
         return Err(ApiError::rate_limited(wait.as_secs().max(1)));
     }
     Ok(())
-}
-
-/// A duplicate username in the installation is HTTP 409 `username_taken`.
-fn map_username_taken(error: DbError) -> ApiError {
-    if error.is_unique_violation() {
-        ApiError::username_taken()
-    } else {
-        ApiError::from(error)
-    }
 }
 
 fn parse_uuid(value: &str) -> Result<UserId, ApiError> {

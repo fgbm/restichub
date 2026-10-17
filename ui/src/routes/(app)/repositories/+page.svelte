@@ -63,6 +63,17 @@
 	let jobError = $state<string | null>(null);
 	let jobStarting = $state(false);
 	let jobSubmitted = $state(false);
+	// The control plane runs an init, and an access test of a local path, only on the maintenance
+	// host and refuses another agent (resolve_agent, FR-RP-08).
+	const jobHostFixed = $derived(
+		jobRepository !== null && (jobKind === 'init' || jobRepository.backend.kind === 'local')
+	);
+	const jobNoHost = $derived(jobHostFixed && !jobRepository?.maintenance_agent_id);
+	const jobHostHref = $derived(
+		jobRepository
+			? `${resolve('/(app)/repositories/[id]', { id: jobRepository.id })}#repo-agent`
+			: ''
+	);
 	let jobTimer: ReturnType<typeof setInterval> | null = null;
 
 	const jobStatusLabels: Record<JobStatus, MessageKey> = {
@@ -237,14 +248,14 @@
 			{
 				id: 'retention',
 				label: t('repositories.runRetention'),
-				icon: 'refresh',
+				icon: 'eraser',
 				hidden: !maintained,
 				onSelect: () => void runTask(repository, 'retention')
 			},
 			{
 				id: 'check',
 				label: t('repositories.runCheck'),
-				icon: 'refresh',
+				icon: 'shield-check',
 				hidden: !maintained,
 				onSelect: () => void runTask(repository, 'check')
 			},
@@ -258,7 +269,7 @@
 			{
 				id: 'test',
 				label: t('repositories.testAccess'),
-				icon: 'eye',
+				icon: 'plug-zap',
 				hidden: !canWrite,
 				onSelect: () => openJob(repository, 'test_access')
 			},
@@ -374,9 +385,10 @@
 		jobRepository = repository;
 		jobKind = kind;
 		// The default host is the maintenance host of the repository (FR-RP-08).
+		const fixed = kind === 'init' || repository.backend.kind === 'local';
 		jobHost =
 			repository.maintenance_agent_id ??
-			agents.find((agent) => agent.status === 'active')?.id ??
+			(fixed ? '' : agents.find((agent) => agent.status === 'active')?.id) ??
 			'';
 		job = null;
 		jobError = null;
@@ -386,7 +398,7 @@
 	}
 
 	async function startJob(): Promise<void> {
-		if (!jobRepository) return;
+		if (!jobRepository || jobNoHost) return;
 		jobSubmitted = true;
 		if (focusFirstInvalid([['job-host', jobHost === '']])) return;
 		jobStarting = true;
@@ -560,7 +572,7 @@
 				{t('repositories.initializeBody')}
 			</Alert>
 		{:else}
-			<Alert tone="info" icon="eye" title={t('repositories.testAccess')}>
+			<Alert tone="info" icon="plug-zap" title={t('repositories.testAccess')}>
 				{t('repositories.testAccessBody')}
 			</Alert>
 		{/if}
@@ -580,6 +592,21 @@
 					{/if}
 				</p>
 			</div>
+		{:else if jobNoHost && jobRepository}
+			<Alert tone="attention" icon="alert" title={t('repositories.jobNoHostTitle')}>
+				{jobKind === 'init' ? t('repositories.jobNoHostInit') : t('repositories.jobNoHostLocal')}
+				<!-- eslint-disable svelte/no-navigation-without-resolve -- resolved path with a hash -->
+				<a class="link job__link" href={jobHostHref}>{t('repositories.jobNoHostLink')}</a>
+				<!-- eslint-enable svelte/no-navigation-without-resolve -->
+			</Alert>
+		{:else if jobHostFixed && jobRepository}
+			<TextField
+				id="job-host"
+				label={t('repositories.jobHost')}
+				help={jobKind === 'init' ? t('repositories.jobHostInit') : t('repositories.jobHostLocal')}
+				value={maintenanceName(jobRepository)}
+				disabled
+			/>
 		{:else}
 			<Select
 				id="job-host"
@@ -593,7 +620,13 @@
 		{#snippet footer()}
 			<Button onclick={closeJob}>{t('common.close')}</Button>
 			{#if !job}
-				<Button type="submit" variant="primary" loading={jobStarting}>
+				<Button
+					type="submit"
+					variant="primary"
+					loading={jobStarting}
+					disabled={jobNoHost}
+					title={jobNoHost ? t('repositories.jobNoHostTitle') : undefined}
+				>
 					{t('repositories.jobStart')}
 				</Button>
 			{/if}
@@ -618,6 +651,11 @@
 	.job__label {
 		color: var(--rh-color-text-muted);
 		font-size: var(--rh-font-size-sm);
+	}
+
+	.job__link {
+		display: block;
+		margin-top: var(--rh-space-2);
 	}
 
 	.job__result {
