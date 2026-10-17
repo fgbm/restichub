@@ -58,7 +58,7 @@ The agent service on Linux runs in a systemd sandbox. The sandbox makes the file
 
 Do these steps on the maintenance host before you initialize the repository:
 
-1. Write the parent directory of the repository on one line of the file `/etc/restichub-agent-repository-roots.txt`, for example `/srv/restichub` or `/var/spool/restichub`. Each line holds one absolute path. A line that starts with `#` is a comment.
+1. Write the parent directory of the repository on one line of the file `/etc/restichub-agent-repository-roots.txt`, for example `/srv/restichub` or `/var/spool/restichub`. Each line holds one absolute path. A line that starts with `#` is a comment. On Linux the agent ignores a line with a quotation mark, a backslash, `%`, a space or a control character.
 2. Make sure that root owns the file and that no other account can write it: `sudo chown root:root /etc/restichub-agent-repository-roots.txt` and `sudo chmod 0644 /etc/restichub-agent-repository-roots.txt`.
 3. Run `sudo restichub-agent install-service`. The command adds each root to `ReadWritePaths` of the systemd unit and restarts the service. It creates a missing root with access for root only, and each missing parent with mode `0755`.
 
@@ -68,7 +68,7 @@ A root and each existing parent directory must belong to root. No group or other
 
 The agent refuses a local repository outside the roots before restic starts. The job fails with the reason `repository_path_denied`, and the screen names the file. The agent also refuses a path that holds or lies inside its own files.
 
-A root cannot be `/`, a system directory (`/etc`, `/usr`, `/bin`, `/sbin`, `/lib`, `/lib64`, `/boot`, `/proc`, `/sys`, `/dev`, `/run`), a directory that holds one of them, a directory `/var/lib/restichub*` or a directory of the agent. Each root becomes writable for restic, so such a root would open the system files. The agent ignores such a root and logs a warning that names the line. `install-service` stops with a message.
+A root cannot be `/`, a system directory (`/etc`, `/usr`, `/bin`, `/sbin`, `/lib`, `/lib64`, `/boot`, `/proc`, `/sys`, `/dev`, `/run`, `/var/spool/cron`, `/var/lib/systemd`), a directory that holds one of them, `/home` or `/root` itself, a directory `/var/lib/restichub*` or a directory of the agent. Each root becomes writable for restic, so such a root would open the system files or the files of all accounts. Use a separate directory only for repositories as a root. The agent ignores such a root and logs a warning that names the line. `install-service` stops with a message.
 
 The unit sets `ProtectHome=read-only`. The service reads a backup source below `/home`, but it writes below `/home`, `/root` and `/run/user` only in a root. A directory of a user account, for example `/home/<user>`, cannot hold a root, because it does not belong to root. Use a directory that root owns, for example `/srv/restichub`.
 

@@ -108,6 +108,29 @@ jobs:
           sudo systemctl restart restichub-agent
           test "$(systemctl is-active restichub-agent)" = active
           scripts/install-smoke.sh connected "$since" 60
+      # The restore guide tells the administrator to add /home or /root to the restore roots for
+      # an in-place restore there. The check uses the file, not the exit code of systemd-run.
+      - name: ReadWritePaths lifts ProtectHome=read-only for /home and /root, the root / does not (ADR-0045)
+        run: |
+          set -euo pipefail
+          sandbox=(sudo systemd-run --quiet --wait --collect -p ProtectSystem=strict -p ProtectHome=read-only)
+          below="$(sudo mktemp -d /home/restichub-smoke.XXXXXX)"
+          for writable in /home /root "$below"; do
+            file="$writable/restichub-smoke-file"
+            "${sandbox[@]}" -p "ReadWritePaths=$writable" touch "$file" || true
+            if ! sudo test -f "$file"; then
+              echo "ReadWritePaths=$writable must make $file writable under ProtectHome=read-only" >&2
+              exit 1
+            fi
+            sudo rm -f "$file"
+          done
+          sudo rmdir "$below"
+          "${sandbox[@]}" -p ReadWritePaths=/ touch /root/restichub-smoke-slash || true
+          if sudo test -e /root/restichub-smoke-slash; then
+            echo "ReadWritePaths=/ must not make /root writable under ProtectHome=read-only" >&2
+            exit 1
+          fi
+          echo "ReadWritePaths lifts ProtectHome for /home, /root and a directory below /home; / does not"
       - name: A local repository below a repository root inits and backs up (ADR-0045)
         run: |
           set -euo pipefail

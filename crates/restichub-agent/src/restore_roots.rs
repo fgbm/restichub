@@ -86,11 +86,13 @@ impl RestoreAccess {
     /// downloaded restic binary. The directory of `program` joins the protected paths (ADR-0038).
     #[must_use]
     pub fn for_host(config_dir: &Path, cache_dir: &Path, program: &Path) -> Self {
-        let protected = protected_paths(config_dir, cache_dir, program);
-        let repository_roots = crate::repository_roots::load_roots(config_dir, &protected);
+        let repository_roots = listed_roots(&crate::repository_roots::roots_file_for(config_dir));
         Self::new(
             load_roots(&roots_file_for(config_dir)),
-            restore_protected(protected, repository_roots),
+            restore_protected(
+                protected_paths(config_dir, cache_dir, program),
+                repository_roots,
+            ),
         )
     }
 
@@ -234,7 +236,7 @@ pub(crate) fn load_roots_file(file: &Path) -> Vec<PathBuf> {
                     tracing::warn!(
                         file = %file.display(),
                         skipped,
-                        "the roots file holds lines that are not absolute paths"
+                        "the roots file holds lines that are not plain absolute paths"
                     );
                 }
                 for root in extra {
@@ -259,6 +261,24 @@ pub(crate) fn load_roots_file(file: &Path) -> Vec<PathBuf> {
         Err(error) => tracing::warn!(file = %file.display(), %error, "cannot read the roots file"),
     }
     roots
+}
+
+/// Every root line of a roots file, without the trust checks of `load_roots_file`.
+///
+/// Only for a refusal: a repository stays in a root that the agent stopped trusting, so a restore
+/// must keep away from it (ADR-0045).
+fn listed_roots(file: &Path) -> Vec<PathBuf> {
+    // A FIFO or a device in place of the file would block or flood the read.
+    if !std::fs::metadata(file).is_ok_and(|metadata| metadata.is_file()) {
+        return Vec::new();
+    }
+    match std::fs::read_to_string(file) {
+        Ok(text) => parse_roots(&text).0,
+        Err(error) => {
+            tracing::warn!(file = %file.display(), %error, "cannot read the roots file");
+            Vec::new()
+        }
+    }
 }
 
 /// The roots of the roots file that `load_roots` ignores, with the reason. `install-service`
@@ -361,8 +381,8 @@ fn check_trusted(_file: &Path) -> Result<()> {
     Ok(())
 }
 
-/// The roots of a file text and the number of lines that are not absolute paths. A line that starts
-/// with `#` is a comment.
+/// The roots of a file text and the number of lines that are not plain absolute paths. A line that
+/// starts with `#` is a comment.
 fn parse_roots(text: &str) -> (Vec<PathBuf>, usize) {
     let mut roots = Vec::new();
     let mut skipped = 0;
@@ -370,13 +390,22 @@ fn parse_roots(text: &str) -> (Vec<PathBuf>, usize) {
         if line.starts_with('#') {
             continue;
         }
-        if components(PathFlavor::host(), line).is_some() {
+        if components(PathFlavor::host(), line).is_some() && !has_unit_syntax(line) {
             roots.push(PathBuf::from(line));
         } else {
             skipped += 1;
         }
     }
     (roots, skipped)
+}
+
+/// Each root goes into `ReadWritePaths` of the systemd unit, where quotes, backslashes and white
+/// space split or change the path and `%` starts a specifier. So `/srv" "/etc` would open `/etc`.
+fn has_unit_syntax(line: &str) -> bool {
+    cfg!(unix)
+        && line
+            .chars()
+            .any(|c| matches!(c, '"' | '\'' | '\\' | '%') || c.is_whitespace() || c.is_control())
 }
 
 /// Creates the default root with the access of the service account only (FR-RS-03).
@@ -636,6 +665,46 @@ mod tests {
             vec![PathBuf::from("/srv/restore"), PathBuf::from("/data")]
         );
         assert_eq!(skipped, 2);
+    }
+
+    #[test]
+    fn adr_0045_a_root_line_with_unit_syntax_is_skipped() {
+        let (roots, skipped) = parse_roots(
+            "/srv/\" \"/etc\n/srv/'a'\n/srv/a b\n/srv/a\tb\n/srv/a\\b\n/srv/%h\n/srv/a\u{7}\n/srv/ok\n",
+        );
+        assert_eq!(roots, vec![PathBuf::from("/srv/ok")]);
+        assert_eq!(skipped, 7);
+    }
+
+    #[test]
+    fn adr_0045_a_restore_keeps_away_from_an_untrusted_repository_root() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let base = temp_dir("untrusted-repository-root");
+        let config = base.join("config");
+        let repos = base.join("repos");
+        std::fs::create_dir_all(&config).expect("cannot create the config");
+        std::fs::create_dir_all(repos.join("fs-01")).expect("cannot create the repository");
+        std::fs::set_permissions(&repos, std::fs::Permissions::from_mode(0o777))
+            .expect("cannot set the mode");
+        let file = crate::repository_roots::roots_file_for(&config);
+        std::fs::write(&file, format!("{}\n", repos.display())).expect("cannot write the file");
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o666))
+            .expect("cannot set the mode");
+        assert!(load_roots_file(&file).is_empty());
+        let access = RestoreAccess::new(
+            vec![PathBuf::from("/")],
+            restore_protected(vec![config], listed_roots(&file)),
+        );
+        for target in [repos.clone(), repos.join("fs-01").join("config")] {
+            assert_eq!(
+                access.check(target.to_str().expect("utf-8")),
+                Err(TargetDenied::ProtectedPath),
+                "{}",
+                target.display()
+            );
+        }
+        assert!(listed_roots(&base.join("absent.txt")).is_empty());
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

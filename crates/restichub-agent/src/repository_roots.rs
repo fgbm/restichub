@@ -98,10 +98,28 @@ pub(crate) fn is_local(location: &str) -> bool {
 
 /// Directories that a repository root must not hold or lie in. Each root goes into
 /// `ReadWritePaths`, so such a root would open the system files to a compromised restic.
+/// A write to `/var/spool/cron` or `/var/lib/systemd` runs code outside the sandbox.
 const SYSTEM_DIRS: &[&str] = &[
-    "/etc", "/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/libx32", "/boot", "/proc",
-    "/sys", "/dev", "/run",
+    "/etc",
+    "/usr",
+    "/bin",
+    "/sbin",
+    "/lib",
+    "/lib32",
+    "/lib64",
+    "/libx32",
+    "/boot",
+    "/proc",
+    "/sys",
+    "/dev",
+    "/run",
+    "/var/spool/cron",
+    "/var/lib/systemd",
 ];
+
+/// A root on one of these lifts `ProtectHome=read-only` for every account. A directory below
+/// that root owns stays allowed.
+const HOME_DIRS: &[&str] = &["/home", "/root"];
 
 /// The directory that holds the state directories of the agent and the default restore root.
 const STATE_PARENT: &str = "/var/lib";
@@ -142,7 +160,10 @@ pub(crate) fn refused_root(root: &Path, protected: &[PathBuf]) -> Option<&'stati
         if parts.is_empty() {
             return Some("the root is the root of the file system");
         }
-        let system = SYSTEM_DIRS.iter().any(|dir| overlaps(flavor, path, dir));
+        let system = SYSTEM_DIRS.iter().any(|dir| overlaps(flavor, path, dir))
+            || HOME_DIRS
+                .iter()
+                .any(|dir| components(flavor, dir).as_ref() == Some(&parts));
         let state = is_within(flavor, STATE_PARENT, path)
             || (is_within(flavor, path, STATE_PARENT)
                 && parts
@@ -292,6 +313,14 @@ mod tests {
             "/var/lib/restichub-agent/repos",
             "/opt",
             "/opt/restichub-agent",
+            "/home",
+            "/home/",
+            "/root",
+            "/var/spool",
+            "/var/spool/cron",
+            "/var/spool/cron/crontabs",
+            "/var/lib/systemd",
+            "/var/lib/systemd/system",
         ] {
             assert!(
                 refused_root(Path::new(root), &protected).is_some(),
@@ -303,7 +332,8 @@ mod tests {
             "/srv/repos",
             "/var/spool/restichub",
             "/var/lib/backups",
-            "/home",
+            "/home/restichub",
+            "/root/repos",
         ] {
             assert_eq!(refused_root(Path::new(root), &protected), None, "{root}");
         }
