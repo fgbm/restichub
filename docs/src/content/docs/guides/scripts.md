@@ -145,6 +145,8 @@ On Linux, the service of the agent runs with `ProtectSystem=strict`. A script ca
 ReadWritePaths=/var/backups
 ```
 
+The unit also has a system call filter (`SystemCallFilter=@system-service`). A system call outside the filter fails with the error `EPERM`. Thus a debug tool such as `strace` or `perf` does not work in a script.
+
 ## Job detail
 
 The job detail lists every script in order before the job runs. Each step shows its status, start time, duration and exit code. Select the log of a step ("Show the log of ...") to read the output of that step only. The backup step has its own log too. The complete log of the job ("Complete log") stays below the steps.

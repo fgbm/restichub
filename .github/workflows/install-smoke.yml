@@ -153,6 +153,40 @@ jobs:
           mkdir -p "$SMOKE_DIR/source"
           echo "local repository smoke" >"$SMOKE_DIR/source/file.txt"
           scripts/install-smoke.sh local-repository "$root" "$SMOKE_DIR/source" /var/tmp/restichub-outside/local-test
+      # The service runs restic with the sandbox of its unit, so restic runs here with the same
+      # properties. The jobs of the service above show that the agent itself runs in it.
+      - name: restic runs each command of a job in the sandbox of the unit (AC-IN-03)
+        run: |
+          set -euo pipefail
+          unit=/etc/systemd/system/restichub-agent.service
+          grep -qx 'SystemCallFilter=@system-service' "$unit"
+          grep -qx 'SystemCallErrorNumber=EPERM' "$unit"
+          grep -qx 'ProtectProc=invisible' "$unit"
+          properties=()
+          while IFS= read -r line; do
+            case "$line" in
+              '' | '['* | Description=* | After=* | Wants=* | WantedBy=* | Type=* | ExecStart=* | Restart*) ;;
+              *) properties+=(-p "$line") ;;
+            esac
+          done <"$unit"
+          repository=/srv/restichub-smoke-repositories/sandbox
+          target=/srv/restichub-smoke-repositories/sandbox-restore
+          sandboxed() {
+            sudo systemd-run --wait --pipe --quiet "${properties[@]}" \
+              -E RESTIC_PASSWORD=smoke-sandbox -E RESTIC_REPOSITORY="$repository" \
+              /opt/restichub-agent/bin/restic "$@"
+          }
+          sandboxed init
+          sandboxed backup "$SMOKE_DIR/source"
+          sandboxed backup "$SMOKE_DIR/source"
+          sandboxed snapshots
+          sandboxed ls latest
+          sandboxed restore latest --target "$target"
+          sudo test -f "$target$SMOKE_DIR/source/file.txt"
+          sandboxed forget --keep-last 1
+          sandboxed prune
+          sandboxed check
+          sudo rm -rf "$repository" "$target"
       # The service writes its log to journald. The scan reads the entries of all units.
       - name: journald holds no canary after ten jobs (AC-AG-03)
         run: |

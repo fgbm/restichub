@@ -191,7 +191,7 @@ pub(crate) fn check_path(
 /// Resolves the links of the deepest existing ancestor and appends the missing names.
 ///
 /// A link that points nowhere is an error: the restore would create the file behind it.
-fn resolve(path: &Path) -> io::Result<PathBuf> {
+pub(crate) fn resolve(path: &Path) -> io::Result<PathBuf> {
     let mut missing = Vec::new();
     let mut current = path.to_path_buf();
     loop {

@@ -31,9 +31,10 @@ pub(crate) const ROTATION_MARKER: &str = "rotation.next";
 /// The files of a rotation that a load moves into place.
 const ROTATED_FILES: [&str; 3] = [KEY_FILE, CERT_FILE, CA_CHAIN_FILE];
 
-/// The names in an identity directory whose content a load reads or moves into place, with
-/// whether the name holds the private key.
-pub(crate) fn loaded_names() -> Vec<(String, bool)> {
+/// The names in an identity directory whose content the service trusts, with whether the name
+/// holds the private key: what a load reads or moves into place, the key updates that widen the
+/// key ring, the restic record and the job journal.
+pub(crate) fn trusted_names() -> Vec<(String, bool)> {
     let mut names: Vec<(String, bool)> = IDENTITY_FILES
         .iter()
         .map(|file| ((*file).to_owned(), *file == KEY_FILE))
@@ -44,6 +45,14 @@ pub(crate) fn loaded_names() -> Vec<(String, bool)> {
             .map(|file| (format!("{file}{STAGED_SUFFIX}"), *file == KEY_FILE)),
     );
     names.push((ROTATION_MARKER.to_owned(), false));
+    names.extend(
+        [
+            crate::keys::KEY_UPDATES_FILE,
+            crate::restic_store::RECORD_FILE,
+            crate::journal::JOURNAL_FILE,
+        ]
+        .map(|file| (file.to_owned(), false)),
+    );
     names
 }
 

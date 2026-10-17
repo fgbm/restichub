@@ -13,8 +13,8 @@ pub(super) const LABELS: &[(&str, &str, &str)] = &[
     ("step_failed", "restic error", "ошибка restic"),
     (
         "step_not_started",
-        "restic did not start",
-        "restic не запустился",
+        "The step did not start",
+        "Шаг не начался",
     ),
     (
         "wrong_password",

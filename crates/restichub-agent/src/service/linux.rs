@@ -66,6 +66,9 @@ pub fn unit_contents(exe: &Path, config_dir: &Path, writable_roots: &[PathBuf]) 
          LockPersonality=true\n\
          MemoryDenyWriteExecute=true\n\
          SystemCallArchitectures=native\n\
+         SystemCallFilter=@system-service\n\
+         SystemCallErrorNumber=EPERM\n\
+         ProtectProc=invisible\n\
          CapabilityBoundingSet={capabilities}\n\
          RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX\n\
          CacheDirectory=restichub-agent\n\
@@ -408,6 +411,11 @@ mod tests {
         }
         assert!(unit.contains("CacheDirectory=restichub-agent"));
         assert!(unit.contains("RESTIC_CACHE_DIR=/var/cache/restichub-agent"));
+        // The Linux install smoke runs every restic command of a job under these lines. A system
+        // call outside the filter fails with EPERM instead of killing restic or a script.
+        assert!(unit.contains("SystemCallFilter=@system-service\n"));
+        assert!(unit.contains("SystemCallErrorNumber=EPERM\n"));
+        assert!(unit.contains("ProtectProc=invisible\n"));
     }
 
     #[test]

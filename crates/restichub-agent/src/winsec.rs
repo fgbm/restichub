@@ -16,10 +16,14 @@
 use std::io::Write as _;
 use std::os::windows::ffi::OsStrExt as _;
 use std::os::windows::fs::MetadataExt as _;
+use std::os::windows::io::FromRawHandle as _;
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
-use windows_sys::Win32::Foundation::{CloseHandle, ERROR_SUCCESS, HANDLE, HLOCAL, LocalFree};
+use windows_sys::Win32::Foundation::{
+    CloseHandle, ERROR_SUCCESS, GENERIC_READ, GENERIC_WRITE, HANDLE, HLOCAL, INVALID_HANDLE_VALUE,
+    LocalFree,
+};
 use windows_sys::Win32::Security::Authorization::{
     ConvertStringSecurityDescriptorToSecurityDescriptorW, ConvertStringSidToSidW,
     GetNamedSecurityInfoW, SDDL_REVISION_1, SE_FILE_OBJECT, SetNamedSecurityInfoW,
@@ -33,10 +37,11 @@ use windows_sys::Win32::Security::{
     TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation,
 };
 use windows_sys::Win32::Storage::FileSystem::{
-    CreateDirectoryW, DELETE, FILE_ADD_FILE, FILE_ADD_SUBDIRECTORY, FILE_ALL_ACCESS,
-    FILE_APPEND_DATA, FILE_ATTRIBUTE_REPARSE_POINT, FILE_DELETE_CHILD, FILE_GENERIC_EXECUTE,
-    FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA, FILE_WRITE_EA,
-    WRITE_DAC, WRITE_OWNER,
+    CREATE_NEW, CreateDirectoryW, CreateFileW, DELETE, FILE_ADD_FILE, FILE_ADD_SUBDIRECTORY,
+    FILE_ALL_ACCESS, FILE_APPEND_DATA, FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_REPARSE_POINT,
+    FILE_DELETE_CHILD, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ, FILE_GENERIC_WRITE,
+    FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA,
+    FILE_WRITE_EA, WRITE_DAC, WRITE_OWNER,
 };
 use windows_sys::Win32::System::SystemServices::{
     ACCESS_ALLOWED_ACE_TYPE, ACCESS_ALLOWED_CALLBACK_ACE_TYPE,
@@ -285,17 +290,12 @@ pub fn create_protected_dir(dir: &Path) -> Result<()> {
 /// Returns an error when the file cannot be created or its access control cannot be set.
 pub fn create_protected_file(path: &Path, contents: &[u8]) -> Result<()> {
     let _ = std::fs::remove_file(path);
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
+    let mut file = create_new_protected(path, GENERIC_WRITE, 0)
         .with_context(|| format!("cannot create {}", path.display()))?;
     file.write_all(contents)
         .with_context(|| format!("cannot write {}", path.display()))?;
     file.sync_all()
-        .with_context(|| format!("cannot flush {}", path.display()))?;
-    drop(file);
-    apply_descriptor(path, FILE_SDDL)
+        .with_context(|| format!("cannot flush {}", path.display()))
 }
 
 /// Opens the file, or creates it empty with the descriptor of [`create_protected_file`].
@@ -307,23 +307,50 @@ pub fn create_protected_file(path: &Path, contents: &[u8]) -> Result<()> {
 /// Returns an error when the file cannot be opened or created, or its access control cannot be
 /// set.
 pub(crate) fn open_or_create_protected(path: &Path) -> Result<std::fs::File> {
-    let mut options = std::fs::OpenOptions::new();
-    options.read(true).write(true);
-    match options.clone().create_new(true).open(path) {
-        Ok(file) => {
-            if let Err(error) = apply_descriptor(path, FILE_SDDL) {
-                // A later open would accept the file with the access that it inherited.
-                drop(file);
-                let _ = std::fs::remove_file(path);
-                return Err(error);
-            }
-            Ok(file)
+    match create_new_protected(
+        path,
+        GENERIC_READ | GENERIC_WRITE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+    ) {
+        Ok(file) => Ok(file),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(path)
+                .with_context(|| format!("cannot open {}", path.display()))
         }
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => options
-            .open(path)
-            .with_context(|| format!("cannot open {}", path.display())),
         Err(error) => Err(error).with_context(|| format!("cannot create {}", path.display())),
     }
+}
+
+/// Creates a new file with the protected descriptor of a file. The descriptor applies at the
+/// creation, so no handle ever opens the file with the access of the parent.
+fn create_new_protected(path: &Path, access: u32, share: u32) -> std::io::Result<std::fs::File> {
+    let descriptor = descriptor(FILE_SDDL).map_err(std::io::Error::other)?;
+    let attributes = SECURITY_ATTRIBUTES {
+        nLength: u32::try_from(std::mem::size_of::<SECURITY_ATTRIBUTES>()).unwrap_or(u32::MAX),
+        lpSecurityDescriptor: descriptor.0,
+        bInheritHandle: 0,
+    };
+    let wide = wide_path(path);
+    // SAFETY: the path is a null-terminated UTF-16 string and the attributes stay alive for the call.
+    let handle = unsafe {
+        CreateFileW(
+            wide.as_ptr(),
+            access,
+            share,
+            &attributes,
+            CREATE_NEW,
+            FILE_ATTRIBUTE_NORMAL,
+            std::ptr::null_mut(),
+        )
+    };
+    if handle == INVALID_HANDLE_VALUE {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: the handle is open and the file takes the only ownership of it.
+    Ok(unsafe { std::fs::File::from_raw_handle(handle) })
 }
 
 /// Refuses a path that another account owns or can change (FR-AG-04).
@@ -686,6 +713,27 @@ pub(crate) mod tests {
         set_owner(&dir, &sid).expect("cannot set the owner");
         assert!(check_admin_only(&dir).is_err());
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn fr_ag_04_a_protected_file_never_holds_the_access_of_its_parent() {
+        let dir = temp("open-parent");
+        create_protected_dir(&dir).expect("cannot create the directory");
+        grant(&dir, "(OI)(CI)(F)").expect("cannot add the access control entry");
+        let inherited = dir.join("inherited");
+        std::fs::write(&inherited, b"probe").expect("cannot write the probe");
+        assert!(
+            check_admin_only(&inherited).is_err(),
+            "the parent passes its access on"
+        );
+
+        let key = dir.join("agent-key.pem");
+        create_protected_file(&key, b"key").expect("cannot write the key");
+        check_admin_only(&key).expect("the key holds only the protected access");
+        let journal = dir.join("journal");
+        drop(open_or_create_protected(&journal).expect("cannot create the file"));
+        check_admin_only(&journal).expect("the new file holds only the protected access");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

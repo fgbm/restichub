@@ -269,10 +269,10 @@ pub fn check_program_files() -> Result<()> {
 /// Refuses an identity in `dir` that another account could change (FR-AG-04, threat T20).
 ///
 /// The service runs it before it loads the identity. It repairs nothing. It checks `dir`, the
-/// backup of an interrupted swap that the load can take instead, and every file that the load
-/// reads or moves into place, also when `dir` is empty. A missing entry passes, so the load
-/// reports a missing identity. Linux refuses a link, an owner that is not root or this account, a
-/// group or world write, and a private key that the group or the world can read.
+/// backup of an interrupted swap that the load can take instead, and every file that the service
+/// trusts, also when `dir` is empty. A missing entry passes, so the load reports a missing
+/// identity. Linux refuses a link, an owner that is not root or this account, a group or world
+/// write, a private key that the group or the world can read, and an extended ACL.
 ///
 /// # Errors
 ///
@@ -285,9 +285,8 @@ pub fn check_identity_dir(dir: &Path) -> Result<()> {
     }
     #[cfg(unix)]
     {
-        use std::os::unix::fs::MetadataExt as _;
         let backup = crate::identity::sibling(dir, ".old");
-        let names = crate::identity::loaded_names();
+        let names = crate::identity::trusted_names();
         let mut entries = Vec::new();
         for candidate in [dir, backup.as_path()] {
             entries.push((candidate.to_path_buf(), false));
@@ -298,22 +297,7 @@ pub fn check_identity_dir(dir: &Path) -> Result<()> {
             );
         }
         for (path, secret) in entries {
-            let metadata = match std::fs::symlink_metadata(&path) {
-                Ok(metadata) => metadata,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-                Err(error) => {
-                    return Err(error).with_context(|| format!("cannot read {}", path.display()));
-                }
-            };
-            if let Some(reason) = unix_exposure(
-                metadata.file_type().is_symlink(),
-                metadata.uid(),
-                metadata.mode(),
-                current_uid(),
-                secret,
-            ) {
-                anyhow::bail!("{} {reason}", path.display());
-            }
+            check_identity_entry(&path, secret, crate::acl::has_extended_acl)?;
         }
         Ok(())
     }
@@ -321,6 +305,49 @@ pub fn check_identity_dir(dir: &Path) -> Result<()> {
     {
         let _ = dir;
         Ok(())
+    }
+}
+
+/// `read_acl` is a parameter, so a test can remove the entry between the two reads.
+#[cfg(unix)]
+fn check_identity_entry(
+    path: &Path,
+    secret: bool,
+    read_acl: impl Fn(&Path) -> Result<bool>,
+) -> Result<()> {
+    use std::os::unix::fs::MetadataExt as _;
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(error).with_context(|| format!("cannot read {}", path.display()));
+        }
+    };
+    if let Some(reason) = unix_exposure(
+        metadata.file_type().is_symlink(),
+        metadata.uid(),
+        metadata.mode(),
+        current_uid(),
+        secret,
+    ) {
+        anyhow::bail!("{} {reason}", path.display());
+    }
+    // An extended ACL can grant another account an access that the mode does not show.
+    match read_acl(path) {
+        Ok(false) => Ok(()),
+        Ok(true) => anyhow::bail!(
+            "{} holds an extended access control list, so another account may change it",
+            path.display()
+        ),
+        // A swap of the identity removes the entry between the two reads; a missing entry passes.
+        Err(error)
+            if error
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound) =>
+        {
+            Ok(())
+        }
+        Err(error) => Err(error.context(format!("cannot check {}", path.display()))),
     }
 }
 
@@ -670,6 +697,66 @@ mod tests {
         );
         assert!(error.contains("ca-chain.pem.next"), "{error}");
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fr_ag_04_the_check_covers_every_trusted_file() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = temp_dir("identity-trusted");
+        ensure_config_dir(&dir).expect("cannot create the configuration directory");
+        for file in [
+            crate::keys::KEY_UPDATES_FILE,
+            crate::restic_store::RECORD_FILE,
+            crate::journal::JOURNAL_FILE,
+        ] {
+            let path = dir.join(file);
+            create_protected_file(&path, b"{}").expect("cannot write");
+            check_identity_dir(&dir).expect("a protected file passes");
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o666)).expect("mode");
+            let error = format!("{:#}", check_identity_dir(&dir).expect_err(file));
+            assert!(error.contains(file), "{error}");
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).expect("mode");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn fr_ag_04_the_check_refuses_an_extended_acl() {
+        let dir = temp_dir("identity-acl");
+        ensure_config_dir(&dir).expect("cannot create the configuration directory");
+        let chain = dir.join(crate::identity::CA_CHAIN_FILE);
+        create_protected_file(&chain, b"chain").expect("cannot write the chain");
+        check_identity_dir(&dir).expect("a file without an ACL passes");
+        // The mask of a read entry keeps the mode free of a group write.
+        let granted = std::process::Command::new("setfacl")
+            .args(["-m", "u:65534:r"])
+            .arg(&chain)
+            .status()
+            .is_ok_and(|status| status.success());
+        if granted {
+            let error = format!("{:#}", check_identity_dir(&dir).expect_err("an ACL entry"));
+            assert!(error.contains("extended access control list"), "{error}");
+        } else {
+            eprintln!("setfacl cannot add an entry here; the ACL refusal is not tested");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn fr_ag_04_an_entry_that_vanishes_before_the_acl_read_passes() {
+        let dir = temp_dir("identity-vanish");
+        ensure_config_dir(&dir).expect("cannot create the configuration directory");
+        let chain = dir.join(crate::identity::CA_CHAIN_FILE);
+        create_protected_file(&chain, b"chain").expect("cannot write the chain");
+        check_identity_entry(&chain, false, |path| {
+            std::fs::remove_file(path).expect("cannot remove the entry");
+            crate::acl::has_extended_acl(path)
+        })
+        .expect("an entry that a swap removed passes");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[cfg(unix)]

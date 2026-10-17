@@ -57,6 +57,7 @@ use crate::restore_roots::RestoreAccess;
 use crate::scripts::ScriptStore;
 
 mod command_text;
+mod link_check;
 mod log;
 mod outcome;
 mod phases;
@@ -133,6 +134,8 @@ pub struct Jobs {
     /// The roots where a restore may write and the files of the agent that it may never touch
     /// (FR-RS-03, ADR-0035).
     restore: Arc<RestoreAccess>,
+    /// Checks the paths of a restore for links before restic writes (threat T31).
+    restore_link_rule: bool,
     /// Where a local backend may lie on a Linux host (ADR-0045).
     repository: Arc<RepositoryAccess>,
     /// The agent reads it again at each job (FR-HK-08).
@@ -181,6 +184,7 @@ impl Jobs {
             stop_grace: STOP_GRACE,
             cleanup_grace: CLEANUP_GRACE,
             restore: Arc::new(restore),
+            restore_link_rule: cfg!(windows),
             repository: Arc::new(repository),
             scripts: Arc::new(scripts),
             log_spool: Arc::new(LogSpool::open(dir, LogSpool::max_bytes_from_env())),
@@ -236,6 +240,15 @@ impl Jobs {
     #[must_use]
     pub fn with_restore_access(mut self, access: RestoreAccess) -> Self {
         self.restore = Arc::new(access);
+        self
+    }
+
+    /// Turns the link check of a restore on or off, so a Linux test covers the Windows rule
+    /// (threat T31).
+    #[cfg(feature = "test-util")]
+    #[must_use]
+    pub fn with_restore_link_rule(mut self, on: bool) -> Self {
+        self.restore_link_rule = on;
         self
     }
 
@@ -741,15 +754,24 @@ impl Jobs {
             if is_init {
                 progress.init_ran = true;
             }
-            let outcome = self
-                .run_step(
-                    &validated,
-                    step,
-                    &cancel,
-                    StepLimits::for_step(step, max, job.stall_timeout_seconds),
-                    &mut log,
-                )
+            let checked_at = tokio::time::Instant::now();
+            let refusal = self
+                .restore_link_check(&validated, step, &cancel, max, &mut log)
                 .await;
+            let outcome = match refusal {
+                Some(outcome) => outcome,
+                None => {
+                    let max = max.map(|max| max.saturating_sub(checked_at.elapsed()));
+                    self.run_step(
+                        &validated,
+                        step,
+                        &cancel,
+                        StepLimits::for_step(step, max, job.stall_timeout_seconds),
+                        &mut log,
+                    )
+                    .await
+                }
+            };
             let finished_at = now_timestamp();
             step_results.push(
                 self.send_step_result(&job_id, step, &outcome, started_at, finished_at)

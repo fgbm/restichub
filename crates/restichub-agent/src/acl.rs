@@ -27,8 +27,9 @@ pub fn has_extended_acl(path: &Path) -> Result<bool> {
     let size = unsafe { libc::getxattr(path.as_ptr(), name.as_ptr(), std::ptr::null_mut(), 0) };
     if size < 0 {
         let error = std::io::Error::last_os_error();
-        // ENODATA means that the attribute is absent, so the mode is the whole access control.
-        if error.raw_os_error() == Some(libc::ENODATA) {
+        // ENODATA means that the attribute is absent, and EOPNOTSUPP that the file system has no
+        // ACL, so the mode is the whole access control.
+        if matches!(error.raw_os_error(), Some(libc::ENODATA | libc::EOPNOTSUPP)) {
             return Ok(false);
         }
         return Err(anyhow::Error::from(error).context("cannot read the access control list"));
