@@ -243,7 +243,7 @@ impl Jobs {
                 Err(_) => break,
             }
         }
-        // A node that was not read was not checked.
+        // Unread nodes were never checked, so restic must not start.
         if stop.is_none() && lines_open {
             stop = Some(Stop::Refused(cannot_check_text(
                 "the listing of the snapshot did not end",
