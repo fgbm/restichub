@@ -3,7 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
-  # The label `ci-heavy` starts the heavy jobs (`backends`, `canary-windows`) on a pull request.
+  # The label `ci-heavy` starts the heavy jobs (`backends`, `canary-windows`) on a pull request. A change to the repository API or to the agent tests starts `backends` without the label.
   pull_request:
     types: [opened, synchronize, reopened, labeled]
 
@@ -33,6 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       rust: ${{ steps.groups.outputs.rust }}
+      backends: ${{ steps.groups.outputs.backends }}
       windows: ${{ steps.groups.outputs.windows }}
       ui: ${{ steps.groups.outputs.ui }}
       openapi: ${{ steps.groups.outputs.openapi }}
@@ -245,8 +246,8 @@ jobs:
   # publishes images or binaries, so the S3 side is SeaweedFS, pinned by digest.
   backends:
     name: Backends (S3, rest-server)
-    needs: restic
-    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci-heavy')
+    needs: [changes, restic]
+    if: github.event_name != 'pull_request' || needs.changes.outputs.backends == 'true' || contains(github.event.pull_request.labels.*.name, 'ci-heavy')
     runs-on: ubuntu-latest
     services:
       postgres:

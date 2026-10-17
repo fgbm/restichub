@@ -159,7 +159,9 @@ async fn exercise(name: &str, backend: Backend) {
     let job = common::wait_job(&app, &admin, &job_id).await;
     assert_eq!(result_code(&job), Some("succeeded"), "{job}");
 
-    // A second repository record on the same location with another password: restic exits with 12.
+    // A second record on the same location with another password: restic exits with 12. A tenant
+    // holds a location once (FR-RP-11), so the first record goes first.
+    common::delete_repository(&app, &admin, &repository).await;
     let wrong = common::create_repository(
         &app,
         &admin,
