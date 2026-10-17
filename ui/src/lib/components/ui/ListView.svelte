@@ -145,6 +145,7 @@
 		danger: 'failed',
 		warning: 'warning',
 		running: 'running',
+		success: 'success',
 		neutral: 'neutral'
 	};
 
@@ -241,6 +242,7 @@
 							class:tone--danger={lead.tone === 'danger'}
 							class:tone--warning={lead.tone === 'warning'}
 							class:tone--running={lead.tone === 'running'}
+							class:tone--success={lead.tone === 'success'}
 							title={lead.label}
 						>
 							<Icon name={lead.name} spin={lead.spin} label={state ? undefined : lead.label} />
@@ -416,6 +418,10 @@
 
 	.tone--running {
 		color: var(--rh-color-running);
+	}
+
+	.tone--success {
+		color: var(--rh-color-success);
 	}
 
 	.item__body {

@@ -37,7 +37,7 @@ describe('job states', () => {
 			[{ status: 'queued' }, 'В очереди', 'neutral', 'clock'],
 			[{ status: 'sent' }, 'Отправлено хосту', 'neutral', 'send-horizontal'],
 			[{ status: 'running' }, 'Выполняется', 'running', 'loader-circle'],
-			[{ status: 'succeeded' }, 'Успешно', 'normal', 'check-circle'],
+			[{ status: 'succeeded' }, 'Успешно', 'success', 'check-circle'],
 			[{ status: 'failed' }, 'Не выполнено', 'danger', 'x-circle'],
 			[{ status: 'failed', result_code: 'cancelled' }, 'Отменено', 'neutral', 'circle-slash'],
 			[{ status: 'expired' }, 'Срок истёк', 'warning', 'clock-alert'],
@@ -48,19 +48,19 @@ describe('job states', () => {
 		}
 	});
 
-	it('shows success with warnings as Succeeded in the warning tone with the full meaning', () => {
+	it('shows success with warnings as With warnings in the warning tone with the full meaning', () => {
 		const state = jobState({ status: 'succeeded', result_code: 'succeeded_with_warnings' });
 		expect(pillOf(state)).toEqual({
 			tone: 'warning',
-			label: 'Succeeded',
+			label: 'With warnings',
 			full: 'Succeeded with warnings'
 		});
 	});
 
-	it('gives the usual success no pill and a grey icon', () => {
+	it('gives a success no pill and a green icon', () => {
 		const state = jobState({ status: 'succeeded' });
 		expect(pillOf(state)).toBeNull();
-		expect(iconOf(state).tone).toBeUndefined();
+		expect(iconOf(state).tone).toBe('success');
 	});
 
 	it('spins only the running icon', () => {
@@ -83,6 +83,7 @@ describe('host states', () => {
 		);
 		expect(hostState(agent({ version_status: 'unsupported' }), now).key).toBe('outdated');
 		expect(pillOf(hostState(agent({}), now))).toBeNull();
+		expect(iconOf(hostState(agent({}), now)).tone).toBe('success');
 	});
 
 	it('fr_ui_01 shows the use of an old certificate in the danger tone above offline', () => {
