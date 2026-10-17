@@ -29,7 +29,7 @@ The time budget does not include these preparations:
 
    Result: the directory `/opt/restichub` holds the release. The section "Contents" of the [release page](https://github.com/fgbm/restichub/releases) shows the image reference `ghcr.io/fgbm/restichub-cp@sha256:<digest>`. See [Get the image digest](/restichub/operations/install-control-plane/#get-the-image-digest).
 
-3. **Start the control plane (5 min).** Create the environment file with the image reference from the release page, and start the stack:
+3. **Start the control plane (5 min).** Use the image reference from step 2, and run these commands:
 
    ```sh
    cd /opt/restichub/deploy/reference
@@ -47,7 +47,7 @@ The time budget does not include these preparations:
 
    Result: you sign in as the administrator. See [The first administrator](/restichub/operations/install-control-plane/#the-first-administrator).
 
-5. **Enroll the host (5 min).** On the host, unpack the agent package and run the command from the dialog "Add a host" ("Hosts" → "Add host" → "Create token") as `root`:
+5. **Enroll the host (5 min).** On the host, run these commands as `root`. Copy the last command from the dialog "Add a host" ("Hosts" → "Add host" → "Create token"):
 
    ```sh
    curl -LO https://github.com/fgbm/restichub/releases/download/v0.1.0-rc.4/restichub-agent-0.1.0-rc.4-linux-amd64.tar.gz
@@ -57,7 +57,7 @@ The time budget does not include these preparations:
 
    Result: the host has the status "Online" on the screen "Hosts". The agent downloads restic itself. See [Register an agent](/restichub/operations/register-an-agent/).
 
-6. **Add the repository (3 min).** Add the repository with this host as the "Maintenance host", then select "Initialize" in the menu "…" of its row.
+6. **Add the repository (3 min).** Add the repository with this host as the "Maintenance host". Then select "Initialize" in the menu "…" of its row.
 
    Result: the repository has the status "Ready". See [Add a repository](/restichub/operations/add-a-repository/).
 
