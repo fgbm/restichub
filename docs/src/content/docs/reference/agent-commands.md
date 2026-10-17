@@ -91,7 +91,9 @@ To upgrade an agent, you do not register the host again. The identity stays.
 
 The command stops the running service, copies the new executable into the program directory, points the service at it and starts it. It keeps the identity and the restic record. It waits for the connection, as `register` does.
 
-On Windows the command also repairs the access control of `%ProgramData%\ResticHub`, when an older agent left a foreign access there. The command first sets the protected access control on the directory. Then it examines the items in the directory. The command prints one line for each change. It does not read the old restore root `%ProgramData%\ResticHub\Restore`. The service never repairs the access.
+On Windows the command also repairs the access control of `%ProgramData%\ResticHub` and `%ProgramFiles%\ResticHub`, when an older agent or a manual copy left a foreign access there. The command first sets the protected access control on the directory. Then it examines the items in the directory. For each top-level directory, the command prints one line with the number of repaired items, for example `repaired the access control of 812 entries under C:\ProgramData\ResticHub\Agent`. Each removal and each warning gets its own line. Add `--verbose` to `register` or `install-service` to print one line for each repaired item. The command does not read the old restore root `%ProgramData%\ResticHub\Restore`. The service never repairs the access.
+
+The repaired access control is the same as on a new install: full control for SYSTEM and Administrators, and the owner Administrators. Other users get no access, also no read access, because the service runs as LocalSystem and each command of the agent runs as Administrator. A folder that a person made by hand under `%ProgramFiles%` keeps the inherited access. On a client edition of Windows that access gives full control to the account of the administrator, also in a session without elevation. Then a program of that session can replace the agent or restic. If another account could change restic, the command removes `restic.exe` and the restic record, and downloads and verifies restic again. The command copies the agent executable again when it differs from the running agent.
 
 The agent does not use a file that another account could change before the repair:
 
@@ -103,11 +105,15 @@ The agent does not use a file that another account could change before the repai
 
 The command stops at an item that it cannot repair. Such an item has another owner, is a link or a hard link, or is not a file of the agent. The message names the item.
 
+`register --force` does all the checks and repairs before it removes an old identity: the program directory, the data directory and the state of the service. If a check fails, the old identity files stay in place.
+
+The service does not repair. If another account could change the identity directory, its parent or a file of the identity, the service does not start. It writes the cause and the fix to the event log `ResticHub` (Linux: journald) and stops with the exit code 78. `status` shows the same cause in the line `identity`.
+
 On Linux the command needs no repair: it sets the mode of `/etc/restichub-agent` itself, and an old install leaves no directory that the command refuses.
 
 ## Troubleshooting
 
-The exit code is 0 on success and 1 on an error. The exit code is 78 when the service starts without a usable identity. The systemd unit does not restart the service after the code 78, because a restart cannot create an identity.
+The exit code is 0 on success and 1 on an error. The exit code is 78 when the service starts without a usable identity, or with an identity that another account could change. The systemd unit does not restart the service after the code 78, because only an administrator can fix the cause. On Windows the service restarts after the first and the second failure, and then it stays stopped. The count resets after one day without a failure.
 
 | Message or symptom | Cause | Action |
 | --- | --- | --- |
@@ -122,6 +128,8 @@ The exit code is 0 on success and 1 on an error. The exit code is 78 when the se
 | `service: installed, not running` | The service stopped at the start. | On Linux read `journalctl -u restichub-agent`. On Windows read the `ResticHub` event log and the files in `%ProgramData%\ResticHub\Agent-logs` (see [Agent logs](/restichub/reference/agent-logs/)). Fix the cause and run `install-service`. |
 | `connection: not connected ... after the wait` | The agent cannot reach the control plane. | Check the clock of the host, the firewall to port 8443 and the URL. Run `status` to read the last error. |
 | `cannot load the agent identity in ...; register the agent again with a new enrollment token` | The identity directory is damaged or empty. The service exits with code 78 and does not restart. | Create a token with "Re-register" and run `register --force` with it. |
+| `the agent does not use the identity in ...: ... grants a write access to an account that is not SYSTEM or Administrators` | The service found an identity that another account could change. It did not connect. | Run `restichub-agent install-service` as Administrator. If it says that the identity could be changed by another account, register the host again with `register --force`. |
+| The job page shows "restic did not start: ..." | The agent could not start restic. The text after the colon is the cause from the agent, for example `cannot protect the directory ...`. | Fix the named cause. For a directory with a foreign access, run `restichub-agent install-service` as Administrator. |
 | The host stays in "Waiting for connection" | The service does not run, or it cannot reach the control plane. | Run `restichub-agent status` and read "last error". Check the service, the clock and the firewall. |
 | `the control plane does not accept the protocol version of this agent` | The agent and the control plane have different protocol versions. | Update the agent (see [Agent and control plane versions](/restichub/reference/agent-version-compatibility/)). |
 | `... cannot protect the directory ...ResticHub ... grants the access mask ... to an account that is not SYSTEM or Administrators` | An older agent left `%ProgramData%\ResticHub` with the access of `%ProgramData%`. | Run `restichub-agent install-service` of the new package as Administrator. The command repairs the access and keeps the identity. Do not delete the directory, because it holds the identity. |
