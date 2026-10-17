@@ -313,11 +313,19 @@ export const ru: Record<MessageKey, string> = {
 	'platformUsers.lastAdminHint': 'Это последний администратор платформы',
 	'platformUsers.roleIn': 'Роль в организации {name}',
 	'platformUsers.removeFrom': 'Убрать из организации {name}',
-	'platformUsers.removeSelfHint': 'Нельзя убрать своё членство',
+	'platformUsers.removeSelfHint': 'Нельзя убрать своё членство в организации текущего сеанса',
 	'platformUsers.removeTitle': 'Убрать из организации?',
 	'platformUsers.removeBody':
 		'{name} потеряет доступ к организации {org}. Учётная запись останется; членство можно добавить снова.',
 	'platformUsers.removeConfirm': 'Убрать',
+	'platformUsers.removeSelfBody':
+		'Вы потеряете доступ к организации {org}. Членство можно добавить снова на этой странице.',
+	'platformUsers.lowerSelfTitle': 'Понизить свою роль?',
+	'platformUsers.lowerSelfBody':
+		'Ваша роль в организации {org} станет «{role}». Повысить её снова можно на этой странице.',
+	'platformUsers.lowerSelfConfirm': 'Понизить роль',
+	'platformUsers.revokeSelfHint': 'Нельзя снять с себя право администратора платформы',
+	'platformUsers.disableSelfHint': 'Нельзя отключить свою учётную запись',
 	'platformUsers.revokeTitle': 'Забрать право администратора платформы?',
 	'platformUsers.revokeBody':
 		'{name} больше не сможет управлять организациями и пользователями установки. Членство в организациях не изменится.',

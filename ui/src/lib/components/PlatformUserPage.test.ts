@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
 	resetPlatformUserPassword: vi.fn(),
 	pushToast: vi.fn()
 }));
+const loadSession = vi.hoisted(() => vi.fn());
 
 vi.mock('#lib/stores/session.svelte.ts', () => ({
 	getSession: () => ({
@@ -27,7 +28,8 @@ vi.mock('#lib/stores/session.svelte.ts', () => ({
 		tenant: { id: 't_01', name: 'acme' },
 		role: 'admin',
 		platform_admin: true
-	})
+	}),
+	loadSession
 }));
 vi.mock('#lib/stores/toasts.svelte.ts', () => ({ pushToast: mocks.pushToast }));
 vi.mock('#lib/api/index.ts', async (importOriginal) => {
@@ -65,11 +67,16 @@ const self = account({
 	display_name: 'Self',
 	email: 'self@example.com',
 	platform_admin: true,
-	memberships: [{ tenant_id: 't_01', tenant_name: 'acme', role: 'admin', disabled: false }]
+	memberships: [
+		{ tenant_id: 't_01', tenant_name: 'acme', role: 'admin', disabled: false },
+		{ tenant_id: 't_02', tenant_name: 'globex', role: 'admin', disabled: false }
+	]
 });
 
 beforeEach(() => {
 	for (const mock of Object.values(mocks)) mock.mockReset();
+	loadSession.mockReset();
+	loadSession.mockResolvedValue(null);
 	mocks.getPlatformUser.mockResolvedValue(account());
 	mocks.listTenants.mockResolvedValue([
 		tenant('t_01', 'acme'),
@@ -200,7 +207,7 @@ describe('Platform user page', () => {
 		);
 	});
 
-	it('disables the changes of the own account with the reason', async () => {
+	it('disables the changes of the own account that the API refuses, with the reason', async () => {
 		const user = userEvent.setup();
 		mocks.getPlatformUser.mockResolvedValue(self);
 		render(PlatformUserPage, { userId: 'self' });
@@ -210,7 +217,10 @@ describe('Platform user page', () => {
 		expect(
 			screen.getByRole('button', { name: 'Remove from the organization acme' })
 		).toBeDisabled();
-		expect(screen.getByLabelText('Role in the organization acme')).toBeDisabled();
+		expect(
+			screen.getByRole('button', { name: 'Remove from the organization globex' })
+		).toBeEnabled();
+		expect(screen.getByLabelText('Role in the organization acme')).toBeEnabled();
 		expect(screen.getByText('self@example.com')).toBeInTheDocument();
 		expect(screen.getByText('not verified')).toBeInTheDocument();
 
@@ -218,8 +228,70 @@ describe('Platform user page', () => {
 		const revoke = (await screen.findByText('Remove the Platform Admin right')).closest(
 			'[data-disabled]'
 		);
-		expect(revoke).toHaveTextContent('This is your account');
-		expect(screen.getByText('Disable user').closest('[data-disabled]')).not.toBeNull();
+		expect(revoke).toHaveTextContent('You cannot remove your own Platform Admin right');
+		expect(screen.getByText('Disable user').closest('[data-disabled]')).toHaveTextContent(
+			'You cannot disable your own account'
+		);
+	});
+
+	it('asks before it lowers the own role and keeps the role when the person cancels', async () => {
+		const user = userEvent.setup();
+		mocks.getPlatformUser.mockResolvedValue(self);
+		render(PlatformUserPage, { userId: 'self' });
+		const select = await screen.findByLabelText('Role in the organization globex');
+		await user.selectOptions(select, 'viewer');
+		const dialog = await screen.findByRole('dialog', { name: 'Lower your own role?' });
+		expect(dialog).toHaveTextContent('Your role in the organization globex becomes "Viewer".');
+		await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+		await waitFor(() => expect(select).toHaveValue('admin'));
+		expect(mocks.setPlatformMembershipRole).not.toHaveBeenCalled();
+
+		await user.selectOptions(select, 'operator');
+		await user.click(
+			within(await screen.findByRole('dialog', { name: 'Lower your own role?' })).getByRole(
+				'button',
+				{ name: 'Lower the role' }
+			)
+		);
+		await waitFor(() =>
+			expect(mocks.setPlatformMembershipRole).toHaveBeenCalledWith('self', 't_02', {
+				role: 'operator'
+			})
+		);
+		expect(select).toHaveValue('operator');
+		expect(loadSession).not.toHaveBeenCalled();
+	});
+
+	it('reloads the session after it lowers the own role in the organization of the session', async () => {
+		const user = userEvent.setup();
+		mocks.getPlatformUser.mockResolvedValue(self);
+		render(PlatformUserPage, { userId: 'self' });
+		await user.selectOptions(
+			await screen.findByLabelText('Role in the organization acme'),
+			'viewer'
+		);
+		await user.click(
+			within(await screen.findByRole('dialog', { name: 'Lower your own role?' })).getByRole(
+				'button',
+				{ name: 'Lower the role' }
+			)
+		);
+		await waitFor(() => expect(loadSession).toHaveBeenCalled());
+	});
+
+	it('asks before it removes the own membership of another organization', async () => {
+		const user = userEvent.setup();
+		mocks.getPlatformUser.mockResolvedValue(self);
+		render(PlatformUserPage, { userId: 'self' });
+		await user.click(
+			await screen.findByRole('button', { name: 'Remove from the organization globex' })
+		);
+		const dialog = await screen.findByRole('dialog', { name: 'Remove from the organization?' });
+		expect(dialog).toHaveTextContent('You lose the access to the organization globex.');
+		await user.click(within(dialog).getByRole('button', { name: 'Remove' }));
+		await waitFor(() =>
+			expect(mocks.removePlatformMembership).toHaveBeenCalledWith('self', 't_02')
+		);
 	});
 
 	it('locks the right of the last Platform Admin from the count of the record', async () => {
