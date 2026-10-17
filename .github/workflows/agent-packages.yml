@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: agent-packages-${{ github.ref }}
+  group: agent-packages-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: false
 
 env:

@@ -11,9 +11,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  # A push to main must not cancel the run that is already in progress; only a
-  # new push to the same pull request replaces the previous run.
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  # Each push to main has its own group, so main runs never wait for or cancel each
+  # other; only a new push to the same pull request replaces the previous run.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
