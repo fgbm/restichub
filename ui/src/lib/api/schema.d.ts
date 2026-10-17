@@ -1991,6 +1991,7 @@ export interface components {
         CreateChannelRequest: {
             enabled?: boolean;
             kind: components["schemas"]["ChannelKind"];
+            /** @description Free text of 1 to 100 characters. Unique in the tenant, ignoring the letter case. Holds no control or format character. */
             name: string;
             /** @description Required for an email channel: 1 to 20 addresses. */
             recipients?: string[];
@@ -2032,6 +2033,7 @@ export interface components {
             cron: string;
             enabled?: boolean;
             missed_run_policy: components["schemas"]["MissedRunPolicy"];
+            /** @description Free text of 1 to 100 characters. Unique in the tenant, ignoring the letter case. Holds no control or format character. */
             name: string;
             profile_id: string;
             /**
@@ -2048,7 +2050,7 @@ export interface components {
             check?: components["schemas"]["CheckOptions"] | null;
             exclude_files?: string[];
             excludes?: string[];
-            /** @description Holds 1 to 48 characters from `a-z`, `0-9`, `.`, `_` and `-`. */
+            /** @description Free text of 1 to 100 characters. Unique in the tenant, ignoring the letter case. Holds no control or format character. */
             name: string;
             options?: components["schemas"]["BackupOptions"];
             paths?: components["schemas"]["ProfilePaths"];
@@ -3538,6 +3540,7 @@ export interface components {
         };
         UpdateChannelRequest: {
             enabled?: boolean | null;
+            /** @description Free text of 1 to 100 characters. Unique in the tenant, ignoring the letter case. Holds no control or format character. */
             name?: string | null;
             /** @description The full new address list of an email channel. */
             recipients?: string[] | null;
@@ -3568,6 +3571,7 @@ export interface components {
             cron: string;
             enabled?: boolean;
             missed_run_policy: components["schemas"]["MissedRunPolicy"];
+            /** @description Free text of 1 to 100 characters. Unique in the tenant, ignoring the letter case. Holds no control or format character. */
             name?: string | null;
             profile_id: string;
             /**
@@ -3582,6 +3586,7 @@ export interface components {
             check?: components["schemas"]["CheckOptions"] | null;
             exclude_files?: string[];
             excludes?: string[];
+            /** @description Free text of 1 to 100 characters. Unique in the tenant, ignoring the letter case. Holds no control or format character. */
             name?: string | null;
             options?: components["schemas"]["BackupOptions"];
             paths?: components["schemas"]["ProfilePaths"];

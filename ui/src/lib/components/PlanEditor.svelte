@@ -3,6 +3,7 @@
 	import { beforeNavigate, goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { ApiError, fieldError, service } from '#lib/api/index.ts';
+	import { nameError } from '#lib/names.ts';
 	import type {
 		Agent,
 		ApiProblem,
@@ -444,7 +445,8 @@
 		<TextField
 			id="plan-name"
 			label={t('plans.plan')}
-			error={fieldError(formProblem, 'name')}
+			help={t('names.help')}
+			error={nameError(name) ?? fieldError(formProblem, 'name')}
 			bind:value={name}
 			required
 		/>

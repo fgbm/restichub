@@ -36,6 +36,8 @@ const MAX_RECIPIENTS: usize = 20;
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CreateChannelRequest {
+    /// Free text of 1 to 100 characters. Unique in the tenant, ignoring the letter case. Holds no control or format character.
+    #[schema(max_length = 100)]
     pub name: String,
     pub kind: ChannelKind,
     #[serde(default = "default_enabled")]
@@ -55,6 +57,8 @@ fn default_enabled() -> bool {
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UpdateChannelRequest {
+    /// Free text of 1 to 100 characters. Unique in the tenant, ignoring the letter case. Holds no control or format character.
+    #[schema(max_length = 100)]
     #[serde(default)]
     pub name: Option<String>,
     #[serde(default)]
@@ -202,7 +206,7 @@ pub async fn create_channel(
     ApiJson(body): ApiJson<CreateChannelRequest>,
 ) -> Result<(StatusCode, Json<ChannelResponse>), ApiError> {
     context.authorize(Operation::ChannelsWrite)?;
-    let name = crate::profiles::validate_name(&body.name)?;
+    let name = crate::validation::validate_record_name("name", &body.name)?;
     let (recipients, url) = match body.kind {
         ChannelKind::Email => {
             if body.url.is_some() {
@@ -318,7 +322,7 @@ pub async fn update_channel(
     };
 
     let name = match &body.name {
-        Some(name) => crate::profiles::validate_name(name)?,
+        Some(name) => crate::validation::validate_record_name("name", name)?,
         None => current.name.clone(),
     };
     let enabled = body.enabled.unwrap_or(current.enabled);

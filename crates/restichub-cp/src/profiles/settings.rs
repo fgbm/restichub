@@ -27,8 +27,6 @@ use crate::error::ApiError;
 use crate::scripts::{EnvKind, ScriptDef};
 use crate::validation::{self, Reason};
 
-/// Limit in characters of a profile name. The derived value stays within the column.
-pub const MAX_PROFILE_NAME: usize = 48;
 /// Limit in characters of one exclude, exclude file or tag.
 pub const MAX_PATTERN: usize = 4096;
 /// Limit in characters of one path entry. A Windows path is longer than a Unix path.
@@ -261,7 +259,8 @@ pub struct CheckOptions {
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CreateProfileRequest {
-    /// Holds 1 to 48 characters from `a-z`, `0-9`, `.`, `_` and `-`.
+    /// Free text of 1 to 100 characters. Unique in the tenant, ignoring the letter case. Holds no control or format character.
+    #[schema(max_length = 100)]
     pub name: String,
     /// The identifier of the repository that the profile uses.
     pub repository_id: String,
@@ -296,6 +295,8 @@ pub struct CreateProfileRequest {
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UpdateProfileRequest {
+    /// Free text of 1 to 100 characters. Unique in the tenant, ignoring the letter case. Holds no control or format character.
+    #[schema(max_length = 100)]
     #[serde(default)]
     pub name: Option<String>,
     pub repository_id: String,
@@ -875,7 +876,7 @@ fn validate_profile(
     retention: Option<Retention>,
     check: Option<CheckOptions>,
 ) -> Result<ValidatedProfile, ApiError> {
-    let name = validate_profile_name("name", &name.unwrap_or_default())?;
+    let name = crate::validation::validate_record_name("name", &name.unwrap_or_default())?;
     let repository_id = parse_repository_id("repository_id", &repository_id)?;
     let paths = validate_paths(paths)?;
     let excludes = validate_patterns("excludes", excludes)?;
@@ -906,29 +907,6 @@ fn validate_profile(
         retention,
         check,
     })
-}
-
-/// A profile name holds 1 to [`MAX_PROFILE_NAME`] characters from `a-z`, `0-9`, `.`, `_` and `-`
-/// (FR-PF-01). The unique index of the `profiles` table makes it unique for the tenant.
-pub fn validate_profile_name(field: &'static str, value: &str) -> Result<String, ApiError> {
-    let value = value.trim();
-    let count = value.chars().count();
-    if count == 0 {
-        return Err(ApiError::invalid_field(field, Reason::Empty));
-    }
-    if count > MAX_PROFILE_NAME {
-        return Err(ApiError::invalid_field(field, Reason::TooLong));
-    }
-    if restichub_proto::validate::has_forbidden(value)
-        || !value.chars().all(|character| {
-            character.is_ascii_lowercase()
-                || character.is_ascii_digit()
-                || matches!(character, '.' | '_' | '-')
-        })
-    {
-        return Err(ApiError::invalid_field(field, Reason::InvalidCharacter));
-    }
-    Ok(value.to_owned())
 }
 
 fn validate_paths(paths: ProfilePaths) -> Result<ProfilePaths, ApiError> {

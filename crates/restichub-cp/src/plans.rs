@@ -58,6 +58,8 @@ pub struct NextRunsQuery {
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CreatePlanRequest {
+    /// Free text of 1 to 100 characters. Unique in the tenant, ignoring the letter case. Holds no control or format character.
+    #[schema(max_length = 100)]
     pub name: String,
     pub profile_id: String,
     pub agent_id: String,
@@ -77,6 +79,8 @@ pub struct CreatePlanRequest {
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UpdatePlanRequest {
+    /// Free text of 1 to 100 characters. Unique in the tenant, ignoring the letter case. Holds no control or format character.
+    #[schema(max_length = 100)]
     #[serde(default)]
     pub name: Option<String>,
     pub profile_id: String,
@@ -635,7 +639,7 @@ fn validate_input(
     missed_run_policy: MissedRunPolicy,
     enabled: bool,
 ) -> Result<PlanInput, ApiError> {
-    let name = crate::profiles::validate_name(&name.unwrap_or_default())?;
+    let name = crate::validation::validate_record_name("name", &name.unwrap_or_default())?;
     let profile_id = parse_id("profile_id", profile_id, ProfileId::from_uuid)?;
     let agent_id = parse_id("agent_id", agent_id, AgentId::from_uuid)?;
     let cron = cron.trim().to_owned();

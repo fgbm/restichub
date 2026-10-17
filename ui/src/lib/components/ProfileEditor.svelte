@@ -3,6 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { ApiError, fieldError, service } from '#lib/api/index.ts';
+	import { nameError } from '#lib/names.ts';
 	import type {
 		Agent,
 		ApiProblem,
@@ -393,8 +394,8 @@
 			<TextField
 				id="profile-name"
 				label={t('profiles.profile')}
-				help={t('pe.name.help')}
-				error={fieldError(formProblem, 'name')}
+				help={t('names.help')}
+				error={nameError(draft.name) ?? fieldError(formProblem, 'name')}
 				bind:value={draft.name}
 				required
 			/>
