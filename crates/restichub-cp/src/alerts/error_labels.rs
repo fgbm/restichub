@@ -97,6 +97,11 @@ pub(super) const LABELS: &[(&str, &str, &str)] = &[
         "хост не подтвердил задание",
     ),
     (
+        "not_repository_host",
+        "not the host of the local repository",
+        "не хост локального репозитория",
+    ),
+    (
         "secret_unavailable",
         "a secret is not available",
         "секрет недоступен",

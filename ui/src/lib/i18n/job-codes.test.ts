@@ -60,6 +60,7 @@ const RESULT_MESSAGES = [
 	'agent_lost',
 	'expired',
 	'cancelled',
+	'not_repository_host',
 	'succeeded_with_warnings'
 ];
 

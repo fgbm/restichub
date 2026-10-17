@@ -269,6 +269,9 @@ pub async fn update_profile(
     }
     let warnings = save_warnings(&validated)?;
     ensure_repository(&mut tx, validated.repository_id).await?;
+    if validated.repository_id != current.repository_id {
+        ensure_plans_on_repository_host(&mut tx, profile_id, validated.repository_id).await?;
+    }
     script_secrets::check_script_secrets(&mut tx, &validated.scripts).await?;
     repo::update(&mut tx, profile_id, &validated.update())
         .await
@@ -419,6 +422,31 @@ async fn ensure_repository(
 ) -> Result<(), ApiError> {
     if repositories_repo::get(tx, repository).await?.is_none() {
         return Err(ApiError::invalid_field("repository_id", Reason::Unknown));
+    }
+    Ok(())
+}
+
+async fn ensure_plans_on_repository_host(
+    tx: &mut restichub_db::TenantTx<'_>,
+    profile_id: ProfileId,
+    repository_id: restichub_db::RepositoryId,
+) -> Result<(), ApiError> {
+    // The lock orders this save after a concurrent change of the repository host.
+    let Some(repository) = repositories_repo::get_for_update(tx, repository_id).await? else {
+        return Err(ApiError::invalid_field("repository_id", Reason::Unknown));
+    };
+    if repository.backend != BackendKind::Local {
+        return Ok(());
+    }
+    let plans = plans_repo::list_by_profile(tx, profile_id).await?;
+    if plans
+        .iter()
+        .any(|plan| repository.maintenance_agent_id != Some(plan.agent_id))
+    {
+        return Err(ApiError::invalid_field(
+            "repository_id",
+            Reason::PlanOnOtherHost,
+        ));
     }
     Ok(())
 }

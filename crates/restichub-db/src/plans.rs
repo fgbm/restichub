@@ -244,6 +244,64 @@ pub async fn list_by_profile(
     Ok(rows.into_iter().map(Plan::from).collect())
 }
 
+/// True when a plan of a profile that uses the repository runs on another agent than `host`.
+///
+/// A local repository lives on the disk of one host, so each of its plans must run there.
+pub async fn has_plan_off_host(
+    tx: &mut TenantTx<'_>,
+    repository_id: RepositoryId,
+    host: AgentId,
+) -> Result<bool, DbError> {
+    let (found,): (bool,) = sqlx::query_as(
+        "SELECT EXISTS (SELECT 1 FROM plans p \
+         JOIN profiles pr ON pr.tenant_id = p.tenant_id AND pr.id = p.profile_id \
+         WHERE pr.repository_id = $1 AND p.agent_id <> $2)",
+    )
+    .bind(repository_id)
+    .bind(host)
+    .fetch_one(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(found)
+}
+
+/// A local repository that breaks the host rule: it has no host, or plans run elsewhere.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalHostProblem {
+    pub repository_id: RepositoryId,
+    pub host: Option<AgentId>,
+    pub plans_off_host: Vec<PlanId>,
+}
+
+/// Lists the local repositories of the tenant without a host or with plans on another agent.
+pub async fn local_host_problems(tx: &mut TenantTx<'_>) -> Result<Vec<LocalHostProblem>, DbError> {
+    let rows: Vec<(uuid::Uuid, Option<uuid::Uuid>, Vec<uuid::Uuid>)> = sqlx::query_as(
+        "SELECT r.id, r.maintenance_agent_id, \
+                COALESCE(array_agg(p.id ORDER BY p.created_at, p.id) \
+                    FILTER (WHERE p.id IS NOT NULL \
+                        AND p.agent_id IS DISTINCT FROM r.maintenance_agent_id), '{}'::uuid[]) \
+         FROM repositories r \
+         LEFT JOIN profiles pr ON pr.tenant_id = r.tenant_id AND pr.repository_id = r.id \
+         LEFT JOIN plans p ON p.tenant_id = pr.tenant_id AND p.profile_id = pr.id \
+         WHERE r.backend = 'local' \
+         GROUP BY r.id, r.maintenance_agent_id \
+         HAVING r.maintenance_agent_id IS NULL \
+             OR bool_or(p.id IS NOT NULL AND p.agent_id IS DISTINCT FROM r.maintenance_agent_id) \
+         ORDER BY r.id",
+    )
+    .fetch_all(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(rows
+        .into_iter()
+        .map(|(repository, host, plans)| LocalHostProblem {
+            repository_id: RepositoryId::from_uuid(repository),
+            host: host.map(AgentId::from_uuid),
+            plans_off_host: plans.into_iter().map(PlanId::from_uuid).collect(),
+        })
+        .collect())
+}
+
 /// Reads one plan and locks its row for the transaction.
 ///
 /// An update or a delete uses this function, so a concurrent change cannot remove the row between

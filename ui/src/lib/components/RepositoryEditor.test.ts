@@ -133,6 +133,9 @@ describe('the repository page', () => {
 
 	it('fr_rp_08 shows the warning when the maintenance host is cleared', async () => {
 		const user = userEvent.setup();
+		mocks.listRepositories.mockResolvedValue([
+			repository({ backend: { kind: 'rest', endpoint: 'https://rest.example.net/a' } })
+		]);
 		const { container } = render(RepositoryEditor, { repositoryId: 'r_1' });
 
 		await screen.findByLabelText('Maintenance host');
@@ -156,7 +159,7 @@ describe('the repository page', () => {
 		unmount();
 
 		render(RepositoryEditor, { repositoryId: 'r_1' });
-		await screen.findByLabelText('Maintenance host');
+		await screen.findByLabelText(/Repository host/);
 		expect(screen.queryByLabelText(/Repository password/)).not.toBeInTheDocument();
 		expect(screen.getByText(/cannot be replaced/)).toBeInTheDocument();
 	});
@@ -181,6 +184,7 @@ describe('the repository page', () => {
 		await user.selectOptions(screen.getByLabelText('Backend kind'), 'local');
 		await user.type(screen.getByLabelText(/Path/), '/srv/x');
 		await user.type(screen.getByLabelText(/Repository password/), 'pw');
+		await user.selectOptions(screen.getByLabelText(/Repository host/), 'a_1');
 		await user.click(screen.getByRole('button', { name: 'Save' }));
 
 		await waitFor(() =>
@@ -188,10 +192,64 @@ describe('the repository page', () => {
 				expect.objectContaining({
 					name: 'x',
 					password: 'pw',
-					backend: { kind: 'local', path: '/srv/x' }
+					backend: { kind: 'local', path: '/srv/x' },
+					maintenance_agent_id: 'a_1'
 				})
 			)
 		);
+	});
+
+	it('fr_rp_08 locks the host of an initialized local repository and says why', async () => {
+		render(RepositoryEditor, { repositoryId: 'r_1' });
+
+		const host = await screen.findByLabelText(/Repository host/);
+		expect(host).toBeDisabled();
+		expect(host).toHaveValue('a_1');
+		expect(host).toHaveAccessibleDescription(/initialized local repository cannot change/);
+		expect(screen.queryByRole('option', { name: 'None' })).not.toBeInTheDocument();
+	});
+
+	it('fr_rp_08 requires the host of a local repository and lets it change before the init', async () => {
+		mocks.listRepositories.mockResolvedValue([repository({ initialized: false })]);
+		mocks.listAgents.mockResolvedValue([
+			{ id: 'a_1', hostname: 'nas-backup', status: 'active' },
+			{ id: 'a_2', hostname: 'nas-spare', status: 'active' }
+		]);
+		render(RepositoryEditor, { repositoryId: 'r_1' });
+
+		const host = await screen.findByLabelText(/Repository host/);
+		expect(host).toBeEnabled();
+		expect(host).toBeRequired();
+		expect(host).toHaveAccessibleDescription(/Every job of the repository runs on this host/);
+		expect(screen.queryByRole('option', { name: 'None' })).not.toBeInTheDocument();
+		expect(screen.getByRole('option', { name: 'nas-spare' })).toBeInTheDocument();
+	});
+
+	it('fr_rp_08 shows the field error of a refused host change', async () => {
+		const user = userEvent.setup();
+		mocks.listRepositories.mockResolvedValue([repository({ initialized: false })]);
+		mocks.listAgents.mockResolvedValue([
+			{ id: 'a_1', hostname: 'nas-backup', status: 'active' },
+			{ id: 'a_2', hostname: 'nas-spare', status: 'active' }
+		]);
+		const { ApiError } = await import('#lib/api/index.ts');
+		mocks.updateRepository.mockRejectedValue(
+			new ApiError({
+				title: 'Bad Request',
+				status: 400,
+				code: 'invalid_argument',
+				field: 'maintenance_agent_id',
+				reason: 'plan_on_other_host'
+			})
+		);
+		render(RepositoryEditor, { repositoryId: 'r_1' });
+
+		await user.selectOptions(await screen.findByLabelText(/Repository host/), 'a_2');
+		await user.click(screen.getByRole('button', { name: 'Save' }));
+
+		expect(
+			await screen.findByText(/A plan of the repository runs on another host/)
+		).toBeInTheDocument();
 	});
 
 	it('fr_rp_01 says "Not set" for the empty prefix of an initialized S3 repository', async () => {

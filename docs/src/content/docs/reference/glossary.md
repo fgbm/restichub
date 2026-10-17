@@ -19,6 +19,7 @@ The documentation and the web UI use these terms. One term has one meaning.
 | snapshot | A restic snapshot. |
 | backup | The data that restic saves. |
 | maintenance agent | The agent that runs `forget`, `prune` and `check` for a repository. |
+| repository host | The host that holds the path of a local repository. It is the maintenance agent of the repository, and every job of the repository runs on it. |
 | exclusive operation | An operation that needs the whole repository: `init`, `check`, `forget`, `prune` and `unlock`. |
 | enrollment | The first registration of an agent. |
 | enrollment token | A one-time value that lets an agent enroll. |

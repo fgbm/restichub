@@ -14,7 +14,7 @@ The data of a restore goes from the repository to the target agent. It does not 
 - The repository must be initialized.
 - The agent that you select must be online.
 - The agent must announce the capability `restore-v1`. This capability is in the agent packages that include the Restore screen. An agent without it can list snapshots, but the control plane refuses the file tree and the restore with the reason `agent_capability_missing`. Update the agent package to fix this.
-- A repository with a local path accepts its maintenance agent only. The data stays on that host.
+- A repository with a local path accepts its repository host only. The data stays on that host, and the restore writes to that host.
 - The target path must lie inside a restore root of the agent (see [Restore roots](#restore-roots)).
 
 ## List the snapshots

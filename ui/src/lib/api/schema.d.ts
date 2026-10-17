@@ -2070,7 +2070,10 @@ export interface components {
          */
         CreateRepositoryRequest: {
             backend: components["schemas"]["BackendSettings"];
-            /** @description The identifier of the maintenance agent (FR-RP-08). Optional. */
+            /**
+             * @description The identifier of the maintenance agent (FR-RP-08). Required for a local repository: the
+             *     path is on the disk of this host, and every job of the repository runs there.
+             */
             maintenance_agent_id?: string | null;
             /** @description Holds 1 to 48 characters from `a-z`, `0-9`, `.`, `_` and `-`. */
             name: string;
@@ -2304,7 +2307,7 @@ export interface components {
         /** @enum {string} */
         EnvKind: "string" | "secret_ref";
         /** @enum {string} */
-        ErrorCode: "not_found" | "service_unavailable" | "internal_error" | "unauthenticated" | "invalid_credentials" | "forbidden" | "csrf_required" | "conflict" | "invalid_argument" | "payload_too_large" | "tenant_key_missing" | "ambiguous_credentials" | "method_not_allowed" | "rate_limited" | "busy" | "shared_account" | "username_taken" | "email_taken" | "agent_offline" | "already_queued" | "agent_capability_missing" | "restore_target_denied" | "token_used" | "token_already_revoked" | "token_expired" | "agent_recently_online" | "setup_already_done" | "invalid_setup_token";
+        ErrorCode: "not_found" | "service_unavailable" | "internal_error" | "unauthenticated" | "invalid_credentials" | "forbidden" | "csrf_required" | "conflict" | "invalid_argument" | "payload_too_large" | "tenant_key_missing" | "ambiguous_credentials" | "method_not_allowed" | "rate_limited" | "busy" | "shared_account" | "username_taken" | "email_taken" | "agent_offline" | "already_queued" | "agent_capability_missing" | "restore_target_denied" | "token_used" | "token_already_revoked" | "token_expired" | "agent_recently_online" | "setup_already_done" | "invalid_setup_token" | "repository_host_locked" | "not_repository_host";
         /** @description One value of a filter with the number of rows that hold it. */
         FacetValue: {
             /** Format: int64 */
@@ -3586,7 +3589,10 @@ export interface components {
          */
         UpdateRepositoryRequest: {
             backend?: components["schemas"]["BackendSettings"] | null;
-            /** @description The maintenance agent. An empty string clears the assignment. */
+            /**
+             * @description The maintenance agent. An empty string clears the assignment. A local repository keeps a
+             *     host, and the host of an initialized local repository cannot change.
+             */
             maintenance_agent_id?: string | null;
             name?: string | null;
             /** @description Replaces the stored value when the field is present. */
@@ -6370,7 +6376,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemBody"];
                 };
             };
-            /** @description The agent of the plan is revoked, or a manual run of the plan is already queued (`already_queued`). */
+            /** @description The agent of the plan is revoked, a manual run of the plan is already queued (`already_queued`), or the plan runs on another host than its local repository (`not_repository_host`). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -7955,6 +7961,15 @@ export interface operations {
             };
             /** @description The repository is not found. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The location of an initialized repository cannot change, and neither can the host of an initialized local repository (`repository_host_locked`). */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

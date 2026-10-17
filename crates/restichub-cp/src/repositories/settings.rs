@@ -87,7 +87,8 @@ pub struct CreateRepositoryRequest {
     #[serde(default)]
     #[schema(value_type = Option<String>)]
     pub rest_password: Option<SecretString>,
-    /// The identifier of the maintenance agent (FR-RP-08). Optional.
+    /// The identifier of the maintenance agent (FR-RP-08). Required for a local repository: the
+    /// path is on the disk of this host, and every job of the repository runs there.
     #[serde(default)]
     pub maintenance_agent_id: Option<String>,
 }
@@ -117,7 +118,8 @@ pub struct UpdateRepositoryRequest {
     #[serde(default)]
     #[schema(value_type = Option<String>)]
     pub rest_password: Option<SecretString>,
-    /// The maintenance agent. An empty string clears the assignment.
+    /// The maintenance agent. An empty string clears the assignment. A local repository keeps a
+    /// host, and the host of an initialized local repository cannot change.
     #[serde(default)]
     pub maintenance_agent_id: Option<String>,
 }

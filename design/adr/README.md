@@ -51,3 +51,4 @@ To write a new record, copy [0000-template.md](0000-template.md) and use the nex
 | [0043](0043-no-grace-for-unlisted-running-jobs.md) | No grace for a running job that the hello omits | accepted |
 | [0044](0044-host-online-state.md) | The host online state is an open stream recorded in the database | accepted |
 | [0045](0045-repository-roots-for-local-repositories.md) | Repository roots for local repositories | accepted |
+| [0046](0046-local-repository-bound-to-its-host.md) | A local repository is bound to its host | accepted |
