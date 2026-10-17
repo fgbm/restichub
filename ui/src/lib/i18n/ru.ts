@@ -141,7 +141,7 @@ export const ru: Record<MessageKey, string> = {
 		'Создайте первого администратора платформы. Используйте одноразовый токен настройки.',
 	'setup.descriptionSingle':
 		'Создайте первого администратора. Используйте одноразовый токен настройки.',
-	'setup.tokenHint': 'Найдите значение в журнале контрольной плоскости (`docker compose logs cp`).',
+	'setup.tokenHint': 'Найдите значение в журнале сервера управления (`docker compose logs cp`).',
 	'setup.setupToken': 'Токен настройки',
 	'setup.username': 'Имя пользователя',
 	'setup.displayName': 'Отображаемое имя',
@@ -355,7 +355,7 @@ export const ru: Record<MessageKey, string> = {
 	'tokens.valueOnceTitle': 'Скопируйте значение токена',
 	'tokens.valueOnceBody': 'Это значение показывается один раз',
 	'tokens.valueOnceText':
-		'Скопируйте его и сохраните. Панель управления не может показать его снова.',
+		'Скопируйте его и сохраните. Сервер управления не может показать его снова.',
 
 	'nav.secrets': 'Секреты',
 	'secrets.title': 'Секреты',
@@ -469,7 +469,7 @@ export const ru: Record<MessageKey, string> = {
 	'hosts.revokeAgent': 'Отозвать агент',
 	'hosts.revokeTitle': 'Отозвать хост?',
 	'hosts.revokeBody':
-		'Это действие отзовёт хост «{name}». Панель управления закроет его поток и отклонит следующее подключение. Продолжить?',
+		'Это действие отзовёт хост «{name}». Сервер управления закроет его поток и отклонит следующее подключение. Продолжить?',
 	'hosts.revoked': 'Хост отозван.',
 	'hosts.labels': 'Метки',
 	'hosts.labelsPlaceholder': 'например, web, prod',
@@ -500,12 +500,12 @@ export const ru: Record<MessageKey, string> = {
 	// Repositories
 	'repositories.title': 'Репозитории',
 	'repositories.description':
-		'Каждый репозиторий хранит одно хранилище restic. Панель управления хранит секреты и хост обслуживания.',
+		'Каждый репозиторий хранит одно хранилище restic. Сервер управления хранит секреты и хост обслуживания.',
 	'repositories.add': 'Добавить репозиторий',
 	'repositories.addFirst': 'Добавить первый репозиторий',
 	'repositories.addTitle': 'Добавить репозиторий',
 	'repositories.addDescription':
-		'Введите адрес хранилища и учётные данные. Панель управления шифрует каждое значение секрета.',
+		'Введите адрес хранилища и учётные данные. Сервер управления шифрует каждое значение секрета.',
 	'repositories.editTitle': 'Изменить репозиторий',
 	'repositories.editDescription': 'Оставьте поле секрета пустым, чтобы сохранить текущее значение.',
 	'repositories.emptyTitle': 'Репозиториев пока нет',
@@ -574,7 +574,7 @@ export const ru: Record<MessageKey, string> = {
 	'repositories.s3SecretKey': 'Секретный ключ S3',
 	'repositories.restPassword': 'Пароль REST-сервера',
 	'repositories.restPasswordHint':
-		'Необязательно. Панель управления отправляет его агенту с каждым заданием.',
+		'Необязательно. Сервер управления отправляет его агенту с каждым заданием.',
 	'repositories.created': 'Репозиторий создан.',
 	'repositories.updated': 'Репозиторий изменён.',
 	'repositories.deleted': 'Репозиторий удалён.',
@@ -595,13 +595,23 @@ export const ru: Record<MessageKey, string> = {
 	'repositories.testAccess': 'Проверить доступ',
 	'repositories.initializeTitle': 'Инициализировать репозиторий?',
 	'repositories.initializeBody':
-		'Сервер управления передаст пароль репозитория выбранному хосту, и хост выполнит restic init. Сохраните копию пароля репозитория вне ResticHub. Если сервер управления будет потерян, без пароля открыть снимки не удастся.',
+		'Сервер управления передаст пароль репозитория хосту обслуживания, и хост выполнит restic init. Сохраните копию пароля репозитория вне ResticHub. Если сервер управления будет потерян, без пароля открыть снимки не удастся.',
 	'repositories.testAccessTitle': 'Проверить доступ',
 	'repositories.testAccessBody':
 		'Выбранный хост откроет репозиторий и прочитает его конфигурацию. Проверка только читает данные.',
 	'repositories.jobHost': 'Хост',
 	'repositories.jobHostHint': 'Хост, который выполнит задание. По умолчанию — хост обслуживания.',
 	'repositories.jobHostRequired': 'Выберите хост.',
+	'repositories.jobHostInit':
+		'Сервер управления выполняет инициализацию только на хосте обслуживания репозитория.',
+	'repositories.jobHostLocal':
+		'Локальный путь находится на одном хосте, поэтому доступ проверяется на хосте обслуживания.',
+	'repositories.jobNoHostTitle': 'У репозитория нет хоста обслуживания',
+	'repositories.jobNoHostInit':
+		'Инициализация выполняется только на хосте обслуживания. Укажите его на странице репозитория.',
+	'repositories.jobNoHostLocal':
+		'Локальный путь проверяется только на хосте обслуживания. Укажите его на странице репозитория.',
+	'repositories.jobNoHostLink': 'Указать хост обслуживания',
 	'repositories.jobStart': 'Запустить',
 	'repositories.jobRunning': 'Задание выполняется на хосте. В этом окне появится результат.',
 	'repositories.jobDone': 'Задание завершено.',
@@ -621,7 +631,7 @@ export const ru: Record<MessageKey, string> = {
 	'repositories.result.succeeded_with_warnings': 'Задание завершено с предупреждениями.',
 	'repositories.result.repository_locked': 'Репозиторий заблокирован другим процессом.',
 	'repositories.result.incompatible':
-		'Версия restic на узле слишком старая для этого задания. Обновите restic на узле.',
+		'Версия restic на хосте слишком старая для этого задания. Обновите restic на хосте.',
 	'repositories.result.access_error':
 		'Репозитория нет по этому пути на этом хосте. Проверьте путь, точку монтирования и хост.',
 	'repositories.jobExpired': 'Срок задания истёк до ответа хоста. Запустите его снова.',
@@ -1358,9 +1368,9 @@ export const ru: Record<MessageKey, string> = {
 	'alerts.cond.stale_lock':
 		'Блокировка репозитория устарела уже {elapsed} (порог {threshold} мин).',
 	'alerts.cond.job_dead_letter':
-		'Задача «{what}» остановлена после повторных попыток из-за блокировки репозитория.',
-	'alerts.cond.job_warnings': 'Задача «{what}» завершилась с предупреждениями.',
-	'alerts.cond.job_failed': 'Задача «{what}» завершилась ошибкой ({code}).',
+		'Задание «{what}» остановлено после повторных попыток из-за блокировки репозитория.',
+	'alerts.cond.job_warnings': 'Задание «{what}» завершилось с предупреждениями.',
+	'alerts.cond.job_failed': 'Задание «{what}» завершилось ошибкой ({code}).',
 
 	// Alert rules (FR-MN-03)
 	'rules.title': 'Правила оповещений',
@@ -1647,8 +1657,8 @@ export const ru: Record<MessageKey, string> = {
 	'hp.danger.revoke': 'Отозвать агент. Хост больше не подключается.',
 	'hp.state.title': 'Состояние',
 	'hp.state.connection': 'Связь',
-	'hp.state.online': 'На связи',
-	'hp.state.offline': 'Не на связи',
+	'hp.state.online': 'В сети',
+	'hp.state.offline': 'Не в сети',
 	'hp.state.unknown': 'Неизвестно',
 	'hp.state.alerts': 'Открытые оповещения',
 	'hp.state.alertsNone': 'Нет',

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { beforeNavigate, goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { ApiError, fieldError, service } from '#lib/api/index.ts';
@@ -268,7 +268,13 @@
 		}
 	}
 
-	onMount(load);
+	onMount(async () => {
+		await load();
+		await tick();
+		// The init dialog links to #repo-agent when the repository has no maintenance host.
+		const id = window.location.hash.slice(1);
+		if (id) document.getElementById(id)?.focus();
+	});
 
 	const resultItems = $derived<KeyValueItem[]>(
 		SECTIONS.filter((key) => showSchedules || (key !== 'retention' && key !== 'check')).map(
