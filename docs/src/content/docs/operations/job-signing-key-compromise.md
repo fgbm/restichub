@@ -58,7 +58,7 @@ A job in the status `sent` can hold a signature of a retired key. The control pl
 
 An agent that was at most one rotation behind holds the new current key as its next key. When it connects, it gets the re-sync chain. The chain does not carry the compromised key, but it carries the step that the new current key signed. The agent verifies this step with the key that it already holds, learns the new next key and revokes the compromised key. It needs no new enrollment and it accepts the next job.
 
-An agent that is two or more rotations behind, for example after two compromises, does not hold the new current key. It cannot verify the chain and it does not run a job. Register such a host again with a new enrollment token. See [Register an agent](/restichub/operations/register-an-agent/).
+An agent that is two or more rotations behind, for example after two compromises, does not hold the new current key. It cannot verify the chain and it does not run a job. Register such a host again with a new enrollment token. See [Register an agent](/restichub/getting-started/add-a-host/).
 
 ## Result
 

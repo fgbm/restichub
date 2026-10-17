@@ -9,10 +9,43 @@ const group = (en, ru, slugs) => ({
 	items: slugs.map((slug) => ({ slug })),
 });
 
+// Earlier page addresses stay valid for links outside the site.
+const moved = [
+	['about', 'getting-started/about'],
+	['operations/quick-start', 'getting-started/quick-start'],
+	['operations/install-control-plane', 'getting-started/install-control-plane'],
+	['operations/register-an-agent', 'getting-started/add-a-host'],
+	['operations/migrate-from-resticprofile', 'getting-started/migrate-from-resticprofile'],
+	['operations/add-a-repository', 'guides/add-a-repository'],
+	['operations/restore', 'guides/restore'],
+	['operations/scripts', 'guides/scripts'],
+	['operations/alerts', 'guides/alerts'],
+	['operations/users', 'guides/users'],
+	['operations/enroll-a-host-again', 'guides/enroll-a-host-again'],
+	['operations/agent-revocation', 'guides/agent-revocation'],
+	['concepts/overview', 'concepts/architecture'],
+	['concepts/jobs', 'concepts/job-lifecycle'],
+	['operations/agent-jobs', 'concepts/agent-jobs'],
+	['operations/agent-packages', 'reference/agent-packages'],
+	['operations/environment-variables', 'reference/environment-variables'],
+	['operations/metrics', 'reference/metrics'],
+	['operations/api-reference', 'reference/api'],
+	['operations/agent-version-compatibility', 'reference/agent-version-compatibility'],
+	['operations/glossary', 'reference/glossary'],
+];
+
+const redirects = Object.fromEntries(
+	moved.flatMap(([from, to]) => [
+		[`/${from}`, `/restichub/${to}/`],
+		[`/ru/${from}`, `/restichub/ru/${to}/`],
+	]),
+);
+
 // https://starlight.astro.build/reference/configuration/
 export default defineConfig({
 	site: 'https://fgbm.github.io',
 	base: '/restichub',
+	redirects,
 	integrations: [
 		starlight({
 			title: 'ResticHub',
@@ -31,46 +64,50 @@ export default defineConfig({
 			],
 			sidebar: [
 				group('Getting started', 'Начало работы', [
-					'about',
-					'operations/quick-start',
-					'operations/install-control-plane',
-					'operations/register-an-agent',
-					'operations/add-a-repository',
-					'operations/migrate-from-resticprofile',
+					'getting-started/about',
+					'getting-started/quick-start',
+					'getting-started/install-control-plane',
+					'getting-started/add-a-host',
+					'getting-started/migrate-from-resticprofile',
 				]),
-				group('Daily work', 'Ежедневная работа', [
+				group('Guides', 'Руководства', [
+					'guides/add-a-repository',
+					'guides/jobs',
+					'guides/restore',
+					'guides/scripts',
+					'guides/alerts',
+					'guides/users',
+					'guides/enroll-a-host-again',
+					'guides/agent-revocation',
+				]),
+				group('Concepts', 'Понятия', [
+					'concepts/architecture',
+					'concepts/job-lifecycle',
+					'concepts/agent-jobs',
 					'concepts/profiles',
 					'concepts/plans',
-					'concepts/jobs',
-					'operations/agent-jobs',
-					'operations/restore',
-					'operations/alerts',
-					'operations/alert-configuration',
-					'operations/users',
+					'concepts/repositories',
 				]),
-				group('Hosts and agent', 'Хосты и агент', [
-					'operations/agent-packages',
-					'operations/enroll-a-host-again',
-					'operations/agent-version-compatibility',
+				group('Operations and security', 'Эксплуатация и безопасность', [
 					'operations/certificate-rotation',
-					'operations/agent-revocation',
-					'operations/scripts',
-				]),
-				group('Security', 'Безопасность', [
+					'operations/root-ca-rotation',
 					'operations/job-signing-key-compromise',
 					'operations/job-signing-key-recovery',
-					'operations/root-ca-rotation',
 					'operations/enrollment-rate-limit',
-					'operations/security-for-operators',
 					'operations/verify-a-release',
+					'operations/security-for-operators',
+					'operations/alert-configuration',
 				]),
 				group('Reference', 'Справочник', [
-					'concepts/overview',
-					'concepts/repositories',
-					'operations/metrics',
-					'operations/environment-variables',
-					'operations/api-reference',
-					'operations/glossary',
+					'reference/agent-commands',
+					'reference/agent-packages',
+					'reference/agent-logs',
+					'reference/environment-variables',
+					'reference/metrics',
+					'reference/api',
+					'reference/status-codes',
+					'reference/agent-version-compatibility',
+					'reference/glossary',
 				]),
 			],
 		}),
