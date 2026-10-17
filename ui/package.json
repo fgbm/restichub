@@ -27,6 +27,16 @@
 		"gen:icons": "node scripts/gen-icons.mjs && prettier --write src/lib/components/ui/icons.ts"
 	},
 	"overrides": {
+		"bits-ui": {
+			"@sveltejs/kit": {
+				"cookie": "^0.7.0"
+			}
+		},
+		"svelte-toolbelt": {
+			"@sveltejs/kit": {
+				"cookie": "^0.7.0"
+			}
+		},
 		"openapi-typescript": {
 			"typescript": "$typescript"
 		}
