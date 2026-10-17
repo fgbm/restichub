@@ -146,7 +146,7 @@ async fn fr_rp_08_the_host_of_a_local_repository_is_locked_after_init() {
         assert_eq!(body["code"], "repository_host_locked", "{body}");
         assert_eq!(body["field"], "maintenance_agent_id", "{body}");
     }
-    // The same host with a rename passes.
+    // Sending the current host again with a rename is not a host change.
     let (status, body) = env
         .call(
             &env.admin,
