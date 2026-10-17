@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use restichub_agent::cli::RegisterOptions;
-use restichub_agent::commands::provision_and_register;
+use restichub_agent::commands::{PreparedDirectories, provision_and_register};
 use restichub_agent::http_get::HttpsClient;
 use restichub_agent::openpgp::PublicKey;
 use restichub_agent::restic_install::Installer;
@@ -243,15 +243,13 @@ async fn fr_in_07_register_without_restic_and_network_fails_before_the_enrollmen
         token: Some("re_test".to_owned()),
         ..RegisterOptions::default()
     };
-    let error = provision_and_register(
-        &options,
-        &dir.join("config"),
-        &dir.join("cache"),
-        &installer,
-        &unreachable,
-    )
-    .await
-    .expect_err("no network");
+    let config = dir.join("config");
+    let cache = dir.join("cache");
+    let prepared =
+        PreparedDirectories::prepare(&options, &config, &cache).expect("the directories are ready");
+    let error = provision_and_register(&options, &prepared, &installer, &unreachable)
+        .await
+        .expect_err("no network");
     assert!(format!("{error:#}").contains("GitHub"), "{error:#}");
     assert!(
         error.to_string().contains("the token is not used"),
