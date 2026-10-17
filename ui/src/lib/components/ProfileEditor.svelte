@@ -88,6 +88,8 @@
 		Object.fromEntries(SECTIONS.map((key) => [key, key === 'basics' || key === 'paths']))
 	);
 
+	let excludeListOpen = $state(false);
+
 	const canWrite = $derived(['admin', 'operator'].includes(getSession()?.role ?? ''));
 	// Code that runs on a host needs the Admin role (ADR-0037).
 	const canEditScripts = $derived(['admin', 'platform_admin'].includes(getSession()?.role ?? ''));
@@ -222,6 +224,11 @@
 	});
 
 	onMount(load);
+
+	// The list file stays folded until it holds a value or an error.
+	$effect(() => {
+		if (draft.excludeFiles !== '' || formProblem?.field === 'exclude_files') excludeListOpen = true;
+	});
 
 	// A section that holds a server error opens, so the message is not hidden.
 	$effect(() => {
@@ -477,31 +484,35 @@
 		bind:open={open.excludes}
 	>
 		<p class="lead"><RichText text={t('pe.excludes.lead')} /></p>
-		<div class="grid2">
-			<Field
-				label={t('profiles.excludes')}
-				error={fieldError(formProblem, 'excludes')}
-				for="profile-excludes"
-			>
-				<textarea
-					id="profile-excludes"
-					class="rh-textarea rh-input--mono"
-					rows="3"
-					bind:value={draft.excludes}></textarea>
-			</Field>
-			<Field
-				label={t('profiles.excludeFiles')}
-				help={t('pe.excludes.filesHelp')}
-				error={fieldError(formProblem, 'exclude_files')}
-				for="profile-exclude-files"
-			>
-				<textarea
-					id="profile-exclude-files"
-					class="rh-textarea rh-input--mono"
-					rows="3"
-					bind:value={draft.excludeFiles}></textarea>
-			</Field>
-		</div>
+		<Field
+			label={t('profiles.excludes')}
+			help={t('pe.excludes.patternsHelp')}
+			error={fieldError(formProblem, 'excludes')}
+			for="profile-excludes"
+		>
+			<textarea
+				id="profile-excludes"
+				class="rh-textarea rh-input--mono"
+				rows="4"
+				bind:value={draft.excludes}></textarea>
+		</Field>
+		<details class="more" bind:open={excludeListOpen}>
+			<summary>{t('pe.excludes.more')}</summary>
+			<div class="more__body">
+				<Field
+					label={t('profiles.excludeFiles')}
+					help={t('pe.excludes.filesHelp')}
+					error={fieldError(formProblem, 'exclude_files')}
+					for="profile-exclude-files"
+				>
+					<textarea
+						id="profile-exclude-files"
+						class="rh-textarea rh-input--mono"
+						rows="3"
+						bind:value={draft.excludeFiles}></textarea>
+				</Field>
+			</div>
+		</details>
 	</ProfileSection>
 
 	<ProfileSection
@@ -765,6 +776,21 @@
 </RecordPage>
 
 <style>
+	.more {
+		margin-top: var(--rh-space-3);
+		border: var(--rh-border-width) solid var(--rh-color-border);
+		border-radius: var(--rh-radius-md);
+	}
+
+	.more summary {
+		padding: var(--rh-space-2) var(--rh-space-3);
+		cursor: pointer;
+	}
+
+	.more__body {
+		padding: var(--rh-space-2) var(--rh-space-3) var(--rh-space-3);
+	}
+
 	.os {
 		display: flex;
 		align-items: center;

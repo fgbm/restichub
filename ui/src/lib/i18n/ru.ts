@@ -681,8 +681,8 @@ export const ru: Record<MessageKey, string> = {
 	'profiles.pathsWindows': 'Windows',
 	'profiles.pathsLinux': 'Linux',
 	'profiles.pathsMacos': 'macOS',
-	'profiles.excludes': 'Исключения',
-	'profiles.excludeFiles': 'Файлы исключений',
+	'profiles.excludes': 'Шаблоны',
+	'profiles.excludeFiles': 'Файл со списком исключений на хосте',
 	'profiles.tags': 'Теги',
 	'profiles.options.vss': 'Снимок файловой системы (VSS)',
 	'profiles.options.oneFileSystem': 'Не выходить за файловую систему',
@@ -1830,7 +1830,10 @@ export const ru: Record<MessageKey, string> = {
 		'Что копировать. По одному пути в строке. Пути «Для всех систем» берутся на любом хосте, остальные только на своей системе.',
 	'pe.excludes.lead':
 		'Что пропустить. Шаблоны вида <code>*.tmp</code> или пути. По одной записи в строке.',
-	'pe.excludes.filesHelp': 'Путь к файлу со списком шаблонов на хосте.',
+	'pe.excludes.filesHelp':
+		'Путь к файлу на хосте, где лежит список шаблонов. restic --exclude-file.',
+	'pe.excludes.patternsHelp': 'Шаблон вида *.tmp, имя или путь. Как в restic --exclude.',
+	'pe.excludes.more': 'Дополнительно: файл со списком на хосте',
 	'pe.tags.lead': 'Метки снимков этого профиля. По ним снимки ищут и отбирают правила хранения.',
 	'pe.tags.help': 'После каждого тега нажмите Enter, запятую или пробел.',
 	'pe.tags.placeholder': 'Добавьте тег и нажмите Enter',

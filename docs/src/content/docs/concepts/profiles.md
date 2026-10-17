@@ -13,7 +13,7 @@ The profile editor is one page. Select "Add profile" on the "Profiles" screen, o
 |---|---|
 | Main | The name of the profile and its repository. The name is how you find the profile in the list and in plans. A name is any text of 1 to 100 characters, with letters of any script, spaces and emoji. It is unique in the tenant, and the letter case does not matter. |
 | What to back up | One path in each line. The paths for "All systems" apply on every host. The other paths apply only on their own system (Windows, Linux or macOS). |
-| Exclusions | Patterns such as `*.tmp`, or paths. One entry in each line. You can also give the path of a file on the host that holds a list of patterns ("Exclude files"). |
+| Exclusions | Patterns such as `*.tmp`, or paths. One entry in each line. Under "More" you can also give the path of a file on the host that holds a list of patterns ("Exclude list file on the host"). |
 | Tags | The tags of the snapshots of this profile. The retention rules and the searches use them. Type a tag and press Enter, or separate tags with a comma or a space. Each tag becomes a chip. Select the cross on a chip to remove the tag. |
 | Backup options | VSS (Windows only), which passes `--use-fs-snapshot`. "Stay on one file system" (`--one-file-system`). "Exclude cache directories" that hold a `CACHEDIR.TAG` file (`--exclude-caches`). "Upload limit (KiB/s)" and "Download limit (KiB/s)" (`--limit-upload`, `--limit-download`). |
 | Retention | The rules that decide which snapshots stay. See the section below. |
