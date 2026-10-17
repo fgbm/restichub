@@ -241,6 +241,23 @@ describe('Profile editor sections', () => {
 		expect(screen.getByRole('button', { name: /Run limits.*45m \(default\)/ })).toBeInTheDocument();
 	});
 
+	it('folds the exclude list file until it holds a value', async () => {
+		render(ProfileEditor, { profileId: 'p_1' });
+		await expand(user(), /^Exclusions/);
+		const more = (await screen.findByText('More: a list file on the host')).closest('details');
+		expect(more).not.toHaveAttribute('open');
+		expect(screen.getByLabelText('Patterns')).toBeInTheDocument();
+	});
+
+	it('opens the exclude list file when the profile already has one', async () => {
+		mocks.listProfiles.mockResolvedValue([profile({ exclude_files: ['/etc/excludes.txt'] })]);
+		render(ProfileEditor, { profileId: 'p_1' });
+		await expand(user(), /^Exclusions/);
+		const more = (await screen.findByText('More: a list file on the host')).closest('details');
+		await waitFor(() => expect(more).toHaveAttribute('open'));
+		expect(screen.getByLabelText('Exclude list file on the host')).toHaveValue('/etc/excludes.txt');
+	});
+
 	it('has no hooks section', async () => {
 		render(ProfileEditor, { profileId: 'p_1' });
 		await screen.findByLabelText(/^Profile/);

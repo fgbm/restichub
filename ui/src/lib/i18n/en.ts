@@ -186,7 +186,7 @@ export const en = {
 	'overview.step.agent.action': 'Enroll a host',
 	'overview.step.repository.title': 'Add a repository',
 	'overview.step.repository.body':
-		'A restic repository holds the snapshots. The control plane keeps its password and the maintenance agent.',
+		'A restic repository holds the snapshots. The control plane keeps its password and the maintenance host.',
 	'overview.step.repository.action': 'Add repository',
 	'overview.step.profile.title': 'Create a profile',
 	'overview.step.profile.body':
@@ -205,7 +205,7 @@ export const en = {
 	'overview.how.data':
 		'The agent reaches the repository directly. The control plane never holds the backup data.',
 	'overview.how.maintenance':
-		'One maintenance agent runs forget, prune and check for each repository.',
+		'One maintenance host runs forget, prune and check for each repository.',
 	'overview.noOrganizations': 'You hold no organization. Ask an administrator to add you to one.',
 
 	// Organizations
@@ -675,8 +675,8 @@ export const en = {
 	'profiles.pathsWindows': 'Windows',
 	'profiles.pathsLinux': 'Linux',
 	'profiles.pathsMacos': 'macOS',
-	'profiles.excludes': 'Excludes',
-	'profiles.excludeFiles': 'Exclude files',
+	'profiles.excludes': 'Patterns',
+	'profiles.excludeFiles': 'Exclude list file on the host',
 	'profiles.tags': 'Tags',
 	'profiles.options.vss': 'Use a file system snapshot (VSS)',
 	'profiles.options.oneFileSystem': 'Stay on one file system',
@@ -1821,7 +1821,11 @@ export const en = {
 		'What to back up, one path for each line. The paths for all systems apply on any host. The other paths apply on their own system only.',
 	'pe.excludes.lead':
 		'What to skip. Patterns such as <code>*.tmp</code> or paths, one entry for each line.',
-	'pe.excludes.filesHelp': 'The path to a file with patterns on the host.',
+	'pe.excludes.filesHelp':
+		'The path to a file on the host that holds the list of patterns. restic --exclude-file.',
+	'pe.excludes.patternsHelp':
+		'A pattern such as *.tmp, a name or a path. Same as restic --exclude.',
+	'pe.excludes.more': 'More: a list file on the host',
 	'pe.tags.lead':
 		'Labels of the snapshots of this profile. The retention rules and the searches use them.',
 	'pe.tags.help': 'Press Enter, a comma or a space after each tag.',
