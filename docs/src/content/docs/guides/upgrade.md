@@ -136,3 +136,28 @@ On such a host, do these steps one time:
 A host that you registered first with 0.1.0-rc.2 or a later release on a clean computer does not need these steps. `install-service` alone is sufficient there.
 - The Windows service writes its log to rotated files in `%ProgramData%\ResticHub\Agent-logs` and to the event log `ResticHub`. See [Agent logs](/restichub/reference/agent-logs/).
 - A local repository is bound to its host. The control plane refuses a job of a local repository on another host with the reason `not_repository_host`. If several hosts used one shared network disk (NFS or SMB) as a local repository, move this repository to rest-server or SFTP. To find and correct the old plans, see [Repositories saved before this rule](/restichub/guides/add-a-repository/#repositories-saved-before-this-rule).
+
+### Local repositories on Linux
+
+The new agent on Linux writes a local repository only below a repository root. The systemd unit now also sets `ProtectHome=read-only`, so `/home`, `/root` and `/run/user` are read-only for the service. An older unit left these directories writable. Thus a local repository below `/home` or `/root` worked before, and after the upgrade the agent rejects its jobs with `repository_path_denied`. `install-service` also writes the unit again and removes a change that you made by hand.
+
+Do these steps on each Linux host that keeps a local repository:
+
+1. Open "Repositories" and find each repository with the backend kind "Local path" on this host.
+2. Check the path of each repository. If another account owns a parent directory, for example `/home/<user>`, move the repository to a directory that root owns. The agent refuses such a root, because that account could replace a directory with a link. For example:
+
+   ```sh
+   sudo systemctl stop restichub-agent
+   sudo install -d -o root -g root -m 0755 /srv/restichub
+   sudo mv /home/<user>/backup /srv/restichub/fs-01
+   sudo chown -R root:root /srv/restichub/fs-01
+   ```
+
+3. Write each parent directory of the repositories on one line of the file `/etc/restichub-agent-repository-roots.txt`, for example `/srv/restichub`. Root must own the file, and no other account may write it: `sudo chmod 0644 /etc/restichub-agent-repository-roots.txt`.
+4. Run `sudo restichub-agent install-service`. The command adds each root to `ReadWritePaths` and starts the service.
+5. If you moved a repository, open it in "Repositories" and enter the new path in the field "Path".
+6. Start "Test access" for each local repository. The result must be "The repository is ready.".
+
+A repository root cannot be `/`, a system directory such as `/etc` or `/usr`, or a directory of the agent. A restore root and a repository root cannot hold each other, except the restore root `/`. `install-service` stops with a message that names the line.
+
+With the restore root `/`, an in-place restore below `/home` or `/root` now fails with `read-only file system`. A restore root `/home` or `/root` does not change this, and `install-service` now refuses such a root. Use a directory below it that root owns. Restore to another root, for example `/var/lib/restichub-restore`, and copy the files to their place. See [Restore roots](/restichub/guides/restore/#restore-roots).

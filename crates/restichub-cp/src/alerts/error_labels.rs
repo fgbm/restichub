@@ -123,6 +123,11 @@ pub(super) const LABELS: &[(&str, &str, &str)] = &[
         "профиль удалён",
     ),
     (
+        "repository_deleted",
+        "the repository is deleted",
+        "репозиторий удалён",
+    ),
+    (
         "repository_changed",
         "the profile uses another repository",
         "профиль использует другой репозиторий",
@@ -146,6 +151,16 @@ pub(super) const LABELS: &[(&str, &str, &str)] = &[
         "restore_target_denied",
         "the restore target is denied",
         "цель восстановления запрещена",
+    ),
+    (
+        "repository_path_denied",
+        "the repository path is not allowed on the host",
+        "путь репозитория не разрешён на хосте",
+    ),
+    (
+        "repository_read_only",
+        "the repository path is read-only for the agent",
+        "путь репозитория доступен агенту только для чтения",
     ),
     (
         "forget_without_tags",

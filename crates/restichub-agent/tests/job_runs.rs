@@ -268,7 +268,10 @@ async fn ac_lg_04_the_not_started_line_is_scrubbed() {
     common::script_exit_codes(&path, 0, 0);
     let program = common::fake_restic();
     let jobs = restichub_agent::jobs::Jobs::open(program, "0".repeat(64), dir.join("cache"), &dir)
-        .expect("the job journal must open");
+        .expect("the job journal must open")
+        .with_repository_access(
+            restichub_agent::repository_roots::RepositoryAccess::unrestricted(),
+        );
     let (tx, mut rx) = mpsc::channel(32);
     jobs.attach(&tx);
     jobs.greeted(false);

@@ -28,15 +28,17 @@
 		formatSeconds
 	} from '#lib/format.ts';
 	import {
+		isInitProbe,
 		isLive,
 		limitLines,
 		shortKeyId,
 		markerOf,
 		statsOf,
+		stepErrorCode,
 		stepProgress,
 		stepRows
 	} from '#lib/job-detail.ts';
-	import type { StepRow } from '#lib/job-detail.ts';
+	import type { StepMarker, StepRow } from '#lib/job-detail.ts';
 	import { countLines, groupLines, logText } from '#lib/job-log.ts';
 	import { jobDetailReason, notStartedReason } from '#lib/job-reason.ts';
 	import type { LogCounts } from '#lib/job-log.ts';
@@ -62,7 +64,8 @@
 		failed: 'x-circle',
 		skipped: 'circle-slash',
 		idle: 'clock',
-		running: 'loader-circle'
+		running: 'loader-circle',
+		info: 'info'
 	} as const;
 
 	const id = $derived(page.params.id ?? '');
@@ -211,10 +214,17 @@
 		return parts.join(' · ');
 	}
 
+	function markerOfRow(row: StepRow): StepMarker {
+		if (row.state === 'running') return 'running';
+		if (!row.step) return 'idle';
+		if (job && isInitProbe(job, row.step)) return 'info';
+		return markerOf(row.step.status);
+	}
+
 	function isOpen(row: StepRow): boolean {
 		const chosen = openSteps[row.id];
 		if (chosen !== undefined) return chosen;
-		return row.state === 'running' || (row.step !== null && markerOf(row.step.status) === 'failed');
+		return row.state === 'running' || markerOfRow(row) === 'failed';
 	}
 
 	function toggle(row: StepRow): void {
@@ -222,17 +232,23 @@
 	}
 
 	function stepError(step: JobStep): string | null {
-		if (!step.error_code) return null;
+		if (job && isInitProbe(job, step)) return t('jobDetail.probe.willCreate');
+		const code = stepErrorCode(step);
+		if (!code) return null;
 		const reason = notStartedReason(step);
 		if (reason) return t('jobDetail.notStartedBecause', { reason });
-		const key = `jobDetail.stepError.${step.error_code}` as MessageKey;
+		const key = `jobDetail.stepError.${code}` as MessageKey;
 		const text = t(key);
-		return text === key ? step.error_code : text;
+		return text === key ? code : text;
 	}
 
 	// The duration is the own time of the step: its start and end come from the host.
 	function stepMeta(step: JobStep): string {
-		const parts = [t(`jobDetail.stepStatus.${step.status}` as MessageKey)];
+		const parts = [
+			job && isInitProbe(job, step)
+				? t('jobDetail.probe.absent')
+				: t(`jobDetail.stepStatus.${step.status}` as MessageKey)
+		];
 		if (step.started_at && step.finished_at && step.status !== 'skipped') {
 			parts.push(formatDuration(step.started_at, step.finished_at));
 		}
@@ -545,8 +561,7 @@
 				{/if}
 				<ol class="timeline">
 					{#each rows as row (row.id)}
-						{@const marker =
-							row.state === 'running' ? 'running' : row.step ? markerOf(row.step.status) : 'idle'}
+						{@const marker = markerOfRow(row)}
 						<li class="timeline__item">
 							<span class="timeline__marker timeline__marker--{marker}">
 								<Icon name={MARKER_ICONS[marker]} size="lg" spin={marker === 'running'} />
@@ -796,6 +811,10 @@
 
 	.timeline__marker--failed {
 		color: var(--rh-color-danger);
+	}
+
+	.timeline__marker--info {
+		color: var(--rh-color-info);
 	}
 
 	.timeline__marker--running {

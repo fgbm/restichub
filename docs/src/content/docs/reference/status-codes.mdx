@@ -26,7 +26,7 @@ If the control plane cannot build a job, the job fails with a reason code:
 | `step_missing` | The profile no longer holds the step of the job. |
 | `agent_revoked` | The agent is revoked. |
 | `plan_missing`, `plan_changed` | The plan is deleted, or it moved to another agent. |
-| `profile_missing`, `repository_missing`, `repository_changed` | An object of the job is deleted or changed. |
+| `profile_missing`, `repository_deleted`, `repository_changed` | An object of the job is deleted or changed. |
 | `secret_unavailable` | A secret of the repository cannot be read. |
 | `signing_failed` | The control plane could not sign the job. |
 

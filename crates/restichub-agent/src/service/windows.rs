@@ -117,6 +117,7 @@ pub fn install(restic: &Path) -> Result<()> {
     super::location::check(&exe, restic)?;
     // The default restore root gets the access of SYSTEM and Administrators only (FR-RS-03).
     crate::restore_roots::ensure_default_root()?;
+    crate::restore_roots::refuse_skipped_lines(&crate::restore_roots::roots_file())?;
     if let Some((root, reason)) = crate::restore_roots::rejected_roots(&crate::paths::config_dir())
         .into_iter()
         .next()

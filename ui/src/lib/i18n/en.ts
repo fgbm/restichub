@@ -816,11 +816,14 @@ export const en = {
 	'jobs.errorCode.plan_changed': 'the plan moved to another host',
 	'jobs.errorCode.not_repository_host': 'not the host of the local repository',
 	'jobs.errorCode.profile_missing': 'the profile is deleted',
+	'jobs.errorCode.repository_deleted': 'the repository is deleted',
 	'jobs.errorCode.repository_changed': 'the profile uses another repository',
 	'jobs.errorCode.agent_facts_invalid': 'the facts of the host are not usable',
 	'jobs.errorCode.forget_selected_nothing': 'forget selected no snapshots',
 	'jobs.errorCode.agent_capability_missing': 'the agent is too old for the job',
 	'jobs.errorCode.restore_target_denied': 'the restore target is denied',
+	'jobs.errorCode.repository_path_denied': 'the repository path is not allowed on the host',
+	'jobs.errorCode.repository_read_only': 'the repository path is read-only for the agent',
 	'jobs.errorCode.forget_without_tags': 'forget without tags',
 	'jobs.errorCode.step_missing': 'the profile lacks the step',
 	'jobs.errorCode.job_invalid': 'the job is not valid',
@@ -851,13 +854,18 @@ export const en = {
 	'jobs.reason.not_repository_host':
 		'The repository is local, and its path is on another host. Move the plan to the repository host.',
 	'jobs.reason.profile_missing': 'The profile is deleted.',
-	'jobs.reason.repository_missing': 'The repository is deleted.',
+	'jobs.reason.repository_missing': 'No repository at this location.',
+	'jobs.reason.repository_deleted': 'The repository is deleted.',
 	'jobs.reason.repository_changed': 'The profile now uses another repository.',
 	'jobs.reason.agent_facts_invalid': 'The facts of the host are not usable. Restart the agent.',
 	'jobs.reason.forget_selected_nothing': 'Forget selected no snapshots',
 	'jobs.reason.agent_capability_missing': 'The agent is too old for this job. Update the agent.',
 	'jobs.reason.restore_target_denied':
 		'The host refused the target path. It lies outside the restore roots or holds a file of the agent.',
+	'jobs.reason.repository_path_denied':
+		'The host refused the local repository path. Add its root to /etc/restichub-agent-repository-roots.txt on the host and run install-service.',
+	'jobs.reason.repository_read_only':
+		'The agent cannot write to the local repository path. Add its root to /etc/restichub-agent-repository-roots.txt on the host and run install-service.',
 	'jobs.reason.forget_without_tags':
 		'The retention has no tag filter. The job was not sent. Add a tag filter to the retention.',
 	'jobs.reason.step_missing': 'The profile no longer holds this step.',
@@ -930,6 +938,11 @@ export const en = {
 		'restic finished with a warning. The data is in the repository.',
 	'jobDetail.stepError.repository_locked': 'Another process holds a lock on the repository.',
 	'jobDetail.stepError.step_config_error': 'The repository password or the access keys are wrong.',
+	'jobDetail.stepError.repository_missing': 'No repository at this location.',
+	'jobDetail.stepError.repository_read_only':
+		'The agent cannot write to the local repository path. Add its root to /etc/restichub-agent-repository-roots.txt on the host and run install-service.',
+	'jobDetail.probe.absent': 'No repository',
+	'jobDetail.probe.willCreate': 'No repository at this location. The next step creates it.',
 	'jobDetail.stepError.step_failed': 'restic stopped with an error. Read the job log.',
 	'jobDetail.stepError.step_cancelled': 'The step was cancelled.',
 	'jobDetail.stepError.step_timeout': 'The step ran longer than its timeout.',

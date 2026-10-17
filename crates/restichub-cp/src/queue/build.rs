@@ -45,7 +45,7 @@ pub enum Refusal {
     PlanMissing,
     PlanChanged,
     ProfileMissing,
-    RepositoryMissing,
+    RepositoryDeleted,
     RepositoryChanged,
     NotMaintenanceAgent,
     NotRepositoryHost,
@@ -70,7 +70,7 @@ impl Refusal {
             Self::PlanMissing => "plan_missing",
             Self::PlanChanged => "plan_changed",
             Self::ProfileMissing => "profile_missing",
-            Self::RepositoryMissing => "repository_missing",
+            Self::RepositoryDeleted => "repository_deleted",
             Self::RepositoryChanged => "repository_changed",
             Self::NotMaintenanceAgent => "not_maintenance_agent",
             Self::NotRepositoryHost => "not_repository_host",
@@ -142,10 +142,10 @@ pub async fn build(
         return Err(BuildError::Refused(Refusal::AgentRevoked));
     }
     let Some(repository_id) = job.repository_id else {
-        return Err(BuildError::Refused(Refusal::RepositoryMissing));
+        return Err(BuildError::Refused(Refusal::RepositoryDeleted));
     };
     let Some(repository) = repo::get(tx, repository_id).await? else {
-        return Err(BuildError::Refused(Refusal::RepositoryMissing));
+        return Err(BuildError::Refused(Refusal::RepositoryDeleted));
     };
     // Save-time checks refuse this too; this one also covers older rows and queued jobs, so no job
     // reaches a host that cannot see the local path.
@@ -457,6 +457,16 @@ mod tests {
             JobResultCode::ConfigError
         );
         assert_eq!(Refusal::AgentRevoked.result_code(), JobResultCode::Failed);
+    }
+
+    #[test]
+    fn adr_0045_a_deleted_repository_has_its_own_code() {
+        // The agent reports `repository_missing` for restic exit code 10.
+        assert_eq!(Refusal::RepositoryDeleted.code(), "repository_deleted");
+        assert_eq!(
+            Refusal::RepositoryDeleted.result_code(),
+            JobResultCode::Failed
+        );
     }
 
     #[test]
