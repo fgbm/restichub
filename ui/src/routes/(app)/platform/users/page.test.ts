@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
 	listPlatformUsers: vi.fn(),
 	listTenants: vi.fn(),
 	updatePlatformUser: vi.fn(),
+	createPlatformUser: vi.fn(),
 	pushToast: vi.fn()
 }));
 
@@ -43,7 +44,8 @@ vi.mock('#lib/api/index.ts', async (importOriginal) => {
 			...actual.service,
 			listPlatformUsers: mocks.listPlatformUsers,
 			listTenants: mocks.listTenants,
-			updatePlatformUser: mocks.updatePlatformUser
+			updatePlatformUser: mocks.updatePlatformUser,
+			createPlatformUser: mocks.createPlatformUser
 		}
 	};
 });
@@ -70,6 +72,7 @@ beforeEach(() => {
 	]);
 	mocks.listTenants.mockResolvedValue([]);
 	mocks.updatePlatformUser.mockResolvedValue(undefined);
+	mocks.createPlatformUser.mockResolvedValue(undefined);
 });
 
 describe('Platform Users screen', () => {
@@ -107,5 +110,48 @@ describe('Platform Users screen', () => {
 		await user.click(await screen.findByRole('button', { name: 'More actions for Self' }));
 		const reset = (await screen.findByText('Reset password')).closest('[data-disabled]');
 		expect(reset).toHaveTextContent('This is your account');
+	});
+
+	it('keeps the create button enabled and shows the password rule on submit', async () => {
+		const user = userEvent.setup();
+		render(PlatformUsers);
+		await user.click(await screen.findByRole('button', { name: 'Create user' }));
+		const dialog = await screen.findByRole('dialog', { name: 'Create an installation account' });
+		const password = within(dialog).getByLabelText(/Initial password/);
+		const submit = within(dialog).getByRole('button', { name: 'Create user' });
+
+		await user.type(within(dialog).getByLabelText(/User name/), 'ivan');
+		await user.type(within(dialog).getByLabelText(/Display name/), 'Ivan');
+		await user.type(password, 'abcdef');
+		expect(within(dialog).getByText('6 of 12 characters')).toHaveClass('rh-field__help');
+		expect(submit).toBeEnabled();
+
+		await user.click(submit);
+		expect(mocks.createPlatformUser).not.toHaveBeenCalled();
+		expect(password).toHaveFocus();
+		expect(password).toHaveAttribute('aria-invalid', 'true');
+		expect(within(dialog).getByText('6 of 12 characters')).toHaveClass('rh-field__error');
+
+		await user.type(password, 'ghijkl');
+		expect(within(dialog).getByText('12 characters — long enough')).toBeVisible();
+		expect(password).not.toHaveAttribute('aria-invalid');
+		await user.click(submit);
+		await waitFor(() =>
+			expect(mocks.createPlatformUser).toHaveBeenCalledWith(
+				expect.objectContaining({ username: 'ivan', password: 'abcdefghijkl' })
+			)
+		);
+	});
+
+	it('names the empty required fields on submit', async () => {
+		const user = userEvent.setup();
+		render(PlatformUsers);
+		await user.click(await screen.findByRole('button', { name: 'Create user' }));
+		const dialog = await screen.findByRole('dialog', { name: 'Create an installation account' });
+		await user.click(within(dialog).getByRole('button', { name: 'Create user' }));
+		expect(mocks.createPlatformUser).not.toHaveBeenCalled();
+		expect(within(dialog).getAllByText('This field is required.')).toHaveLength(2);
+		expect(within(dialog).getByLabelText(/User name/)).toHaveFocus();
+		expect(within(dialog).getByText('At least 12 characters.')).toHaveClass('rh-field__error');
 	});
 });

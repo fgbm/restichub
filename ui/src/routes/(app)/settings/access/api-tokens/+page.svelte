@@ -23,6 +23,7 @@
 		SelectOption
 	} from '#lib/components/ui/index.ts';
 	import { facetCounts, matchesSearch, splitList } from '#lib/filters.ts';
+	import { emptyError, focusFirstInvalid } from '#lib/form.ts';
 	import { ago, expiry } from '#lib/list-format.ts';
 	import { apiTokenState, iconOf, pillOf } from '#lib/vocabulary.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
@@ -39,6 +40,7 @@
 	let createError = $state<string | null>(null);
 	let createProblem = $state<ApiProblem | null>(null);
 	let newName = $state('');
+	let createSubmitted = $state(false);
 
 	// The fields of the create form. A problem of another field (for example `body`) shows the
 	// general alert instead of the message next to an input.
@@ -252,6 +254,7 @@
 		createError = null;
 		createProblem = null;
 		createdToken = null;
+		createSubmitted = false;
 		createOpen = true;
 	}
 
@@ -261,7 +264,8 @@
 	}
 
 	async function createToken(): Promise<void> {
-		if (!newName) return;
+		createSubmitted = true;
+		if (focusFirstInvalid([['token-name', newName === '']])) return;
 		creating = true;
 		createError = null;
 		createProblem = null;
@@ -375,7 +379,7 @@
 		<TextField
 			id="token-name"
 			label={t('tokens.name')}
-			error={fieldError(createProblem, 'name')}
+			error={emptyError(createSubmitted, newName) ?? fieldError(createProblem, 'name')}
 			bind:value={newName}
 			placeholder={t('tokens.namePlaceholder')}
 			required
@@ -401,7 +405,7 @@
 			<Button type="submit" variant="primary">{t('common.done')}</Button>
 		{:else}
 			<Button onclick={closeCreate}>{t('common.cancel')}</Button>
-			<Button type="submit" variant="primary" loading={creating} disabled={!newName}>
+			<Button type="submit" variant="primary" loading={creating}>
 				{t('tokens.create')}
 			</Button>
 		{/if}

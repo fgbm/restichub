@@ -1,7 +1,9 @@
 <script lang="ts">
 	import { ApiError, service } from '#lib/api/index.ts';
 	import type { User } from '#lib/api/index.ts';
-	import { Alert, Button, ConfirmDialog, Dialog, PasswordField } from './ui/index.ts';
+	import { Alert, Button, ConfirmDialog, Dialog, NewPasswordField } from './ui/index.ts';
+	import { focusFirstInvalid } from '#lib/form.ts';
+	import { passwordProblem } from '#lib/password-policy.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
@@ -15,6 +17,7 @@
 	let resetOpen = $state(false);
 	let resetPassword = $state('');
 	let resetting = $state(false);
+	let resetSubmitted = $state(false);
 	let resetError = $state<string | null>(null);
 
 	let disableOpen = $state(false);
@@ -29,6 +32,7 @@
 		target = user;
 		resetPassword = '';
 		resetError = null;
+		resetSubmitted = false;
 		resetOpen = true;
 	}
 
@@ -49,7 +53,10 @@
 	}
 
 	async function submitReset(): Promise<void> {
-		if (!target || resetPassword.length < 12) return;
+		if (!target) return;
+		resetSubmitted = true;
+		if (focusFirstInvalid([['user-reset-password', passwordProblem(resetPassword) !== null]]))
+			return;
 		resetting = true;
 		resetError = null;
 		try {
@@ -85,22 +92,15 @@
 		<Alert variant="inline" tone="danger" title={resetError} />
 	{/if}
 	<p>{t('users.resetHint', { name })}</p>
-	<PasswordField
+	<NewPasswordField
 		id="user-reset-password"
 		label={t('setup.password')}
-		help={t('setup.passwordHint')}
+		submitted={resetSubmitted}
 		bind:value={resetPassword}
-		autocomplete="new-password"
-		required
 	/>
 	{#snippet footer()}
 		<Button onclick={() => (resetOpen = false)}>{t('common.cancel')}</Button>
-		<Button
-			type="submit"
-			variant="primary"
-			loading={resetting}
-			disabled={resetPassword.length < 12}
-		>
+		<Button type="submit" variant="primary" loading={resetting}>
 			{t('users.resetPassword')}
 		</Button>
 	{/snippet}
