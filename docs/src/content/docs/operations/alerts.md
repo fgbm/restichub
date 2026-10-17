@@ -50,7 +50,7 @@ Two control plane instances send each message once. A crash between the send and
 
 ## Email channels
 
-An Admin adds an email channel in **Settings**, **Channels**. The channel holds 1 to 20 recipients. The installation needs an SMTP server. See [Configure alerts](../alert-configuration/). Without it, an email channel cannot send, and the test button shows the error `smtp_not_configured`.
+An Admin adds an email channel in **Settings**, **Channels**. The channel holds 1 to 20 recipients. The installation needs an SMTP server. See [Configure alerts](/restichub/operations/alert-configuration/). Without it, an email channel cannot send, and the test button shows the error `smtp_not_configured`.
 
 The message is plain text with the subject `[ResticHub] <alert> - <plan> (<organization>)`. It holds the organization, the host, the plan, the repository, the error text and a link to the job.
 
@@ -120,7 +120,7 @@ The control plane refuses to send to a private network. It resolves the host nam
 
 A host name that resolves to one forbidden address among others is refused too. The control plane never follows a redirect. An answer other than 2xx is a failure. A send takes at most 10 seconds.
 
-To reach a private receiver, the administrator adds its network to the allow-list. See [Configure alerts](../alert-configuration/).
+To reach a private receiver, the administrator adds its network to the allow-list. See [Configure alerts](/restichub/operations/alert-configuration/).
 
 ## Audit
 

@@ -3,7 +3,7 @@ title: Agent packages
 description: The content of the agent package and the verification chain of the restic that the agent downloads.
 ---
 
-The agent package does not hold restic. The package and restic are two separate downloads. The agent downloads and verifies restic itself. Unpack the package in any folder and run `restichub-agent register`. The agent copies itself into its program directory (`/opt/restichub-agent` on Linux, `%ProgramFiles%\ResticHub\Agent` on Windows) and installs the service from there. See [Register an agent](register-an-agent.md) for the commands and the layout.
+The agent package does not hold restic. The package and restic are two separate downloads. The agent downloads and verifies restic itself. Unpack the package in any folder and run `restichub-agent register`. The agent copies itself into its program directory (`/opt/restichub-agent` on Linux, `%ProgramFiles%\ResticHub\Agent` on Windows) and installs the service from there. See [Register an agent](/restichub/operations/register-an-agent/) for the commands and the layout.
 
 ## Package content
 

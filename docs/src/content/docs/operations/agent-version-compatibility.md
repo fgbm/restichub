@@ -42,6 +42,6 @@ The revision does not change the comparison. The mark "Update available" depends
 
 The allow-list hooks no longer exist. The control plane drops the hook section of each profile when it upgrades. For each profile that had a hook, the audit log holds one record with the action `profile_hooks_removed`. The record names the profile, and the hook identifiers and phases. It holds no parameter value.
 
-A plan that ran a hook now runs without it, and its jobs can still succeed. Check the audit log after the upgrade. Move each hook to a server script on a host with the trust mode. See [Server scripts](../scripts/).
+A plan that ran a hook now runs without it, and its jobs can still succeed. Check the audit log after the upgrade. Move each hook to a server script on a host with the trust mode. See [Server scripts](/restichub/operations/scripts/).
 
 The agent no longer reads the file `restichub-agent-hooks.toml`. When the file still exists, the agent writes a warning with its path at each start. Delete the file when you no longer need it.
