@@ -870,7 +870,10 @@ pub(crate) fn ensure_repository_host(
     agent: AgentId,
 ) -> Result<(), ApiError> {
     if repository.backend == BackendKind::Local && repository.maintenance_agent_id != Some(agent) {
-        return Err(ApiError::invalid_field("agent_id", Reason::NotRepositoryHost));
+        return Err(ApiError::invalid_field(
+            "agent_id",
+            Reason::NotRepositoryHost,
+        ));
     }
     Ok(())
 }

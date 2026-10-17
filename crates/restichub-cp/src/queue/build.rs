@@ -11,8 +11,8 @@
 use restichub_compiler::{JobLimits, ValidatedJob, compile};
 use restichub_db::jobs::Job;
 use restichub_db::{
-    AgentStatus, BackendKind, JobKind, JobResultCode, RepositoryId, SecretId, TenantTx, agents as agents_repo,
-    plans as plans_repo, profiles as profiles_repo, repositories as repo,
+    AgentStatus, BackendKind, JobKind, JobResultCode, RepositoryId, SecretId, TenantTx,
+    agents as agents_repo, plans as plans_repo, profiles as profiles_repo, repositories as repo,
 };
 use restichub_proto::AgentCapability;
 use restichub_proto::agent::v1::{

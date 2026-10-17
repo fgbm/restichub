@@ -146,7 +146,7 @@ async fn fr_rp_08_the_host_of_a_local_repository_is_locked_after_init() {
         assert_eq!(body["code"], "repository_host_locked", "{body}");
         assert_eq!(body["field"], "maintenance_agent_id", "{body}");
     }
-    // The same host and a rename still pass.
+    // The same host with a rename passes.
     let (status, body) = env
         .call(
             &env.admin,
@@ -182,12 +182,7 @@ async fn fr_rp_08_a_host_change_keeps_the_plans_on_the_host() {
     assert_field(&body, "maintenance_agent_id", "plan_on_other_host");
 
     let (status, body) = env
-        .call(
-            &env.admin,
-            "DELETE",
-            &format!("/api/v1/plans/{plan}"),
-            None,
-        )
+        .call(&env.admin, "DELETE", &format!("/api/v1/plans/{plan}"), None)
         .await;
     assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
     let (status, body) = set_host(&env, repository, &second.id.to_string()).await;
@@ -317,10 +312,7 @@ async fn fr_rs_01_a_local_repository_restores_and_lists_on_its_host_only() {
             }),
         ),
         ("snapshots", json!({"agent_id": agent})),
-        (
-            "ls",
-            json!({"snapshot_id": "0123abcd", "agent_id": agent}),
-        ),
+        ("ls", json!({"snapshot_id": "0123abcd", "agent_id": agent})),
         ("test-access", json!({"agent_id": agent})),
     ] {
         let (status, body) = env
@@ -352,7 +344,9 @@ async fn fr_rp_08_the_start_check_reports_old_rows_and_keeps_them() {
     let clean = env.create_repository_at(host.id, "pw", "/srv/clean").await;
     let clean_profile = env.create_profile(clean, json!({})).await;
     env.create_plan(clean_profile, host.id).await;
-    let hostless = env.create_repository_at(host.id, "pw", "/srv/hostless").await;
+    let hostless = env
+        .create_repository_at(host.id, "pw", "/srv/hostless")
+        .await;
     let mut tx = env.scoped().await;
     sqlx::query("UPDATE repositories SET maintenance_agent_id = NULL WHERE id = $1")
         .bind(hostless)

@@ -273,9 +273,7 @@ pub struct LocalHostProblem {
 }
 
 /// Lists the local repositories of the tenant without a host or with plans on another agent.
-pub async fn local_host_problems(
-    tx: &mut TenantTx<'_>,
-) -> Result<Vec<LocalHostProblem>, DbError> {
+pub async fn local_host_problems(tx: &mut TenantTx<'_>) -> Result<Vec<LocalHostProblem>, DbError> {
     let rows: Vec<(uuid::Uuid, Option<uuid::Uuid>, Vec<uuid::Uuid>)> = sqlx::query_as(
         "SELECT r.id, r.maintenance_agent_id, \
                 COALESCE(array_agg(p.id ORDER BY p.created_at, p.id) \
