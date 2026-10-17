@@ -205,7 +205,8 @@ pub fn repair_program_dir(config: &Path, verbose: bool, log: &mut dyn FnMut(&str
 
 /// Refuses an identity in `dir` that another account could change (FR-AG-04, threat T20).
 ///
-/// The service runs it before it loads the identity. It repairs nothing. Linux refuses a link and a
+/// The service runs it before it loads the identity. It repairs nothing. A directory without an
+/// identity file passes, so the load reports the missing identity. Linux refuses a link and a
 /// directory or an identity file that every account can write; a group write passes, because a
 /// umask of 002 gives it to a directory of a test run.
 ///
@@ -213,6 +214,12 @@ pub fn repair_program_dir(config: &Path, verbose: bool, log: &mut dyn FnMut(&str
 ///
 /// Returns an error that names the entry another account could change.
 pub fn check_identity_dir(dir: &Path) -> Result<()> {
+    let holds_identity = crate::identity::IDENTITY_FILES
+        .iter()
+        .any(|file| std::fs::symlink_metadata(dir.join(file)).is_ok());
+    if !holds_identity {
+        return Ok(());
+    }
     #[cfg(windows)]
     {
         crate::winrepair::check_identity(dir, &agent_root())
