@@ -274,11 +274,11 @@ pub(crate) fn check_identity(config: &Path, root: &Path) -> Result<()> {
         if entry.is_reparse_point() {
             bail!("{} is a reparse point", level.display());
         }
-        refuse_exposure(&entry, level)?;
+        refuse_exposure(&entry, level, Rights::Change)?;
     }
     let names = crate::identity::loaded_names();
     for dir in [config, backup.as_path()] {
-        for (name, _) in &names {
+        for (name, secret) in &names {
             let path = dir.join(name);
             let Some(entry) = Entry::inspect(&path)? else {
                 continue;
@@ -289,18 +289,28 @@ pub(crate) fn check_identity(config: &Path, root: &Path) -> Result<()> {
                     path.display()
                 );
             }
-            refuse_exposure(&entry, &path)?;
+            // As on Linux, a private key that another account can read is refused.
+            let rights = if *secret {
+                Rights::ReadOrChange
+            } else {
+                Rights::Change
+            };
+            refuse_exposure(&entry, &path, rights)?;
         }
     }
     Ok(())
 }
 
-fn refuse_exposure(entry: &Entry, path: &Path) -> Result<()> {
+fn refuse_exposure(entry: &Entry, path: &Path, rights: Rights) -> Result<()> {
     match entry
-        .exposure(Rights::Change)
+        .exposure(rights)
         .with_context(|| format!("cannot check {}", path.display()))?
     {
         Exposure::Clean => Ok(()),
+        Exposure::ForeignGrant if rights == Rights::ReadOrChange => bail!(
+            "{} holds the private key and grants a read or write access to an account that is not SYSTEM or Administrators",
+            path.display()
+        ),
         Exposure::ForeignGrant => bail!(
             "{} grants a write access to an account that is not SYSTEM or Administrators",
             path.display()
@@ -951,6 +961,29 @@ mod tests {
             check_identity(&config, &root).expect_err("an open root")
         );
         assert!(error.contains("grants a write access"), "{error}");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn fr_ag_04_the_service_refuses_a_key_that_another_account_could_read() {
+        let (base, root, config) = tree("check-key-read");
+        crate::identity::tests::sample()
+            .save(&config)
+            .expect("cannot save the identity");
+        grant(&config.join(crate::identity::CA_CHAIN_FILE), "(R)").expect("cannot add");
+        check_identity(&config, &root).expect("a readable certificate chain passes");
+
+        let key = config.join(crate::identity::KEY_FILE);
+        grant(&key, "(R)").expect("cannot add the entry");
+        let error = format!(
+            "{:#}",
+            check_identity(&config, &root).expect_err("a readable key")
+        );
+        assert!(error.contains("agent-key.pem"), "{error}");
+        assert!(error.contains("holds the private key"), "{error}");
+        let (result, _) = repair(&config, &root);
+        assert!(result.expect("the repair must succeed").is_empty());
+        check_identity(&config, &root).expect("the repaired key passes");
         let _ = std::fs::remove_dir_all(&base);
     }
 

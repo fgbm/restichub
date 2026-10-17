@@ -23,12 +23,13 @@ use crate::winsec::{Entry, Exposure, Rights};
 /// The open level nearest to `root` goes, or `program` when only an entry in it is open. A level
 /// of another owner is refused. `stop_service` runs before the move: a running agent or restic
 /// keeps the tree in use. The restic record in `record` goes with restic. `running` is the image
-/// of this process, which cannot move.
+/// of this process and `current_dir` its current directory; neither lets the tree move.
 pub(crate) fn rebuild_open_program_tree(
     program: &Path,
     root: &Path,
     record: &Path,
     running: &Path,
+    current_dir: Option<&Path>,
     stop_service: &mut dyn FnMut() -> Result<()>,
     log: &mut dyn FnMut(Action),
 ) -> Result<bool> {
@@ -41,6 +42,13 @@ pub(crate) fn rebuild_open_program_tree(
             open.display()
         );
     }
+    if let Some(current) = current_dir.filter(|current| is_inside(current, &open)) {
+        bail!(
+            "the current directory {} is in {}, which the command must replace, and an open directory cannot move; change to another directory, for example `cd $env:TEMP`, and run the command again",
+            current.display(),
+            open.display()
+        );
+    }
     stop_service().context("cannot stop the service before the program directory is replaced")?;
     let name = open
         .file_name()
@@ -50,7 +58,7 @@ pub(crate) fn rebuild_open_program_tree(
     let aside = open.with_file_name(format!("{name}.untrusted-{stamp}"));
     move_with_retry(&open, &aside).with_context(|| {
         format!(
-            "cannot move {} to {}; another process may keep a file in it open, for example a restic that runs a job; an administrator waits for the job or restarts the computer, then runs the command again",
+            "cannot move {} to {}; another process keeps a file or a directory in it open, for example a restic that runs a job or a shell whose current directory is in it; the service is stopped and starts again when the command succeeds; an administrator closes that process, or waits for the job or restarts the computer, then runs the command again; to start the service without the repair, run: Start-Service restichub-agent",
             open.display(),
             aside.display()
         )
@@ -212,6 +220,10 @@ mod tests {
     }
 
     fn rebuild(tree: &Tree, running: &Path) -> Run {
+        rebuild_from(tree, running, None)
+    }
+
+    fn rebuild_from(tree: &Tree, running: &Path, current_dir: Option<&Path>) -> Run {
         let mut actions = Vec::new();
         let mut stops = 0;
         let result = rebuild_open_program_tree(
@@ -219,6 +231,7 @@ mod tests {
             &tree.root,
             &tree.record,
             running,
+            current_dir,
             &mut || {
                 stops += 1;
                 Ok(())
@@ -345,6 +358,28 @@ mod tests {
     }
 
     #[test]
+    fn fr_in_07_a_current_directory_in_the_tree_stops_before_the_service_stops() {
+        let tree = tree("program-current");
+        grant(&tree.root, "(OI)(CI)(M)").expect("cannot add the entry");
+        let run = rebuild_from(&tree, &elsewhere(&tree), Some(&tree.program));
+        let error = format!(
+            "{:#}",
+            run.result.expect_err("the current directory is inside")
+        );
+        assert!(error.contains("change to another directory"), "{error}");
+        assert_eq!(run.stops, 0, "the service keeps running");
+        assert!(run.actions.is_empty(), "{:?}", run.actions);
+        assert!(tree.program.join("restic.exe").exists());
+        assert!(tree.record.exists());
+
+        let run = rebuild_from(&tree, &elsewhere(&tree), Some(&tree.base));
+        assert!(
+            run.result
+                .expect("a directory above the tree does not stop the move")
+        );
+    }
+
+    #[test]
     fn fr_in_07_a_file_in_use_stops_the_move_with_the_fix() {
         let tree = tree("program-in-use");
         grant(&tree.program, "(OI)(CI)(M)").expect("cannot add the entry");
@@ -357,6 +392,8 @@ mod tests {
         let run = rebuild(&tree, &elsewhere(&tree));
         let error = format!("{:#}", run.result.expect_err("a file in use"));
         assert!(error.contains("restarts the computer"), "{error}");
+        assert!(error.contains("the service is stopped"), "{error}");
+        assert!(error.contains("Start-Service restichub-agent"), "{error}");
         assert_eq!(run.stops, 1, "the service stops first");
         assert!(tree.record.exists(), "a failed move keeps the record");
         drop(restic);

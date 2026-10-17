@@ -98,6 +98,8 @@ The command stops the service, copies the new program to `%ProgramFiles%\ResticH
 
 If a job runs, the command cannot stop the service. Wait for the job, then run the command again.
 
+The command cannot move an open `%ProgramFiles%\ResticHub` while a process keeps a file or a directory in it open. Do not go to a folder in `%ProgramFiles%\ResticHub` in PowerShell. If the move fails, the service stays stopped. Close that process or restart the computer, then run the command again.
+
 ## Check the agents
 
 1. Open "Hosts".
@@ -131,7 +133,8 @@ On such a host, do these steps one time:
 1. Run `install-service` of the new package as Administrator.
 2. If the command says `the identity of this host could be changed by another account`, create a token with "Re-register" on the host page.
 3. Run `restichub-agent register --force --url <URL> --token <TOKEN>` as Administrator. The command repairs all the directories first. It removes the old identity only after all the checks pass.
-4. If a command printed `repaired the access control of ... under C:\ProgramData\ResticHub...`, restart the computer. A program that opened that directory before the repair can still add a file to it until the restart.
+4. If a command printed `repaired the access control of ... under C:\ProgramData\ResticHub...`, restart the computer. A program that opened that directory before the repair keeps the access of its handle until the restart. With that handle it can put back its access entry. The service then refuses the identity and stops with the exit code 78.
+5. After the restart, run `install-service` again. Its output must not show a line that starts with `repaired`. If it shows such a line, a program with administrator rights changes the rights of the directory. An example is a management tool or a sync tool. Find that program and stop it. Then do the steps 4 and 5 again.
 
 A host that you registered first with 0.1.0-rc.2 or a later release on a clean computer does not need these steps. `install-service` alone is sufficient there.
 - The Windows service writes its log to rotated files in `%ProgramData%\ResticHub\Agent-logs` and to the event log `ResticHub`. See [Agent logs](/restichub/reference/agent-logs/).

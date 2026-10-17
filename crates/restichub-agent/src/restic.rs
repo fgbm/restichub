@@ -105,9 +105,30 @@ impl Restic for ResticBinary {
 ///
 /// Returns an error when the binary is missing or its hash differs from `expected_hex`.
 pub fn verify_hash(path: &Path, expected_hex: &str) -> Result<()> {
+    verify_digest(&digest_at(path)?, expected_hex)
+}
+
+/// Like [`verify_hash`], but the error gives no advice, because the caller gives its own.
+pub(crate) fn check_hash(path: &Path, expected_hex: &str) -> Result<()> {
+    if let Some(mismatch) = mismatch(&digest_at(path)?, expected_hex) {
+        bail!(mismatch);
+    }
+    Ok(())
+}
+
+fn digest_at(path: &Path) -> Result<Vec<u8>> {
     let bytes = std::fs::read(path)
         .with_context(|| format!("cannot read the restic binary at {}", path.display()))?;
-    verify_digest(&Sha256::digest(&bytes), expected_hex)
+    Ok(Sha256::digest(&bytes).to_vec())
+}
+
+fn mismatch(actual: &[u8], expected_hex: &str) -> Option<String> {
+    let actual = hex(actual);
+    (!actual.eq_ignore_ascii_case(expected_hex)).then(|| {
+        format!(
+            "the restic binary does not match the recorded SHA-256: expected {expected_hex}, got {actual}"
+        )
+    })
 }
 
 /// Checks a SHA-256 digest against the expected hexadecimal value (AC-AG-11).
@@ -119,11 +140,8 @@ pub fn verify_hash(path: &Path, expected_hex: &str) -> Result<()> {
 ///
 /// Returns an error when the digest differs from `expected_hex`.
 pub fn verify_digest(actual: &[u8], expected_hex: &str) -> Result<()> {
-    let actual = hex(actual);
-    if !actual.eq_ignore_ascii_case(expected_hex) {
-        bail!(
-            "the restic binary does not match the recorded SHA-256: expected {expected_hex}, got {actual}; run `restichub-agent restic update` again or restart the service"
-        );
+    if let Some(mismatch) = mismatch(actual, expected_hex) {
+        bail!("{mismatch}; run `restichub-agent restic update` again or restart the service");
     }
     Ok(())
 }

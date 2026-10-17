@@ -50,8 +50,10 @@ use windows_sys::Win32::System::SystemServices::{
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
 mod entry;
+mod image;
 
 pub(crate) use entry::{Entry, Exposure, Rights};
+pub(crate) use image::open_running_image;
 
 /// A protected DACL: full control for SYSTEM and Administrators only, inherited by the children,
 /// with Administrators as the owner.
