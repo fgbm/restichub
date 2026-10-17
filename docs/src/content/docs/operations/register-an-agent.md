@@ -7,7 +7,7 @@ An agent registers by hand with a one-time enrollment token. A person on the hos
 
 ## The registration command
 
-The Web UI shows the full command on the "Add host" screen. The command uses the control plane URL and the token:
+The Web UI shows the full command in the dialog "Add a host". Select "Add host" on the "Hosts" screen to open it. The command uses the control plane URL and the token:
 
 ```sh
 restichub-agent register --url https://<control-plane> --token <token>
@@ -42,7 +42,7 @@ If a step fails, the summary names what failed and the next command to run. The 
 
 After `register --no-service` the command prints that the service is not installed and names `install-service` as the next command.
 
-After a successful registration, the host appears on the "Hosts" screen with the status "Waiting for connection". The status changes to "Active" when the agent opens its stream.
+After a successful registration, the host appears on the "Hosts" screen with the status "Waiting for connection". The status changes to "Online" when the agent opens its stream.
 
 The token is single use. The control plane consumes the token at the first successful registration. A used token, an expired token and a revoked token give a clear error.
 
@@ -88,9 +88,9 @@ To check the connection:
 
 1. Open the "Hosts" screen in the Web UI.
 2. Find the host by its name.
-3. Read the status. A host that enrolled but did not connect yet shows "Waiting for connection". The status is "Active" after the first connection.
-4. Read the "Last seen" time. The control plane writes this time while the stream is open. A time within the last minute shows a live connection.
-5. Read the column "Agent version". The mark "Update available" shows an agent package older than the control plane (see [Agent and control plane versions](/restichub/operations/agent-version-compatibility/)).
+3. Read the status. A host that enrolled but did not connect yet shows "Waiting for connection". The status is "Online" after the first connection.
+4. Read the second line of the row, for example `contact 24 s ago · linux · amd64 · agent 0.4.2, 0.5.0 is available`. The text `0.5.0 is available` shows an agent package older than the control plane (see [Agent and control plane versions](/restichub/operations/agent-version-compatibility/)).
+5. Select the host name to open the host page. The section "General" shows the "Agent version" and the mark "Update available". An offline host shows the time "Last seen".
 
 The control plane sends a heartbeat every 30 seconds and closes the stream after three heartbeats without an answer. The Overview counts a host as online when the control plane heard from it in the last 90 seconds. The alert "Host offline" waits for its own limit (see [Alerts](/restichub/operations/alerts/)).
 
@@ -108,23 +108,9 @@ the control plane refused the agent identity; check that the agent is enrolled a
 
 The agent then waits 60 seconds and tries again. Register the host again after a revoke (see [Enroll a host again](/restichub/operations/enroll-a-host-again/)).
 
-## Initialize a repository
+## Next step
 
-An agent runs a repository job on demand. The control plane sends the job through the open stream. The job holds a `test_access` step and, for an init, an `init` step. The agent runs `restic cat config` for a test-access step and `restic init` for an init step.
-
-The agent runs `init` only when `test_access` exits with restic code 10. Restic code 10 means that the repository does not exist. Any other result stops the job, so the agent never initializes an existing repository a second time. A wrong password exits with code 12 and the job reports `config_error`.
-
-The repository password and the backend credentials travel inside the signed job only. The agent passes them to restic in the environment. They never reach an argument, a log, the job journal or an error message. The agent keeps the result of a finished job, so a job that the control plane delivers again does not run a second time.
-
-To initialize a repository:
-
-1. Open the "Repositories" screen in the Web UI.
-2. Find the repository.
-3. Start "Initialize". For a repository that exists, start "Test access" instead.
-4. Read the job result. "The repository is ready." means that restic initialized the repository or that the access worked. "The repository password or the credentials are not correct." is the result `config_error`. "The repository does not exist yet. Initialize it." is the result `not_initialized`.
-5. Read the repository state. The control plane sets `initialized` after a successful init or a successful test-access.
-
-An init and a local-path repository run on the maintenance agent of the repository only.
+Add a repository and initialize it from this host. See [Add a repository](/restichub/operations/add-a-repository/).
 
 ## Install the service
 

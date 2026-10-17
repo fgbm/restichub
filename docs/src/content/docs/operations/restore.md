@@ -19,22 +19,22 @@ The data of a restore goes from the repository to the target agent. It does not 
 
 1. Open **Restore**.
 2. Select a repository in the page header. An agent runs `restic snapshots` once for the whole repository, and the screen shows all snapshots. If the control plane already holds a stored list, the screen shows it with its age.
-3. Narrow the list with the filter bar above the table. The filters apply at once, on the loaded list. There is no search button.
-   - **Path**: type a part of a path. A snapshot matches when any of its backup paths contains the text. The search ignores case.
+3. Narrow the list with the search field and the filters above the list. The filters apply at once, on the loaded list. There is no search button.
+   - **Search by path**: type a part of a path. A snapshot matches when any of its backup paths contains the text. The search ignores case.
    - **Host** and **Tag**: select one or more values. The menus list the values that the loaded snapshots hold, with the number of snapshots for each value. A tag that comes from a profile shows the name of the profile.
-   - **Period**: select 24 hours, 7 days, 30 days, 90 days or all time. **Custom range** takes two dates, and the range includes both days.
+   - **Period**: select 24 hours, 7 days, 30 days, 90 days or all time. **Custom range…** takes two dates, and the range includes both days.
 4. Each filter that you set shows as a chip. Click the cross on a chip to remove it. Click **Reset** to remove all filters.
 5. Click the refresh button to run the list job again and read the current snapshots from the repository. The text next to it shows the age of the list.
 
-Several values of one filter match any of them. Different filters must all match. For example, the host `nas` or `ws`, with the tag `daily`, shows the snapshots of either host that carry the tag `daily`.
+The list shows a heading for each day and the size of each snapshot on the right. Several values of one filter match any of them. Different filters must all match. For example, the host `nas` or `ws`, with the tag `daily`, shows the snapshots of either host that carry the tag `daily`.
 
-The address of the page keeps the repository and the filters. The link **Back to the snapshots** on a snapshot page returns to the same view. The screen has an empty state for each case: no repository, no snapshots in the repository, and no snapshot that matches the filters.
+The address of the page keeps the repository and the filters. On a snapshot page, the breadcrumbs `<organization> / Restore / <repository> / Snapshot <id>` return to the same view. The screen has an empty state for each case: no repository, no snapshots in the repository, and no snapshot that matches the filters.
 
 The API keeps its filter parameters. The control plane applies the date range, and restic applies the host, the tag and the path. The screen filters the loaded list by the same rules. The result agrees with `restic snapshots --json` for the same filters. When a repository holds more snapshots than a result can carry, the screen shows a warning and keeps the newest snapshots.
 
 ## Browse a snapshot
 
-Select a snapshot to open its page. The page shows the snapshot identifier, time, host, paths and tags, and the file tree. The link **Back to the snapshots** returns to the list with the same filters. A folder, a link and each type of file have their own icon. A link shows its target and has no size. The tree scrolls inside a box, and the footer under it shows the selected paths. The screen shows one directory at a time. The agent reads the directory and returns a page of at most 1000 entries. Select **Load more** to read the next page. A directory with one million files shows its first page in less than 5 seconds.
+Select a snapshot to open its page. The page shows the snapshot identifier, time, host, paths and tags, and the file tree. Select the repository in the breadcrumbs to return to the list with the same filters. A folder, a link and each type of file have their own icon. A link shows its target and has no size. The tree scrolls inside a box, and the footer under it shows the selected paths. The screen shows one directory at a time. The agent reads the directory and returns a page of at most 1000 entries. Select **Load more** to read the next page. A directory with one million files shows its first page in less than 5 seconds.
 
 The control plane keeps a page for 10 minutes. If you open the same directory again in that time, the screen shows the stored page and no job runs. A request that is the same as a job that still waits or runs gets that job. The control plane keeps a snapshot list for one hour. The Jobs list does not show the browse jobs.
 

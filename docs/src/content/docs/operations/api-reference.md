@@ -19,7 +19,7 @@ Load the file in an OpenAPI viewer or in a code generator. The document describe
 
 Use an API token for a script. A token belongs to one tenant and has one role.
 
-1. Open "API tokens" in the web UI.
+1. Open "Settings" → "Access" → "API tokens" in the web UI.
 2. Select "Create token". Enter a name, a role and an optional expiry time.
 3. Copy the token value. The control plane shows it one time only.
 
