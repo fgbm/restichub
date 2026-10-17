@@ -93,13 +93,52 @@ A local path exists on the disk of one host only. Thus a local repository is bou
 
 For an S3 or rest-server repository, each host reaches the repository on the network. A change of the maintenance host is a usual operation.
 
+The replace of a host record moves the repository host to the new record, also after the initialization. The two records belong to the same machine, so the path stays on the same disk. See [Enroll a host again](/restichub/guides/enroll-a-host-again/).
+
+:::caution
+Do not use a shared network disk (NFS or SMB) as a local repository for several hosts. ResticHub sends the jobs of a local repository to the repository host only, so the plans on the other hosts fail. For a repository that several hosts write to, use rest-server or SFTP.
+:::
+
+### The repository host is revoked
+
+ResticHub cannot move an initialized local repository to another host. When the repository host is revoked, for example after a reinstall with a new machine identifier, do one of these procedures.
+
+To keep the old snapshots on a new host:
+
+1. Delete the repository in ResticHub. Move or delete its profiles first. The restic data on the disk stays.
+2. If the data moved to a new host, add it again as a new local repository on the new host. Use the same repository password.
+3. Select "Test access". The test finds the existing repository and marks it initialized.
+
+To keep the plans and the data at the same path:
+
+1. Add a new local repository with the same path on the new host, and a new profile that writes to it.
+2. Open each plan of the old profile. Select the new profile and the new host in one change, then save.
+3. On the new repository, select "Test access". The test finds the existing repository and marks it initialized.
+4. Delete the old repository and the old profile.
+
+The job history and the maintenance schedules of the old repository do not move to the new repository.
+
 ### Repositories saved before this rule
 
-The control plane keeps a local repository that has no host, and a plan that runs on another host. It deletes nothing. At the start, the control plane writes a warning to its log for each such repository, with the identifiers of the plans. The control plane refuses a job of such a plan with the reason `not_repository_host`. To correct a repository:
+The control plane keeps a local repository that has no host, and a plan that runs on another host. It deletes nothing. The control plane refuses a job of such a plan with the reason `not_repository_host`. To find such a plan:
+
+- Open "Jobs", select the tab "Failed" and filter by the repository. A failed job of such a plan shows the reason "The repository is local, and its path is on another host". The row names the plan.
+- Open a plan. The host field shows an error when the plan runs on another host than its local repository.
+- "Run now" of such a plan shows an error.
+
+The log of the control plane also holds a warning for each such repository, with at most 20 plan identifiers. Only an administrator of the control plane reads this log.
+
+To correct a repository:
 
 1. Open the repository page.
 2. In the section "Repository host", select the host that holds the path. A repository without a host accepts this change also when a plan runs on another host.
-3. Open each plan that the log names, and select the repository host.
+3. Open each plan that you found, and select the repository host.
+
+## Delete a repository
+
+Delete a repository from the menu "…" of the repository row in the list "Repositories". First delete or change each profile that uses the repository. The control plane also refuses the delete while a job of the repository is active.
+
+The delete removes the repository record and its stored secrets from ResticHub. It never deletes the restic data in the backend or on the disk. ResticHub sends no job to the host for the delete. Keep the repository password: ResticHub removes its copy, and you need the password to add the repository again.
 
 ## Related
 

@@ -120,3 +120,4 @@ Upgrade the agents only after the new control plane works.
 - Three database migrations run at the first start. They add indexes and fields of the lists, and the password reset of a platform account.
 - On Windows, `install-service` repairs the access control of `%ProgramData%\ResticHub`. Read its output: it prints one line for each change.
 - The Windows service writes its log to rotated files in `%ProgramData%\ResticHub\Agent-logs` and to the event log `ResticHub`. See [Agent logs](/restichub/reference/agent-logs/).
+- A local repository is bound to its host. The control plane refuses a job of a local repository on another host with the reason `not_repository_host`. If several hosts used one shared network disk (NFS or SMB) as a local repository, move this repository to rest-server or SFTP. To find and correct the old plans, see [Repositories saved before this rule](/restichub/guides/add-a-repository/#repositories-saved-before-this-rule).
