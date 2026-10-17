@@ -30,7 +30,7 @@ An Operator or an Admin can run the retention or the check at once from the menu
 
 ### Barriers
 
-A maintenance job is exclusive. It starts after the running backups of the repository end. The backups that the control plane queues after it wait until it ends. The [Jobs](/restichub/concepts/jobs/) page shows the maintenance jobs with the backups.
+A maintenance job is exclusive. It starts after the running backups of the repository end. The backups that the control plane queues after it wait until it ends. The [Jobs](/restichub/concepts/job-lifecycle/) page shows the maintenance jobs with the backups.
 
 ### Retention of several profiles
 

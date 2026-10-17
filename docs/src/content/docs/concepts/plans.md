@@ -45,7 +45,7 @@ A suspended tenant creates no job. A plan whose agent is revoked creates no job.
 
 ## Delivery
 
-A scheduled job starts in the `queued` status. The queue sends the job to the online agent. The [Jobs](/restichub/concepts/jobs/) page describes the queue, the limits and the retries. A plan delete ends the queued jobs of the plan with the `cancelled` result.
+A scheduled job starts in the `queued` status. The queue sends the job to the online agent. The [Jobs](/restichub/concepts/job-lifecycle/) page describes the queue, the limits and the retries. A plan delete ends the queued jobs of the plan with the `cancelled` result.
 
 ## Run now
 
