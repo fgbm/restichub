@@ -20,14 +20,33 @@ dc() { docker compose --env-file "$env_file" -f "$bench_dir/compose.yaml" "$@"; 
 
 log() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" >&2; }
 
-# api METHOD PATH [JSON]: one call as the signed-in administrator; prints the body, fails on HTTP errors.
-api() {
+# api_once METHOD PATH [JSON]: one HTTP call as the signed-in administrator; prints the body. Exit code 22
+# means an HTTP error status.
+api_once() {
 	local method="$1" path="$2" body="${3:-}"
 	if [ -n "$body" ]; then
 		curl -fsS -X "$method" "${csrf[@]}" -b "$jar" -H 'content-type: application/json' "$web$path" -d "$body"
 	else
 		curl -fsS -X "$method" "${csrf[@]}" -b "$jar" "$web$path"
 	fi
+}
+
+# api METHOD PATH [JSON]: like api_once. After a 401 (the web session lives 12 hours) it signs in again and
+# repeats the call once; a second failure is final.
+api() {
+	local out err rc=0
+	err="$(mktemp)"
+	out="$(api_once "$@" 2>"$err")" || rc=$?
+	if [ "$rc" -eq 22 ] && grep -q ' 401' "$err"; then
+		log "the session expired; signing in again"
+		sign_in
+		rc=0
+		out="$(api_once "$@" 2>"$err")" || rc=$?
+	fi
+	if [ "$rc" -ne 0 ]; then cat "$err" >&2; fi
+	rm -f "$err"
+	if [ "$rc" -eq 0 ]; then printf '%s\n' "$out"; fi
+	return "$rc"
 }
 
 sign_in() {
