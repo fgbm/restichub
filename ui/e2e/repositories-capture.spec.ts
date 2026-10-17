@@ -61,7 +61,7 @@ async function shot(page: Page, name: string): Promise<void> {
 	await page.screenshot({ path: `${out}/${name}.png` });
 }
 
-async function addLocal(page: Page, labels: Labels, name: string, host: string | null) {
+async function addRepository(page: Page, labels: Labels, name: string, host: string | null) {
 	await page.getByRole('button', { name: labels.addRepository, exact: true }).click();
 	await page.locator('#repo-name').fill(name);
 	// A local repository needs its host; a rest-server repository may have none.
@@ -105,8 +105,8 @@ async function capture(page: Page, labels: Labels, suffix: string): Promise<void
 	await shot(page, `new-repository-maintenance${suffix}`);
 	await page.getByRole('button', { name: labels.cancel, exact: true }).click();
 
-	await addLocal(page, labels, 'backups-prod', labels.hostName);
-	await addLocal(page, labels, 'scratch-remote', null);
+	await addRepository(page, labels, 'backups-prod', labels.hostName);
+	await addRepository(page, labels, 'scratch-remote', null);
 	await page.getByRole('button', { name: labels.moreActions('backups-prod') }).click();
 	await page.getByRole('menuitem', { name: labels.initialize }).click();
 	await page.getByRole('dialog').getByRole('button', { name: labels.start }).click();
