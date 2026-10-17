@@ -208,6 +208,66 @@ async fn ac_au_10_the_email_update_names_the_field_and_a_blank_value_removes_it(
     db.cleanup().await;
 }
 
+async fn update_diffs(app: &Router, cookie: &str, id: &str) -> Vec<Value> {
+    let uri = format!(
+        "/api/v1/platform/audit?action=user_update&tenant_id={PLATFORM_TENANT_ID}&object_id={id}"
+    );
+    let (status, _, page) = send(app, request("GET", &uri, Some(cookie), None)).await;
+    assert_eq!(status, StatusCode::OK, "{page}");
+    page.get("items")
+        .and_then(Value::as_array)
+        .expect("the audit items")
+        .iter()
+        .filter_map(|item| item.pointer("/diff/new").cloned())
+        .collect()
+}
+
+#[tokio::test]
+async fn ac_au_10_the_audit_tells_a_removed_email_from_an_unchanged_one() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let cookie = seed_session(db.database(), PLATFORM_TENANT_ID, "root", "platform_admin").await;
+    let app = app_with_kek(db.database());
+
+    let (status, body) = post(
+        &app,
+        &cookie,
+        "/api/v1/platform/users",
+        account("alice", Some("alice@example.net")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let id = body
+        .get("id")
+        .and_then(Value::as_str)
+        .expect("the account id");
+    let path = format!("/api/v1/platform/users/{id}");
+
+    for patch in [
+        json!({"disabled": false}),
+        json!({"disabled": false, "email": " "}),
+    ] {
+        let (status, _, response) =
+            send(&app, request("PATCH", &path, Some(&cookie), Some(patch))).await;
+        assert_eq!(status, StatusCode::NO_CONTENT, "{response}");
+    }
+
+    let diffs = update_diffs(&app, &cookie, id).await;
+    assert_eq!(diffs.len(), 2, "{diffs:?}");
+    let removed: Vec<Option<&Value>> = diffs.iter().map(|diff| diff.get("email_removed")).collect();
+    assert!(removed.contains(&Some(&Value::Bool(true))), "{diffs:?}");
+    assert!(removed.contains(&Some(&Value::Null)), "{diffs:?}");
+    assert!(
+        diffs
+            .iter()
+            .all(|diff| diff.get("email") == Some(&Value::Null)),
+        "{diffs:?}"
+    );
+
+    db.cleanup().await;
+}
+
 #[tokio::test]
 async fn ac_au_07_the_organization_create_names_the_taken_username() {
     let Some(db) = common::test_db().await else {

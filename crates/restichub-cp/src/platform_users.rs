@@ -546,7 +546,6 @@ pub async fn update_account(
     {
         return Err(ApiError::forbidden());
     }
-    // An empty email removes the address: the column holds NULL, never a blank string.
     let email = match body.email.as_deref().map(str::trim) {
         None => None,
         Some("") => Some(None),
@@ -607,7 +606,8 @@ pub async fn update_account(
         None,
         Some(&serde_json::json!({
             "disabled": body.disabled,
-            "email": email,
+            "email": email.as_ref().and_then(Option::as_deref),
+            "email_removed": (email == Some(None)).then_some(true),
             "platform_admin": body.platform_admin,
             "password": if grant { Some("<grant>") } else { None },
         })),
