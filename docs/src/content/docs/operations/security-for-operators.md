@@ -27,9 +27,9 @@ Apply all controls that your storage supports.
 
 - Keep the key encryption key (KEK) outside the database backup. The KEK protects the repository passwords, the job signing keys and the keys of the certificate authority. Without it, a restored database holds no usable secret.
 - Copy the repository password outside ResticHub. If you lose the control plane, you cannot open the snapshots without the password.
-- Turn on the trust mode for server scripts only on a host that you accept to control from the control plane. See [Server scripts](/restichub/operations/scripts/).
+- Turn on the trust mode for server scripts only on a host that you accept to control from the control plane. See [Server scripts](/restichub/guides/scripts/).
 - Put a reverse proxy with rate limits in front of the enrollment endpoint. See [Agent enrollment rate limit](/restichub/operations/enrollment-rate-limit/).
-- Revoke a host that you do not trust. See [Agent revocation](/restichub/operations/agent-revocation/).
+- Revoke a host that you do not trust. See [Agent revocation](/restichub/guides/agent-revocation/).
 
 ## Summary of the threat model
 

@@ -113,7 +113,7 @@
 			<TextField
 				id="profile-keep-within"
 				mono
-				placeholder="30d"
+				placeholder={t('common.example', { value: '30d' })}
 				aria-label={t('pe.rule.within.title')}
 				error={preview.withinInvalid
 					? t('pe.rule.within.invalid')

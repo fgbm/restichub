@@ -18,10 +18,10 @@ The profile editor is one page. Select "Add profile" on the "Profiles" screen, o
 | Backup options | VSS (Windows only), which passes `--use-fs-snapshot`. "Stay on one file system" (`--one-file-system`). "Exclude cache directories" that hold a `CACHEDIR.TAG` file (`--exclude-caches`). "Upload limit (KiB/s)" and "Download limit (KiB/s)" (`--limit-upload`, `--limit-download`). |
 | Retention | The rules that decide which snapshots stay. See the section below. |
 | Repository check | A check after the backup. Without a "Read-data subset", the check reads the repository structure only. This is fast. A share such as `5%` or `1/10` reads that part of the data. A larger share takes more time and traffic. |
-| Scripts on the host | Scripts before and after the backup. See [Server scripts](/restichub/operations/scripts/). |
+| Scripts on the host | Scripts before and after the backup. See [Server scripts](/restichub/guides/scripts/). |
 | Run limits | The stall limit and the maximum duration of a job. See the section below. |
 
-A profile has no hooks. Use [server scripts](/restichub/operations/scripts/) to run a command on the host before or after a backup.
+A profile has no hooks. Use [server scripts](/restichub/guides/scripts/) to run a command on the host before or after a backup.
 
 Only the [maintenance host](/restichub/concepts/repositories/) of the repository runs the `forget` and `prune` steps.
 
@@ -64,7 +64,7 @@ The section "Run limits" protects against jobs that hang or run too long. The st
 
 | Field | Unit | Default | Allowed values | Variable for the whole installation |
 |---|---|---|---|---|
-| "Stop after no progress (minutes)" | Minutes | 60 minutes | 5 to 10080 | [`RESTICHUB_JOB_STALL_TIMEOUT_SECS`](/restichub/operations/environment-variables/) |
-| "Maximum duration (hours)" | Hours | 48 hours | 0 to 720. 0 means no limit. | [`RESTICHUB_JOB_MAX_DURATION_SECS`](/restichub/operations/environment-variables/) |
+| "Stop after no progress (minutes)" | Minutes | 60 minutes | 5 to 10080 | [`RESTICHUB_JOB_STALL_TIMEOUT_SECS`](/restichub/reference/environment-variables/) |
+| "Maximum duration (hours)" | Hours | 48 hours | 0 to 720. 0 means no limit. | [`RESTICHUB_JOB_MAX_DURATION_SECS`](/restichub/reference/environment-variables/) |
 
-If restic makes no progress for longer than the first limit, the agent stops the step and the job fails as stalled. A `check` or `prune` step waits for at least 6 hours, even when the profile sets a shorter limit. A job that runs longer than the second limit stops even when it makes progress. The variable sets the default of a new profile. A value in the profile overrides it. The [Jobs](/restichub/concepts/jobs/#time-limits) page describes how the agent measures progress. The job detail shows the limits of each job.
+If restic makes no progress for longer than the first limit, the agent stops the step and the job fails as stalled. A `check` or `prune` step waits for at least 6 hours, even when the profile sets a shorter limit. A job that runs longer than the second limit stops even when it makes progress. The variable sets the default of a new profile. A value in the profile overrides it. The [Jobs](/restichub/concepts/job-lifecycle/#time-limits) page describes how the agent measures progress. The job detail shows the limits of each job.

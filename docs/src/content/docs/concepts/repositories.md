@@ -5,6 +5,8 @@ description: Store the backups of the hosts, and keep the repository clean with 
 
 A repository is the place where restic stores the backups. The control plane keeps the address of the repository and its secrets. The agent receives the secrets for one job only.
 
+The control plane encrypts each secret in the database. After you save a secret, the web UI never shows its value again. To change a secret, replace its value. You set the repository password when you add the repository. You cannot change it in this version. You can replace the S3 keys and the REST server credentials.
+
 ## Maintenance
 
 Each repository has one maintenance host, the maintenance agent. Only this host runs `forget`, `prune` and `check`. A backup host never receives these steps. Use a dedicated host for the maintenance.
@@ -28,7 +30,7 @@ An Operator or an Admin can run the retention or the check at once from the menu
 
 ### Barriers
 
-A maintenance job is exclusive. It starts after the running backups of the repository end. The backups that the control plane queues after it wait until it ends. The [Jobs](/restichub/concepts/jobs/) page shows the maintenance jobs with the backups.
+A maintenance job is exclusive. It starts after the running backups of the repository end. The backups that the control plane queues after it wait until it ends. The [Jobs](/restichub/concepts/job-lifecycle/) page shows the maintenance jobs with the backups.
 
 ### Retention of several profiles
 
