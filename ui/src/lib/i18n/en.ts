@@ -1479,6 +1479,8 @@ export const en = {
 	'channels.filters': 'Channel filters',
 	'channels.name': 'Name',
 	'channels.namePlaceholder': 'e.g. ops-mail',
+	'names.help':
+		'Any text, up to 100 characters. The name is unique; the letter case does not matter.',
 	'channels.kind': 'Type',
 	'channels.kind.email': 'Email',
 	'channels.kind.webhook': 'Webhook',
@@ -1794,7 +1796,6 @@ export const en = {
 	'pe.section.check': 'Repository check',
 	'pe.section.scripts': 'Scripts on the host',
 	'pe.section.limits': 'Run limits',
-	'pe.name.help': 'A short name. The lists and the plans show it.',
 	'pe.paths.lead':
 		'What to back up, one path for each line. The paths for all systems apply on any host. The other paths apply on their own system only.',
 	'pe.excludes.lead':

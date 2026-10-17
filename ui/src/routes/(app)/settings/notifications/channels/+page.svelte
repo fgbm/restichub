@@ -2,6 +2,7 @@
 	import { resolve } from '$app/paths';
 	import { onMount } from 'svelte';
 	import { ApiError, fieldError, namesField, service } from '#lib/api/index.ts';
+	import { nameError, nameProblem } from '#lib/names.ts';
 	import type {
 		ApiProblem,
 		ChannelKind,
@@ -233,7 +234,7 @@
 
 	async function save(): Promise<void> {
 		formSubmitted = true;
-		if (focusFirstInvalid([['channel-name', name === '']])) return;
+		if (focusFirstInvalid([['channel-name', nameProblem(name) !== null]])) return;
 		saving = true;
 		formError = null;
 		formProblem = null;
@@ -420,7 +421,8 @@
 		id="channel-name"
 		label={t('channels.name')}
 		placeholder={t('channels.namePlaceholder')}
-		error={emptyError(formSubmitted, name) ?? fieldError(formProblem, 'name')}
+		help={t('names.help')}
+		error={emptyError(formSubmitted, name) ?? nameError(name) ?? fieldError(formProblem, 'name')}
 		bind:value={name}
 		required
 	/>

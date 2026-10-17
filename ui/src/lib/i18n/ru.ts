@@ -1487,6 +1487,7 @@ export const ru: Record<MessageKey, string> = {
 	'channels.filters': 'Фильтры каналов',
 	'channels.name': 'Название',
 	'channels.namePlaceholder': 'например, ops-mail',
+	'names.help': 'Любой текст, до 100 символов. Имя уникально, регистр букв не важен.',
 	'channels.kind': 'Тип',
 	'channels.kind.email': 'Почта',
 	'channels.kind.webhook': 'Вебхук',
@@ -1803,7 +1804,6 @@ export const ru: Record<MessageKey, string> = {
 	'pe.section.check': 'Проверка репозитория',
 	'pe.section.scripts': 'Скрипты на хосте',
 	'pe.section.limits': 'Лимиты выполнения',
-	'pe.name.help': 'Короткое имя, по нему профиль находят в списке и в планах.',
 	'pe.paths.lead':
 		'Что копировать. По одному пути в строке. Пути «Для всех систем» берутся на любом хосте, остальные только на своей системе.',
 	'pe.excludes.lead':

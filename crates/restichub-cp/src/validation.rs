@@ -28,6 +28,8 @@ pub const MAX_SECRET_NAME: usize = 64;
 pub const MAX_SECRET_VALUE: usize = 64 * 1024;
 /// Limit in characters. The derived secret names stay within [`MAX_SECRET_NAME`].
 pub const MAX_REPOSITORY_NAME: usize = 48;
+/// Limit in characters of the name of a profile, a plan or an alert channel (FR-PF-01).
+pub const MAX_RECORD_NAME: usize = 100;
 /// Limit in characters of a backend endpoint.
 pub const MAX_ENDPOINT: usize = 2048;
 /// Limit in characters of a rest-server user name.
@@ -326,6 +328,28 @@ pub fn validate_repository_name(
     Ok(value.to_owned())
 }
 
+/// Validates the name of a profile, a plan or an alert channel and returns the trimmed value.
+///
+/// A name is free text of 1 to [`MAX_RECORD_NAME`] characters: letters of any script, digits,
+/// spaces and punctuation. A control character and a format character, such as a bidirectional
+/// override, are refused (FR-PR-10). The unique index of the table makes the name unique for the
+/// tenant and ignores the letter case, so a duplicate gives a conflict at the database. A name is
+/// data only: it never goes into a command line, a tag or a path.
+pub fn validate_record_name(field: &'static str, value: &str) -> Result<String, ValidationError> {
+    let value = value.trim();
+    let count = value.chars().count();
+    if count == 0 {
+        return Err(ValidationError::new(field, Reason::Empty));
+    }
+    if count > MAX_RECORD_NAME {
+        return Err(ValidationError::new(field, Reason::TooLong));
+    }
+    if has_forbidden(value) {
+        return Err(ValidationError::new(field, Reason::InvalidCharacter));
+    }
+    Ok(value.to_owned())
+}
+
 /// Validates a backend endpoint and returns it.
 ///
 /// The endpoint is an absolute URL with the scheme `http` or `https` and a host (FR-RP-01). The
@@ -488,12 +512,12 @@ mod tests {
     use time::OffsetDateTime;
 
     use super::{
-        MAX_BUCKET, MAX_DISPLAY_NAME, MAX_EMAIL, MAX_REPOSITORY_NAME, MAX_REST_USERNAME,
-        MAX_SECRET_NAME, MAX_SECRET_VALUE, MAX_TENANT_NAME, MAX_USERNAME, validate_bucket,
-        validate_display_name, validate_email, validate_endpoint, validate_expiry,
-        validate_local_path, validate_repository_name, validate_rest_username, validate_s3_prefix,
-        validate_secret_name, validate_secret_value, validate_tenant_name, validate_token_name,
-        validate_username,
+        MAX_BUCKET, MAX_DISPLAY_NAME, MAX_EMAIL, MAX_RECORD_NAME, MAX_REPOSITORY_NAME,
+        MAX_REST_USERNAME, MAX_SECRET_NAME, MAX_SECRET_VALUE, MAX_TENANT_NAME, MAX_USERNAME,
+        Reason, ValidationError, validate_bucket, validate_display_name, validate_email,
+        validate_endpoint, validate_expiry, validate_local_path, validate_record_name,
+        validate_repository_name, validate_rest_username, validate_s3_prefix, validate_secret_name,
+        validate_secret_value, validate_tenant_name, validate_token_name, validate_username,
     };
 
     const FIELD: &str = "value";
@@ -606,6 +630,74 @@ mod tests {
         assert!(validate_repository_name(FIELD, "with space").is_err());
         assert!(validate_repository_name(FIELD, &"a".repeat(MAX_REPOSITORY_NAME)).is_ok());
         assert!(validate_repository_name(FIELD, &"a".repeat(MAX_REPOSITORY_NAME + 1)).is_err());
+    }
+
+    #[test]
+    fn a_record_name_is_free_text() {
+        for name in [
+            "linux-logs",
+            "Ночной бэкап",
+            "Backup of passwords db",
+            "daily 📦 backup",
+            "  padded  ",
+            "a.b_c-d",
+        ] {
+            assert!(validate_record_name(FIELD, name).is_ok(), "{name}");
+        }
+        assert_eq!(
+            validate_record_name(FIELD, "  Ночной бэкап  ").as_deref(),
+            Ok("Ночной бэкап")
+        );
+        assert!(validate_record_name(FIELD, &"я".repeat(MAX_RECORD_NAME)).is_ok());
+        assert_eq!(
+            validate_record_name(FIELD, &"я".repeat(MAX_RECORD_NAME + 1)),
+            Err(ValidationError::new(FIELD, Reason::TooLong))
+        );
+        for empty in ["", "   ", "\u{3000}"] {
+            assert_eq!(
+                validate_record_name(FIELD, empty),
+                Err(ValidationError::new(FIELD, Reason::Empty))
+            );
+        }
+        for bad in [
+            "line\nbreak",
+            "tab\there",
+            "nul\0",
+            "bidi \u{202E}override",
+            "isolate \u{2066}x",
+            "zero\u{200B}width",
+            "sep\u{2028}arator",
+            "del\u{7f}",
+        ] {
+            assert_eq!(
+                validate_record_name(FIELD, bad),
+                Err(ValidationError::new(FIELD, Reason::InvalidCharacter)),
+                "{bad:?}"
+            );
+        }
+    }
+
+    /// The web UI runs the same vectors in `ui/src/lib/names.test.ts`, so the hints and the checks
+    /// of the forms cannot drift from this rule.
+    #[test]
+    fn fr_pf_01_the_name_vectors_match_the_ui() {
+        let vectors: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/name-rules.json"))
+                .expect("the vectors are JSON");
+        for (kind, expected) in [
+            ("valid", None),
+            ("empty", Some(Reason::Empty)),
+            ("invalid_character", Some(Reason::InvalidCharacter)),
+            ("too_long", Some(Reason::TooLong)),
+        ] {
+            let names = vectors[kind].as_array().expect("a list of names");
+            assert!(!names.is_empty(), "{kind}");
+            for name in names {
+                let name = name.as_str().expect("a string");
+                let verdict = validate_record_name(FIELD, name).err().map(|e| e.reason);
+                assert_eq!(verdict, expected, "{kind}: {name:?}");
+            }
+        }
     }
 
     #[test]
