@@ -199,6 +199,8 @@ A host facet of a list uses `withHosts` from `$lib/host-picker.ts`. It gives eac
 
 A form does not disable its primary action for a value that is not correct (UI principles 5.4). The submit handler sets `submitted`, calls `focusFirstInvalid` from `$lib/form.ts` and stops when it returns `true`. `emptyError(submitted, value)` gives the error of an empty required field.
 
+`Switch` and `SwitchField` (`$lib/components/ui`) set the on/off state of a record (UI principles 5.6 to 5.8). The label says what the switch does, for example "Run on schedule". In a section, use `ProfileSection` with `switchable`, and give `switchLabel` and `note` when the section name does not say enough. In a dialog without sections, `SwitchField` is the last field: the label, the help line and the switch. Do not use `Checkbox` for this state. `no-enabled-checkbox.test.ts` fails when a `Checkbox` is bound to a field named `enabled`.
+
 `TextField` takes an `action`: `{ icon, label, onclick }`. The field shows an icon button at its end, for example "Reset to the default path". The label is the tooltip and the accessible name of the button. Do not put a separate button next to the field for this. Give the action only when it can change the value, for example when the value is not the default. A locked field does not show the action.
 
 ## Dialog

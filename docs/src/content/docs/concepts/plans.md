@@ -15,7 +15,7 @@ A plan assigns one profile to one agent with a schedule. The control plane keeps
 | Cron expression | Five fields: minute, hour, day of month, month, day of week. |
 | Time zone | An IANA name, for example `Europe/Berlin`. |
 | Missed runs | The rule for a fire time that the control plane missed. |
-| Enabled | A disabled plan creates no job. |
+| Run on schedule | The switch in the header of the section **Schedule**. When it is off, the scheduler creates no job for the plan, and the plan shows the pill **Disabled** next to its name. **Run now** still starts a job, and the alerts about a missed backup and the recovery point stay silent. |
 
 The profile and the agent belong to the same tenant. The control plane compiles the stored profile for the operating system of the agent before it writes the plan. A profile without a path for that operating system is refused.
 

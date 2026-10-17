@@ -59,3 +59,6 @@ Use the shared components of [ui/COMPONENTS.md](../../ui/COMPONENTS.md). They ap
 3. Each field that sets a password uses `NewPasswordField`.
 4. A primary action stays enabled when a field is not correct. When the person tries to send the form, each field that is not correct shows its error. The first of these fields gets the focus.
 5. If a primary action is disabled, a text next to the action or the tooltip of the action gives the reason.
+6. The on/off state of a record is a `Switch`. Examples are a plan, a channel, an alert rule and a maintenance task. The label of the switch says what it does, for example "Run on schedule" or "Send alerts". Do not use a `Checkbox` with the label "Enabled". A `Checkbox` is for an option of a record or of an action, for example "Use VSS" or "Dry run".
+7. Put the switch in the header of the section that it controls. In a dialog without sections, make it the last field (`SwitchField`). The field is a row: the label at the left, the switch at the right and a help line below the label. A test fails when a `Checkbox` is bound to a field named `enabled`.
+8. A record that is off shows the pill "Disabled" next to its name in the page header and in its list row.

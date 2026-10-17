@@ -94,6 +94,14 @@ test('an Admin adds an email channel and a webhook, tests one and deletes one', 
 	await hook.getByRole('button', { name: 'Send test' }).click();
 	await expect(page.getByText('The test message is sent.')).toBeVisible();
 
+	// The state is the last field of the form: a switch with a help line, not a checkbox.
+	await hook.getByRole('button', { name: 'team-hook' }).click();
+	const form = page.getByRole('dialog', { name: 'Edit the channel' });
+	await expect(form.getByRole('checkbox', { name: 'Enabled' })).toHaveCount(0);
+	await form.getByRole('switch', { name: 'Send alerts' }).click();
+	await form.getByRole('button', { name: 'Save' }).click();
+	await expect(hook.locator('.status', { hasText: 'Disabled' })).toBeVisible();
+
 	// Delete a channel from its form: the item keeps two actions.
 	await hook.getByRole('button', { name: 'team-hook' }).click();
 	await page
