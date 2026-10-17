@@ -46,6 +46,7 @@ export const endpoints = {
 		list: '/repositories',
 		create: '/repositories',
 		byId: (id: string) => `/repositories/${encodeURIComponent(id)}`,
+		usage: (id: string) => `/repositories/${encodeURIComponent(id)}/usage`,
 		init: (id: string) => `/repositories/${encodeURIComponent(id)}/init`,
 		testAccess: (id: string) => `/repositories/${encodeURIComponent(id)}/test-access`,
 		maintenance: (id: string) => `/repositories/${encodeURIComponent(id)}/maintenance`,
@@ -66,6 +67,7 @@ export const endpoints = {
 		defaults: '/profiles/defaults',
 		create: '/profiles',
 		byId: (id: string) => `/profiles/${encodeURIComponent(id)}`,
+		usage: (id: string) => `/profiles/${encodeURIComponent(id)}/usage`,
 		preview: (id: string) => `/profiles/${encodeURIComponent(id)}/preview`
 	},
 	plans: {

@@ -58,6 +58,13 @@ pub enum ErrorCode {
     InvalidSetupToken,
     RepositoryHostLocked,
     NotRepositoryHost,
+    RepositoryInUse,
+    RepositoryHasActiveJob,
+    ProfileInUse,
+    SecretInUse,
+    LastAdmin,
+    OwnAccountProtected,
+    PlatformTenantProtected,
     RepositoryLocationTaken,
 }
 
@@ -94,6 +101,13 @@ impl ErrorCode {
             Self::InvalidSetupToken => "invalid_setup_token",
             Self::RepositoryHostLocked => "repository_host_locked",
             Self::NotRepositoryHost => "not_repository_host",
+            Self::RepositoryInUse => "repository_in_use",
+            Self::RepositoryHasActiveJob => "repository_has_active_job",
+            Self::ProfileInUse => "profile_in_use",
+            Self::SecretInUse => "secret_in_use",
+            Self::LastAdmin => "last_admin",
+            Self::OwnAccountProtected => "own_account_protected",
+            Self::PlatformTenantProtected => "platform_tenant_protected",
             Self::RepositoryLocationTaken => "repository_location_taken",
         }
     }
@@ -112,6 +126,8 @@ pub struct ApiError {
     existing_name: Option<String>,
     /// The `Retry-After` header value in seconds. Only `rate_limited` and `busy` set it.
     retry_after: Option<u64>,
+    // Boxed so that `Result<_, ApiError>` stays below the `result_large_err` limit.
+    blockers: Option<Box<Blockers>>,
     /// The internal detail. The response body never holds it; the mapper logs it with the request
     /// ID. The value holds no secret: every constructor takes a message, never a value.
     cause: Option<String>,
@@ -127,6 +143,7 @@ impl ApiError {
             reason: None,
             existing_name: None,
             retry_after: None,
+            blockers: None,
             cause: None,
         }
     }
@@ -423,6 +440,19 @@ impl ApiError {
         )
     }
 
+    /// Creates a `409` error that names the records which block a delete. The user interface
+    /// translates the code and links the records (NFR-DOC-04).
+    pub fn blocked(code: ErrorCode, blockers: Blockers) -> Self {
+        let mut error = Self::new(StatusCode::CONFLICT, code, "Conflict");
+        error.blockers = Some(Box::new(blockers));
+        error
+    }
+
+    /// Creates a `409` error for a protected record: no list of records explains it.
+    pub fn protected(code: ErrorCode) -> Self {
+        Self::new(StatusCode::CONFLICT, code, "Conflict")
+    }
+
     /// Creates a `409 already_queued` error: the plan already holds a queued manual run.
     pub fn already_queued() -> Self {
         Self::new(StatusCode::CONFLICT, ErrorCode::AlreadyQueued, "Conflict")
@@ -534,6 +564,7 @@ impl IntoResponse for ApiError {
             request_id: String::new(),
             field: self.field,
             reason: self.reason.map(|reason| reason.as_str().to_owned()),
+            blockers: self.blockers.map(|blockers| *blockers),
             existing_name: self.existing_name,
         };
         let mut response = (
@@ -569,10 +600,68 @@ pub struct ProblemBody {
     /// In snake_case; only `invalid_argument` sets it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    /// The records that block a delete. Only the `*_in_use` codes and `repository_has_active_job`
+    /// set it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blockers: Option<Blockers>,
     /// The name of the repository that holds the location; only `repository_location_taken` sets
     /// it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub existing_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BlockerKind {
+    Repository,
+    Channel,
+    Profile,
+    JobTemplate,
+    Plan,
+    Job,
+}
+
+impl From<restichub_db::SecretUsageKind> for BlockerKind {
+    fn from(kind: restichub_db::SecretUsageKind) -> Self {
+        match kind {
+            restichub_db::SecretUsageKind::Repository => Self::Repository,
+            restichub_db::SecretUsageKind::Channel => Self::Channel,
+            restichub_db::SecretUsageKind::Profile => Self::Profile,
+            restichub_db::SecretUsageKind::JobTemplate => Self::JobTemplate,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct Blocker {
+    pub kind: BlockerKind,
+    pub id: String,
+    /// For a job: its kind.
+    pub name: String,
+}
+
+/// At most `restichub_db::referrers::REFERRER_LIMIT` records, and the count of all of them.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct Blockers {
+    pub items: Vec<Blocker>,
+    pub total: i64,
+}
+
+impl Blockers {
+    pub fn new(kind: BlockerKind, referrers: &restichub_db::referrers::Referrers) -> Self {
+        Self {
+            items: referrers
+                .items
+                .iter()
+                .map(|item| Blocker {
+                    kind,
+                    id: item.id.to_string(),
+                    name: item.name.clone(),
+                })
+                .collect(),
+            total: referrers.total,
+        }
+    }
 }
 
 /// The shared responses of a protected route: 401 and 403 with the problem body.

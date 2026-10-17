@@ -340,7 +340,7 @@ pub async fn replace_secret_value(
         (status = 204, description = "The secret is removed."),
         crate::error::ProtectedResponses,
         (status = 404, description = "The secret is not found.", body = crate::error::ProblemBody),
-        (status = 409, description = "An object uses the secret.", body = crate::error::ProblemBody)
+        (status = 409, description = "An object uses the secret (`secret_in_use`). The body lists the objects.", body = crate::error::ProblemBody)
     )
 )]
 pub async fn delete_secret(
@@ -356,8 +356,8 @@ pub async fn delete_secret(
         return Err(ApiError::not_found());
     };
     // A profile names a hook secret inside its JSON, so no foreign key refuses the delete.
-    if !repo::list_usage(&mut tx, Some(secret_id)).await?.is_empty() {
-        return Err(ApiError::conflict());
+    if let Some(block) = crate::delete_check::secret_block(&mut tx, secret_id).await? {
+        return Err(block.into_error());
     }
     repo::delete(&mut tx, secret_id).await.map_err(|error| {
         // A repository binds the secret, so the row cannot go. The foreign key refuses the delete.

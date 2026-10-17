@@ -1,7 +1,7 @@
 /*
  * The Profiles list links each profile to its editor page (FR-PF-01).
  */
-import { render, screen } from '@testing-library/svelte';
+import { render, screen, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Profiles from './+page.svelte';
@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
 	listProfiles: vi.fn(),
 	listRepositories: vi.fn(),
 	listPlans: vi.fn(),
+	profileUsage: vi.fn(),
+	deleteProfile: vi.fn(),
 	goto: vi.fn()
 }));
 
@@ -33,7 +35,9 @@ vi.mock('#lib/api/index.ts', async (importOriginal) => {
 			...actual.service,
 			listProfiles: mocks.listProfiles,
 			listRepositories: mocks.listRepositories,
-			listPlans: mocks.listPlans
+			listPlans: mocks.listPlans,
+			profileUsage: mocks.profileUsage,
+			deleteProfile: mocks.deleteProfile
 		}
 	};
 });
@@ -62,12 +66,12 @@ describe('Profiles list', () => {
 		expect(link).toHaveAttribute('href', '/(app)/profiles/p_1');
 	});
 
-	it('keeps copy and delete as icon buttons and blocks the delete of a profile in use', async () => {
+	it('keeps copy and delete as icon buttons and explains the delete of a profile in use', async () => {
 		render(Profiles);
 		await screen.findByRole('link', { name: 'db-nightly' });
 		expect(screen.getByRole('button', { name: 'Make a copy' })).toBeInTheDocument();
 		const remove = screen.getByRole('button', { name: 'Delete profile' });
-		expect(remove).toBeDisabled();
+		expect(remove).toBeEnabled();
 		expect(remove).toHaveAttribute('title', 'A plan uses the profile. Delete the plans first.');
 		expect(screen.queryByRole('button', { name: 'More actions for db-nightly' })).toBeNull();
 		expect(screen.getByText('offsite')).toBeInTheDocument();
@@ -96,5 +100,51 @@ describe('Profiles list', () => {
 		render(Profiles);
 		await user.click(await screen.findByRole('button', { name: 'Add profile' }));
 		expect(mocks.goto).toHaveBeenCalledWith('/(app)/profiles/new');
+	});
+
+	it('names the plans that block the delete and disables the confirm button', async () => {
+		const user = userEvent.setup();
+		mocks.profileUsage.mockResolvedValue({
+			blocked_by: 'profile_in_use',
+			blockers: { items: [{ kind: 'plan', id: 'pl_1', name: 'Nightly' }], total: 1 }
+		});
+		render(Profiles);
+		await user.click(await screen.findByRole('button', { name: 'Delete profile' }));
+
+		const dialog = await screen.findByRole('dialog', { name: 'Delete the profile?' });
+		expect(await within(dialog).findByRole('alert')).toHaveTextContent('Plans use this profile.');
+		expect(within(dialog).getByRole('link', { name: 'Nightly' })).toHaveAttribute(
+			'href',
+			'/(app)/plans/pl_1'
+		);
+		expect(within(dialog).getByRole('button', { name: 'Delete profile' })).toBeDisabled();
+	});
+
+	it('shows the server reason when the state changes before the click', async () => {
+		const user = userEvent.setup();
+		const { ApiError } = await import('#lib/api/errors.ts');
+		mocks.profileUsage.mockResolvedValue({
+			blocked_by: null,
+			blockers: { items: [], total: 0 }
+		});
+		mocks.deleteProfile.mockRejectedValue(
+			new ApiError({
+				status: 409,
+				code: 'profile_in_use',
+				title: 'Conflict',
+				blockers: { items: [{ kind: 'plan', id: 'pl_9', name: 'Late plan' }], total: 1 }
+			})
+		);
+		render(Profiles);
+		await user.click(await screen.findByRole('button', { name: 'Delete profile' }));
+
+		const dialog = await screen.findByRole('dialog', { name: 'Delete the profile?' });
+		const confirm = await within(dialog).findByRole('button', { name: 'Delete profile' });
+		await vi.waitFor(() => expect(confirm).toBeEnabled());
+		await user.click(confirm);
+
+		expect(await within(dialog).findByRole('link', { name: 'Late plan' })).toBeInTheDocument();
+		expect(within(dialog).getByRole('alert')).toHaveTextContent('Plans use this profile.');
+		expect(within(dialog).getByRole('button', { name: 'Delete profile' })).toBeDisabled();
 	});
 });

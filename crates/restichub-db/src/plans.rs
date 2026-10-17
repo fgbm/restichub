@@ -15,6 +15,7 @@ use time::OffsetDateTime;
 use crate::DbError;
 use crate::enums::{AgentStatus, MissedRunPolicy};
 use crate::ids::{AgentId, PlanId, ProfileId, RepositoryId, UserId};
+use crate::referrers::Referrers;
 use crate::tx::TenantTx;
 
 pub const DEFAULT_PAGE_LIMIT: i64 = 50;
@@ -207,21 +208,21 @@ pub async fn get(tx: &mut TenantTx<'_>, id: PlanId) -> Result<Option<Plan>, DbEr
     Ok(row.map(Plan::from))
 }
 
-/// True when a plan of the tenant binds the profile.
+/// Lists the plans of the tenant that bind the profile.
 ///
 /// A profile that a plan uses cannot be removed until the plan is removed or repointed. The check
 /// runs before the delete, so the foreign key never blocks it with an internal error (FR-SC-11).
-pub async fn is_profile_used(
+pub async fn referrers_of_profile(
     tx: &mut TenantTx<'_>,
     profile_id: ProfileId,
-) -> Result<bool, DbError> {
-    let (bound,): (bool,) =
-        sqlx::query_as("SELECT EXISTS (SELECT 1 FROM plans WHERE profile_id = $1)")
-            .bind(profile_id)
-            .fetch_one(tx.as_conn())
-            .await
-            .map_err(DbError::Query)?;
-    Ok(bound)
+) -> Result<Referrers, DbError> {
+    crate::referrers::fetch(
+        tx,
+        "SELECT id, name, count(*) OVER () FROM plans WHERE profile_id = $1 \
+         ORDER BY lower(name), id LIMIT $2",
+        profile_id.as_uuid(),
+    )
+    .await
 }
 
 /// Lists the plans of the tenant that bind the profile, oldest first (FR-SC-11).

@@ -539,6 +539,12 @@ pub const ROUTES: &[Route] = &[
         handler: || routes!(crate::repositories::delete_repository),
     },
     Route {
+        method: "get",
+        path: "/api/v1/repositories/{id}/usage",
+        access: Access::Protected(Operation::RepositoriesRead),
+        handler: || routes!(crate::repositories::repository_usage),
+    },
+    Route {
         method: "post",
         path: "/api/v1/repositories/{id}/init",
         access: Access::Protected(Operation::RepositoriesWrite),
@@ -693,6 +699,12 @@ pub const ROUTES: &[Route] = &[
         path: "/api/v1/profiles/{id}",
         access: Access::Protected(Operation::ProfilesWrite),
         handler: || routes!(crate::profiles::delete_profile),
+    },
+    Route {
+        method: "get",
+        path: "/api/v1/profiles/{id}/usage",
+        access: Access::Protected(Operation::ProfilesRead),
+        handler: || routes!(crate::profiles::profile_usage),
     },
     Route {
         method: "post",

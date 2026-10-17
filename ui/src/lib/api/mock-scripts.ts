@@ -352,8 +352,9 @@ export class MockScripts {
 					type: 'about:blank',
 					title: 'Conflict',
 					status: 409,
-					code: 'conflict',
-					request_id: ''
+					code: 'secret_in_use',
+					request_id: '',
+					blockers: { items: secret.used_by, total: secret.used_by.length }
 				}
 			});
 		}
