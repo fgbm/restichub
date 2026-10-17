@@ -300,7 +300,7 @@ async fn ac_ag_10_the_real_restic_keeps_the_upload_limit() {
     let _ = std::fs::remove_dir_all(&data);
 }
 
-/// AC-RP-01: the real restic initializes and tests a repository in S3 (MinIO), and a wrong
+/// AC-RP-01: the real restic initializes and tests a repository in S3 (SeaweedFS), and a wrong
 /// password gives `config_error`.
 #[tokio::test(flavor = "multi_thread")]
 async fn ac_rp_01_the_real_restic_works_against_s3() {
