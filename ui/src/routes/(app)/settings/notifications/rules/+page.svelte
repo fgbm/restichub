@@ -114,11 +114,7 @@
 								/>
 							</div>
 						{/if}
-						<Switch
-							id={`rule-${row.kind}`}
-							label={t('common.enabled')}
-							bind:checked={row.enabled}
-						/>
+						<Switch id={`rule-${row.kind}`} label={t('rules.send')} bind:checked={row.enabled} />
 					</li>
 				{/each}
 			</ul>

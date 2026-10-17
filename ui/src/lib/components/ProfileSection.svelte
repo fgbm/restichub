@@ -12,6 +12,8 @@
 		open = $bindable(false),
 		enabled = $bindable(true),
 		switchable = false,
+		switchLabel,
+		note,
 		required = false,
 		badge,
 		children
@@ -24,6 +26,10 @@
 		enabled?: boolean;
 		/** The header holds an on/off switch. A switched-off section keeps its fields dimmed. */
 		switchable?: boolean;
+		/** The label of the header switch, when it says more than the section name. */
+		switchLabel?: string;
+		/** Shown above the fields, for example what a switched-off section means. */
+		note?: string;
 		required?: boolean;
 		badge?: string;
 		children: Snippet;
@@ -65,11 +71,12 @@
 			{#if !open}<span class="section__summary">{summary}</span>{/if}
 		</button>
 		{#if switchable}
-			<Switch bind:checked={enabled} label={t('pe.section.switch', { title })} />
+			<Switch bind:checked={enabled} label={switchLabel ?? t('pe.section.switch', { title })} />
 		{/if}
 	</header>
 	{#if open}
 		<div class="section__body" class:section__body--off={switchable && !enabled} id={bodyId}>
+			{#if note}<p class="section__note">{note}</p>{/if}
 			{@render children()}
 		</div>
 	{/if}
@@ -139,6 +146,12 @@
 		flex-direction: column;
 		gap: var(--rh-space-4);
 		padding: var(--rh-space-1) var(--rh-space-4) var(--rh-space-4);
+	}
+
+	.section__note {
+		margin: 0;
+		color: var(--rh-color-text-muted);
+		font-size: var(--rh-font-size-sm);
 	}
 
 	.section__body--off {

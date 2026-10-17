@@ -320,6 +320,45 @@ describe('the plan page', () => {
 		expect(mocks.pushToast).toHaveBeenCalledWith('success', 'The plan is updated.');
 	});
 
+	it('fr_sc_01 turns the plan off with the switch in the schedule header', async () => {
+		const user = userEvent.setup();
+		mocks.updatePlan.mockResolvedValue({ plan: plan({ enabled: false }) });
+		render(PlanEditor, { planId: 'pl_1' });
+
+		await screen.findByRole('heading', { level: 1, name: 'nightly-web' });
+		expect(screen.queryByText('Disabled')).not.toBeInTheDocument();
+		expect(screen.queryByRole('checkbox', { name: 'Enabled' })).not.toBeInTheDocument();
+		const schedule = document.querySelector<HTMLElement>('[data-section="schedule"]')!;
+		const toggle = within(schedule).getByRole('switch', { name: 'Run on schedule' });
+		expect(toggle).toHaveAttribute('data-state', 'checked');
+		expect(within(schedule).queryByText(/The scheduler does not run this plan/)).toBeNull();
+
+		await user.click(toggle);
+
+		expect(toggle).toHaveAttribute('data-state', 'unchecked');
+		expect(within(schedule).getByText(/The scheduler does not run this plan/)).toHaveTextContent(
+			/"Run now" still works/
+		);
+		expect(screen.getByRole('heading', { level: 1 }).parentElement).toHaveTextContent('Disabled');
+		await user.click(screen.getByRole('button', { name: 'Save' }));
+		await waitFor(() =>
+			expect(mocks.updatePlan).toHaveBeenCalledWith(
+				'pl_1',
+				expect.objectContaining({ enabled: false })
+			)
+		);
+	});
+
+	it('fr_sc_01 shows the source section before the basics', async () => {
+		render(PlanEditor);
+
+		await screen.findByRole('heading', { level: 1, name: 'New plan' });
+		const order = [...document.querySelectorAll('[data-section]')].map((node) =>
+			node.getAttribute('data-section')
+		);
+		expect(order).toEqual(['source', 'basics', 'schedule', 'objective']);
+	});
+
 	it('deletes a stored plan after the confirmation and returns to the list', async () => {
 		const user = userEvent.setup();
 		mocks.deletePlan.mockResolvedValue(undefined);

@@ -48,6 +48,10 @@ The control plane stores each message in a queue before it sends it. A failed se
 
 Two control plane instances send each message once. A crash between the send and the record can repeat a send, so a receiver must accept a repeat. The webhook payload holds the field `id` for this purpose.
 
+## Turn a channel off
+
+The last field of a channel form is the switch **Send alerts**. When it is off, the channel gets no alert and no test message, and the list shows the pill **Disabled** for the channel. The row action **Disable** does the same.
+
 ## Email channels
 
 An Admin adds an email channel in **Settings**, **Channels**. The channel holds 1 to 20 recipients. The installation needs an SMTP server. See [Configure alerts](/restichub/operations/alert-configuration/). Without it, an email channel cannot send, and the test button shows the error `smtp_not_configured`.
