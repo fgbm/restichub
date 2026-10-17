@@ -7,7 +7,7 @@ A profile is the definition of a backup: what to copy, what to skip, how to run 
 
 ## Editor sections
 
-The profile editor is one page. Select "Add profile" on the "Profiles" screen, or "Edit" in the menu of a profile. Each section shows its state ("On", "Off" or "Needs attention") and a short summary. You can switch a section on or off, and you can use "Expand all" and "Collapse all". The side panel shows "The result": a live summary and the restic commands that the profile produces for a host. Unsaved changes show the note "The changes are not saved.". When the profile has plans, the editor tells how many plans use it. The new settings apply to their next run.
+The profile editor is one page. Select "Add profile" on the "Profiles" screen, or select the name of a profile. The menu "…" of a profile row holds only "Make a copy" and "Delete profile". Each section shows its state ("On", "Off" or "Needs attention") and a short summary. You can switch a section on or off, and you can use "Expand all" and "Collapse all". The side panel shows "The result": a live summary and the restic commands that the profile produces for a host. Unsaved changes show the note "The changes are not saved.". When the profile has plans, the editor tells how many plans use it. The new settings apply to their next run.
 
 | Section | What you set |
 |---|---|

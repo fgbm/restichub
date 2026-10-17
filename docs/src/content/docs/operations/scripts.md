@@ -36,7 +36,7 @@ When you turn the trust mode on, the control plane can run any command on this h
 
    On Windows, start an elevated PowerShell and run `restichub-agent.exe trust-server-scripts --enable`.
 3. Wait for the command to finish. The new state applies to the next job. The agent reports the state to the control plane each time it connects. Thus, when the service is idle, the command restarts it and waits until the agent is connected again. When a job is in progress, the command does not restart the service, because a restart stops the job. It tells you to restart the service after the job: `systemctl restart restichub-agent` on Linux, `Restart-Service restichub-agent` on Windows. If no service is running, the control plane sees the new state when the service starts. To skip the restart, use `--no-restart`.
-4. Open **Hosts** in the web interface. The column **Server scripts** shows **Enabled**. A host that has not reported yet shows **Unknown**. The host list also shows the interpreters that the agent found.
+4. Open **Hosts** in the web interface, and select the name of the host. The section **Server scripts** of the host page shows **Enabled** and the interpreters that the agent found. A host that has not reported yet shows **Unknown**. The filter **Server scripts** of the host list finds the hosts by this value.
 
 To turn the mode off, run the command with `--disable`. The command restarts the service in the same way. The agent reads the setting for each job, so the change applies to the next job.
 
@@ -55,7 +55,7 @@ The agent reports the mode and the interpreters that it found. The control plane
 
 ## Write a script
 
-1. Open **Profiles**. Select **Add profile**, or select **Edit** for a profile.
+1. Open **Profiles**. Select **Add profile**, or select the name of a profile.
 2. Open the section **Scripts on the host** and switch it on.
 3. In the list **Before the backup** or **After the backup**, select **Blank script** or **From a script template**.
 4. Enter a name, select the interpreter and write the script.
@@ -103,7 +103,7 @@ For a secret, select a stored secret of the purpose `hook_secret`. Select **New 
 
 A script template is a ready script with declared parameters. A profile gets a copy of the template. A later change of the template does not change the profile.
 
-Open **Settings**, then **Script templates**, to see the templates. The built-in templates are read-only. Select **Make a copy** to change one. The control plane ships these built-in templates:
+Open **Settings**, then **Scripts** → **Script templates**, to see the templates. Select the name of a template to open its page. The built-in templates are read-only. Select **Make a copy** to change one. The control plane ships these built-in templates:
 
 | Template | System |
 |---|---|
@@ -115,7 +115,7 @@ Open **Settings**, then **Script templates**, to see the templates. The built-in
 | Free disk space check | Linux, Windows |
 | Run a command | Linux, Windows |
 
-A job template is a set of scripts in a fixed order. In the profile form, select **Use a job template** to add its scripts. Open **Settings**, then **Job templates**, to manage them. A secret stays empty in a job template. Select the secret in the profile.
+A job template is a set of scripts in a fixed order. In the profile form, select **Use a job template** to add its scripts. Open **Settings**, then **Scripts** → **Job templates**, to manage them. Each job template opens as its own page. A secret stays empty in a job template. Select the secret in the profile.
 
 ## What the agent does
 

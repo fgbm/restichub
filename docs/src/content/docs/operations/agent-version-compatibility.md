@@ -20,9 +20,11 @@ The control plane sends a typed refusal and closes the stream. The refusal names
 
 ## Marks on the Hosts screen
 
-The Hosts screen shows the package version of each agent in the column "Agent version" and a mark. The tooltip of the version reads "Protocol <protocol> · control plane <version>".
+The list of hosts shows the package version of each agent in the second line of the row, for example `agent 0.4.2`. If the agent package is older than the control plane, the line shows `agent 0.4.2, 0.5.0 is available`. A host with a version that the control plane refuses shows the status "Agent too old".
 
-| Mark | Meaning |
+The page of the host shows the "Agent version" in the section "General" with a mark. The section "Connection and certificate" shows the "Protocol version" and the "Control plane version".
+
+| Mark on the host page | Meaning |
 |---|---|
 | No mark | The agent version equals the control plane version, or it is newer. |
 | Update available | The agent package is older than the control plane. The agent works. |

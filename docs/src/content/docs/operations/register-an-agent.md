@@ -7,7 +7,7 @@ An agent registers by hand with a one-time enrollment token. A person on the hos
 
 ## The registration command
 
-The Web UI shows the full command on the "Add host" screen. The command uses the control plane URL and the token:
+The Web UI shows the full command in the dialog "Add a host". Select "Add host" on the "Hosts" screen to open it. The command uses the control plane URL and the token:
 
 ```sh
 restichub-agent register --url https://<control-plane> --token <token>
@@ -42,7 +42,7 @@ If a step fails, the summary names what failed and the next command to run. The 
 
 After `register --no-service` the command prints that the service is not installed and names `install-service` as the next command.
 
-After a successful registration, the host appears on the "Hosts" screen with the status "Waiting for connection". The status changes to "Active" when the agent opens its stream.
+After a successful registration, the host appears on the "Hosts" screen with the status "Waiting for connection". The status changes to "Online" when the agent opens its stream.
 
 The token is single use. The control plane consumes the token at the first successful registration. A used token, an expired token and a revoked token give a clear error.
 
@@ -88,9 +88,9 @@ To check the connection:
 
 1. Open the "Hosts" screen in the Web UI.
 2. Find the host by its name.
-3. Read the status. A host that enrolled but did not connect yet shows "Waiting for connection". The status is "Active" after the first connection.
-4. Read the "Last seen" time. The control plane writes this time while the stream is open. A time within the last minute shows a live connection.
-5. Read the column "Agent version". The mark "Update available" shows an agent package older than the control plane (see [Agent and control plane versions](/restichub/operations/agent-version-compatibility/)).
+3. Read the status. A host that enrolled but did not connect yet shows "Waiting for connection". The status is "Online" after the first connection.
+4. Read the second line of the row, for example `contact 24 s ago · linux · amd64 · agent 0.4.2, 0.5.0 is available`. The text `0.5.0 is available` shows an agent package older than the control plane (see [Agent and control plane versions](/restichub/operations/agent-version-compatibility/)).
+5. Select the host name to open the host page. The section "General" shows the "Agent version" and the mark "Update available". An offline host shows the time "Last seen".
 
 The control plane sends a heartbeat every 30 seconds and closes the stream after three heartbeats without an answer. The Overview counts a host as online when the control plane heard from it in the last 90 seconds. The alert "Host offline" waits for its own limit (see [Alerts](/restichub/operations/alerts/)).
 
