@@ -21,6 +21,8 @@ On a host with the trust mode, a person who controls the control plane can run a
 - The audit log records each change of a script and each job that carries scripts. Each record holds the SHA-256 hash of the script text.
 - A secret reaches a script only in an environment variable. It never appears in the text, in an argument or in the log.
 
+The diagram of the [trust model](/restichub/concepts/trust-model/) shows the checks of the agent.
+
 ## Turn the trust mode on
 
 :::danger

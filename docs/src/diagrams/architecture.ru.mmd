@@ -1,0 +1,15 @@
+flowchart TB
+  browser[Браузер: {{users.role.admin}}, {{users.role.operator}}, {{users.role.viewer}}]
+  proxy[Обратный прокси: TLS на 443]
+  cp[Сервер управления: веб-интерфейс, API, планировщик, очередь]
+  db[(PostgreSQL)]
+  agent[Служба агента на каждом хосте]
+  restic[restic на хосте]
+  repo[(Репозиторий: S3, REST, SFTP, локальный)]
+
+  browser -->|HTTPS 443| proxy
+  proxy -->|HTTP 8080| cp
+  cp --> db
+  agent ==>|агент открывает поток: gRPC, mTLS 8443| cp
+  agent --> restic
+  restic -->|данные копии идут напрямую| repo

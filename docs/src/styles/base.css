@@ -56,13 +56,5 @@
 .rh-card strong { display: block; color: var(--sl-color-white); margin-bottom: .25rem; }
 .rh-card span { color: var(--sl-color-gray-3); font-size: .9rem; }
 .rh-card .rh-step { color: var(--sl-color-text-accent); font-size: .75rem; font-weight: 600; display: block; margin-bottom: .35rem; }
-.rh-how { margin: 0 0 2rem; }
-.rh-how svg { width: 100%; height: auto; max-width: 52rem; display: block; }
-.rh-how .box { fill: var(--sl-color-bg-nav); stroke: var(--sl-color-gray-5); stroke-width: 1.5; }
-.rh-how .lead { fill: var(--sl-color-accent-low); stroke: var(--sl-color-accent); stroke-width: 1.5; }
-.rh-how text { fill: var(--sl-color-white); font-size: 14px; font-family: var(--__sl-font); text-anchor: middle; }
-.rh-how text.sub { fill: var(--sl-color-gray-3); font-size: 11.5px; }
-.rh-how .arrow { stroke: var(--sl-color-gray-3); stroke-width: 1.6; fill: none; }
-.rh-how .head { fill: var(--sl-color-gray-3); }
 [data-has-hero] h1 { font-size: 1.6rem; line-height: 1.2; }
 .hero { padding-block: 2rem 1rem; }
