@@ -144,4 +144,4 @@ Do these steps on each Linux host that keeps a local repository:
 
 A repository root cannot be `/`, a system directory such as `/etc` or `/usr`, or a directory of the agent. A restore root and a repository root cannot hold each other, except the restore root `/`. `install-service` stops with a message that names the line.
 
-With the restore root `/`, an in-place restore below `/home` or `/root` now fails with `read-only file system`. A restore root `/home` or `/root` does not change this. Restore to another root, for example `/var/lib/restichub-restore`, and copy the files to their place. See [Restore roots](/restichub/guides/restore/#restore-roots).
+With the restore root `/`, an in-place restore below `/home` or `/root` now fails with `read-only file system`. A restore root `/home` or `/root` does not change this, and `install-service` now refuses such a root. Use a directory below it that root owns. Restore to another root, for example `/var/lib/restichub-restore`, and copy the files to their place. See [Restore roots](/restichub/guides/restore/#restore-roots).

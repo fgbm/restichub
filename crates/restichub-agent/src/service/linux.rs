@@ -196,15 +196,18 @@ pub fn stop() -> Result<()> {
     Ok(())
 }
 
-/// Refuses a restore root that another account can change (FR-RS-03).
+/// Refuses a restore root that another account can change, a skipped line and the root `/home` or
+/// `/root` (FR-RS-03).
 fn refuse_rejected_roots(config: &Path) -> Result<()> {
+    let file = crate::restore_roots::roots_file_for(config);
+    crate::restore_roots::refuse_skipped_lines(&file)?;
     if let Some((root, reason)) = crate::restore_roots::rejected_roots(config)
         .into_iter()
         .next()
     {
         bail!("the restore root {} is not safe: {reason}", root.display());
     }
-    Ok(())
+    crate::restore_roots::refuse_home_roots(&file)
 }
 
 /// The repository roots of the host, each created with the access of root only when it is missing
@@ -212,6 +215,7 @@ fn refuse_rejected_roots(config: &Path) -> Result<()> {
 /// of the agent stop the install.
 fn repository_roots(config: &Path, restic: &Path) -> Result<Vec<PathBuf>> {
     let file = crate::repository_roots::roots_file_for(config);
+    crate::restore_roots::refuse_skipped_lines(&file)?;
     if let Some((root, reason)) = crate::restore_roots::rejected_roots_in(&file)
         .into_iter()
         .next()

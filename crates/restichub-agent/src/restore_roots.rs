@@ -221,8 +221,24 @@ fn resolve(path: &Path) -> io::Result<PathBuf> {
 /// so a local user cannot widen the roots.
 fn load_roots(file: &Path) -> Vec<PathBuf> {
     let mut roots = vec![default_root()];
-    roots.extend(load_roots_file(file));
+    roots.extend(
+        load_roots_file(file)
+            .into_iter()
+            .filter(|root| usable_restore_root(file, root)),
+    );
     roots
+}
+
+fn usable_restore_root(file: &Path, root: &Path) -> bool {
+    let home = cfg!(target_os = "linux") && crate::repository_roots::is_home_dir(root);
+    if home {
+        tracing::warn!(
+            file = %file.display(),
+            root = %root.display(),
+            "the restore root is ignored: the service keeps /home and /root read-only; use a directory below it"
+        );
+    }
+    !home
 }
 
 /// The safe roots of a roots file. An absent file holds no root.
@@ -232,14 +248,15 @@ pub(crate) fn load_roots_file(file: &Path) -> Vec<PathBuf> {
         Ok(_) => match read_trusted(file) {
             Ok(text) => {
                 let (extra, skipped) = parse_roots(&text);
-                if skipped > 0 {
+                for (line, text) in skipped {
                     tracing::warn!(
                         file = %file.display(),
-                        skipped,
-                        "the roots file holds lines that are not plain absolute paths"
+                        line,
+                        text = ?text,
+                        "the roots file line is ignored: it is not a plain absolute path"
                     );
                 }
-                for root in extra {
+                for (_, root) in extra {
                     match check_root(&root) {
                         Ok(()) => roots.push(root),
                         Err(error) => tracing::warn!(
@@ -273,7 +290,11 @@ fn listed_roots(file: &Path) -> Vec<PathBuf> {
         return Vec::new();
     }
     match std::fs::read_to_string(file) {
-        Ok(text) => parse_roots(&text).0,
+        Ok(text) => parse_roots(&text)
+            .0
+            .into_iter()
+            .map(|(_, root)| root)
+            .collect(),
         Err(error) => {
             tracing::warn!(file = %file.display(), %error, "cannot read the roots file");
             Vec::new()
@@ -295,11 +316,62 @@ pub(crate) fn rejected_roots_in(file: &Path) -> Vec<(PathBuf, String)> {
     parse_roots(&text)
         .0
         .into_iter()
-        .filter_map(|root| {
+        .filter_map(|(_, root)| {
             let error = check_root(&root).err()?;
             Some((root, format!("{error:#}")))
         })
         .collect()
+}
+
+/// Refuses a line of a roots file that the agent skips at load, so `install-service` names it
+/// instead of a silent warning.
+///
+/// # Errors
+///
+/// Returns an error with the line number for the first such line.
+pub fn refuse_skipped_lines(file: &Path) -> Result<()> {
+    match read_trusted(file) {
+        Ok(text) => skipped_line_error(file, &text),
+        Err(_) => Ok(()),
+    }
+}
+
+fn skipped_line_error(file: &Path, text: &str) -> Result<()> {
+    if let Some((line, text)) = parse_roots(text).1.into_iter().next() {
+        anyhow::bail!(
+            "line {line} of {} is not a plain absolute path, or holds a quote, a backslash, white space or %: {text:?}; fix or remove the line and run install-service again",
+            file.display()
+        );
+    }
+    Ok(())
+}
+
+/// Refuses the restore root `/home` or `/root`: `ProtectHome=read-only` keeps it read-only even in
+/// `ReadWritePaths`, so a restore there would fail.
+///
+/// # Errors
+///
+/// Returns an error with the line number for the first such root.
+pub fn refuse_home_roots(file: &Path) -> Result<()> {
+    match read_trusted(file) {
+        Ok(text) => home_root_error(file, &text),
+        Err(_) => Ok(()),
+    }
+}
+
+fn home_root_error(file: &Path, text: &str) -> Result<()> {
+    if let Some((line, root)) = parse_roots(text)
+        .0
+        .into_iter()
+        .find(|(_, root)| crate::repository_roots::is_home_dir(root))
+    {
+        anyhow::bail!(
+            "line {line} of {}: the restore root {} stays read-only, because the service keeps /home and /root read-only; use a directory below it, owned by root, and run install-service again",
+            file.display(),
+            root.display()
+        );
+    }
+    Ok(())
 }
 
 /// Refuses a root that another account can change, or whose existing ancestor another account can
@@ -381,19 +453,23 @@ fn check_trusted(_file: &Path) -> Result<()> {
     Ok(())
 }
 
-/// The roots of a file text and the number of lines that are not plain absolute paths. A line that
-/// starts with `#` is a comment.
-fn parse_roots(text: &str) -> (Vec<PathBuf>, usize) {
+/// A line of a roots file with its number from 1.
+type Numbered<T> = (usize, T);
+
+/// The roots of a file text and the lines that are not plain absolute paths. A line that starts
+/// with `#` is a comment.
+fn parse_roots(text: &str) -> (Vec<Numbered<PathBuf>>, Vec<Numbered<String>>) {
     let mut roots = Vec::new();
-    let mut skipped = 0;
-    for line in text.lines().map(str::trim).filter(|line| !line.is_empty()) {
-        if line.starts_with('#') {
+    let mut skipped = Vec::new();
+    for (index, line) in text.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
             continue;
         }
         if components(PathFlavor::host(), line).is_some() && !has_unit_syntax(line) {
-            roots.push(PathBuf::from(line));
+            roots.push((index + 1, PathBuf::from(line)));
         } else {
-            skipped += 1;
+            skipped.push((index + 1, line.to_owned()));
         }
     }
     (roots, skipped)
@@ -662,9 +738,15 @@ mod tests {
             parse_roots("# comment\n\n/srv/restore\n  /data  \nrelative\n../x\n");
         assert_eq!(
             roots,
-            vec![PathBuf::from("/srv/restore"), PathBuf::from("/data")]
+            vec![
+                (3, PathBuf::from("/srv/restore")),
+                (4, PathBuf::from("/data"))
+            ]
         );
-        assert_eq!(skipped, 2);
+        assert_eq!(
+            skipped,
+            vec![(5, "relative".to_owned()), (6, "../x".to_owned())]
+        );
     }
 
     #[test]
@@ -672,8 +754,52 @@ mod tests {
         let (roots, skipped) = parse_roots(
             "/srv/\" \"/etc\n/srv/'a'\n/srv/a b\n/srv/a\tb\n/srv/a\\b\n/srv/%h\n/srv/a\u{7}\n/srv/ok\n",
         );
-        assert_eq!(roots, vec![PathBuf::from("/srv/ok")]);
-        assert_eq!(skipped, 7);
+        assert_eq!(roots, vec![(8, PathBuf::from("/srv/ok"))]);
+        assert_eq!(skipped.len(), 7);
+    }
+
+    #[test]
+    fn adr_0045_install_service_refuses_a_skipped_root_line_by_its_number() {
+        let file = Path::new("/etc/restichub-agent-repository-roots.txt");
+        let error = skipped_line_error(file, "# comment\n/srv/ok\n/srv/a b\nrelative\n")
+            .expect_err("the line must be refused");
+        let message = format!("{error:#}");
+        assert!(
+            message.contains("line 3 of /etc/restichub-agent-repository-roots.txt"),
+            "{message}"
+        );
+        assert!(message.contains("\"/srv/a b\""), "{message}");
+        assert!(skipped_line_error(file, "# comment\n\n/srv/ok\n").is_ok());
+    }
+
+    #[test]
+    fn ac_rs_05_install_service_refuses_the_restore_root_home_or_root() {
+        let file = Path::new("/etc/restichub-agent-restore-roots.txt");
+        for (text, line) in [
+            ("/srv/ok\n/home\n", 2),
+            ("/home/\n", 1),
+            ("# c\n//root\n", 2),
+        ] {
+            let error = home_root_error(file, text).expect_err("the root must be refused");
+            let message = format!("{error:#}");
+            assert!(
+                message.contains(&format!(
+                    "line {line} of /etc/restichub-agent-restore-roots.txt"
+                )),
+                "{message}"
+            );
+            assert!(message.contains("below it, owned by root"), "{message}");
+        }
+        assert!(home_root_error(file, "/home/restore\n/root/restore\n/srv\n").is_ok());
+    }
+
+    #[test]
+    fn ac_rs_05_the_agent_skips_the_restore_root_home_or_root() {
+        let file = Path::new("/etc/restichub-agent-restore-roots.txt");
+        assert!(!usable_restore_root(file, Path::new("/home")));
+        assert!(!usable_restore_root(file, Path::new("/root/")));
+        assert!(usable_restore_root(file, Path::new("/home/restore")));
+        assert!(usable_restore_root(file, Path::new("/srv/restore")));
     }
 
     #[test]

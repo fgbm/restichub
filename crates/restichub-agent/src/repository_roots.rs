@@ -145,6 +145,24 @@ pub(crate) fn load_roots(config_dir: &Path, protected: &[PathBuf]) -> Vec<PathBu
         .collect()
 }
 
+/// `/home` or `/root` itself, by its text or its real path.
+pub(crate) fn is_home_dir(root: &Path) -> bool {
+    let flavor = PathFlavor::host();
+    std::iter::once(root.to_path_buf())
+        .chain(root.canonicalize().ok())
+        .any(|form| {
+            form.to_str()
+                .and_then(|path| components(flavor, path))
+                .is_some_and(|parts| is_home(&parts))
+        })
+}
+
+fn is_home(parts: &[String]) -> bool {
+    HOME_DIRS
+        .iter()
+        .any(|dir| components(PathFlavor::host(), dir).as_deref() == Some(parts))
+}
+
 /// Why a repository root is not allowed, or `None` for an allowed root.
 pub(crate) fn refused_root(root: &Path, protected: &[PathBuf]) -> Option<&'static str> {
     let mut forms = vec![root.to_path_buf()];
@@ -160,10 +178,7 @@ pub(crate) fn refused_root(root: &Path, protected: &[PathBuf]) -> Option<&'stati
         if parts.is_empty() {
             return Some("the root is the root of the file system");
         }
-        let system = SYSTEM_DIRS.iter().any(|dir| overlaps(flavor, path, dir))
-            || HOME_DIRS
-                .iter()
-                .any(|dir| components(flavor, dir).as_ref() == Some(&parts));
+        let system = SYSTEM_DIRS.iter().any(|dir| overlaps(flavor, path, dir)) || is_home(&parts);
         let state = is_within(flavor, STATE_PARENT, path)
             || (is_within(flavor, path, STATE_PARENT)
                 && parts
