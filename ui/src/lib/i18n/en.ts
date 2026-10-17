@@ -1163,6 +1163,8 @@ export const en = {
 		'The host does not restore to this path. Use a restore root of the host. An administrator adds a root on the host.',
 	'error.repository_host_locked':
 		'The host of an initialized local repository cannot change. The snapshots are on the disk of this host.',
+	'error.not_repository_host':
+		'The plan runs on another host than its local repository. Open the plan and select the repository host.',
 	'error.internal_error':
 		'The control plane has an internal problem. Try again later. If the problem stays, ask the administrator to read the log.',
 	'error.network': 'The control plane did not answer. Check the network and try again.',

@@ -144,7 +144,7 @@ describe('the plan page', () => {
 		expect(within(host).queryByRole('option', { name: 'old-host' })).not.toBeInTheDocument();
 	});
 
-	it('fr_rp_08 offers only the repository host for a local repository', async () => {
+	it('ac_rp_07 offers only the repository host for a local repository', async () => {
 		mocks.listAgents.mockResolvedValue([
 			{ id: 'a_1', hostname: 'win-fs01', status: 'active' },
 			{ id: 'a_3', hostname: 'nas-01', status: 'active' }
@@ -181,6 +181,74 @@ describe('the plan page', () => {
 				.map((option) => option.textContent)
 		).toEqual(['nas-01']);
 		expect(screen.getByText(/Its path is on the host nas-01 only/)).toBeInTheDocument();
+	});
+
+	it('ac_rp_07 keeps the host of a stored plan on another host and shows the error', async () => {
+		mocks.listAgents.mockResolvedValue([
+			{ id: 'a_1', hostname: 'win-fs01', status: 'active' },
+			{ id: 'a_3', hostname: 'nas-01', status: 'active' }
+		]);
+		mocks.listRepositories.mockResolvedValue([
+			{
+				id: 'r_1',
+				name: 'nas-local',
+				backend: { kind: 'local', path: '/srv/restic' },
+				maintenance_agent_id: 'a_3'
+			}
+		]);
+		const user = userEvent.setup();
+		mocks.updatePlan.mockResolvedValue({ plan: plan() });
+		render(PlanEditor, { planId: 'pl_1' });
+
+		const host = await screen.findByLabelText(/Host/, { selector: 'select' });
+		expect(host).toHaveValue('a_1');
+		expect(
+			within(host)
+				.getAllByRole('option')
+				.map((option) => option.textContent)
+		).toEqual(['win-fs01', 'nas-01']);
+		expect(host).toHaveAttribute('aria-invalid', 'true');
+		expect(screen.getByText(/Select the repository host/)).toBeInTheDocument();
+
+		await user.clear(input('#plan-cron'));
+		await user.type(input('#plan-cron'), '0 3 * * *');
+		await user.click(screen.getByRole('button', { name: 'Save' }));
+		await waitFor(() =>
+			expect(mocks.updatePlan).toHaveBeenCalledWith(
+				'pl_1',
+				expect.objectContaining({ agent_id: 'a_1' })
+			)
+		);
+	});
+
+	it('ac_rp_07 clears the host when the local repository host is not active', async () => {
+		mocks.listProfiles.mockResolvedValue([
+			{ id: 'p_1', name: 'web-daily', repository_id: 'r_1' },
+			{ id: 'p_2', name: 'nas-files', repository_id: 'r_2' }
+		]);
+		mocks.listRepositories.mockResolvedValue([
+			{
+				id: 'r_1',
+				name: 'repo-a',
+				backend: { kind: 'rest', endpoint: 'https://rest.example.net/a' },
+				maintenance_agent_id: 'a_1'
+			},
+			{
+				id: 'r_2',
+				name: 'nas-local',
+				backend: { kind: 'local', path: '/srv/restic' },
+				maintenance_agent_id: 'a_2'
+			}
+		]);
+		const user = userEvent.setup();
+		render(PlanEditor);
+
+		const host = await screen.findByLabelText(/Host/, { selector: 'select' });
+		await user.selectOptions(screen.getByLabelText(/Profile/, { selector: 'select' }), 'p_2');
+
+		await waitFor(() => expect(within(host).queryAllByRole('option')).toHaveLength(0));
+		expect((host as HTMLSelectElement).value).toBe('');
+		expect(screen.getByText(/Select the repository host/)).toBeInTheDocument();
 	});
 
 	it('fr_sc_01 edits a stored plan', async () => {

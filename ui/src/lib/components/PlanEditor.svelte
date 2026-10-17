@@ -82,19 +82,29 @@
 	const profileOptions = $derived<SelectOption[]>(
 		profiles.map((profile) => ({ value: profile.id, label: profile.name }))
 	);
-	const repository = $derived.by(() => {
-		const repositoryId = profiles.find((profile) => profile.id === profileId)?.repository_id;
+	function repositoryOf(id: string): Repository | undefined {
+		const repositoryId = profiles.find((profile) => profile.id === id)?.repository_id;
 		return repositories.find((item) => item.id === repositoryId);
-	});
-	// A local path is on the disk of the repository host only, so the plan runs there (FR-RP-08).
-	const localHost = $derived(
-		repository?.backend.kind === 'local' ? (repository.maintenance_agent_id ?? '') : null
-	);
+	}
+	// A local path is on the disk of the repository host only, so the plan runs there (FR-RP-10).
+	function localHostOf(item: Repository | undefined): string | null {
+		return item?.backend.kind === 'local' ? (item.maintenance_agent_id ?? '') : null;
+	}
+	const repository = $derived(repositoryOf(profileId));
+	const localHost = $derived(localHostOf(repository));
+	// The stored host of a plan stays an option, so the field shows the real value and its error
+	// instead of a silent move to another host.
 	const agentOptions = $derived<SelectOption[]>(
 		agents
-			.filter((agent) => agent.status === 'active')
-			.filter((agent) => localHost === null || agent.id === localHost)
+			.filter(
+				(agent) =>
+					(agent.status === 'active' && (localHost === null || agent.id === localHost)) ||
+					agent.id === existing?.agent_id
+			)
 			.map((agent) => ({ value: agent.id, label: agent.hostname }))
+	);
+	const hostMismatch = $derived(
+		localHost !== null && agentId !== localHost ? t('reason.not_repository_host') : undefined
 	);
 	const policyOptions = $derived<SelectOption[]>(
 		POLICIES.map((value) => ({ value, label: describeMissedRunPolicy(value, t) }))
@@ -110,9 +120,12 @@
 	const repositoryName = $derived(repository?.name ?? '');
 	const localHostName = $derived(agents.find((agent) => agent.id === localHost)?.hostname ?? '');
 
-	$effect(() => {
-		if (!loading && localHost !== null && agentId !== localHost) agentId = localHost;
-	});
+	function selectProfile(id: string): void {
+		const host = localHostOf(repositoryOf(id));
+		if (host === null) return;
+		const active = agents.some((agent) => agent.id === host && agent.status === 'active');
+		agentId = active ? host : '';
+	}
 
 	function describeHours(seconds: number): string {
 		const hours = seconds / 3600;
@@ -418,13 +431,14 @@
 				options={profileOptions}
 				error={fieldError(formProblem, 'profile_id')}
 				bind:value={profileId}
+				onchange={(event) => selectProfile(event.currentTarget.value)}
 				required
 			/>
 			<Select
 				id="plan-agent"
 				label={t('plans.host')}
 				options={agentOptions}
-				error={fieldError(formProblem, 'agent_id')}
+				error={fieldError(formProblem, 'agent_id') ?? hostMismatch}
 				bind:value={agentId}
 				required
 			/>
