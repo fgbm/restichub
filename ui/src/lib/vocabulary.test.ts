@@ -48,11 +48,11 @@ describe('job states', () => {
 		}
 	});
 
-	it('shows success with warnings as With warnings in the warning tone with the full meaning', () => {
+	it('shows success with warnings as Warnings in the warning tone with the full meaning', () => {
 		const state = jobState({ status: 'succeeded', result_code: 'succeeded_with_warnings' });
 		expect(pillOf(state)).toEqual({
 			tone: 'warning',
-			label: 'With warnings',
+			label: 'Warnings',
 			full: 'Succeeded with warnings'
 		});
 	});
