@@ -34,6 +34,7 @@
 		StatusPill,
 		Switch,
 		DataTable,
+		Disclosure,
 		FilterBar,
 		Tabs,
 		TextField,
@@ -57,6 +58,7 @@
 	let panelOpen = $state(false);
 	let page = $state(1);
 	let tab = $state('overview');
+	let disclosureOpen = $state(false);
 	let username = $state('operator');
 	let displayName = $state('Boris Ivanov');
 	let role = $state('operator');
@@ -448,6 +450,13 @@
 		<div class="spaced">
 			<Pagination bind:page pageCount={7} summary="Showing 1 to 20 of 128" />
 		</div>
+	</section>
+
+	<section>
+		<h2>Disclosure</h2>
+		<Disclosure label="More: a list file on the host" bind:open={disclosureOpen}>
+			<TextField label="Exclude list file" bind:value={username} />
+		</Disclosure>
 	</section>
 
 	<section>

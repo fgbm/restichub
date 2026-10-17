@@ -29,6 +29,7 @@
 		Badge,
 		Button,
 		Checkbox,
+		Disclosure,
 		Field,
 		Icon,
 		Select,
@@ -483,7 +484,7 @@
 		bind:enabled={draft.enabled.excludes}
 		bind:open={open.excludes}
 	>
-		<p class="lead"><RichText text={t('pe.excludes.lead')} /></p>
+		<p class="lead">{t('pe.excludes.lead')}</p>
 		<Field
 			label={t('profiles.excludes')}
 			help={t('pe.excludes.patternsHelp')}
@@ -496,23 +497,20 @@
 				rows="4"
 				bind:value={draft.excludes}></textarea>
 		</Field>
-		<details class="more" bind:open={excludeListOpen}>
-			<summary>{t('pe.excludes.more')}</summary>
-			<div class="more__body">
-				<Field
-					label={t('profiles.excludeFiles')}
-					help={t('pe.excludes.filesHelp')}
-					error={fieldError(formProblem, 'exclude_files')}
-					for="profile-exclude-files"
-				>
-					<textarea
-						id="profile-exclude-files"
-						class="rh-textarea rh-input--mono"
-						rows="3"
-						bind:value={draft.excludeFiles}></textarea>
-				</Field>
-			</div>
-		</details>
+		<Disclosure label={t('pe.excludes.more')} bind:open={excludeListOpen}>
+			<Field
+				label={t('profiles.excludeFiles')}
+				help={t('pe.excludes.filesHelp')}
+				error={fieldError(formProblem, 'exclude_files')}
+				for="profile-exclude-files"
+			>
+				<textarea
+					id="profile-exclude-files"
+					class="rh-textarea rh-input--mono"
+					rows="3"
+					bind:value={draft.excludeFiles}></textarea>
+			</Field>
+		</Disclosure>
 	</ProfileSection>
 
 	<ProfileSection
@@ -776,21 +774,6 @@
 </RecordPage>
 
 <style>
-	.more {
-		margin-top: var(--rh-space-3);
-		border: var(--rh-border-width) solid var(--rh-color-border);
-		border-radius: var(--rh-radius-md);
-	}
-
-	.more summary {
-		padding: var(--rh-space-2) var(--rh-space-3);
-		cursor: pointer;
-	}
-
-	.more__body {
-		padding: var(--rh-space-2) var(--rh-space-3) var(--rh-space-3);
-	}
-
 	.os {
 		display: flex;
 		align-items: center;

@@ -1819,8 +1819,7 @@ export const en = {
 	'pe.section.limits': 'Run limits',
 	'pe.paths.lead':
 		'What to back up, one path for each line. The paths for all systems apply on any host. The other paths apply on their own system only.',
-	'pe.excludes.lead':
-		'What to skip. Patterns such as <code>*.tmp</code> or paths, one entry for each line.',
+	'pe.excludes.lead': 'What not to back up. One entry for each line.',
 	'pe.excludes.filesHelp':
 		'The path to a file on the host that holds the list of patterns. restic --exclude-file.',
 	'pe.excludes.patternsHelp':
