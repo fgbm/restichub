@@ -182,12 +182,8 @@ pub fn register(options: &RegisterOptions, dir: &Path) -> Result<()> {
     }
     // The tree check runs before the copy: the move of an old restic reads from it, so a directory
     // that another account can write must be refused before anything leaves it (T20, FR-IN-07).
-    crate::preflight::prepare_directories(
-        dir,
-        &crate::paths::cache_dir(),
-        untrusted(options),
-        options.verbose,
-    )?;
+    let cache = crate::paths::cache_dir();
+    let prepared = PreparedDirectories::prepare(options, dir, &cache)?;
     place_program()?;
     let installer = Installer::host()?;
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -196,14 +192,7 @@ pub fn register(options: &RegisterOptions, dir: &Path) -> Result<()> {
         .context("cannot start the runtime")?;
     let registered = runtime.block_on(async {
         let supply = crate::restic_install::supply(&options.restic)?;
-        provision_and_register(
-            options,
-            dir,
-            &crate::paths::cache_dir(),
-            &installer,
-            &supply,
-        )
-        .await
+        provision_and_register(options, &prepared, &installer, &supply).await
     });
     if program.rebuilt.replaced() {
         registered.context("the service stays stopped until this command succeeds")?;
@@ -231,20 +220,39 @@ pub fn register(options: &RegisterOptions, dir: &Path) -> Result<()> {
 
 const REGISTERED_NOT_STARTED: &str = "the agent is registered, but the service is not started; fix the cause and run: restichub-agent install-service";
 
-/// Checks the input, installs restic when it is absent and enrolls this host (FR-IN-07, ADR-0038).
+/// The configuration and cache directories after the register checks and repairs, which run once
+/// and before the token is spent (FR-IN-07, T20).
+pub struct PreparedDirectories<'a> {
+    dir: &'a Path,
+    cache: &'a Path,
+}
+
+impl<'a> PreparedDirectories<'a> {
+    /// Repairs and proves both directories (see [`crate::preflight::prepare_directories`]).
+    ///
+    /// # Errors
+    ///
+    /// Returns the error of [`crate::preflight::prepare_directories`].
+    pub fn prepare(options: &RegisterOptions, dir: &'a Path, cache: &'a Path) -> Result<Self> {
+        crate::preflight::prepare_directories(dir, cache, untrusted(options), options.verbose)?;
+        Ok(Self { dir, cache })
+    }
+}
+
+/// Installs restic when it is absent and enrolls this host (FR-IN-07, ADR-0038).
+///
+/// The caller has checked the input and prepared the directories.
 ///
 /// # Errors
 ///
-/// Returns an error from the checks, from the restic install, or from [`register_async`].
+/// Returns an error from the restic install or from the enrollment.
 pub async fn provision_and_register(
     options: &RegisterOptions,
-    dir: &Path,
-    cache: &Path,
+    prepared: &PreparedDirectories<'_>,
     installer: &Installer<'_>,
     supply: &Supply,
 ) -> Result<()> {
-    check_register_input(options, dir)?;
-    crate::preflight::prepare_directories(dir, cache, untrusted(options), options.verbose)?;
+    let PreparedDirectories { dir, cache } = *prepared;
     installer.ensure(supply).await.context(
         "restic is not installed, so the agent did not register and the token is not used",
     )?;
@@ -261,11 +269,11 @@ pub async fn provision_and_register(
             dir,
             was_enabled,
             &crate::scripts::set_mode,
-            register_async(options, dir, cache, &restic),
+            enroll_prepared(options, prepared, &restic),
         )
         .await;
     }
-    register_async(options, dir, cache, &restic).await
+    enroll_prepared(options, prepared, &restic).await
 }
 
 /// Writes the trust mode before the enrollment, so a mode file that the host cannot trust never
@@ -525,10 +533,28 @@ pub async fn register_async(
     restic: &dyn Restic,
 ) -> Result<()> {
     check_register_input(options, dir)?;
-    let url = options.url.clone().unwrap_or_default();
     let token = resolve_token(options)?;
-    crate::preflight::prepare_directories(dir, cache, untrusted(options), options.verbose)?;
+    let prepared = PreparedDirectories::prepare(options, dir, cache)?;
+    enroll(options, &prepared, restic, &token).await
+}
 
+async fn enroll_prepared(
+    options: &RegisterOptions,
+    prepared: &PreparedDirectories<'_>,
+    restic: &dyn Restic,
+) -> Result<()> {
+    let token = resolve_token(options)?;
+    enroll(options, prepared, restic, &token).await
+}
+
+async fn enroll(
+    options: &RegisterOptions,
+    prepared: &PreparedDirectories<'_>,
+    restic: &dyn Restic,
+    token: &str,
+) -> Result<()> {
+    let dir = prepared.dir;
+    let url = options.url.clone().unwrap_or_default();
     let facts = Facts {
         hostname: hostname()?,
         os: std::env::consts::OS.to_owned(),
@@ -541,7 +567,7 @@ pub async fn register_async(
     let (generated, csr_der) = generate_key_and_csr()?;
     let client = Client::new(options.ca_file.as_deref())?;
     crate::preflight::check_clock(OffsetDateTime::now_utc(), client.server_time(&url).await)?;
-    let enrolled = client.enroll(&url, &token, &facts, &csr_der).await?;
+    let enrolled = client.enroll(&url, token, &facts, &csr_der).await?;
     // The response is checked before any file is written (ADR-0026, FR-AG-04).
     crate::verify::check_enrollment(&generated.public_key, &enrolled, OffsetDateTime::now_utc())?;
 

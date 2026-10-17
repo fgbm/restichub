@@ -344,15 +344,13 @@ async fn fr_in_07_a_failed_restic_install_says_that_the_token_is_not_used() {
         sums_signature: missing.join("SHA256SUMS.asc"),
     };
 
-    let error = commands::provision_and_register(
-        &options,
-        &dir.join("Agent"),
-        &dir.join("cache"),
-        &installer,
-        &supply,
-    )
-    .await
-    .expect_err("restic cannot be installed");
+    let config = dir.join("Agent");
+    let cache = dir.join("cache");
+    let prepared = commands::PreparedDirectories::prepare(&options, &config, &cache)
+        .expect("the directories are ready");
+    let error = commands::provision_and_register(&options, &prepared, &installer, &supply)
+        .await
+        .expect_err("restic cannot be installed");
 
     assert!(
         format!("{error:#}").contains("the token is not used"),
@@ -407,4 +405,48 @@ fn sample_identity() -> StoredIdentity {
             signature: "AAAA".to_owned(),
         },
     }
+}
+
+#[tokio::test]
+async fn fr_in_07_provision_and_register_does_not_prepare_the_directories_again() {
+    let dir = common::temp_config_dir("register-prepared-once");
+    std::fs::create_dir_all(&dir).expect("cannot create the test directory");
+    let options = RegisterOptions {
+        url: Some("http://127.0.0.1:9".to_owned()),
+        token: Some("one-time-token".to_owned()),
+        no_service: true,
+        ..RegisterOptions::default()
+    };
+    let installer = restichub_agent::restic_install::Installer {
+        layout: restichub_agent::restic_store::Layout::new(dir.join("bin"), dir.join("Agent")),
+        platform: restichub_agent::restic_release::Platform::host().expect("a restic platform"),
+        key: restichub_agent::restic_release::release_key().expect("the release key"),
+        probe: &|_| Ok("0.19.1".to_owned()),
+    };
+    let missing = dir.join("missing");
+    let supply = restichub_agent::restic_release::Supply::Files {
+        archive: missing.join("restic_0.19.1_linux_amd64.bz2"),
+        sums: missing.join("SHA256SUMS"),
+        sums_signature: missing.join("SHA256SUMS.asc"),
+    };
+    let config = dir.join("Agent");
+    let cache = dir.join("cache");
+    let prepared = commands::PreparedDirectories::prepare(&options, &config, &cache)
+        .expect("the directories are ready");
+    std::fs::remove_dir_all(&cache).expect("cannot remove the cache directory");
+    std::fs::write(&cache, b"a file").expect("cannot write the blocker");
+    assert!(
+        commands::PreparedDirectories::prepare(&options, &config, &cache).is_err(),
+        "a second preparation sees the blocker"
+    );
+
+    let error = commands::provision_and_register(&options, &prepared, &installer, &supply)
+        .await
+        .expect_err("restic cannot be installed");
+
+    assert!(
+        format!("{error:#}").contains("the token is not used"),
+        "unexpected error: {error:#}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }
