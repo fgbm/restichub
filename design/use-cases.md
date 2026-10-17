@@ -1,6 +1,6 @@
 # ResticHub acceptance use cases
 
-Status: for manual acceptance. Date: 2026-10-14.
+Status: for manual acceptance. Date: 2026-10-17.
 
 ## 1. Purpose
 
@@ -57,7 +57,7 @@ The sign-in screen asks for the username and the password only. The account is i
   1. Open the stage address.
   2. Enter the username and the password.
   3. Click "Sign in".
-- **Expected result:** the dashboard appears. The top bar shows the organization switcher and the role of the person. The audit log holds a `sign_in` record.
+- **Expected result:** the "Overview" appears. The top bar shows the organization switcher and the account menu. The audit log holds a `sign_in` record.
 - **Alternative flows:**
   - A wrong username or password gives `invalid_credentials`.
   - Many attempts from one address give `rate_limited`.
@@ -73,7 +73,7 @@ The sign-in screen asks for the username and the password only. The account is i
   1. Open the organization menu in the top bar.
   2. The menu lists the memberships of the person with the role and a check mark on the current organization.
   3. Click another organization. The menu shows a filter when the person holds more than seven memberships.
-- **Expected result:** the toast "Switched to name" appears. Every screen reloads its data for the new organization. The audit log holds a `session_switch` record.
+- **Expected result:** the toast "You switched to <name>." appears. Every screen reloads its data for the new organization. The audit log holds a `session_switch` record.
 - **Alternative flows:**
   - A failed switch shows a toast with the error.
   - A lost session redirects to the sign-in screen.
@@ -103,11 +103,11 @@ The sign-in screen asks for the username and the password only. The account is i
 - **Actor:** the Platform Admin.
 - **Preconditions:** the person signs in as the Platform Admin.
 - **Main flow:**
-  1. Open the "Organizations" screen in the "Platform" section.
-  2. Click "Create an organization".
+  1. Open the organization menu in the top bar and click "Platform administration".
+  2. Open "Organizations" and click "Create organization".
   3. Enter the name. The name holds 1 to 63 characters from `a-z`, `0-9` and `-`, starts with a letter and is not `platform`.
-  4. Click "Create".
-- **Expected result:** the list shows the new organization with the status "Active", the user count 0 and the mark "No administrator". The platform audit log holds `tenant_create`.
+  4. Click "Create organization".
+- **Expected result:** the tab "Active" shows the new organization with "0 users" and the mark "No administrator". The platform audit log holds `tenant_create`.
 - **Alternative flows:**
   - An existing name gives `conflict`.
   - An invalid name gives `validation_failed` on the field.
@@ -120,11 +120,12 @@ The sign-in screen asks for the username and the password only. The account is i
 - **Actor:** the Platform Admin.
 - **Preconditions:** the person signs in as the Platform Admin. The organization exists.
 - **Main flow:**
-  1. Open the "Organizations" screen.
-  2. Click "Suspend" on an active organization.
-  3. Click "Resume" to make the organization active again.
-  4. Click "Delete" on a suspended organization and confirm.
-- **Expected result:** a suspended organization refuses the sign-in and the API tokens of its users. Its agents stay connected. The status of a deleted organization is "Deleted". The platform audit log holds `tenant_suspend`, `tenant_resume` and `tenant_delete`.
+  1. Open "Organizations".
+  2. In the menu "…" of an active organization, click "Suspend".
+  3. In the same menu, click "Resume" to make the organization active again.
+  4. Suspend the organization again. In its menu "…", click "Delete".
+  5. Type the name of the organization and click "Delete organization".
+- **Expected result:** a suspended organization refuses the sign-in and the API tokens of its users. Its agents stay connected. The tab "Deleted" shows a deleted organization. The platform audit log holds `tenant_suspend`, `tenant_resume` and `tenant_delete`.
 - **Alternative flows:**
   - The platform tenant cannot be suspended or deleted (conflict).
   - The delete of an active organization is refused. Suspend it first.
@@ -155,12 +156,12 @@ The sign-in screen asks for the username and the password only. The account is i
 - **Actor:** the Admin of the organization.
 - **Preconditions:** the person signs in as the Admin.
 - **Main flow:**
-  1. Open the "Users" screen.
-  2. Click "Create a user".
+  1. Open "Settings" → "Access" → "Users".
+  2. Click "Create user".
   3. Enter the username, the display name and a password of 12 characters or more.
   4. Select the role: Admin, Operator or Viewer.
-  5. Click "Create".
-- **Expected result:** the list shows the user with the role and the status "Enabled". The audit log holds `user_create`.
+  5. Click "Create user".
+- **Expected result:** the list shows the user with the role. The audit log holds `user_create`.
 - **Alternative flows:**
   - An existing username gives `conflict`.
   - An invalid field gives `validation_failed`.
@@ -173,10 +174,10 @@ The sign-in screen asks for the username and the password only. The account is i
 - **Actor:** the Admin of the organization.
 - **Preconditions:** the person signs in as the Admin. The user exists.
 - **Main flow:**
-  1. Open the "Users" screen.
-  2. Click "Disable" on an enabled user.
-  3. Click "Enable" to restore the user.
-- **Expected result:** the status changes between "Disabled" and "Enabled". A disabled user cannot sign in. The audit log holds `user_update`.
+  1. Open "Settings" → "Access" → "Users".
+  2. In the menu "…" of an enabled user, click "Disable user" and confirm.
+  3. In the same menu, click "Enable user" to restore the user.
+- **Expected result:** the user shows the mark "Disabled", and the mark goes away after "Enable user". A disabled user cannot sign in. The audit log holds `user_update`.
 - **Requirements:** FR-TN-02.
 - **Acceptance criteria:** AC-AU-02.
 - **Status:** Ready on the stage.
@@ -186,12 +187,12 @@ The sign-in screen asks for the username and the password only. The account is i
 - **Actor:** the Platform Admin.
 - **Preconditions:** the person signs in as the Platform Admin. An organization exists.
 - **Main flow:**
-  1. Open the "Users" screen in the "Platform" section.
-  2. Click "Create a user".
+  1. Open "Platform administration" → "Users".
+  2. Click "Create user".
   3. Enter the username, the display name and a password of 12 characters or more. Enter an optional email.
   4. Add a membership: select an organization and a role.
-  5. Click "Create".
-- **Expected result:** the list shows the account with its memberships and roles. The person signs in and reaches the organization. The platform audit log holds `user_create`.
+  5. Click "Create user".
+- **Expected result:** the list shows the account. Its page shows the memberships and the roles. The person signs in and reaches the organization. The platform audit log holds `user_create`.
 - **Alternative flows:**
   - An existing username gives `username_taken`. An existing email gives `email_taken`.
   - An organization without an active Admin shows the mark "No administrator".
@@ -206,19 +207,19 @@ The sign-in screen asks for the username and the password only. The account is i
 - **Actor:** the Admin creates the token. A person on the host runs the installation.
 - **Preconditions:** the person signs in as the Admin. A Windows or Linux host is ready.
 - **Main flow:**
-  1. Open the "Hosts" screen and click "Add host".
-  2. Enter the labels and click "Create token". The screen shows the install command with the token one time.
-  3. Copy the command. The token appears under "Pending registrations" until a host uses it.
+  1. Open "Hosts" and click "Add host".
+  2. Enter the labels and click "Create token". The dialog "Add a host" shows the token and the install command one time.
+  3. Copy the command. The token stays under "Pending registrations" until a host uses it.
   4. On the host, unpack the agent package.
-  5. Run the command, for example `restichub-agent register --url <control-plane-url> --token <token>`. A script can use `--token-file` or `--token-stdin`.
+  5. Run the command as root or Administrator, for example `restichub-agent register --url <control-plane-url> --token <token>`. A script can use `--token-file` or `--token-stdin`.
   6. The agent generates its key pair and sends the certificate signing request and the token to the control plane.
   7. The control plane signs the certificate and returns it. The agent stores its identity in the protected configuration directory.
-  8. Run `restichub-agent install-service` to register the operating system service.
-- **Expected result:** the host appears in the "Hosts" list with the status "Active". The pending registration disappears. The certificate holds the agent ID and the tenant ID. The audit log holds `enrollment_token_create` and `agent_enroll`.
+  8. The command installs and starts the service and waits for the connection.
+- **Expected result:** the host appears in the "Hosts" list with the status "Online". The pending registration disappears. The certificate holds the agent ID and the tenant ID. The audit log holds `enrollment_token_create` and `agent_enroll`.
 - **Alternative flows:**
   - A used, an expired or a revoked token is refused with a clear error. The Admin can click "Cancel" on a pending registration to revoke its token.
   - The 11th enrollment request from one address in one minute gives HTTP 429.
-  - The Admin can click "Rename" on a host to change its name.
+  - The Admin can click "Rename" in the menu "…" of a host to change its name.
 - **Requirements:** FR-ID-01, FR-ID-02, FR-ID-05, FR-IN-01, FR-IN-07, FR-IN-08.
 - **Acceptance criteria:** AC-ID-01, AC-ID-05, AC-IN-02, AC-IN-03.
 - **Status:** Ready on the stage. The epic #1 stays open for the other protocol work.
@@ -228,8 +229,8 @@ The sign-in screen asks for the username and the password only. The account is i
 - **Actor:** the Admin of the organization.
 - **Preconditions:** the person signs in as the Admin. The host is enrolled.
 - **Main flow:**
-  1. Open the "Hosts" screen.
-  2. Open the actions menu of the host, click "Revoke agent" and confirm.
+  1. Open "Hosts".
+  2. In the menu "…" of the host, click "Revoke agent" and confirm.
 - **Expected result:** the status of the host changes to "Revoked". The control plane closes the stream in 5 s or less and sends a cancellation for a running job. The next connection is refused. The audit log holds `agent_revoke`.
 - **Requirements:** FR-ID-04.
 - **Acceptance criteria:** AC-ID-04.
@@ -240,11 +241,9 @@ The sign-in screen asks for the username and the password only. The account is i
 - **Actor:** the host administrator.
 - **Preconditions:** the host is enrolled and the agent service runs. A newer agent package is available.
 - **Main flow:**
-  1. Unpack the new agent package in a separate directory.
-  2. Stop the agent service.
-  3. Replace the `restichub-agent` file and the `restic` file with the files from the new package.
-  4. Start the agent service. Do not run `register` again.
-- **Expected result:** the agent connects with its old identity. The "Hosts" screen shows the same host with the status "Active" and the new value in "Agent version". The host keeps its agent ID, its certificate and its trust mode file. The next job of the host runs with the new files.
+  1. Unpack the new agent package in an empty directory.
+  2. Run `restichub-agent install-service` from the new package as root or Administrator. Do not run `register` again.
+- **Expected result:** the command stops the service, copies the new program, starts the service and waits for the connection. The agent connects with its old identity. The "Hosts" list shows the same host with the status "Online" and the new version in the second line of the row. The host keeps its agent ID, its certificate and its trust mode file. The next job of the host runs with the new files.
 - **Alternative flows:**
   - A `restic` file that does not match the pinned hash stops the agent at start. The host stays offline and the service log gives the cause.
   - A job that the agent already ran does not run again after the start. The agent journal holds the job.
@@ -265,10 +264,10 @@ The sign-in screen asks for the username and the password only. The account is i
   3. Replace the value with `PUT /api/v1/secrets/{id}/value`.
 - **Expected result:** the list shows the metadata and the marker `set`. No endpoint returns the value. The audit log holds `secret_create` and `secret_replace`.
 - **Alternative flows:**
-  - The "Repositories" screen also writes the secrets of one repository: the repository password, the S3 keys and the REST server password. It shows a stored value never again.
+  - The page of a repository also writes the secrets of that repository: the repository password, the S3 keys and the REST server password. It shows a stored value never again.
 - **Requirements:** FR-RP-03, FR-RP-05.
 - **Acceptance criteria:** AC-RP-02.
-- **Note:** the web UI has no separate screen for the secrets. The person uses the REST API for the steps above, or the "Repositories" screen for the secrets of a repository.
+- **Note:** "Settings" → "Access" → "Secrets" lists the secrets and replaces a value. The REST API does the same steps.
 - **Status:** Ready on the stage.
 
 ### UC-RP-02: Add and initialize a repository
@@ -276,13 +275,14 @@ The sign-in screen asks for the username and the password only. The account is i
 - **Actor:** an Admin.
 - **Preconditions:** the person signs in. A backend is ready: S3, rest-server or a local path. A host is enrolled.
 - **Main flow:**
-  1. Open the "Repositories" screen and click "Add repository".
-  2. Select the backend kind: "S3-compatible", "REST server" or "Local path". Enter the backend address, the repository password and the credentials.
-  3. For a local path, select the "Maintenance host". The path is valid on this host only.
-  4. Click "Save". The repository shows the status "Not initialized".
-  5. Open the actions menu of the repository and click "Test access". Select the host and click "Start".
-  6. Click "Initialize", read the warning about the password, select the host and click "Start".
-- **Expected result:** the dialog shows the job status and the result "The repository is ready.". The repository shows the status "Initialized". The test with a correct password succeeds. The audit log holds `repository_create`.
+  1. Open "Repositories" and click "Add repository". The page "New repository" opens.
+  2. In the section "Location", select the backend kind: "S3-compatible", "REST server" or "Local path". Enter the backend address.
+  3. In the section "Access", enter the repository password and the credentials.
+  4. Select the "Maintenance host". For a local path, the path is valid on this host only.
+  5. Click "Save". The list shows the repository with the mark "Not initialized".
+  6. In the menu "…" of the repository, click "Test access". Select the host and click "Start".
+  7. In the same menu, click "Initialize". Read the warning about the password and click "Start". The initialization runs on the maintenance host.
+- **Expected result:** the dialog shows the job status and the result "The repository is ready.". The mark "Not initialized" goes away. The test with a correct password succeeds. The audit log holds `repository_create`.
 - **Alternative flows:**
   - A wrong password or wrong credentials give the status `config_error` (code 12) and the message "The repository password or the credentials are not correct.".
   - A repository that does not exist yet gives the result "The repository does not exist yet. Initialize it.".
@@ -298,8 +298,9 @@ The sign-in screen asks for the username and the password only. The account is i
 - **Actor:** an Admin.
 - **Preconditions:** the person signs in as the Admin. An initialized repository has a lock that no operation holds, for example after a killed restic. The Admin knows that no other operation runs on the repository.
 - **Main flow:**
-  1. Call `POST /api/v1/repositories/{id}/unlock-all` with the body `{"confirm": "<repository name>"}`. The field `agent_id` is optional. Without it the call uses the maintenance host of the repository.
-  2. Open the "Jobs" screen and find the job of the kind "Unlock all".
+  1. Open "Repositories". In the menu "…" of the repository, click "Unlock all".
+  2. Read the warning, type the repository name and confirm. The REST API does the same step: `POST /api/v1/repositories/{id}/unlock-all` with the body `{"confirm": "<repository name>"}`.
+  3. Open "Jobs" and find the job of the kind "Unlock all".
 - **Expected result:** the call queues one `unlock_all` job. The agent runs `restic unlock --remove-all`. The job gets the status "Succeeded". The audit log holds `repository_unlock_all` with the actor.
 - **Alternative flows:**
   - A name that differs from the repository name is refused and no job starts.
@@ -307,7 +308,6 @@ The sign-in screen asks for the username and the password only. The account is i
   - A repository of another organization gives HTTP 404.
 - **Requirements:** FR-SC-06, FR-PR-02.
 - **Acceptance criteria:** AC-SC-06.
-- **Note:** the web UI has no button for this action. The person uses the REST API. The automatic `unlock` of a stale lock waits for the issue #73.
 - **Status:** Ready on the stage.
 
 ## 10. Backup plan and profile
@@ -317,12 +317,13 @@ The sign-in screen asks for the username and the password only. The account is i
 - **Actor:** an Admin or an Operator.
 - **Preconditions:** the person signs in. An initialized repository exists.
 - **Main flow:**
-  1. Open the "Profiles" screen and click "Add profile".
-  2. Select the repository. Enter the paths for each operating system, the excludes, the tags and the backup options.
-  3. Set the retention and the scripts when they are needed.
-  4. Click "Preview", select a host and read the steps.
-  5. Click "Save".
-- **Expected result:** the preview shows the steps and the equivalent restic command line for the host. The secrets are masked. The profile appears in the list with the status "Ready". The audit log holds `profile_create`.
+  1. Open "Profiles" and click "Add profile". The profile page opens.
+  2. In the section "Main", enter the name and select the repository.
+  3. In the section "What to back up", enter the paths for each operating system. Enter the excludes, the tags and the backup options in their sections.
+  4. Set the retention and the scripts when they are needed. The panel "The result" on the right side shows a summary.
+  5. Click "Preview", select a host and read the steps.
+  6. Click "Save".
+- **Expected result:** the preview shows the steps and the equivalent restic command line for the host. The secrets are masked. The profile appears in the list. The audit log holds `profile_create`.
 - **Alternative flows:**
   - An incorrect value or an option that the installed restic lacks stops the save. The error points to the field.
   - A profile that fits the host with a warning is saved. The screen shows "The profile is saved with warnings.".
@@ -335,12 +336,12 @@ The sign-in screen asks for the username and the password only. The account is i
 - **Actor:** an Admin or an Operator.
 - **Preconditions:** the person signs in. A profile exists. An agent is enrolled.
 - **Main flow:**
-  1. Open the "Plans" screen and click "Add plan".
-  2. Select the profile and the host.
-  3. Enter the cron expression, or select a preset. Enter the time zone, for example `Europe/Berlin`.
+  1. Open "Plans" and click "Add plan". The plan page opens.
+  2. In the section "What to back up", select the profile and the host.
+  3. In the section "Schedule", enter the cron expression, or select a preset. Enter the time zone, for example `Europe/Berlin`.
   4. Select the policy for "Missed runs": "Run every missed run", "Run the latest missed run" or "Skip the missed runs".
   5. Read the "Next 5 runs" and click "Save".
-- **Expected result:** the plan appears in the list with the column "Next run". The control plane creates a job at each fire time. The audit log holds `plan_create`.
+- **Expected result:** the plan appears in the list. The panel on the plan page shows the "Next run". The control plane creates a job at each fire time. The audit log holds `plan_create`.
 - **Alternative flows:**
   - An incorrect cron expression or time zone stops the save. The error points to the field.
   - A plan that is disabled creates no job.
@@ -358,9 +359,9 @@ The sign-in screen asks for the username and the password only. The account is i
   1. Wait for the fire time of the plan.
   2. Open the "Jobs" screen. The newest job is first.
   3. Read the status, the host, the plan, the start time and the duration of the job.
-- **Expected result:** the job shows the status "Succeeded". The "Next run" of the plan moves to the next fire time.
+- **Expected result:** the job shows the status "Succeeded". The "Next run" on the plan page moves to the next fire time.
 - **Alternative flows:**
-  - A job that ends with exit code 3 shows "Succeeded with warnings" (UC-JOB-05).
+  - A job that ends with exit code 3 shows "Succeeded" in yellow with the tooltip "Succeeded with warnings" (UC-JOB-05).
   - A job that fails shows "Failed" with the reason.
   - A job that the host does not confirm before its expiry shows "Expired".
 - **Requirements:** FR-SC-01, FR-SC-02, FR-AG-05.
@@ -373,9 +374,9 @@ The sign-in screen asks for the username and the password only. The account is i
 - **Actor:** an Operator.
 - **Preconditions:** the person signs in. An online agent and a plan are ready.
 - **Main flow:**
-  1. Open the "Plans" screen, open the actions menu of the plan and click "Run now".
-  2. Open the "Jobs" screen. The new job shows "Waiting", then "Sent to the host", then "Running".
-  3. Open the actions menu of the job, click "Cancel job" and confirm.
+  1. Open "Plans". In the menu "…" of the plan, click "Run now".
+  2. Open "Jobs". The new job shows "Waiting", then "Sent to the host", then "Running".
+  3. In the menu "…" of the job, or on the job page, click "Cancel job" and confirm.
 - **Expected result:** restic starts in 3 s or less. The cancel stops restic before the grace period ends. The status is "Cancelled". No lock stays on the repository. The audit log holds `job_run` and `job_cancel`.
 - **Alternative flows:**
   - A second "Run now" for a plan that already has a manual run in the queue gives `already_queued`.
@@ -409,7 +410,7 @@ The sign-in screen asks for the username and the password only. The account is i
 - **Main flow:**
   1. Run the plan with "Run now", or wait for its fire time.
   2. Open the "Jobs" screen.
-- **Expected result:** restic ends with exit code 3. The job gets the status "Succeeded with warnings" (`succeeded_with_warnings`). The snapshot exists with the files that restic could read. The job does not retry.
+- **Expected result:** restic ends with exit code 3. The job shows "Succeeded" in yellow with the tooltip "Succeeded with warnings" (`succeeded_with_warnings`). The tab "With warnings" of the "Jobs" list shows it. The snapshot exists with the files that restic could read. The job does not retry.
 - **Alternative flows:**
   - If no file can be read, restic gives another exit code and the job gets the status "Failed".
 - **Requirements:** FR-AG-09.
@@ -491,8 +492,8 @@ The sign-in screen asks for the username and the password only. The account is i
 - **Actor:** an Admin, an Operator or a Viewer.
 - **Preconditions:** the person signs in to an organization.
 - **Main flow:**
-  1. Open the "Audit log" screen.
-  2. Set the filters: time, action, actor and object.
+  1. Open "Audit". The list shows the last 30 days, with a heading for each day.
+  2. Search by the name of the object or the actor. Set the filters "Who", "Object", "Action" and "Period".
   3. Open one record.
 - **Expected result:** each record shows the actor, the time, the IP address and the change. A secret value is redacted. No endpoint changes or deletes a record.
 - **Requirements:** FR-AU-01.
@@ -504,7 +505,7 @@ The sign-in screen asks for the username and the password only. The account is i
 - **Actor:** the Platform Admin.
 - **Preconditions:** the person signs in as the Platform Admin.
 - **Main flow:**
-  1. Open the "Audit" tab in the platform mode.
+  1. Open "Platform administration" → "Audit".
   2. Read the records of the organization operations.
 - **Expected result:** the records show `tenant_create`, `tenant_suspend`, `tenant_resume` and `tenant_delete` with the actor and the time.
 - **Requirements:** FR-AU-01, FR-TN-02.
@@ -518,8 +519,8 @@ The sign-in screen asks for the username and the password only. The account is i
 - **Actor:** an Admin.
 - **Preconditions:** the person signs in to an organization.
 - **Main flow:**
-  1. Open the "API tokens" screen and click "Create a token".
-  2. Enter the name, the role and the expiry date.
+  1. Open "Settings" → "Access" → "API tokens" and click "Create token".
+  2. Enter the name, select the role and the expiry: "Never", "In 30 days", "In 90 days" or "In 1 year".
   3. Copy the token value. The screen shows the value one time.
   4. Call the API with the token in the `Authorization: Bearer` header.
 - **Expected result:** the token appears in the list with its prefix and expiry. The API answers the request. The audit log holds `api_token_create`.
@@ -532,8 +533,8 @@ The sign-in screen asks for the username and the password only. The account is i
 - **Actor:** an Admin.
 - **Preconditions:** the person signs in. A token exists.
 - **Main flow:**
-  1. Open the "API tokens" screen.
-  2. Click "Revoke" on the token and confirm.
+  1. Open "Settings" → "Access" → "API tokens".
+  2. In the menu "…" of the token, click "Revoke" and confirm.
 - **Expected result:** the token stops working. The next request gives HTTP 401. The audit log holds `api_token_revoke`.
 - **Requirements:** FR-API-01.
 - **Acceptance criteria:** AC-TN-04.
