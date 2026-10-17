@@ -4,7 +4,6 @@
 
 mod common;
 
-use std::path::PathBuf;
 use std::time::Duration;
 
 use common::*;
@@ -27,9 +26,9 @@ async fn next_message(rx: &mut mpsc::Receiver<AgentMessage>) -> AgentMessage {
 async fn adr_0044_a_local_repository_outside_the_roots_is_rejected_before_restic() {
     let dir = temp_config_dir("repository-roots-agent");
     std::fs::create_dir_all(&dir).expect("cannot create the configuration directory");
+    // A canonical Windows path has the verbatim prefix, which the job validator refuses.
     let root = temp_config_dir("repository-roots-allowed");
     std::fs::create_dir_all(&root).expect("cannot create the root");
-    let root: PathBuf = root.canonicalize().expect("cannot resolve the root");
     let inside = root.join("local-test");
     let outside_parent = temp_config_dir("repository-roots-outside");
     std::fs::create_dir_all(&outside_parent).expect("cannot create the outside directory");
