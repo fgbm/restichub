@@ -3,6 +3,8 @@ title: Quick start
 description: Go from an empty Linux server to the first backup and a restore check in about 30 minutes.
 ---
 
+import Screen from '../../../components/Screen.astro';
+
 This page installs one control plane, enrolls one Linux host and makes the first backup to an S3-compatible storage or a rest-server. Each step has a time budget and a result that you can check. The total budget is 29 minutes. Each step links to the full page.
 
 ## Before you start
@@ -45,6 +47,9 @@ The time budget does not include these preparations:
    docker compose logs cp | grep setup_token
    ```
 
+
+   <Screen name="setup-first-admin" alt="The screen Initial setup with the field Setup token" />
+
    Result: you sign in as the administrator. See [The first administrator](/restichub/getting-started/install-control-plane/#the-first-administrator).
 
 5. **Enroll the host (5 min).** On the host, run these commands as `root`. Copy the last command from the dialog "Add a host" ("Hosts" → "Add host" → "Create token"):
@@ -54,6 +59,9 @@ The time budget does not include these preparations:
    tar -xzf restichub-agent-0.1.0-rc.4-linux-amd64.tar.gz
    sudo ./restichub-agent register --url https://restichub.example.com --token <token>
    ```
+
+
+   <Screen name="hosts-add-command" alt="The dialog Add a host with the token and the register command" />
 
    Result: the host has the status "Online" on the screen "Hosts". The agent downloads restic itself. See [Register an agent](/restichub/getting-started/add-a-host/).
 
@@ -79,6 +87,9 @@ The time budget does not include these preparations:
 
 9. **Run the first backup (2 min).** On the screen "Plans", select "Run now" in the menu "…" of the plan.
 
+
+   <Screen name="jobs-list" alt="The list of jobs with a succeeded job" />
+
    Result: on the screen "Jobs", the job has the status "Succeeded". Select the name of the job to read its steps and log. See [Jobs](/restichub/concepts/job-lifecycle/).
 
 ## Check the restore
@@ -89,5 +100,8 @@ This check is outside the time budget. It takes about 3 minutes.
 2. Select the new snapshot, and select one file in the tree.
 3. Select "Restore…". The dialog proposes the host and a "Target path" in the restore root, for example `/var/lib/restichub-restore/a1b2c3d4`.
 4. Select "Start restore".
+
+
+<Screen name="restore-dialog" alt="The restore dialog with the target host and the target path" />
 
 Result: the restore job has the status "Succeeded", and the file is in the target path on the host. See [Restore](/restichub/guides/restore/).

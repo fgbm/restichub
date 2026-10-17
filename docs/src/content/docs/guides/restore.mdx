@@ -3,6 +3,8 @@ title: Restore
 description: How to list the snapshots of a repository, browse a snapshot and restore files to the same agent or to a different agent.
 ---
 
+import Screen from '../../../components/Screen.astro';
+
 The Restore screen lists the snapshots of a repository, shows the files of a snapshot and restores them. An Operator or an Admin can use it. A Viewer cannot.
 
 The data of a restore goes from the repository to the target agent. It does not go through the control plane. The target agent gets the secrets of this repository for the restore job only. Each delivery writes the audit record `secret_delivered`. The start of a restore writes the audit record `restore_start`. The record names the repository, the snapshot, the target agent and the target path. A snapshot list or a tree page that starts a job writes the audit record `browse_start`. It names the repository and the agent that reads it, because that agent gets the repository secrets.
@@ -42,6 +44,8 @@ One person can send 60 list and page requests in one minute. Each control plane 
 
 ## Restore files
 
+<Screen name="restore-snapshot" alt="The page of a snapshot with the tree of files and the button Restore" />
+
 1. Select the files and directories that you need in the tree. If you select nothing, the restore uses the whole snapshot.
 2. Click **Restore…**.
 3. Select the target host ("Target host"). The default is the host of the snapshot when that host is active. Otherwise it is the maintenance agent of the repository.
@@ -50,6 +54,8 @@ One person can send 60 list and page requests in one minute. Each control plane 
 6. Select what to do with a file that exists in the target. For "Replace every file", the screen shows a warning.
 7. Read the summary at the end of the dialog.
 8. Click **Start restore**. The screen opens the job.
+
+<Screen name="restore-dialog" alt="The restore dialog with the target host, the target path and the restore roots" />
 
 The job detail shows the block "Restore parameters". The block names the snapshot, the target host and path, the paths, the overwrite mode, and the verify and dry run settings. The detail also shows the progress while the restore runs. After it ends, the detail shows how many files and bytes the agent restored and how many it skipped.
 
