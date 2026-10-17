@@ -1,5 +1,5 @@
 //! A local repository is bound to its host: the path exists on the disk of that host only
-//! (FR-RP-01, FR-RP-08, FR-RS-01, ADR-0035).
+//! (FR-RP-10, ADR-0046).
 
 #![allow(clippy::expect_used)]
 
@@ -75,7 +75,7 @@ fn plan_body(profile: Uuid, agent: AgentId) -> Value {
 }
 
 #[tokio::test]
-async fn fr_rp_08_a_local_repository_needs_its_host_at_create() {
+async fn ac_rp_05_a_local_repository_needs_its_host_at_create() {
     let Some(db) = common::test_db().await else {
         return;
     };
@@ -122,7 +122,7 @@ async fn fr_rp_08_a_local_repository_needs_its_host_at_create() {
 }
 
 #[tokio::test]
-async fn fr_rp_08_the_host_of_a_local_repository_is_locked_after_init() {
+async fn ac_rp_06_the_host_of_a_local_repository_is_locked_after_init() {
     let Some(db) = common::test_db().await else {
         return;
     };
@@ -166,7 +166,7 @@ async fn fr_rp_08_the_host_of_a_local_repository_is_locked_after_init() {
 }
 
 #[tokio::test]
-async fn fr_rp_08_a_host_change_keeps_the_plans_on_the_host() {
+async fn ac_rp_06_a_host_change_keeps_the_plans_on_the_host() {
     let Some(db) = common::test_db().await else {
         return;
     };
@@ -191,7 +191,7 @@ async fn fr_rp_08_a_host_change_keeps_the_plans_on_the_host() {
 }
 
 #[tokio::test]
-async fn fr_rp_08_a_plan_of_a_local_repository_runs_on_its_host() {
+async fn ac_rp_07_a_plan_of_a_local_repository_runs_on_its_host() {
     let Some(db) = common::test_db().await else {
         return;
     };
@@ -244,7 +244,53 @@ async fn fr_rp_08_a_plan_of_a_local_repository_runs_on_its_host() {
 }
 
 #[tokio::test]
-async fn fr_rp_08_the_dispatcher_refuses_a_job_on_another_host() {
+async fn ac_rp_07_a_plan_save_waits_for_a_concurrent_profile_repoint() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let host = env.connect_agent("lo-race-host").await;
+    let other = env.connect_agent("lo-race-other").await;
+    let local = env.create_repository(host.id, "pw").await;
+    let remote = env.create_rest_repository(host.id, "user", "secret").await;
+    let profile = env.create_profile(remote, json!({})).await;
+
+    // A profile update that repoints the profile to the local repository holds the profile row.
+    let mut repoint = env.scoped().await;
+    sqlx::query("SELECT id FROM profiles WHERE id = $1 FOR UPDATE")
+        .bind(profile)
+        .execute(&mut *repoint)
+        .await
+        .expect("cannot lock the profile");
+    sqlx::query("UPDATE profiles SET repository_id = $2 WHERE id = $1")
+        .bind(profile)
+        .bind(local)
+        .execute(&mut *repoint)
+        .await
+        .expect("cannot repoint the profile");
+
+    let save = env.call(
+        &env.operator,
+        "POST",
+        "/api/v1/plans",
+        Some(plan_body(profile, other.id)),
+    );
+    let commit = async {
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        repoint.commit().await.expect("cannot commit the repoint");
+    };
+    let ((status, body), ()) = tokio::join!(save, commit);
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_field(&body, "agent_id", "not_repository_host");
+
+    let (status, body) = env.call(&env.admin, "GET", "/api/v1/plans", None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["items"].as_array().map(Vec::len), Some(0), "{body}");
+    env.db.cleanup().await;
+}
+
+#[tokio::test]
+async fn ac_rp_07_the_dispatcher_refuses_a_job_on_another_host() {
     let Some(db) = common::test_db().await else {
         return;
     };
@@ -265,8 +311,9 @@ async fn fr_rp_08_the_dispatcher_refuses_a_job_on_another_host() {
             None,
         )
         .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
-    assert_field(&body, "agent_id", "not_repository_host");
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "not_repository_host", "{body}");
+    assert!(body.get("field").is_none_or(Value::is_null), "{body}");
 
     for (kind, plan) in [
         (JobKind::Backup, Some(plan)),
@@ -278,6 +325,7 @@ async fn fr_rp_08_the_dispatcher_refuses_a_job_on_another_host() {
         eventually(|| async { env.job_status(job).await == "failed" }).await;
         let ended = env.job(job).await;
         assert_eq!(ended["result_message"], "not_repository_host", "{ended}");
+        assert_eq!(ended["result_code"], "config_error", "{ended}");
     }
     assert!(
         other
@@ -290,7 +338,7 @@ async fn fr_rp_08_the_dispatcher_refuses_a_job_on_another_host() {
 }
 
 #[tokio::test]
-async fn fr_rs_01_a_local_repository_restores_and_lists_on_its_host_only() {
+async fn ac_rp_07_a_local_repository_restores_and_lists_on_its_host_only() {
     let Some(db) = common::test_db().await else {
         return;
     };
@@ -330,7 +378,7 @@ async fn fr_rs_01_a_local_repository_restores_and_lists_on_its_host_only() {
 }
 
 #[tokio::test]
-async fn fr_rp_08_the_start_check_reports_old_rows_and_keeps_them() {
+async fn ac_rp_09_the_start_check_reports_old_rows_and_keeps_them() {
     let Some(db) = common::test_db().await else {
         return;
     };

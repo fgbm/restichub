@@ -48,7 +48,6 @@ pub enum Refusal {
     RepositoryMissing,
     RepositoryChanged,
     NotMaintenanceAgent,
-    /// The agent is not the host of the local repository.
     NotRepositoryHost,
     RequestMissing,
     AgentCapabilityMissing,
@@ -98,7 +97,8 @@ impl Refusal {
             | Self::StepMissing
             | Self::RequestMissing
             | Self::SecretUnavailable
-            | Self::ServerScriptsDisabled => JobResultCode::ConfigError,
+            | Self::ServerScriptsDisabled
+            | Self::NotRepositoryHost => JobResultCode::ConfigError,
             _ => JobResultCode::Failed,
         }
     }
@@ -457,5 +457,13 @@ mod tests {
             JobResultCode::ConfigError
         );
         assert_eq!(Refusal::AgentRevoked.result_code(), JobResultCode::Failed);
+    }
+
+    #[test]
+    fn ac_rp_07_a_job_on_another_host_is_a_config_error() {
+        assert_eq!(
+            Refusal::NotRepositoryHost.result_code(),
+            JobResultCode::ConfigError
+        );
     }
 }

@@ -135,6 +135,9 @@ pub async fn ensure_kek_check(
     Ok(())
 }
 
+/// Bounds one warning line; the job log names every plan through its failed jobs.
+const REPORTED_PLANS: usize = 20;
+
 /// Logs each local repository without a host and each plan of one that runs on another host.
 ///
 /// The check changes no row: the data stays, the plan save refuses the old binding, and the job
@@ -151,15 +154,18 @@ pub async fn report_local_repository_hosts(db: &Database) -> Result<(), restichu
         let problems = restichub_db::plans::local_host_problems(&mut tx).await?;
         tx.commit().await?;
         for problem in problems {
+            let plan_count = problem.plans_off_host.len();
             let plans: Vec<String> = problem
                 .plans_off_host
                 .iter()
+                .take(REPORTED_PLANS)
                 .map(ToString::to_string)
                 .collect();
             match problem.host {
                 None => tracing::warn!(
                     tenant = %tenant.id,
                     repository = %problem.repository_id,
+                    plan_count,
                     plans = ?plans,
                     "a local repository has no host; set its host, then move its plans to that host"
                 ),
@@ -167,6 +173,7 @@ pub async fn report_local_repository_hosts(db: &Database) -> Result<(), restichu
                     tenant = %tenant.id,
                     repository = %problem.repository_id,
                     host = %host,
+                    plan_count,
                     plans = ?plans,
                     "plans of a local repository run on another host; their jobs fail with not_repository_host"
                 ),

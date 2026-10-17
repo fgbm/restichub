@@ -100,9 +100,17 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
     .await
     .context("cannot prepare the initial setup")?;
 
-    // A report only: the data stays, and the job builder refuses the jobs on another host.
-    if let Err(error) = restichub_cp::startup::report_local_repository_hosts(&database).await {
-        tracing::warn!(%error, "the check of the local repository hosts failed");
+    // A report only: the data stays, and the job builder refuses the jobs on another host. It
+    // reads every tenant, so it runs beside the server instead of before it.
+    {
+        let database = database.clone();
+        tokio::spawn(async move {
+            if let Err(error) =
+                restichub_cp::startup::report_local_repository_hosts(&database).await
+            {
+                tracing::warn!(%error, "the check of the local repository hosts failed");
+            }
+        });
     }
 
     // The periodic maintenance removes the expired sessions and setup tokens.

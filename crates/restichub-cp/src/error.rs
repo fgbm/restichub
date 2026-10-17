@@ -57,6 +57,7 @@ pub enum ErrorCode {
     SetupAlreadyDone,
     InvalidSetupToken,
     RepositoryHostLocked,
+    NotRepositoryHost,
 }
 
 impl ErrorCode {
@@ -91,6 +92,7 @@ impl ErrorCode {
             Self::SetupAlreadyDone => "setup_already_done",
             Self::InvalidSetupToken => "invalid_setup_token",
             Self::RepositoryHostLocked => "repository_host_locked",
+            Self::NotRepositoryHost => "not_repository_host",
         }
     }
 }
@@ -391,6 +393,16 @@ impl ApiError {
         );
         error.field = Some("maintenance_agent_id".to_owned());
         error
+    }
+
+    /// Creates a `409 not_repository_host` error: the plan runs on another host than its local
+    /// repository, so a job cannot reach the path.
+    pub fn not_repository_host() -> Self {
+        Self::new(
+            StatusCode::CONFLICT,
+            ErrorCode::NotRepositoryHost,
+            "Conflict",
+        )
     }
 
     /// Creates a `409 already_queued` error: the plan already holds a queued manual run.

@@ -426,7 +426,6 @@ async fn ensure_repository(
     Ok(())
 }
 
-/// Refuses a local repository when a plan of the profile runs on another host than its own.
 async fn ensure_plans_on_repository_host(
     tx: &mut restichub_db::TenantTx<'_>,
     profile_id: ProfileId,

@@ -67,9 +67,7 @@ pub enum Reason {
     Removed,
     /// A number or a time range is outside the allowed bounds.
     OutOfRange,
-    /// The agent is not the host of the local repository.
     NotRepositoryHost,
-    /// A plan of the local repository runs on another host.
     PlanOnOtherHost,
 }
 

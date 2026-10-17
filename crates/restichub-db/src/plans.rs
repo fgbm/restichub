@@ -253,7 +253,8 @@ pub async fn has_plan_off_host(
     host: AgentId,
 ) -> Result<bool, DbError> {
     let (found,): (bool,) = sqlx::query_as(
-        "SELECT EXISTS (SELECT 1 FROM plans p JOIN profiles pr ON pr.id = p.profile_id \
+        "SELECT EXISTS (SELECT 1 FROM plans p \
+         JOIN profiles pr ON pr.tenant_id = p.tenant_id AND pr.id = p.profile_id \
          WHERE pr.repository_id = $1 AND p.agent_id <> $2)",
     )
     .bind(repository_id)
@@ -280,8 +281,8 @@ pub async fn local_host_problems(tx: &mut TenantTx<'_>) -> Result<Vec<LocalHostP
                     FILTER (WHERE p.id IS NOT NULL \
                         AND p.agent_id IS DISTINCT FROM r.maintenance_agent_id), '{}'::uuid[]) \
          FROM repositories r \
-         LEFT JOIN profiles pr ON pr.repository_id = r.id \
-         LEFT JOIN plans p ON p.profile_id = pr.id \
+         LEFT JOIN profiles pr ON pr.tenant_id = r.tenant_id AND pr.repository_id = r.id \
+         LEFT JOIN plans p ON p.tenant_id = pr.tenant_id AND p.profile_id = pr.id \
          WHERE r.backend = 'local' \
          GROUP BY r.id, r.maintenance_agent_id \
          HAVING r.maintenance_agent_id IS NULL \

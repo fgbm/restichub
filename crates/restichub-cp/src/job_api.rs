@@ -370,7 +370,7 @@ pub async fn cancel_job(
         (status = 400, description = "The profile does not compile for the agent.", body = crate::error::ProblemBody),
         crate::error::ProtectedResponses,
         (status = 404, description = "The plan is not found.", body = crate::error::ProblemBody),
-        (status = 409, description = "The agent of the plan is revoked, or a manual run of the plan is already queued (`already_queued`).", body = crate::error::ProblemBody)
+        (status = 409, description = "The agent of the plan is revoked, a manual run of the plan is already queued (`already_queued`), or the plan runs on another host than its local repository (`not_repository_host`).", body = crate::error::ProblemBody)
     )
 )]
 pub async fn run_plan(
@@ -400,7 +400,10 @@ pub async fn run_plan(
     let Some(repository) = repo::get(&mut tx, plan.repository_id).await? else {
         return Err(ApiError::conflict());
     };
-    crate::jobs::ensure_repository_host(&repository, plan.agent_id)?;
+    // The request has no agent field, so the refusal is a code of its own, not a field error.
+    if crate::jobs::ensure_repository_host(&repository, plan.agent_id).is_err() {
+        return Err(ApiError::not_repository_host());
+    }
     // The job builder compiles again at send time. The early check gives the user the field error.
     crate::profiles::compile_for_agent(&profile, &agent, now)?;
     if queue_repo::has_queued_manual_run(&mut tx, plan_id).await? {
