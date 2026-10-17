@@ -453,7 +453,7 @@ describe('the plan page', () => {
 		render(PlanEditor, { planId: 'pl_1' });
 
 		await screen.findByRole('heading', { level: 1, name: 'nightly-web' });
-		await user.click(screen.getByRole('checkbox', { name: 'Enabled' }));
+		await user.click(screen.getByRole('switch', { name: 'Enabled' }));
 
 		expect(await screen.findByText('None — the plan is off')).toBeInTheDocument();
 	});
