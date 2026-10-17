@@ -90,11 +90,16 @@ fn literal_prefix(pattern: &str, flavor: PathFlavor) -> Option<(Vec<String>, boo
     if flavor == PathFlavor::Windows && rest.starts_with(separators) {
         return None;
     }
+    let parts: Vec<&str> = rest
+        .split(separators)
+        .filter(|part| !part.is_empty())
+        .collect();
+    // A `..` after a wildcard part also cleans the wildcard away: `/C/*/../../D` is `/D`.
+    if parts.contains(&"..") {
+        return None;
+    }
     let mut prefix = Vec::new();
-    for part in rest.split(separators).filter(|part| !part.is_empty()) {
-        if part == ".." {
-            return None;
-        }
+    for part in parts {
         if part == "." {
             continue;
         }
@@ -384,6 +389,10 @@ mod tests {
     fn fr_rs_03_a_pattern_that_restic_rewrites_selects_the_rewritten_path() {
         let dotdot = Selection::new(&strings(&["/C/../D/x"]), &[], PathFlavor::Posix);
         assert!(dotdot.writes(&parts("/D/x")));
+        let after_wildcard = Selection::new(&strings(&["/C/*/../../D/x"]), &[], PathFlavor::Posix);
+        assert!(after_wildcard.writes(&parts("/D/x")));
+        let windows = Selection::new(&strings(&[r"/C/*/../../D/x"]), &[], PathFlavor::Windows);
+        assert!(windows.writes(&parts("/D/x")));
         let unc = Selection::new(&strings(&[r"\\srv\share"]), &[], PathFlavor::Windows);
         assert!(unc.writes(&parts("/C/a/srv/share")));
         let dots = Selection::new(&strings(&["/./srv//app/./x"]), &[], PathFlavor::Posix);
