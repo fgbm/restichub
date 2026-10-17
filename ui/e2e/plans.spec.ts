@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { pickRecord } from './pickers';
 
 // The Plans screen lists the plans, creates one on the plan page and deletes one (FR-SC-01,
 // FR-SC-07).
@@ -43,7 +44,7 @@ test('the plans screen creates and deletes a plan', async ({ page }) => {
 	await expect(option).toContainText('offsite-s3');
 	await option.click();
 	await expect(page.locator('#plan-profile')).toContainText('web-daily · offsite-s3');
-	await page.locator('#plan-agent').selectOption({ label: 'win-fs01' });
+	await pickRecord(page, page.locator('#plan-agent'), 'win-fs01');
 	await page.locator('#plan-cron').fill('0 2 * * *');
 	await page.locator('#plan-time-zone').fill('Europe/Berlin');
 	await page.getByRole('button', { name: 'Save' }).click();

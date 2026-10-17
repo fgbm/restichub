@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { pickRecord } from './pickers';
 
 // The Restore screen lists the snapshots of a repository, shows the tree of a snapshot with lazy
 // pages and starts a restore on a host (FR-RS-01 to FR-RS-04, UC-RS-01).
@@ -78,7 +79,7 @@ test('a restore asks for the target, warns about a system path and opens the job
 	await page.getByRole('button', { name: 'Restore…' }).click();
 	const dialog = page.getByRole('dialog');
 	await expect(dialog.getByRole('region', { name: 'Summary' })).toContainText('Selected paths: 1');
-	await dialog.getByLabel('Target host').selectOption({ label: 'srv-db-01 · linux' });
+	await pickRecord(page, dialog.locator('#restore-agent'), 'srv-db-01');
 	// The target starts as a folder in the restore root that the host reports.
 	await expect(dialog.getByLabel('Target path')).toHaveValue(
 		/^\/var\/lib\/restichub-restore\/[0-9a-f]{8}$/

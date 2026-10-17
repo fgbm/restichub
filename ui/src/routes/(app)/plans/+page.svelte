@@ -10,6 +10,7 @@
 	import { facetCounts, matchesSearch, splitList } from '#lib/filters.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { getLocale, t, tErrorCode } from '#lib/i18n/index.ts';
+	import { withHosts } from '#lib/host-picker.ts';
 	import { ago } from '#lib/list-format.ts';
 	import { profileDescription } from '#lib/profile-picker.ts';
 	import { describeCron } from '#lib/schedule.ts';
@@ -32,7 +33,12 @@
 		{
 			key: 'host',
 			label: t('plans.host'),
-			options: facetCounts(plans, (plan) => [plan.agent_hostname])
+			search: true,
+			options: withHosts(
+				facetCounts(plans, (plan) => [plan.agent_hostname]),
+				agents,
+				(agent) => agent.hostname
+			)
 		},
 		{
 			key: 'profile',

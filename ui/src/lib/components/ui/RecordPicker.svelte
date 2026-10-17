@@ -22,6 +22,7 @@
 		searchPlaceholder,
 		emptyLabel,
 		allLabel,
+		countLabel,
 		onchange
 	}: {
 		value?: string;
@@ -40,6 +41,8 @@
 		emptyLabel?: string;
 		/** Adds a first option with the empty value, for example "All" in a filter. */
 		allLabel?: string;
+		/** The count of the options in the footer of the list, for example "4 hosts". */
+		countLabel?: (count: number) => string;
 		onchange?: (value: string) => void;
 	} = $props();
 
@@ -65,10 +68,19 @@
 		all.filter((option) => matchesRecord(option.label, option.description, query))
 	);
 	const first = $derived(selected?.description?.[0]);
+	const detail = $derived(
+		selected?.detail ?? (first !== undefined ? recordPartText(first) : undefined)
+	);
 	const closedText = $derived(selected?.label ?? value);
 	const showNotSet = $derived(disabled && closedText === '');
+	const found = $derived(shown.filter((option) => option.value !== '' || allLabel === undefined));
+	const footCount = $derived(
+		query.trim() !== ''
+			? t('recordPicker.shown', { shown: found.length, total: options.length })
+			: (countLabel?.(options.length) ?? '')
+	);
 	const describedBy = $derived(
-		[error ? errorId : help ? helpId : '', first !== undefined ? detailId : '']
+		[error ? errorId : help ? helpId : '', detail !== undefined ? detailId : '']
 			.filter(Boolean)
 			.join(' ') || undefined
 	);
@@ -143,9 +155,12 @@
 			{:else if closedText === ''}
 				<span class="rh-record__placeholder" id={valueId}>{placeholder ?? ''}</span>
 			{:else}
+				{#if selected?.dot}
+					<span class="rh-record__dot rh-record__dot--{selected.dot}" aria-hidden="true"></span>
+				{/if}
 				<span class="rh-record__value" id={valueId}>{closedText}</span>
-				{#if first !== undefined}
-					<span class="rh-record__detail" id={detailId}>· {recordPartText(first)}</span>
+				{#if detail !== undefined}
+					<span class="rh-record__detail" id={detailId}>· {detail}</span>
 				{/if}
 			{/if}
 			<span class="rh-select-wrap__icon"><Icon name="chevron-down" /></span>
@@ -186,31 +201,50 @@
 							<div {...props} class="rh-record__list" aria-label={label ?? ariaLabel}>
 								<Primitive.Viewport>
 									{#each shown as option, index (option.value)}
+										{@const optionId = `${fieldId}-o${index}`}
 										<Primitive.Item
 											class="rh-record__option"
 											value={option.value}
 											label={option.label}
-											aria-labelledby="{fieldId}-o{index}"
-											aria-describedby={option.description?.length
-												? `${fieldId}-o${index}-d`
-												: undefined}
+											disabled={option.disabled}
+											aria-labelledby={optionId}
+											aria-describedby={[
+												option.description?.length ? `${optionId}-d` : '',
+												option.state && option.value !== value ? `${optionId}-s` : '',
+												option.reason ? `${optionId}-r` : ''
+											]
+												.filter(Boolean)
+												.join(' ') || undefined}
 										>
+											{#if option.dot}
+												<span class="rh-record__dot rh-record__dot--{option.dot}" aria-hidden="true"
+												></span>
+											{/if}
 											<span class="rh-record__option-text">
-												<span class="rh-record__option-label" id="{fieldId}-o{index}">
+												<span class="rh-record__option-label" id={optionId}>
 													{option.label}
 												</span>
 												{#if option.description?.length}
-													<RecordLine parts={option.description} id="{fieldId}-o{index}-d" />
+													<RecordLine parts={option.description} id="{optionId}-d" />
+												{/if}
+												{#if option.reason}
+													<span class="rh-record__reason" id="{optionId}-r">{option.reason}</span>
 												{/if}
 											</span>
 											{#if option.value === value}
 												<span class="rh-record__check"><Icon name="check" /></span>
+											{:else if option.state}
+												<span class="rh-record__state" id="{optionId}-s">{option.state}</span>
 											{/if}
 										</Primitive.Item>
 									{:else}
 										<div class="rh-record__none">{emptyLabel ?? t('filter.noMatches')}</div>
 									{/each}
 								</Primitive.Viewport>
+							</div>
+							<div class="rh-record__foot">
+								<span role="status">{footCount}</span>
+								<span class="rh-record__keys">{t('recordPicker.keys')}</span>
 							</div>
 						</div>
 					</div>
@@ -263,7 +297,6 @@
 	}
 
 	.rh-record__panel {
-		z-index: var(--rh-z-overlay);
 		display: flex;
 		flex-direction: column;
 		min-width: max(var(--bits-floating-anchor-width), 18rem);
@@ -295,7 +328,11 @@
 		padding-left: var(--rh-space-8);
 	}
 
+	/* The floating wrapper copies the z-index of this element. The list opens after a dialog in the
+	   document, so the same layer as the dialog puts it on top. */
 	:global(.rh-record__list) {
+		position: relative;
+		z-index: var(--rh-z-panel);
 		overflow-y: auto;
 		padding: var(--rh-space-1);
 	}
@@ -312,12 +349,28 @@
 		cursor: pointer;
 	}
 
+	:global(.rh-record__option[data-selected]) {
+		background-color: var(--rh-color-selected);
+	}
+
 	:global(.rh-record__option[data-highlighted]) {
 		background-color: var(--rh-color-hover);
 	}
 
+	:global(.rh-record__option[data-disabled]) {
+		cursor: not-allowed;
+	}
+
+	:global(.rh-record__option[data-disabled]) .rh-record__option-label,
+	:global(.rh-record__option[data-disabled]) .rh-record__dot,
+	:global(.rh-record__option[data-disabled]) .rh-record__state,
+	:global(.rh-record__option[data-disabled]) :global(.record-line) {
+		opacity: 0.55;
+	}
+
 	.rh-record__option-text {
 		display: flex;
+		flex: 1;
 		flex-direction: column;
 		gap: 2px;
 		min-width: 0;
@@ -325,13 +378,66 @@
 
 	.rh-record__option-label {
 		overflow: hidden;
+		font-weight: var(--rh-font-weight-medium);
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
 
+	.rh-record__dot {
+		flex: none;
+		width: 8px;
+		height: 8px;
+		border-radius: var(--rh-radius-pill);
+	}
+
+	.rh-record__option .rh-record__dot {
+		align-self: flex-start;
+		margin-top: 6px;
+	}
+
+	.rh-record__dot--success {
+		background-color: var(--rh-color-success);
+	}
+
+	.rh-record__dot--warning {
+		background-color: var(--rh-color-warning);
+	}
+
+	.rh-record__dot--neutral {
+		background-color: var(--rh-color-text-subtle);
+	}
+
+	.rh-record__state {
+		flex: none;
+		align-self: flex-start;
+		color: var(--rh-color-text-muted);
+		font-size: var(--rh-font-size-sm);
+		white-space: nowrap;
+	}
+
+	.rh-record__reason {
+		color: var(--rh-color-text-muted);
+		font-size: var(--rh-font-size-sm);
+	}
+
 	.rh-record__check {
 		display: inline-flex;
+		flex: none;
 		color: var(--rh-color-accent);
+	}
+
+	.rh-record__foot {
+		display: flex;
+		justify-content: space-between;
+		gap: var(--rh-space-3);
+		padding: var(--rh-space-1) var(--rh-space-3);
+		border-top: var(--rh-border-width) solid var(--rh-color-border-muted);
+		color: var(--rh-color-text-muted);
+		font-size: var(--rh-font-size-xs);
+	}
+
+	.rh-record__keys {
+		white-space: nowrap;
 	}
 
 	.rh-record__none {

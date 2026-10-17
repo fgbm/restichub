@@ -161,15 +161,28 @@ To keep the filters in the query string, use `queryFilters(keys)` from `$lib/sto
 | `emptyLabel`                               | The text of the list when the search finds no option. By default, "No matches".                                |
 | `allLabel`                                 | Adds a first option with the empty value, for example "All" in a filter.                                       |
 | `ariaLabel`                                | The accessible name of a field without a visible label.                                                        |
+| `countLabel(count)`                        | The count of the options in the footer of the list, for example "4 hosts".                                     |
 | `onchange(value)`                          | Receives the value that the person selects.                                                                    |
+
+An option can also have these properties:
+
+- `dot`: a status dot before the label, `success`, `warning` or `neutral`. Set `state` too, because a color is never the only sign.
+- `state`: the state in words at the right of the option. The selected option shows a check mark in its place.
+- `detail`: the text after the label in the closed field. By default, it is the first part of the secondary line.
+- `disabled` and `reason`: an option that the person cannot select. It stays in the list, dimmed, and the reason shows below it, for example "Repository local-fs is on fs-01". Do not hide an option that the person expects to find.
 
 - A click, Enter, Space, the arrow keys or a typed character opens the list. A typed character starts the search. The focus goes to the search field.
 - The arrow keys move through the options. Enter selects an option. Escape closes the list. When the list closes, the focus goes back to the field.
-- The field has the `combobox` role. Its accessible name is the label and the selected label, and its description is the first part of the secondary line. The secondary line of an option is the accessible description of the option.
+- The footer of the list shows the count of the options, or "2 of 4" during a search, and the keys.
+- The field has the `combobox` role. Its accessible name is the label and the selected label, and its description is the first part of the secondary line. The secondary line, the state and the reason of an option are the accessible description of the option.
 
 `SelectOption` does not have a secondary line, because a native `<select>` cannot show one. A facet of `FilterBar` takes the same secondary line in `FilterOption.description`. Set `search: true` on the facet to show the search field when the facet has fewer than seven values.
 
 `ProfilePicker` (`$lib/components`) is a `RecordPicker` for a profile. It makes the options from the profiles, the repositories and the hosts. An option shows the profile name, the repository name and a chip with the backend kind. For a local repository, it also shows the repository host. `profileDescription` in `$lib/profile-picker.ts` gives the same secondary line for a facet.
+
+`HostPicker` (`$lib/components`) is a `RecordPicker` for a host. Use it for each field that selects a host, for example the plan host, the repository host and the target host of a restore. An option shows the status dot, the host name and the state in words, for example "Offline · 3 h ago". The secondary line shows the OS, the architecture and the labels as chips. It does not show the agent version. The search finds the host name, the OS and the labels. The closed field shows the host name, the OS family and the state. The `reason(host)` property gives the reason why a host cannot be selected. For example, a plan of a local repository runs only on the repository host. Revoked hosts are at the end of the list.
+
+A host facet of a list uses `withHosts` from `$lib/host-picker.ts`. It gives each value the host name and the same secondary line, and it puts the revoked hosts at the end. Set `search: true` on the facet.
 
 ## Forms
 

@@ -233,6 +233,7 @@ function makeAgents(): Agent[] {
 			duplicateOf?: { id: string; hostname: string; isOlder: boolean; lastSeenMinutes: number };
 			createdMinutesAgo?: number;
 			oldCertificateMinutesAgo?: number;
+			labels?: string[];
 		} = {}
 	): Agent => ({
 		id,
@@ -241,7 +242,7 @@ function makeAgents(): Agent[] {
 		arch,
 		agent_version: version,
 		restic_version: '0.19.0',
-		labels: [],
+		labels: options.labels ?? [],
 		status: options.status ?? 'active',
 		restore_roots:
 			os === 'windows'
@@ -292,11 +293,13 @@ function makeAgents(): Agent[] {
 		agent('1', 'win-fs01', 'windows', 'amd64', '0.4.2', 14, {
 			expiresInMinutes: 24 * 27 * 60,
 			rotatedMinutesAgo: 3 * 24 * 60,
-			duplicateOf: { id: '7', hostname: 'win-fs01-new', isOlder: false, lastSeenMinutes: 5 }
+			duplicateOf: { id: '7', hostname: 'win-fs01-new', isOlder: false, lastSeenMinutes: 5 },
+			labels: ['prod', 'files']
 		}),
 		agent('2', 'srv-db-01', 'linux', 'amd64', '0.4.2', 26, {
 			expiresInMinutes: 2 * 24 * 60,
-			rotatedMinutesAgo: null
+			rotatedMinutesAgo: null,
+			labels: ['prod', 'db']
 		}),
 		agent('3', 'win-dc01', 'windows', 'amd64', '0.4.1', 60, {
 			versionStatus: 'update_available',
@@ -306,7 +309,8 @@ function makeAgents(): Agent[] {
 		}),
 		agent('4', 'nas-backup', 'linux', 'arm64', '0.4.2', 120, {
 			expiresInMinutes: 22 * 24 * 60,
-			rotatedMinutesAgo: 8 * 24 * 60
+			rotatedMinutesAgo: 8 * 24 * 60,
+			labels: ['storage']
 		}),
 		agent('5', 'mac-build-01', 'darwin', 'arm64', '0.1.0', 60 * 48, {
 			versionStatus: 'unsupported',

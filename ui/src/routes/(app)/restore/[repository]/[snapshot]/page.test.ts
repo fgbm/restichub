@@ -160,7 +160,9 @@ describe('Snapshot page', () => {
 		);
 		render(Snapshot);
 		const dialog = await openDialog(user);
-		expect(within(dialog).getByLabelText('Target host')).toHaveValue('a_2');
+		expect(within(dialog).getByRole('combobox', { name: /^Target host/ })).toHaveTextContent(
+			'ws-anna'
+		);
 	});
 
 	it('fr_rs_04_the_target_parameter_preselects_the_target_host', async () => {
@@ -169,7 +171,9 @@ describe('Snapshot page', () => {
 		render(Snapshot);
 		expect(await screen.findByRole('heading', { name: 'Snapshot a1b2c3d4' })).toBeVisible();
 		const dialog = await openDialog(user);
-		expect(within(dialog).getByLabelText('Target host')).toHaveValue('a_2');
+		expect(within(dialog).getByRole('combobox', { name: /^Target host/ })).toHaveTextContent(
+			'ws-anna'
+		);
 	});
 
 	it('fr_rs_04_the_target_parameter_of_an_unknown_host_falls_back_to_the_snapshot_host', async () => {
@@ -177,7 +181,9 @@ describe('Snapshot page', () => {
 		route.url = new URL('http://localhost/restore/r_1/x?target=a_99');
 		render(Snapshot);
 		const dialog = await openDialog(user);
-		expect(within(dialog).getByLabelText('Target host')).toHaveValue(agent.id);
+		expect(within(dialog).getByRole('combobox', { name: /^Target host/ })).toHaveTextContent(
+			agent.hostname
+		);
 	});
 
 	it('fr_rs_04_offers_the_exclude_field_only_when_nothing_is_selected', async () => {

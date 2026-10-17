@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Agent, Profile, Repository } from '#lib/api/index.ts';
 	import { t } from '#lib/i18n/index.ts';
+	import { plural } from '#lib/list-format.ts';
 	import { profileOptions } from '#lib/profile-picker.ts';
 	import { RecordPicker } from './ui/index.ts';
 
@@ -34,5 +35,6 @@
 	options={profileOptions(profiles, repositories, agents)}
 	searchPlaceholder={t('profilePicker.search')}
 	emptyLabel={profiles.length === 0 ? t('profilePicker.none') : undefined}
+	countLabel={(count) => plural('profilePicker.count', count)}
 	{...rest}
 />

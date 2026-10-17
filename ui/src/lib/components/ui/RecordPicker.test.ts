@@ -124,6 +124,45 @@ describe('RecordPicker', () => {
 		expect(listbox()).not.toBeInTheDocument();
 	});
 
+	it('shows a disabled option with its reason and does not select it', async () => {
+		const user = userEvent.setup();
+		const onchange = vi.fn();
+		const hosts: RecordOption[] = [
+			{ value: 'h1', label: 'fs-01', dot: 'success', state: 'Online', detail: 'Windows · Online' },
+			{
+				value: 'h2',
+				label: 'db-01',
+				dot: 'neutral',
+				state: 'Offline',
+				disabled: true,
+				reason: 'Repository local-fs is on fs-01'
+			}
+		];
+		render(RecordPicker, {
+			props: {
+				label: 'Profile',
+				options: hosts,
+				value: 'h1',
+				countLabel: (count: number) => `${count} hosts`,
+				onchange
+			}
+		});
+
+		expect(field()).toHaveTextContent(/fs-01\s*· Windows · Online/);
+		await user.click(field());
+		await waitFor(() => expect(search()).toHaveFocus());
+		expect(screen.getByText('2 hosts')).toBeInTheDocument();
+		const blocked = option('db-01');
+		expect(blocked).toHaveAttribute('data-disabled');
+		expect(blocked).toHaveAccessibleDescription(/Offline.*Repository local-fs is on fs-01/);
+		expect(option('fs-01')).not.toHaveTextContent('Online');
+
+		await user.click(blocked);
+		expect(onchange).not.toHaveBeenCalled();
+		await user.type(search(), 'db');
+		expect(screen.getByText('1 of 2')).toBeInTheDocument();
+	});
+
 	it('marks the field invalid and describes it with the error', () => {
 		render(RecordPicker, {
 			props: { label: 'Profile', options, value: 'p1', error: 'Choose a profile.' }

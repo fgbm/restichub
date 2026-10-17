@@ -52,6 +52,7 @@ export type {
 	ListPill,
 	ListTone,
 	MenuItem,
+	RecordDot,
 	RecordOption,
 	RecordPart,
 	RowAction,
