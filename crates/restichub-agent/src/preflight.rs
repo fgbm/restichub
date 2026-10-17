@@ -66,9 +66,11 @@ pub fn prepare_directories(
     untrusted: paths::UntrustedIdentity,
     verbose: bool,
 ) -> Result<()> {
-    repair_in_two_passes(untrusted, &mut |mode| {
-        paths::repair_config_dir(config, mode, verbose, &mut |line| println!("{line}"))
-    })?;
+    let changeable =
+        paths::repair_config_dir(config, untrusted, verbose, &mut |line| println!("{line}"))?;
+    if !changeable.is_empty() {
+        return Err(ChangeableIdentity { paths: changeable }.into());
+    }
     paths::ensure_config_dir(config)
         .with_context(|| format!("cannot prepare the directory {}", config.display()))?;
     let staging = crate::identity::sibling(config, ".staging");
@@ -80,23 +82,6 @@ pub fn prepare_directories(
     staged?;
     prepare_cache(cache)?;
     probe(cache)?;
-    Ok(())
-}
-
-/// The first pass removes nothing of the identity, so every refusal that the tree can give comes
-/// while the old identity is still in place. Only then does `untrusted` remove it (T20, FR-IN-07).
-pub(crate) fn repair_in_two_passes(
-    untrusted: paths::UntrustedIdentity,
-    repair: &mut dyn FnMut(paths::UntrustedIdentity) -> Result<Vec<PathBuf>>,
-) -> Result<()> {
-    let changeable = repair(paths::UntrustedIdentity::Keep)?;
-    if changeable.is_empty() {
-        return Ok(());
-    }
-    if untrusted == paths::UntrustedIdentity::Keep {
-        return Err(ChangeableIdentity { paths: changeable }.into());
-    }
-    repair(untrusted)?;
     Ok(())
 }
 

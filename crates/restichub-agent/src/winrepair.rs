@@ -19,7 +19,7 @@ use crate::winsec::{Entry, Exposure, Rights};
 
 mod program;
 
-pub(crate) use program::repair_program_tree;
+pub(crate) use program::rebuild_open_program_tree;
 
 /// The directory that an older build used as the default restore root. The repair never reads
 /// inside it.
@@ -43,6 +43,16 @@ pub(crate) enum Action {
     RemovedLock(PathBuf),
     /// A restic binary or its record in a directory that another account could change.
     RemovedRestic(PathBuf),
+    /// A program tree that another account could change, moved aside to be made again.
+    MovedProgram {
+        from: PathBuf,
+        to: PathBuf,
+    },
+    RemovedMoved(PathBuf),
+    KeptMoved {
+        path: PathBuf,
+        cause: String,
+    },
 }
 
 impl std::fmt::Display for Action {
@@ -91,6 +101,18 @@ impl std::fmt::Display for Action {
             Self::RemovedRestic(path) => write!(
                 f,
                 "removed {}: another account could change restic, so the agent downloads and verifies restic again",
+                path.display()
+            ),
+            Self::MovedProgram { from, to } => write!(
+                f,
+                "moved {} to {}: another account could change it, so the agent makes it again for SYSTEM and Administrators only, copies the running agent into it, and downloads and verifies restic again",
+                from.display(),
+                to.display()
+            ),
+            Self::RemovedMoved(path) => write!(f, "removed {}", path.display()),
+            Self::KeptMoved { path, cause } => write!(
+                f,
+                "cannot remove {} ({cause}); the agent does not use it; an administrator removes it after a restart of the computer",
                 path.display()
             ),
         }
@@ -186,11 +208,12 @@ impl Kind {
 /// Repairs the levels from `root` down to `config` that SYSTEM or Administrators own, and the
 /// entries of the agent in them (FR-AG-04).
 ///
-/// A level of another owner, a reparse point and a level above `root` are left to the normal
-/// check, which refuses them. An identity entry that another account could change, or every
+/// A level of another owner is refused. A reparse point and a level above `root` are left to the
+/// normal check, which refuses them. An identity entry that another account could change, or every
 /// identity entry of a configuration directory that another account could change, is handled as
-/// `untrusted` says. `log` gets each change and each warning. Returns the identity entries that
-/// another account could change and that stay as found.
+/// `untrusted` says; a removal waits until every check of the tree passed, so a refusal leaves the
+/// old identity in place. `log` gets each change and each warning. Returns the identity entries
+/// that another account could change and that stay as found.
 pub(crate) fn repair_agent_tree(
     config: &Path,
     root: &Path,
@@ -211,9 +234,19 @@ pub(crate) fn repair_agent_tree(
         log,
         exposure_told: false,
         changeable: Vec::new(),
+        doomed: Vec::new(),
     };
     for level in levels {
         repair.level(level)?;
+    }
+    for (path, is_dir) in std::mem::take(&mut repair.doomed) {
+        if is_dir {
+            std::fs::remove_dir_all(&path)
+                .with_context(|| format!("cannot remove {}", path.display()))?;
+        } else {
+            remove_file(&path)?;
+        }
+        (repair.log)(Action::RemovedIdentity(path));
     }
     Ok(repair.changeable)
 }
@@ -222,15 +255,20 @@ pub(crate) fn repair_agent_tree(
 /// them (FR-AG-04, T20).
 ///
 /// The service runs it before it loads the identity. It never repairs: an open level stays a
-/// refusal until an administrator runs the repair. A missing entry passes, so the load reports it.
+/// refusal until an administrator runs the repair. It checks the levels, the backup of an
+/// interrupted swap that the load can take instead, and every file that the load reads or moves
+/// into place, also when `config` is empty. A missing entry passes, so the load reports it.
 pub(crate) fn check_identity(config: &Path, root: &Path) -> Result<()> {
-    let mut levels: Vec<&Path> = config
+    let mut levels: Vec<PathBuf> = config
         .ancestors()
         .take_while(|level| *level == config || level.starts_with(root))
+        .map(Path::to_path_buf)
         .collect();
     levels.reverse();
-    for level in levels {
-        let Some(entry) = Entry::open(level)? else {
+    let backup = crate::identity::sibling(config, ".old");
+    levels.push(backup.clone());
+    for level in &levels {
+        let Some(entry) = Entry::inspect(level)? else {
             continue;
         };
         if entry.is_reparse_point() {
@@ -238,18 +276,21 @@ pub(crate) fn check_identity(config: &Path, root: &Path) -> Result<()> {
         }
         refuse_exposure(&entry, level)?;
     }
-    for file in crate::identity::IDENTITY_FILES {
-        let path = config.join(file);
-        let Some(entry) = Entry::open(&path)? else {
-            continue;
-        };
-        if entry.is_reparse_point() || entry.links() > 1 {
-            bail!(
-                "{} is a link, so another path can carry its content",
-                path.display()
-            );
+    let names = crate::identity::loaded_names();
+    for dir in [config, backup.as_path()] {
+        for (name, _) in &names {
+            let path = dir.join(name);
+            let Some(entry) = Entry::inspect(&path)? else {
+                continue;
+            };
+            if entry.is_reparse_point() || entry.links() > 1 {
+                bail!(
+                    "{} is a link, so another path can carry its content",
+                    path.display()
+                );
+            }
+            refuse_exposure(&entry, &path)?;
         }
-        refuse_exposure(&entry, &path)?;
     }
     Ok(())
 }
@@ -277,6 +318,8 @@ struct Repair<'a> {
     log: &'a mut dyn FnMut(Action),
     exposure_told: bool,
     changeable: Vec<PathBuf>,
+    /// The identity entries that [`UntrustedIdentity::Remove`] removes after the last check.
+    doomed: Vec<(PathBuf, bool)>,
 }
 
 impl Repair<'_> {
@@ -297,7 +340,11 @@ impl Repair<'_> {
             .exposure(rights)
             .with_context(|| format!("cannot check {}", level.display()))?
         {
-            Exposure::ForeignOwner => return Ok(()),
+            // The owner can change the access at any time, also of a level below it through a link.
+            Exposure::ForeignOwner => bail!(
+                "{} is owned by an account that is not SYSTEM or Administrators, so the agent does not repair it; an administrator checks it and makes Administrators its owner, then runs the command again",
+                level.display()
+            ),
             Exposure::ForeignGrant => true,
             Exposure::Clean => false,
         };
@@ -308,7 +355,8 @@ impl Repair<'_> {
             // whatever that account wrote. Only a new registration replaces the directory.
             self.changeable.push(level.to_path_buf());
         } else if open {
-            // The DACL comes before the listing, so no entry can appear after the check.
+            // The DACL comes before the listing, so a new handle cannot add an entry after the
+            // check. A handle opened before keeps its access until it closes (T20 residual).
             entry
                 .protect()
                 .with_context(|| format!("cannot protect {}", level.display()))?;
@@ -435,8 +483,8 @@ impl Repair<'_> {
         Ok(())
     }
 
-    /// Each directory is protected before its listing, so no child can appear after the check.
-    /// `in_changeable` says that another account could change the directory that holds `path`.
+    /// Each directory is protected before its listing, so only a handle opened before the
+    /// protection can add a child after the check. `in_changeable` says that another account could change the directory that holds `path`.
     fn walk(&mut self, path: &Path, kind: Kind, in_changeable: bool) -> Result<()> {
         let Some(entry) = Entry::open(path)? else {
             return Ok(());
@@ -447,7 +495,8 @@ impl Repair<'_> {
         {
             let is_dir = entry.is_dir();
             drop(entry);
-            return self.untrusted_identity(path, is_dir, in_changeable);
+            self.untrusted_identity(path, is_dir, in_changeable);
+            return Ok(());
         }
         if entry.exposure(kind.rights())? == Exposure::ForeignGrant {
             entry
@@ -473,7 +522,7 @@ impl Repair<'_> {
         Ok(())
     }
 
-    fn untrusted_identity(&mut self, path: &Path, is_dir: bool, in_changeable: bool) -> Result<()> {
+    fn untrusted_identity(&mut self, path: &Path, is_dir: bool, in_changeable: bool) {
         match self.untrusted {
             UntrustedIdentity::Keep => {
                 // The directory that holds it is already named.
@@ -481,17 +530,8 @@ impl Repair<'_> {
                     self.changeable.push(path.to_path_buf());
                 }
             }
-            UntrustedIdentity::Remove => {
-                if is_dir {
-                    std::fs::remove_dir_all(path)
-                        .with_context(|| format!("cannot remove {}", path.display()))?;
-                } else {
-                    remove_file(path)?;
-                }
-                (self.log)(Action::RemovedIdentity(path.to_path_buf()));
-            }
+            UntrustedIdentity::Remove => self.doomed.push((path.to_path_buf(), is_dir)),
         }
-        Ok(())
     }
 
     fn identity_exposed(&mut self, path: &Path) {
@@ -814,11 +854,9 @@ mod tests {
         junction(&cache.join("link"), &target);
         grant(&config, "(OI)(CI)(WD)").expect("cannot add the entry");
 
-        let error =
-            crate::preflight::repair_in_two_passes(UntrustedIdentity::Remove, &mut |mode| {
-                repair_agent_tree(&config, &root, mode, &mut |_| {})
-            })
-            .expect_err("a junction must stop register --force");
+        // The identity files come before `cache` in the listing.
+        let (result, actions) = repair_with(&config, &root, UntrustedIdentity::Remove);
+        let error = result.expect_err("a junction must stop register --force");
 
         assert!(format!("{error:#}").contains("reparse point"), "{error:#}");
         for file in crate::identity::IDENTITY_FILES {
@@ -827,6 +865,33 @@ mod tests {
                 "{file} must stay after a refusal"
             );
         }
+        assert!(
+            !actions
+                .iter()
+                .any(|action| matches!(action, Action::RemovedIdentity(_))),
+            "{actions:?}"
+        );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn fr_ag_04_a_level_of_a_foreign_owner_stops_the_repair() {
+        let (base, root, config) = tree("repair-owner-root");
+        crate::identity::tests::sample()
+            .save(&config)
+            .expect("cannot save the identity");
+        set_owner(
+            &root,
+            &current_user_sid().expect("cannot read the user SID"),
+        )
+        .expect("cannot set the owner");
+        grant(&config, "(OI)(CI)(WD)").expect("cannot add the entry");
+        let (result, actions) = repair_with(&config, &root, UntrustedIdentity::Remove);
+        let error = format!("{:#}", result.expect_err("a foreign owner must stop"));
+        assert!(error.contains("is owned by an account"), "{error}");
+        assert!(actions.is_empty(), "nothing below it changes: {actions:?}");
+        assert!(is_open(&config));
+        assert!(config.join(crate::identity::KEY_FILE).exists());
         let _ = std::fs::remove_dir_all(&base);
     }
 
@@ -856,6 +921,37 @@ mod tests {
         let error = format!(
             "{:#}",
             check_identity(&config, &root).expect_err("an open level")
+        );
+        assert!(error.contains("grants a write access"), "{error}");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn fr_ag_04_an_empty_identity_directory_does_not_hide_a_planted_backup() {
+        let (base, root, config) = tree("check-backup");
+        let backup = crate::identity::sibling(&config, ".old");
+        crate::identity::tests::sample()
+            .save(&backup)
+            .expect("cannot save the identity");
+        check_identity(&config, &root).expect("a protected backup passes");
+
+        grant(&backup.join(crate::identity::CA_CHAIN_FILE), "(R,W)").expect("cannot add");
+        let error = format!(
+            "{:#}",
+            check_identity(&config, &root).expect_err("an open file in the backup")
+        );
+        assert!(error.contains("Agent.old"), "{error}");
+        Entry::open(&backup.join(crate::identity::CA_CHAIN_FILE))
+            .expect("cannot open")
+            .expect("the chain must exist")
+            .protect()
+            .expect("cannot protect");
+
+        // The attack: the identity directory is empty and the root is open.
+        grant(&root, "(OI)(CI)(WD)").expect("cannot add the entry");
+        let error = format!(
+            "{:#}",
+            check_identity(&config, &root).expect_err("an open root")
         );
         assert!(error.contains("grants a write access"), "{error}");
         let _ = std::fs::remove_dir_all(&base);

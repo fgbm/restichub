@@ -16,7 +16,7 @@ use windows_sys::Win32::Storage::FileSystem::{
     BY_HANDLE_FILE_INFORMATION, CreateFileW, FILE_ATTRIBUTE_DIRECTORY,
     FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
     FILE_READ_DATA, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
-    GetFileInformationByHandle, OPEN_EXISTING, READ_CONTROL, WRITE_DAC, WRITE_OWNER,
+    GetFileInformationByHandle, OPEN_EXISTING, READ_CONTROL, WRITE_DAC,
 };
 
 use super::{
@@ -65,13 +65,22 @@ impl Drop for Entry {
 impl Entry {
     /// Opens the entry at `path`, or returns `None` when the path does not exist.
     pub(crate) fn open(path: &Path) -> Result<Option<Self>> {
+        Self::open_with(path, READ_CONTROL | WRITE_DAC)
+    }
+
+    /// Opens the entry for [`Entry::exposure`] only, so a process without elevation can check it.
+    pub(crate) fn inspect(path: &Path) -> Result<Option<Self>> {
+        Self::open_with(path, READ_CONTROL)
+    }
+
+    fn open_with(path: &Path, access: u32) -> Result<Option<Self>> {
         let wide = wide_path(path);
         // SAFETY: the path is a null-terminated UTF-16 string. The access asks for no data, so the
         // share mode of another handle cannot refuse it.
         let handle = unsafe {
             CreateFileW(
                 wide.as_ptr(),
-                READ_CONTROL | WRITE_DAC,
+                access,
                 FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                 std::ptr::null(),
                 OPEN_EXISTING,
@@ -151,44 +160,11 @@ impl Entry {
 
     /// Sets the protected DACL of SYSTEM and Administrators on this entry only.
     pub(crate) fn protect(&self) -> Result<()> {
-        self.set(DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION)
-    }
-
-    /// Sets the owner of the descriptor of [`Entry::protect`]. The handle of [`Entry::open`] has
-    /// no right to change the owner, so this opens the path again after the protection.
-    pub(crate) fn own(path: &Path) -> Result<()> {
-        let wide = wide_path(path);
-        // SAFETY: the path is a null-terminated UTF-16 string.
-        let handle = unsafe {
-            CreateFileW(
-                wide.as_ptr(),
-                READ_CONTROL | WRITE_OWNER,
-                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                std::ptr::null(),
-                OPEN_EXISTING,
-                FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS,
-                std::ptr::null_mut(),
-            )
-        };
-        if handle == INVALID_HANDLE_VALUE {
-            return Err(std::io::Error::last_os_error())
-                .with_context(|| format!("cannot open {}", path.display()));
-        }
-        let entry = Self {
-            handle,
-            info: BY_HANDLE_FILE_INFORMATION::default(),
-        };
-        entry
-            .set(OWNER_SECURITY_INFORMATION)
-            .with_context(|| format!("cannot set the owner of {}", path.display()))
-    }
-
-    /// Both descriptors name Administrators as the owner, so an owner change takes either.
-    fn set(&self, info: u32) -> Result<()> {
         let descriptor = descriptor(if self.is_dir() { DIR_SDDL } else { FILE_SDDL })?;
+        let info = DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION;
         // `SetSecurityInfo` would flow the DACL into the children, past a junction among them, so
         // the low-level call sets this object alone and the caller walks the children itself.
-        // SAFETY: the handle is open with the right for `info`; the descriptor stays alive.
+        // SAFETY: the handle is open with WRITE_DAC and the descriptor stays alive for the call.
         let ok = unsafe { SetKernelObjectSecurity(self.handle, info, descriptor.0) };
         if ok == 0 {
             bail!(

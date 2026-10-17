@@ -363,7 +363,8 @@ mod tests {
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("cannot create the directory");
+        // The status refuses a directory that another account could change.
+        crate::paths::ensure_config_dir(&dir).expect("cannot create the directory");
         dir
     }
 

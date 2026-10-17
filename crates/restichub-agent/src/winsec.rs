@@ -944,24 +944,6 @@ pub(crate) mod tests {
         run_icacls(path, &["/grant", &format!("*{sid}:{rights}")])
     }
 
-    pub(crate) fn owner_of(path: &Path) -> Result<String> {
-        use windows_sys::Win32::Security::Authorization::ConvertSidToStringSidW;
-        let security = open_security(path)?;
-        let mut text: *mut u16 = std::ptr::null_mut();
-        // SAFETY: the owner is a valid security identifier that the descriptor keeps alive.
-        if unsafe { ConvertSidToStringSidW(security.owner, &mut text) } == 0 || text.is_null() {
-            bail!("cannot convert the owner of {}", path.display());
-        }
-        // SAFETY: the call returned a null-terminated UTF-16 string that LocalFree releases.
-        let owner = unsafe {
-            let length = (0..).take_while(|&index| *text.add(index) != 0).count();
-            let value = String::from_utf16_lossy(std::slice::from_raw_parts(text, length));
-            LocalFree(text as HLOCAL);
-            value
-        };
-        Ok(owner)
-    }
-
     /// Copies the DACL of the real `C:\Program Files` onto `dir`, for a positive test.
     fn copy_program_files_dacl(dir: &Path) -> Result<()> {
         let source = open_security(Path::new(r"C:\Program Files"))?;

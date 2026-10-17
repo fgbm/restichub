@@ -28,6 +28,25 @@ pub(crate) const IDENTITY_FILES: [&str; 5] = [
 pub(crate) const STAGED_SUFFIX: &str = ".next";
 /// The staged marker. Its presence says that the staged key, certificate and chain are complete.
 pub(crate) const ROTATION_MARKER: &str = "rotation.next";
+/// The files of a rotation that a load moves into place.
+const ROTATED_FILES: [&str; 3] = [KEY_FILE, CERT_FILE, CA_CHAIN_FILE];
+
+/// The names in an identity directory whose content a load reads or moves into place, with
+/// whether the name holds the private key.
+pub(crate) fn loaded_names() -> Vec<(String, bool)> {
+    let mut names: Vec<(String, bool)> = IDENTITY_FILES
+        .iter()
+        .map(|file| ((*file).to_owned(), *file == KEY_FILE))
+        .collect();
+    names.extend(
+        ROTATED_FILES
+            .iter()
+            .map(|file| (format!("{file}{STAGED_SUFFIX}"), *file == KEY_FILE)),
+    );
+    names.push((ROTATION_MARKER.to_owned(), false));
+    names
+}
+
 /// A rotation holds the lock for milliseconds. A holder past this time is not the agent, and a
 /// hang would keep the service from starting.
 const LOCK_WAIT: Duration = Duration::from_secs(60);
@@ -273,7 +292,7 @@ fn staged(dir: &Path, name: &str) -> std::path::PathBuf {
 }
 
 fn discard_staged(dir: &Path) {
-    for name in [KEY_FILE, CERT_FILE, CA_CHAIN_FILE] {
+    for name in ROTATED_FILES {
         let _ = std::fs::remove_file(staged(dir, name));
     }
     let _ = std::fs::remove_file(dir.join(ROTATION_MARKER));
@@ -289,7 +308,7 @@ fn finish_rotation(dir: &Path) -> Result<()> {
         discard_staged(dir);
         return Ok(());
     }
-    for name in [KEY_FILE, CERT_FILE, CA_CHAIN_FILE] {
+    for name in ROTATED_FILES {
         let source = staged(dir, name);
         if source.exists() {
             std::fs::rename(&source, dir.join(name))

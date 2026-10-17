@@ -36,14 +36,19 @@ pub fn run_as_service() -> windows_service::Result<()> {
 }
 
 fn service_main(_arguments: Vec<OsString>) {
-    // An interrupted identity swap is put back before anything else writes below ProgramData.
-    crate::identity::recover(&crate::paths::config_dir());
+    // The identity load puts back an interrupted swap, after the identity check of `run`.
     crate::logging::init_service();
     if let Err(error) = run_service() {
         tracing::error!(%error, "the service stopped with an error");
+        // Without a stopped status the service manager counts a failure and restarts the service,
+        // as `Restart=on-failure` does on Linux.
+        std::process::exit(1);
     }
 }
 
+/// Returns an error only for a failure that a restart can fix. A refusal that needs an
+/// administrator reports the stopped state with the exit code 78, which the service manager does
+/// not act on, as `RestartPreventExitStatus=78` on Linux.
 fn run_service() -> Result<()> {
     // A service has no console, and `CTRL_BREAK` reaches a child only through one (FR-AG-10).
     if let Err(error) = crate::exec::allocate_hidden_console() {
@@ -64,21 +69,20 @@ fn run_service() -> Result<()> {
         ServiceControlAccept::STOP,
         ServiceExitCode::NO_ERROR,
     ))?;
-    let result = crate::commands::run(&crate::paths::config_dir(), Some(receiver));
-    // A failing run leaves a non-zero service exit code, so the SCM and an operator see it.
-    let exit_code = match &result {
+    let exit_code = match crate::commands::run(&crate::paths::config_dir(), Some(receiver)) {
         Ok(()) => ServiceExitCode::NO_ERROR,
-        Err(error) if crate::commands::needs_administrator(error) => {
+        // `run` has logged the refusal with its fix.
+        Err(error) if crate::commands::needs_administrator(&error) => {
             ServiceExitCode::ServiceSpecific(u32::from(crate::commands::EXIT_NO_IDENTITY))
         }
-        Err(_) => ServiceExitCode::Win32(1),
+        Err(error) => return Err(error),
     };
     status_handle.set_service_status(status(
         ServiceState::Stopped,
         ServiceControlAccept::empty(),
         exit_code,
     ))?;
-    result
+    Ok(())
 }
 
 fn status(
@@ -160,7 +164,8 @@ pub fn install(restic: &Path) -> Result<()> {
     };
     service.set_description("The ResticHub backup agent")?;
     service.update_failure_actions(failure_actions())?;
-    service.set_failure_actions_on_non_crash_failures(true)?;
+    // A stop with the exit code 78 is not a crash, so the actions skip it.
+    service.set_failure_actions_on_non_crash_failures(false)?;
     // A running service restarts, so that it uses the new executable path.
     stop_and_wait(&service)?;
     // A start failure is reported, not hidden behind a success message.
@@ -170,29 +175,18 @@ pub fn install(restic: &Path) -> Result<()> {
     Ok(())
 }
 
-/// The service restarts after a failure. The service control manager repeats the last action for
-/// each later failure, so the last one takes no action: a refusal that needs an administrator, such
-/// as an identity that another account could change, does not restart forever. The count resets
-/// after a day without a failure, and each failure stays in the event log.
+/// The service restarts after each failure. The service control manager repeats the last action for
+/// each later failure, so the restarts never end. The count resets after a day without a failure.
 fn failure_actions() -> ServiceFailureActions {
+    let restart = |seconds| ServiceAction {
+        action_type: ServiceActionType::Restart,
+        delay: Duration::from_secs(seconds),
+    };
     ServiceFailureActions {
         reset_period: ServiceFailureResetPeriod::After(Duration::from_secs(86_400)),
         reboot_msg: None,
         command: None,
-        actions: Some(vec![
-            ServiceAction {
-                action_type: ServiceActionType::Restart,
-                delay: Duration::from_secs(5),
-            },
-            ServiceAction {
-                action_type: ServiceActionType::Restart,
-                delay: Duration::from_secs(30),
-            },
-            ServiceAction {
-                action_type: ServiceActionType::None,
-                delay: Duration::default(),
-            },
-        ]),
+        actions: Some(vec![restart(5), restart(30), restart(60)]),
     }
 }
 
@@ -320,16 +314,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn fr_ag_01_a_refusal_restarts_twice_and_then_stays_stopped() {
+    fn fr_ag_01_every_failure_restarts_the_service() {
         let actions = failure_actions().actions.unwrap_or_default();
-        let kinds: Vec<ServiceActionType> =
-            actions.iter().map(|action| action.action_type).collect();
+        let steps: Vec<(ServiceActionType, u64)> = actions
+            .iter()
+            .map(|action| (action.action_type, action.delay.as_secs()))
+            .collect();
         assert_eq!(
-            kinds,
+            steps,
             [
-                ServiceActionType::Restart,
-                ServiceActionType::Restart,
-                ServiceActionType::None
+                (ServiceActionType::Restart, 5),
+                (ServiceActionType::Restart, 30),
+                (ServiceActionType::Restart, 60)
             ]
         );
     }

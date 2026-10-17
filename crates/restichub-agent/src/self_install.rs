@@ -91,6 +91,12 @@ pub fn prepare(
     Ok(outcome)
 }
 
+/// Copies the agent alone into a program directory that the repair made again. The move of an old
+/// restic waits for the check of the directory that holds it.
+pub(crate) fn copy_agent(placement: &Placement, source: &Path) -> Result<()> {
+    copy_file(source, &placement.exe)
+}
+
 /// Moves restic from an earlier install location into the restic directory.
 ///
 /// The service start calls it too, so an agent that an update replaced finds restic without a new

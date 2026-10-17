@@ -134,8 +134,7 @@ pub(crate) fn agent_root() -> PathBuf {
 /// (FR-AG-04, threat T20).
 ///
 /// Only the elevated commands that prepare the directories call it. The service refuses a foreign
-/// access instead. A refusal that the repair does not cover (a foreign owner of a level) comes from
-/// [`ensure_config_dir`]. Linux needs no repair: [`create_protected_dir`] sets the mode of an
+/// access instead. Linux needs no repair: [`create_protected_dir`] sets the mode of an
 /// existing directory and has no owner check that an old build could trip. `log` gets one line for
 /// each warning and removal, and one line for each top-level directory whose access control
 /// changed; `verbose` gives one line for each changed entry instead. Returns the identity entries
@@ -170,56 +169,59 @@ pub fn repair_config_dir(
     }
 }
 
-/// Repairs the access control of the program directory that a manual copy or an older build left
-/// open (FR-IN-07, threat T20).
+/// Moves aside and removes the program directory that a manual copy or an older build left open
+/// (FR-IN-07, threat T20). Returns whether it moved, so the caller makes it again.
 ///
-/// It runs before the program directory is checked, in the elevated commands only. A restic that
-/// another account could change is removed with its record in `config`, so the install downloads
-/// it again. Linux needs no repair: the check refuses a shared level with a remedy. `log` and
-/// `verbose` work as in [`repair_config_dir`].
+/// It runs before the program directory is checked, in the elevated commands only. The restic
+/// record in `config` goes with restic, so the install downloads restic again. `running` is the
+/// image of this process; the command refuses to move the directory that holds it.
+/// `stop_service` runs before the move. Linux needs no repair: the check refuses a shared level
+/// with a remedy. `log` gets one line for each action.
 ///
 /// # Errors
 ///
-/// Returns an error when a level holds an entry that the agent does not know, a link or an entry
-/// that another account owns, or when the access control cannot be set.
-pub fn repair_program_dir(config: &Path, verbose: bool, log: &mut dyn FnMut(&str)) -> Result<()> {
+/// Returns an error when a level has another owner, when the running image is inside the open
+/// directory, or when the service does not stop or the directory does not move.
+pub fn rebuild_program_dir(
+    config: &Path,
+    running: &Path,
+    stop_service: &mut dyn FnMut() -> Result<()>,
+    log: &mut dyn FnMut(&str),
+) -> Result<bool> {
     #[cfg(windows)]
     {
         let program = program_dir();
         let root = program.parent().map(Path::to_path_buf).unwrap_or_default();
         let record = config.join(crate::restic_store::RECORD_FILE);
-        let mut report = crate::winrepair::Report::new(&root, verbose, log);
-        let result =
-            crate::winrepair::repair_program_tree(&program, &root, &record, &mut |action| {
-                report.action(action);
-            });
-        report.finish();
-        result
+        crate::winrepair::rebuild_open_program_tree(
+            &program,
+            &root,
+            &record,
+            running,
+            stop_service,
+            &mut |action| log(&action.to_string()),
+        )
     }
     #[cfg(not(windows))]
     {
-        let _ = (config, verbose, log);
-        Ok(())
+        let _ = (config, running, stop_service, log);
+        Ok(false)
     }
 }
 
 /// Refuses an identity in `dir` that another account could change (FR-AG-04, threat T20).
 ///
-/// The service runs it before it loads the identity. It repairs nothing. A directory without an
-/// identity file passes, so the load reports the missing identity. Linux refuses a link and a
-/// directory or an identity file that every account can write; a group write passes, because a
-/// umask of 002 gives it to a directory of a test run.
+/// The service runs it before it loads the identity. It repairs nothing. It checks `dir`, the
+/// backup of an interrupted swap that the load can take instead, and every file that the load
+/// reads or moves into place, also when `dir` is empty. A missing entry passes, so the load
+/// reports a missing identity. Linux refuses a link, an owner that is not root or this account, a
+/// group or world write, and a private key that the group or the world can read.
 ///
 /// # Errors
 ///
-/// Returns an error that names the entry another account could change.
+/// Returns an error that names the entry another account could change, or the error of an entry
+/// that this process cannot read.
 pub fn check_identity_dir(dir: &Path) -> Result<()> {
-    let holds_identity = crate::identity::IDENTITY_FILES
-        .iter()
-        .any(|file| std::fs::symlink_metadata(dir.join(file)).is_ok());
-    if !holds_identity {
-        return Ok(());
-    }
     #[cfg(windows)]
     {
         crate::winrepair::check_identity(dir, &agent_root())
@@ -227,10 +229,18 @@ pub fn check_identity_dir(dir: &Path) -> Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt as _;
-        let files = crate::identity::IDENTITY_FILES
-            .iter()
-            .map(|file| dir.join(file));
-        for path in std::iter::once(dir.to_path_buf()).chain(files) {
+        let backup = crate::identity::sibling(dir, ".old");
+        let names = crate::identity::loaded_names();
+        let mut entries = Vec::new();
+        for candidate in [dir, backup.as_path()] {
+            entries.push((candidate.to_path_buf(), false));
+            entries.extend(
+                names
+                    .iter()
+                    .map(|(name, secret)| (candidate.join(name), *secret)),
+            );
+        }
+        for (path, secret) in entries {
             let metadata = match std::fs::symlink_metadata(&path) {
                 Ok(metadata) => metadata,
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
@@ -238,8 +248,14 @@ pub fn check_identity_dir(dir: &Path) -> Result<()> {
                     return Err(error).with_context(|| format!("cannot read {}", path.display()));
                 }
             };
-            if metadata.file_type().is_symlink() || metadata.mode() & 0o002 != 0 {
-                anyhow::bail!("{} is a link or every account can write it", path.display());
+            if let Some(reason) = unix_exposure(
+                metadata.file_type().is_symlink(),
+                metadata.uid(),
+                metadata.mode(),
+                current_uid(),
+                secret,
+            ) {
+                anyhow::bail!("{} {reason}", path.display());
             }
         }
         Ok(())
@@ -248,6 +264,23 @@ pub fn check_identity_dir(dir: &Path) -> Result<()> {
     {
         let _ = dir;
         Ok(())
+    }
+}
+
+/// Root may own the entry too: a `status` without root reads the directory that the service owns.
+#[cfg(unix)]
+fn unix_exposure(link: bool, uid: u32, mode: u32, euid: u32, secret: bool) -> Option<&'static str> {
+    let readable = if secret { 0o044 } else { 0 };
+    if link {
+        Some("is a link, so another path can carry its content")
+    } else if uid != 0 && uid != euid {
+        Some("is owned by another account")
+    } else if mode & 0o022 != 0 {
+        Some("is writable by the group or by every account")
+    } else if mode & readable != 0 {
+        Some("holds the private key and the group or every account can read it")
+    } else {
+        None
     }
 }
 
@@ -517,10 +550,69 @@ mod tests {
         std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o666)).expect("mode");
         let error = format!("{:#}", check_identity_dir(&dir).expect_err("a shared key"));
         assert!(error.contains("agent-key.pem"), "{error}");
+        std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o640)).expect("mode");
+        let error = format!(
+            "{:#}",
+            check_identity_dir(&dir).expect_err("a group read key")
+        );
+        assert!(error.contains("private key"), "{error}");
         std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o600)).expect("mode");
-        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o777)).expect("mode");
-        assert!(check_identity_dir(&dir).is_err(), "a shared directory");
+        let chain = dir.join(crate::identity::CA_CHAIN_FILE);
+        create_protected_file(&chain, b"chain").expect("cannot write the chain");
+        std::fs::set_permissions(&chain, std::fs::Permissions::from_mode(0o644)).expect("mode");
+        check_identity_dir(&dir).expect("a public file may be readable");
+        std::fs::set_permissions(&chain, std::fs::Permissions::from_mode(0o660)).expect("mode");
+        let error = format!("{:#}", check_identity_dir(&dir).expect_err("a group write"));
+        assert!(error.contains("ca-chain.pem"), "{error}");
+        std::fs::set_permissions(&chain, std::fs::Permissions::from_mode(0o600)).expect("mode");
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o770)).expect("mode");
+        assert!(
+            check_identity_dir(&dir).is_err(),
+            "a group-writable directory"
+        );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fr_ag_04_the_owner_must_be_root_or_the_service_account() {
+        assert_eq!(unix_exposure(false, 0, 0o100_600, 1000, true), None);
+        assert_eq!(unix_exposure(false, 1000, 0o100_600, 1000, true), None);
+        assert!(unix_exposure(false, 1001, 0o100_600, 1000, true).is_some());
+        assert!(unix_exposure(false, 1001, 0o040_700, 0, false).is_some());
+        assert!(unix_exposure(true, 0, 0o120_777, 0, false).is_some());
+        assert!(unix_exposure(false, 0, 0o100_604, 0, true).is_some());
+        assert_eq!(unix_exposure(false, 0, 0o100_644, 0, false), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fr_ag_04_an_empty_directory_does_not_hide_a_changeable_backup() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let base = temp_dir("identity-backup");
+        let dir = base.join("Agent");
+        ensure_config_dir(&dir).expect("cannot create the configuration directory");
+        let backup = crate::identity::sibling(&dir, ".old");
+        ensure_config_dir(&backup).expect("cannot create the backup");
+        let key = backup.join(crate::identity::KEY_FILE);
+        create_protected_file(&key, b"key").expect("cannot write the key");
+        check_identity_dir(&dir).expect("a protected backup passes");
+        std::fs::set_permissions(&backup, std::fs::Permissions::from_mode(0o777)).expect("mode");
+        let error = format!(
+            "{:#}",
+            check_identity_dir(&dir).expect_err("an open backup")
+        );
+        assert!(error.contains("Agent.old"), "{error}");
+        std::fs::set_permissions(&backup, std::fs::Permissions::from_mode(0o700)).expect("mode");
+        let staged = dir.join(format!("{}.next", crate::identity::CA_CHAIN_FILE));
+        create_protected_file(&staged, b"chain").expect("cannot write");
+        std::fs::set_permissions(&staged, std::fs::Permissions::from_mode(0o666)).expect("mode");
+        let error = format!(
+            "{:#}",
+            check_identity_dir(&dir).expect_err("a planted rotation")
+        );
+        assert!(error.contains("ca-chain.pem.next"), "{error}");
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[cfg(unix)]

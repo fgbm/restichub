@@ -21,7 +21,7 @@ use crate::service::{HostService, ServiceManager};
 use crate::setup::{SetupReport, WaitOptions};
 
 /// The exit code of a service start without a usable identity. The service manager does not
-/// restart on it for long, because only an administrator can fix the identity (FR-AG-01).
+/// restart on it, because only an administrator can fix the identity (FR-AG-01).
 pub const EXIT_NO_IDENTITY: u8 = 78;
 
 /// Tells whether the service stopped for a reason that only an administrator can fix.
@@ -55,17 +55,33 @@ impl std::error::Error for NoIdentity {}
 pub struct UnsafeIdentity {
     dir: PathBuf,
     cause: String,
+    kind: UnsafeKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UnsafeKind {
+    Changeable,
+    /// This process may not read an entry, so the check has no result.
+    Unreadable,
 }
 
 impl std::fmt::Display for UnsafeIdentity {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "the agent does not use the identity in {}: {}; an administrator runs `restichub-agent install-service`, which repairs the access control; if it says that another account could change the identity, {}",
-            self.dir.display(),
-            self.cause,
-            crate::preflight::REGISTER_AGAIN
-        )
+        match self.kind {
+            UnsafeKind::Changeable => write!(
+                f,
+                "the agent does not use the identity in {}: {}; an administrator runs `restichub-agent install-service`, which repairs the access control; if it says that another account could change the identity, {}",
+                self.dir.display(),
+                self.cause,
+                crate::preflight::REGISTER_AGAIN
+            ),
+            UnsafeKind::Unreadable => write!(
+                f,
+                "cannot check the identity in {}: {}; run the command as an administrator (Windows: an elevated PowerShell) or as root (Linux)",
+                self.dir.display(),
+                self.cause
+            ),
+        }
     }
 }
 
@@ -75,12 +91,26 @@ impl std::error::Error for UnsafeIdentity {}
 ///
 /// # Errors
 ///
-/// Returns [`UnsafeIdentity`] with the entry that another account could change.
+/// Returns [`UnsafeIdentity`] with the entry that another account could change, or with the entry
+/// that this process may not read.
 pub fn check_identity(dir: &Path) -> Result<(), UnsafeIdentity> {
-    crate::paths::check_identity_dir(dir).map_err(|error| UnsafeIdentity {
+    crate::paths::check_identity_dir(dir).map_err(|error| unsafe_identity(dir, &error))
+}
+
+fn unsafe_identity(dir: &Path, error: &anyhow::Error) -> UnsafeIdentity {
+    let denied = error
+        .chain()
+        .filter_map(|cause| cause.downcast_ref::<std::io::Error>())
+        .any(|io| io.kind() == std::io::ErrorKind::PermissionDenied);
+    UnsafeIdentity {
         dir: dir.to_path_buf(),
         cause: format!("{error:#}"),
-    })
+        kind: if denied {
+            UnsafeKind::Unreadable
+        } else {
+            UnsafeKind::Changeable
+        },
+    }
 }
 
 /// Enrolls this host on a private runtime, then installs and starts the service and waits for the
@@ -98,7 +128,7 @@ pub fn register(options: &RegisterOptions, dir: &Path) -> Result<()> {
     check_register_input(options, dir)?;
     // Every check and repair that can refuse runs before `--force` removes an identity that another
     // account could change, so a refusal leaves the old files in place (T20, FR-IN-07).
-    prepare_program(dir, &HostService, options.verbose)?;
+    prepare_program(dir, &HostService)?;
     // The tree check runs before the copy: the move of an old restic reads from it, so a directory
     // that another account can write must be refused before anything leaves it (T20, FR-IN-07).
     crate::preflight::prepare_directories(
@@ -226,12 +256,33 @@ pub fn start_after_register(
         .context("the agent is registered, but the service is not ready; fix the cause and run: restichub-agent install-service")
 }
 
-/// Repairs and checks the program directory and reads the service state, so that the later copy
-/// meets no refusal (FR-IN-07, T20).
-fn prepare_program(config: &Path, manager: &dyn ServiceManager, verbose: bool) -> Result<()> {
-    crate::paths::repair_program_dir(config, verbose, &mut |line| println!("{line}"))?;
+/// Makes an open program directory again, checks it and reads the service state, so that the later
+/// copy meets no refusal (FR-IN-07, T20).
+fn prepare_program(config: &Path, manager: &dyn ServiceManager) -> Result<()> {
+    let running = crate::self_install::running_image()?;
+    // A running service and its restic keep the directory in use. The command restarts the service
+    // at the end anyway.
+    let rebuilt = crate::paths::rebuild_program_dir(
+        config,
+        &running,
+        &mut || {
+            if manager.state()?.running {
+                manager.stop()?;
+            }
+            Ok(())
+        },
+        &mut |line| println!("{line}"),
+    )?;
     crate::paths::ensure_program_dir(&crate::paths::restic_dir())?;
     crate::paths::ensure_program_dir(&crate::paths::program_dir())?;
+    if rebuilt {
+        // The installed service starts from this path also when a later check refuses the identity.
+        crate::self_install::copy_agent(&crate::self_install::Placement::host(), &running)?;
+        println!(
+            "the agent is installed in {}",
+            crate::paths::program_dir().display()
+        );
+    }
     manager
         .state()
         .context("cannot read the state of the agent service")?;
@@ -302,7 +353,7 @@ fn finish_setup(report: Option<&SetupReport>, hostname: Option<&str>) -> Result<
 pub fn install_service(options: &InstallOptions) -> Result<()> {
     crate::preflight::ensure_elevated()?;
     let dir = crate::paths::config_dir();
-    prepare_program(&dir, &HostService, options.verbose)?;
+    prepare_program(&dir, &HostService)?;
     prepare_install(
         &dir,
         &crate::paths::cache_dir(),
@@ -1197,6 +1248,22 @@ mod tests {
         let identity = report.identity.expect_err("status must report the refusal");
         assert!(identity.contains("does not use the identity"), "{identity}");
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn fr_ag_04_a_check_without_the_rights_asks_for_an_administrator() {
+        let denied = anyhow::Error::new(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+            .context("cannot open C:\\ProgramData\\ResticHub");
+        let text = unsafe_identity(Path::new("Agent"), &denied).to_string();
+        assert!(
+            text.contains("run the command as an administrator"),
+            "{text}"
+        );
+        assert!(!text.contains("register"), "{text}");
+
+        let open = anyhow::anyhow!("Agent grants a write access to an account");
+        let text = unsafe_identity(Path::new("Agent"), &open).to_string();
+        assert!(text.contains("register --force"), "{text}");
     }
 
     #[test]
