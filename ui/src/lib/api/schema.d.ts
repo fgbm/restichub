@@ -1579,8 +1579,9 @@ export interface components {
             last_certificate_rotation_at?: string | null;
             last_seen_at?: string | null;
             /**
-             * @description Whether a control plane instance holds the stream of the host, the same fact that a job
-             *     dispatch needs. Always false for a revoked host.
+             * @description Whether the host has an open stream to a control plane instance, as the database records it.
+             *     After an instance stops without a close, the value stays true for up to 90 seconds. Always
+             *     false for a revoked host.
              */
             online: boolean;
             os: string;

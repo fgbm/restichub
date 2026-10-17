@@ -4,9 +4,9 @@
 //! the time of its last successful backup and its RPO state, the repositories with the state of
 //! their lock, the recent failed jobs and the open alerts.
 //!
-//! A host counts as online while a control plane instance holds its stream (`agents.stream_id`),
-//! the same fact that the dispatcher uses. The test reads the database, not the stream registry of
-//! one instance, so each instance answers alike.
+//! A host counts as online while it has an open stream to a control plane instance
+//! (`agents.stream_id`, ADR-0044). The test reads the database, not the stream registry of one
+//! instance, so each instance answers alike.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -161,7 +161,20 @@ struct Facts {
 #[derive(Debug)]
 pub struct DashboardCache {
     ttl: Duration,
-    entries: Mutex<HashMap<TenantId, (OffsetDateTime, Arc<Facts>)>>,
+    entries: Mutex<HashMap<TenantId, Entry>>,
+}
+
+/// `version` grows at each `forget`, so facts read before a `forget` never go into the cache.
+#[derive(Debug, Default)]
+struct Entry {
+    version: u64,
+    facts: Option<(OffsetDateTime, Arc<Facts>)>,
+}
+
+enum Lookup {
+    Hit(Arc<Facts>),
+    /// Carries the version that the `put` of the fresh facts must still find.
+    Miss(u64),
 }
 
 impl std::fmt::Debug for Facts {
@@ -178,21 +191,34 @@ impl DashboardCache {
         }
     }
 
-    fn get(&self, tenant: TenantId, now: OffsetDateTime) -> Option<Arc<Facts>> {
+    fn get(&self, tenant: TenantId, now: OffsetDateTime) -> Lookup {
         let entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
-        let (taken, facts) = entries.get(&tenant)?;
-        (now >= *taken && now - *taken < self.ttl).then(|| Arc::clone(facts))
+        let Some(entry) = entries.get(&tenant) else {
+            return Lookup::Miss(0);
+        };
+        match &entry.facts {
+            Some((taken, facts)) if now >= *taken && now - *taken < self.ttl => {
+                Lookup::Hit(Arc::clone(facts))
+            }
+            _ => Lookup::Miss(entry.version),
+        }
     }
 
-    fn put(&self, tenant: TenantId, now: OffsetDateTime, facts: Arc<Facts>) {
+    fn put(&self, tenant: TenantId, version: u64, now: OffsetDateTime, facts: Arc<Facts>) {
         let mut entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
-        entries.insert(tenant, (now, facts));
+        let entry = entries.entry(tenant).or_default();
+        if entry.version == version {
+            entry.facts = Some((now, facts));
+        }
     }
 
-    /// Drops the facts of a tenant, so the next read shows a host state change at once.
+    /// Drops the facts of a tenant, so the next read on this instance shows a host state change at
+    /// once. Another instance shows it after its time-to-live.
     pub fn forget(&self, tenant: TenantId) {
         let mut entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
-        entries.remove(&tenant);
+        let entry = entries.entry(tenant).or_default();
+        entry.version += 1;
+        entry.facts = None;
     }
 }
 
@@ -219,8 +245,8 @@ pub async fn dashboard(
     context.authorize(Operation::DashboardRead)?;
     let now = state.auth().clock.now();
     let facts = match state.dashboard_cache().get(context.tenant_id, now) {
-        Some(facts) => facts,
-        None => {
+        Lookup::Hit(facts) => facts,
+        Lookup::Miss(version) => {
             let fresh = Arc::new(
                 context
                     .tenant_tx(&state, async |tx| {
@@ -238,7 +264,7 @@ pub async fn dashboard(
             );
             state
                 .dashboard_cache()
-                .put(context.tenant_id, now, Arc::clone(&fresh));
+                .put(context.tenant_id, version, now, Arc::clone(&fresh));
             fresh
         }
     };
@@ -375,4 +401,39 @@ pub async fn dashboard(
 fn format_time(value: OffsetDateTime) -> String {
     use time::format_description::well_known::Rfc3339;
     value.format(&Rfc3339).unwrap_or_else(|_| value.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn facts() -> Arc<Facts> {
+        Arc::new(Facts {
+            agents: Vec::new(),
+            plans: Vec::new(),
+            repositories: Vec::new(),
+            failed: Vec::new(),
+            open_total: 0,
+            newest: Vec::new(),
+        })
+    }
+
+    #[test]
+    fn ac_mn_09_a_forget_during_a_miss_keeps_the_stale_facts_out_of_the_cache() {
+        let cache = DashboardCache::new(Duration::seconds(15));
+        let tenant = TenantId::new();
+        let now = OffsetDateTime::now_utc();
+        let Lookup::Miss(version) = cache.get(tenant, now) else {
+            panic!("an empty cache must miss");
+        };
+        cache.forget(tenant);
+        cache.put(tenant, version, now, facts());
+        assert!(matches!(cache.get(tenant, now), Lookup::Miss(_)));
+
+        let Lookup::Miss(version) = cache.get(tenant, now) else {
+            panic!("the cache must still miss");
+        };
+        cache.put(tenant, version, now, facts());
+        assert!(matches!(cache.get(tenant, now), Lookup::Hit(_)));
+    }
 }

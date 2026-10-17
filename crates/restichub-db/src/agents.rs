@@ -542,24 +542,31 @@ pub async fn touch_last_seen_batch(
     Ok(rows.into_iter().map(|(id,)| id).collect())
 }
 
-/// Records that a stream of an active agent passed the hello. A newer stream replaces the value,
-/// so the close of an older stream clears nothing (FR-ID-08).
+/// Records that a stream of an active agent passed the hello. `false` when the agent is not active
+/// or a newer stream holds the row: the close of an older stream clears nothing (FR-ID-08).
+///
+/// The stream ids are UUIDv7, so they order by the open time on the instance clock, and within
+/// one process the order is strict. A late write of an older stream thus never replaces a newer
+/// one. The database clock cannot order them: it gives the write time, not the open time.
 pub async fn set_stream_open(
     tx: &mut TenantTx<'_>,
     id: AgentId,
     stream: Uuid,
 ) -> Result<bool, DbError> {
-    let result =
-        sqlx::query("UPDATE agents SET stream_id = $2 WHERE id = $1 AND status = 'active'")
-            .bind(id)
-            .bind(stream)
-            .execute(tx.as_conn())
-            .await
-            .map_err(DbError::Query)?;
+    // `<=` lets a retry succeed after a commit whose answer was lost.
+    let result = sqlx::query(
+        "UPDATE agents SET stream_id = $2 WHERE id = $1 AND status = 'active' \
+         AND (stream_id IS NULL OR stream_id <= $2)",
+    )
+    .bind(id)
+    .bind(stream)
+    .execute(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
     Ok(result.rows_affected() == 1)
 }
 
-/// Clears the stream of an agent, unless another stream replaced it.
+/// Clears the stream of an agent. `false` when another stream replaced it.
 pub async fn set_stream_closed(
     tx: &mut TenantTx<'_>,
     id: AgentId,

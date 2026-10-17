@@ -109,8 +109,9 @@ pub struct AgentView {
     pub control_plane_version: String,
     pub version_status: crate::agent_version::AgentVersionStatus,
     pub status: AgentStatus,
-    /// Whether a control plane instance holds the stream of the host, the same fact that a job
-    /// dispatch needs. Always false for a revoked host.
+    /// Whether the host has an open stream to a control plane instance, as the database records it.
+    /// After an instance stops without a close, the value stays true for up to 90 seconds. Always
+    /// false for a revoked host.
     pub online: bool,
     pub last_seen_at: Option<String>,
     /// The time of the first stream open. Null while an active host waits for its first connection.

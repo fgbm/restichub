@@ -706,10 +706,13 @@ async fn ac_id_07_an_idle_stream_closes_after_three_ping_intervals() {
     read_handshake(&mut inbound).await;
     // Let the stream task process the hello before the clock is frozen.
     let agent = Uuid::parse_str(&identity.agent_id).expect("the agent id");
-    for _ in 0..200 {
-        if stream_recorded(&db, tenant, agent).await {
-            break;
-        }
+    let mut attempts = 0;
+    while !stream_recorded(&db, tenant, agent).await {
+        attempts += 1;
+        assert!(
+            attempts < 200,
+            "the stream must be recorded within ten seconds"
+        );
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     tokio::time::sleep(Duration::from_millis(50)).await;

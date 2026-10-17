@@ -11,6 +11,7 @@ mod queue_support;
 
 use queue_support::{Env, FakeAgent, eventually, test_queue};
 use restichub_db::AgentId;
+use restichub_db::agents as agent_repo;
 use serde_json::Value;
 
 async fn start() -> Option<Env> {
@@ -148,4 +149,101 @@ async fn ac_id_06_the_offline_alert_still_waits_for_its_threshold() {
         .await
         .expect("the evaluation");
     assert_eq!(report.opened, 1, "the default threshold is 30 minutes");
+}
+
+async fn stored_stream(env: &Env, agent: AgentId) -> Option<uuid::Uuid> {
+    let mut tx = env.scoped().await;
+    sqlx::query_scalar("SELECT stream_id FROM agents WHERE id = $1")
+        .bind(agent.as_uuid())
+        .fetch_one(&mut *tx)
+        .await
+        .expect("cannot read the stream id")
+}
+
+#[tokio::test]
+async fn fr_id_08_an_older_stream_write_does_not_replace_a_newer_stream() {
+    let Some(env) = start().await else {
+        return;
+    };
+    let identity = env.enroll_agent("ordered-host").await;
+    let agent =
+        AgentId::from_uuid(uuid::Uuid::parse_str(&identity.agent_id).expect("the agent id"));
+    let older = uuid::Uuid::now_v7();
+    let newer = uuid::Uuid::now_v7();
+    let write = async |open: bool, stream: uuid::Uuid| {
+        let mut tx = env
+            .state
+            .db()
+            .begin_tenant(env.tenant)
+            .await
+            .expect("cannot begin");
+        let changed = if open {
+            agent_repo::set_stream_open(&mut tx, agent, stream).await
+        } else {
+            agent_repo::set_stream_closed(&mut tx, agent, stream).await
+        }
+        .expect("the stream write");
+        tx.commit().await.expect("cannot commit");
+        changed
+    };
+
+    assert!(write(true, newer).await);
+    assert!(!write(true, older).await, "a late older open must not win");
+    assert!(
+        !write(false, older).await,
+        "the older close must clear nothing"
+    );
+    assert_eq!(stored_stream(&env, agent).await, Some(newer));
+    assert!(
+        write(true, newer).await,
+        "a retry of the same stream succeeds"
+    );
+    assert!(write(false, newer).await);
+    assert_eq!(stored_stream(&env, agent).await, None);
+}
+
+#[tokio::test]
+async fn fr_id_08_a_failed_open_write_is_retried_on_the_next_tick() {
+    let Some(env) = start().await else {
+        return;
+    };
+    // The sequence counts the failed writes: it does not roll back with the failing statement.
+    sqlx::raw_sql(
+        "CREATE SEQUENCE stream_write_failures; \
+         GRANT USAGE ON SEQUENCE stream_write_failures TO PUBLIC; \
+         CREATE FUNCTION fail_stream_write() RETURNS trigger LANGUAGE plpgsql AS $$ \
+         BEGIN PERFORM nextval('stream_write_failures'); RAISE EXCEPTION 'injected failure'; END $$; \
+         CREATE TRIGGER fail_stream_write BEFORE UPDATE OF stream_id ON agents \
+         FOR EACH ROW WHEN (NEW.stream_id IS NOT NULL) EXECUTE FUNCTION fail_stream_write();",
+    )
+    .execute(env.db.owner_pool())
+    .await
+    .expect("cannot install the failing trigger");
+
+    let agent = env.connect_agent("retried-host").await;
+    let id = agent.id;
+    eventually(|| async {
+        sqlx::query_scalar::<_, bool>("SELECT is_called FROM stream_write_failures")
+            .fetch_one(env.db.owner_pool())
+            .await
+            .expect("cannot read the failures")
+    })
+    .await;
+    assert!(
+        !online(&env, id).await,
+        "the failed write shows no open stream"
+    );
+
+    sqlx::raw_sql("DROP TRIGGER fail_stream_write ON agents")
+        .execute(env.db.owner_pool())
+        .await
+        .expect("cannot drop the failing trigger");
+    tokio::time::pause();
+    tokio::time::advance(
+        restichub_cp::agent_stream::LAST_SEEN_INTERVAL + std::time::Duration::from_secs(1),
+    )
+    .await;
+    tokio::time::resume();
+    wait_online(&env, id, true).await;
+    drop(agent);
 }
