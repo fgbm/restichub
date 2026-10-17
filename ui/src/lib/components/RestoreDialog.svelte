@@ -10,6 +10,7 @@
 		Button,
 		Checkbox,
 		Dialog,
+		Field,
 		Select,
 		TextField
 	} from '#lib/components/ui/index.ts';
@@ -226,16 +227,19 @@
 			</Alert>
 		{/if}
 		{#if wholeSnapshot}
-			<TextField
-				id="restore-excludes"
+			<Field
 				label={t('restore.dialog.excludes')}
 				help={t('restore.dialog.excludesHelp')}
 				error={fieldError(problem, 'excludes')}
-				placeholder={t('restore.dialog.excludesPlaceholder')}
-				mono
-				autocomplete="off"
-				bind:value={excludeText}
-			/>
+				for="restore-excludes"
+			>
+				<textarea
+					id="restore-excludes"
+					class="rh-textarea rh-input--mono"
+					rows="2"
+					placeholder={t('restore.dialog.excludesPlaceholder')}
+					bind:value={excludeText}></textarea>
+			</Field>
 		{/if}
 		<Select
 			id="restore-overwrite"

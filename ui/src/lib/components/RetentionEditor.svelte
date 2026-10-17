@@ -3,10 +3,11 @@
 	import { fieldError } from '#lib/api/index.ts';
 	import { Button, Checkbox, Field, Icon, TextField } from './ui/index.ts';
 	import RichText from './RichText.svelte';
-	import TagInput from './TagInput.svelte';
+	import TagInput from './ui/TagInput.svelte';
 	import { t } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
 	import {
+		MAX_RETENTION_LIST,
 		PRESETS,
 		RULES,
 		SAMPLE_SNAPSHOTS,
@@ -51,7 +52,7 @@
 
 	const filterSummary = $derived.by(() => {
 		const parts: string[] = [];
-		const hosts = draft.filterHosts.split('\n').filter((line) => line.trim()).length;
+		const hosts = draft.filterHosts.length;
 		const paths = draft.filterPaths.split('\n').filter((line) => line.trim()).length;
 		if (hosts) parts.push(t('pe.filter.hosts', { count: hosts }));
 		if (draft.filterTags.length)
@@ -142,6 +143,8 @@
 	<TagInput
 		id="profile-keep-tags"
 		label={t('profiles.tags')}
+		placeholder={t('pe.tags.placeholder')}
+		max={MAX_RETENTION_LIST}
 		error={fieldError(problem, 'retention.keep_tags')}
 		bind:value={draft.keepTags}
 	/>
@@ -176,21 +179,19 @@
 	<div class="filter__body">
 		<p class="muted">{t('pe.filter.hint')}</p>
 		<div class="grid3">
-			<Field
+			<TagInput
+				id="profile-filter-hosts"
 				label={t('profiles.retention.filterHosts')}
-				help={t('pe.filter.oneEach')}
+				mono
+				max={MAX_RETENTION_LIST}
 				error={fieldError(problem, 'retention.filter.hosts')}
-				for="profile-filter-hosts"
-			>
-				<textarea
-					id="profile-filter-hosts"
-					class="rh-textarea rh-input--mono"
-					rows="2"
-					bind:value={draft.filterHosts}></textarea>
-			</Field>
+				bind:value={draft.filterHosts}
+			/>
 			<TagInput
 				id="profile-filter-tags"
 				label={t('profiles.retention.filterTags')}
+				placeholder={t('pe.tags.placeholder')}
+				max={MAX_RETENTION_LIST}
 				error={fieldError(problem, 'retention.filter.tags')}
 				bind:value={draft.filterTags}
 			/>

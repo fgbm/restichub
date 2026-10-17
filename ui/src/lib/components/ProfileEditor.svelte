@@ -21,7 +21,7 @@
 	import RetentionEditor from './RetentionEditor.svelte';
 	import RichText from './RichText.svelte';
 	import ScriptsEditor from './ScriptsEditor.svelte';
-	import TagInput from './TagInput.svelte';
+	import TagInput from './ui/TagInput.svelte';
 	import { RecordPage, SummaryPanel } from './layout/index.ts';
 	import {
 		Alert,
@@ -45,7 +45,8 @@
 		enabledCount,
 		settingsOf,
 		summarize,
-		minutesToHours
+		minutesToHours,
+		MAX_TAGS
 	} from '#lib/profile-form.ts';
 	import type { Os, ProfileDraft, SummaryKey } from '#lib/profile-form.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
@@ -537,6 +538,8 @@
 			id="profile-tags"
 			label={t('profiles.tags')}
 			help={t('pe.tags.help')}
+			placeholder={t('pe.tags.placeholder')}
+			max={MAX_TAGS}
 			error={fieldError(formProblem, 'tags')}
 			bind:value={draft.tags}
 		/>

@@ -59,8 +59,8 @@ test('the profiles screen creates, previews, edits and deletes a profile', async
 	await page.locator('#profile-paths-linux').fill('/etc');
 	await page.getByRole('switch', { name: 'Turn on the section "Tags"' }).click();
 	await page.locator('#profile-tags').fill('daily, web ');
-	await expect(page.getByRole('button', { name: 'Remove the tag daily' })).toBeVisible();
-	await expect(page.getByRole('button', { name: 'Remove the tag web' })).toBeVisible();
+	await expect(page.getByRole('button', { name: 'Remove daily' })).toBeVisible();
+	await expect(page.getByRole('button', { name: 'Remove web' })).toBeVisible();
 	// The side panel shows the command of the profile as it is typed.
 	await expect(page.getByText('--tag daily')).toBeVisible();
 	await page.getByRole('button', { name: 'Save' }).click();

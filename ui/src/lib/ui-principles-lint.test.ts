@@ -76,4 +76,25 @@ describe('ui-principles lint rules', () => {
 			{ code: '<button>Загрузить ещё</button>', errors: [{ messageId: 'more' }] }
 		]
 	});
+
+	new RuleTester().run('no-separated-text', rules['no-separated-text'], {
+		valid: [
+			"const en = { 'pe.tags.help': 'Press Enter, a comma or a space after each tag.' };",
+			"const ru = { 'pe.filter.oneEach': 'Один в строке.' };"
+		],
+		invalid: [
+			{
+				code: "const ru = { 'a.help': 'Теги через запятую.' };",
+				errors: [{ messageId: 'separated' }]
+			},
+			{
+				code: "const en = { 'a.help': 'Host names, separated by commas.' };",
+				errors: [{ messageId: 'separated' }]
+			},
+			{
+				code: "const en = { 'a.help': 'A comma-separated list.' };",
+				errors: [{ messageId: 'separated' }]
+			}
+		]
+	});
 });

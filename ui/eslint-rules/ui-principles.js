@@ -136,6 +136,30 @@ const noLoadMore = {
 	}
 };
 
+const SEPARATED_TEXT =
+	/через (точку с )?запятую|разделённ\S* запят|comma[- ]separated|separated (by|with) (a )?commas?/iu;
+
+/** UI principles 3.8: a set of values is entered with TagInput, so no text asks for separators. */
+const noSeparatedText = {
+	meta: {
+		type: 'problem',
+		schema: [],
+		messages: {
+			separated:
+				'Enter a set of values with TagInput, not as text with separators (design/style/ui-principles.md, 3.8).'
+		}
+	},
+	create(context) {
+		return {
+			Literal(node) {
+				if (typeof node.value === 'string' && SEPARATED_TEXT.test(node.value)) {
+					context.report({ node, messageId: 'separated' });
+				}
+			}
+		};
+	}
+};
+
 // A table row that opens a record makes the table a list of entities.
 const RECORD_PROPS = new Set(['rowHref', 'onRowOpen', 'detailTitle']);
 
@@ -171,6 +195,7 @@ export default {
 		'no-raw-table': noRawTable,
 		'no-row-actions-snippet': noRowActionsSnippet,
 		'no-back-link': noBackLink,
-		'no-load-more': noLoadMore
+		'no-load-more': noLoadMore,
+		'no-separated-text': noSeparatedText
 	}
 };
