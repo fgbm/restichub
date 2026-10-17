@@ -17,7 +17,7 @@ Each agent host is a container with the real `restichub-agent` and a real, signe
 What this bench does not cover:
 
 - The Windows hosts and the Debian arm64 host of section 1.3. See `windows-checklist.md`.
-- MinIO (S3) and the local directory repository. The scenarios use the rest-server.
+- S3 and the local directory repository. The scenarios use the rest-server.
 - A second tenant. The bench uses the single-tenant mode (ADR-0024); the scenario 14.2.1 creates the tenant `default` with its first Admin.
 
 ## Requirements
@@ -76,9 +76,7 @@ The scenario 14.2.3 kills a running backup with SIGKILL. The control plane waits
 | `KILL_TARGET` | Victim | Expected |
 |---|---|---|
 | `agent` (default) | the agent process of the host; the control plane loses the agent during the job and marks the lock | the job fails, the control plane runs `unlock` after 30 minutes, the next backup succeeds |
-| `restic` | the restic process only, as AC-SC-06 words it | see the known gap below |
-
-Known gap: when something other than the agent kills restic with SIGKILL, the agent reports a failed step without the stale lock mark (`possible_stale_lock` is set only after the agent stops restic itself). The control plane then runs no `unlock`. The run with `KILL_TARGET=restic` shows it.
+| `restic` | the restic process only, as AC-SC-06 words it | the agent sees the signal exit, marks the lock, and the control plane runs `unlock` after 30 minutes |
 
 The scenario 14.2.2 needs a Windows host. See `windows-checklist.md`. The scenario 14.2.4 runs on Linux hosts here; repeat it on a Windows host when you run the checklist.
 

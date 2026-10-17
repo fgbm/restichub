@@ -207,6 +207,12 @@ pub fn condition(language: Language, alert: &Alert) -> String {
         (Language::Ru, AlertKind::JobWarnings) => {
             format!("Задача «{what}» завершилась с предупреждениями.")
         }
+        (Language::En, AlertKind::JobFailed) if params.job_kind == Some(JobKind::Forget) => {
+            format!("Deletion of expired snapshots failed ({code}).")
+        }
+        (Language::Ru, AlertKind::JobFailed) if params.job_kind == Some(JobKind::Forget) => {
+            format!("Удаление устаревших снимков завершилось ошибкой ({code}).")
+        }
         (Language::En, AlertKind::JobFailed) => format!("The {what} job failed ({code})."),
         (Language::Ru, AlertKind::JobFailed) => {
             format!("Задача «{what}» завершилась ошибкой ({code}).")
@@ -217,6 +223,9 @@ pub fn condition(language: Language, alert: &Alert) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use restichub_db::AlertId;
+    use restichub_db::alerts::{AlertParams, AlertStatus};
+    use time::OffsetDateTime;
 
     #[test]
     fn the_language_parses_two_values() {
@@ -236,6 +245,39 @@ mod tests {
             Some("прервано перезапуском агента")
         );
         assert_eq!(error_label(Language::En, "restic said no"), None);
+    }
+
+    #[test]
+    fn the_failed_forget_job_reads_as_a_sentence() {
+        let alert = Alert {
+            id: AlertId::new(),
+            kind: AlertKind::JobFailed,
+            dedupe_key: String::new(),
+            status: AlertStatus::Open,
+            agent_id: None,
+            plan_id: None,
+            repository_id: None,
+            job_id: None,
+            agent_hostname: None,
+            plan_name: None,
+            repository_name: None,
+            params: sqlx::types::Json(AlertParams {
+                job_kind: Some(JobKind::Forget),
+                error_code: Some("timed_out".to_owned()),
+                ..AlertParams::default()
+            }),
+            detail: String::new(),
+            opened_at: OffsetDateTime::UNIX_EPOCH,
+            resolved_at: None,
+        };
+        assert_eq!(
+            condition(Language::En, &alert),
+            "Deletion of expired snapshots failed (timed_out)."
+        );
+        assert_eq!(
+            condition(Language::Ru, &alert),
+            "Удаление устаревших снимков завершилось ошибкой (timed_out)."
+        );
     }
 
     #[test]

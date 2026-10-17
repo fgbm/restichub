@@ -24,7 +24,7 @@ The principle "the agent has no autonomy" does not protect the data. An agent wi
 | Pluton | One instance or a desktop application | Instance | Not applicable | Apache-2.0. 850 stars [1] |
 | Fulgurite | One instance, runs restic over SSH | Web server cron | SSH keys | Polyform Noncommercial |
 | Restic Explorer | Monitoring of repositories only | Scheduled scans | Not applicable | MIT. Version 1.0 on 2026-04-04 |
-| resticprofile | Configuration wrapper, no server | Operating system scheduler | Not applicable | BSD. The reference for the profile model |
+| resticprofile | Configuration wrapper, no server | Operating system scheduler | Not applicable | GPL-3.0. The reference for the profile model |
 | Kopia repository server | Clients do not know storage credentials | Client | Not applicable | Apache-2.0. Mature. A reference for the secret model [12] |
 
 **Demand.** In Backrest issue #68, users ask in 2026 for agent auto-enrollment, shared plans and full server-side management [6]. The Backrest maintainer keeps client-side scheduling by design.
