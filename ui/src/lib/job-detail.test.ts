@@ -140,9 +140,9 @@ describe('the Russian wording', () => {
 		expect(formatFiles(21)).toBe('21 файл');
 	});
 
-	it('names the forget step as removing snapshots', () => {
+	it('names the forget step as removing expired snapshots', () => {
 		setLocale('ru');
-		expect(t('jobs.kind.forget')).toBe('Удаление снимков (forget)');
+		expect(t('jobs.kind.forget')).toBe('Удаление устаревших снимков');
 	});
 });
 
