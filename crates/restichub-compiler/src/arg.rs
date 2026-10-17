@@ -414,8 +414,9 @@ fn overwrite_value(mode: OverwriteMode) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use restichub_proto::agent::v1::{
-        BackupStep, ForgetStep, HookPhase, Job, RepositoryAccess, ScriptFailurePolicy,
-        ScriptInterpreter, ScriptStep, SnapshotsFilter, Step, UnlockStep, step,
+        BackupStep, ForgetStep, HookPhase, Job, RepositoryAccess, RestCredentials,
+        ScriptFailurePolicy, ScriptInterpreter, ScriptStep, SnapshotsFilter, Step, UnlockStep,
+        repository_access::BackendCredentials, step,
     };
 
     use super::{ArgError, MASK, build_command, is_safe_env, mask_secrets};
@@ -507,6 +508,43 @@ mod tests {
             line.env()
                 .iter()
                 .any(|(name, value)| name == "RESTIC_PASSWORD" && value == "topsecret")
+        );
+    }
+
+    #[test]
+    fn ac_ag_04_the_rest_credentials_go_to_the_environment() {
+        let mut repository = repository();
+        repository.location = "rest:https://rest.example.com/main".to_owned();
+        repository.backend_credentials = Some(BackendCredentials::Rest(RestCredentials {
+            username: "rest-user".to_owned(),
+            password: "rest-topsecret".to_owned(),
+        }));
+        let step = backup(&["/srv"], &[], &[]);
+        let job = Job {
+            job_id: "job-1".to_owned(),
+            tenant_id: "tenant-1".to_owned(),
+            agent_id: "agent-1".to_owned(),
+            repositories: vec![repository],
+            steps: vec![step.clone()],
+            ..Job::default()
+        };
+        let validated = ValidatedJob::new(job).unwrap_or_else(|error| panic!("{error:?}"));
+        let line = build_command(&validated, &step).unwrap_or_else(|error| panic!("{error:?}"));
+        assert!(
+            !line
+                .args()
+                .iter()
+                .any(|value| value.contains("rest-topsecret") || value.contains("rest-user"))
+        );
+        let env = line.env();
+        assert!(env.contains(&("RESTIC_REST_USERNAME".to_owned(), "rest-user".to_owned())));
+        assert!(env.contains(&(
+            "RESTIC_REST_PASSWORD".to_owned(),
+            "rest-topsecret".to_owned()
+        )));
+        assert!(
+            env.iter()
+                .any(|(name, value)| name == "RESTIC_REPOSITORY" && !value.contains('@'))
         );
     }
 

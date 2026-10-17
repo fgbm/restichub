@@ -1825,6 +1825,7 @@ export interface components {
             endpoint: string;
             /** @enum {string} */
             kind: "rest";
+            username?: string | null;
         } | {
             /** @enum {string} */
             kind: "local";

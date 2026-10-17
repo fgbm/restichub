@@ -26,6 +26,7 @@ pub struct RepositorySettings<'a> {
     pub s3_prefix: Option<&'a str>,
     pub s3_region: Option<&'a str>,
     pub rest_endpoint: Option<&'a str>,
+    pub rest_username: Option<&'a str>,
     pub local_path: Option<&'a str>,
 }
 
@@ -50,6 +51,7 @@ pub struct Repository {
     pub s3_prefix: Option<String>,
     pub s3_region: Option<String>,
     pub rest_endpoint: Option<String>,
+    pub rest_username: Option<String>,
     pub local_path: Option<String>,
     pub password_secret_id: SecretId,
     pub s3_access_key_secret_id: Option<SecretId>,
@@ -91,9 +93,9 @@ pub async fn create(
     sqlx::query(
         "INSERT INTO repositories \
          (id, tenant_id, name, backend, s3_endpoint, s3_bucket, s3_prefix, s3_region, \
-          rest_endpoint, local_path, password_secret_id, s3_access_key_secret_id, \
+          rest_endpoint, rest_username, local_path, password_secret_id, s3_access_key_secret_id, \
           s3_secret_key_secret_id, rest_password_secret_id, maintenance_agent_id, created_by) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)",
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)",
     )
     .bind(new.id)
     .bind(tx.tenant())
@@ -104,6 +106,7 @@ pub async fn create(
     .bind(new.settings.s3_prefix)
     .bind(new.settings.s3_region)
     .bind(new.settings.rest_endpoint)
+    .bind(new.settings.rest_username)
     .bind(new.settings.local_path)
     .bind(new.secrets.password)
     .bind(new.secrets.s3_access_key)
@@ -121,7 +124,7 @@ pub async fn create(
 pub async fn list(tx: &mut TenantTx<'_>) -> Result<Vec<Repository>, DbError> {
     let rows = sqlx::query_as::<_, RepositoryRow>(
         "SELECT id, name, backend, s3_endpoint, s3_bucket, s3_prefix, s3_region, rest_endpoint, \
-                local_path, password_secret_id, s3_access_key_secret_id, s3_secret_key_secret_id, \
+                rest_username, local_path, password_secret_id, s3_access_key_secret_id, s3_secret_key_secret_id, \
                 rest_password_secret_id, maintenance_agent_id, initialized, created_at, updated_at, \
                 created_by \
          FROM repositories ORDER BY created_at DESC, id DESC",
@@ -136,7 +139,7 @@ pub async fn list(tx: &mut TenantTx<'_>) -> Result<Vec<Repository>, DbError> {
 pub async fn get(tx: &mut TenantTx<'_>, id: RepositoryId) -> Result<Option<Repository>, DbError> {
     let row = sqlx::query_as::<_, RepositoryRow>(
         "SELECT id, name, backend, s3_endpoint, s3_bucket, s3_prefix, s3_region, rest_endpoint, \
-                local_path, password_secret_id, s3_access_key_secret_id, s3_secret_key_secret_id, \
+                rest_username, local_path, password_secret_id, s3_access_key_secret_id, s3_secret_key_secret_id, \
                 rest_password_secret_id, maintenance_agent_id, initialized, created_at, updated_at, \
                 created_by \
          FROM repositories WHERE id = $1",
@@ -158,7 +161,7 @@ pub async fn get_for_update(
 ) -> Result<Option<Repository>, DbError> {
     let row = sqlx::query_as::<_, RepositoryRow>(
         "SELECT id, name, backend, s3_endpoint, s3_bucket, s3_prefix, s3_region, rest_endpoint, \
-                local_path, password_secret_id, s3_access_key_secret_id, s3_secret_key_secret_id, \
+                rest_username, local_path, password_secret_id, s3_access_key_secret_id, s3_secret_key_secret_id, \
                 rest_password_secret_id, maintenance_agent_id, initialized, created_at, updated_at, \
                 created_by \
          FROM repositories WHERE id = $1 FOR UPDATE",
@@ -183,7 +186,8 @@ pub async fn update(
         "UPDATE repositories SET name = $2, s3_endpoint = $3, s3_bucket = $4, s3_prefix = $5, \
                 s3_region = $6, rest_endpoint = $7, local_path = $8, password_secret_id = $9, \
                 s3_access_key_secret_id = $10, s3_secret_key_secret_id = $11, \
-                rest_password_secret_id = $12, maintenance_agent_id = $13, updated_at = now() \
+                rest_password_secret_id = $12, maintenance_agent_id = $13, rest_username = $14, \
+                updated_at = now() \
          WHERE id = $1",
     )
     .bind(id)
@@ -199,6 +203,7 @@ pub async fn update(
     .bind(patch.secrets.s3_secret_key)
     .bind(patch.secrets.rest_password)
     .bind(patch.maintenance_agent_id)
+    .bind(patch.settings.rest_username)
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
@@ -259,6 +264,7 @@ struct RepositoryRow {
     s3_prefix: Option<String>,
     s3_region: Option<String>,
     rest_endpoint: Option<String>,
+    rest_username: Option<String>,
     local_path: Option<String>,
     password_secret_id: Uuid,
     s3_access_key_secret_id: Option<Uuid>,
@@ -282,6 +288,7 @@ impl From<RepositoryRow> for Repository {
             s3_prefix: row.s3_prefix,
             s3_region: row.s3_region,
             rest_endpoint: row.rest_endpoint,
+            rest_username: row.rest_username,
             local_path: row.local_path,
             password_secret_id: SecretId::from_uuid(row.password_secret_id),
             s3_access_key_secret_id: row.s3_access_key_secret_id.map(SecretId::from_uuid),

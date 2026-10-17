@@ -69,6 +69,7 @@
 	let password = $state('');
 	let s3AccessKey = $state('');
 	let s3SecretKey = $state('');
+	let restUsername = $state('');
 	let restPassword = $state('');
 	let maintenanceAgentId = $state('');
 
@@ -112,6 +113,7 @@
 			password,
 			s3AccessKey,
 			s3SecretKey,
+			restUsername,
 			restPassword,
 			maintenanceAgentId,
 			retentionCron,
@@ -240,6 +242,7 @@
 					region = found.backend.region ?? '';
 				} else if (found.backend.kind === 'rest') {
 					endpoint = found.backend.endpoint;
+					restUsername = found.backend.username ?? '';
 				} else {
 					path = found.backend.path;
 				}
@@ -313,6 +316,7 @@
 		const field = formProblem?.field ?? '';
 		const target: [string, SectionKey][] = [
 			['name', 'basics'],
+			['backend.username', 'access'],
 			['backend', 'location'],
 			['password', 'access'],
 			['s3_', 'access'],
@@ -341,7 +345,7 @@
 					region: region || undefined
 				};
 			case 'rest':
-				return { kind: 'rest', endpoint };
+				return { kind: 'rest', endpoint, username: restUsername.trim() || undefined };
 			case 'local':
 				return { kind: 'local', path };
 		}
@@ -608,6 +612,14 @@
 				/>
 			</div>
 		{:else if kind === 'rest'}
+			<TextField
+				id="repo-rest-username"
+				label={t('repositories.restUsername')}
+				help={t('repositories.restUsernameHint')}
+				error={fieldError(formProblem, 'backend.username')}
+				autocomplete="off"
+				bind:value={restUsername}
+			/>
 			<PasswordField
 				id="repo-rest-password"
 				label={t('repositories.restPassword')}

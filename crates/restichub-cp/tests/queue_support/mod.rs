@@ -502,6 +502,28 @@ impl Env {
         id_of(&repository)
     }
 
+    pub async fn create_rest_repository(
+        &self,
+        agent: AgentId,
+        username: &str,
+        rest_password: &str,
+    ) -> Uuid {
+        let body = json!({
+            "name": format!("repo-{}", Uuid::now_v7()),
+            "backend": {"kind": "rest", "endpoint": "https://rest.example.net/main", "username": username},
+            "password": "pw",
+            "rest_password": rest_password,
+            "maintenance_agent_id": agent.to_string(),
+        });
+        let (status, _, repository) = send(
+            &self.app,
+            bearer_request("POST", "/api/v1/repositories", &self.admin, Some(body)),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{repository}");
+        id_of(&repository)
+    }
+
     /// The fields of `extra` replace or add to the request body.
     pub async fn create_profile(&self, repository: Uuid, extra: Value) -> Uuid {
         let mut body = json!({

@@ -13,7 +13,8 @@ use std::path::PathBuf;
 
 use common::*;
 use restichub_proto::agent::v1::{
-    BackupStep, JobStatus, LogStream, StepStatus, step, step_result::Output,
+    BackupStep, JobStatus, LogStream, RestCredentials, StepStatus,
+    repository_access::BackendCredentials, step, step_result::Output,
 };
 
 type StepBuilder = fn() -> restichub_proto::agent::v1::Step;
@@ -223,6 +224,46 @@ async fn adr_0021_the_backup_arguments_come_from_the_compiler() {
              --limit-download=2048 --retry-lock=5m -- --password-command=calc -x"
         ]
     );
+}
+
+/// AC-AG-04: the user name and the password of a rest-server reach restic in its environment and
+/// never in an argument.
+#[tokio::test(flavor = "multi_thread")]
+async fn ac_ag_04_the_rest_credentials_never_reach_an_argument() {
+    const REST_USER: &str = "CANARY-rest-user";
+    const REST_PASSWORD: &str = "CANARY-rest-password";
+    let fixture = Fixture::new("step-rest-auth");
+    let jobs = fixture.jobs();
+    let mut repository = access("repo-1", &fixture.path, PASSWORD);
+    repository.backend_credentials = Some(BackendCredentials::Rest(RestCredentials {
+        username: REST_USER.to_owned(),
+        password: REST_PASSWORD.to_owned(),
+    }));
+    let result = run(
+        &jobs,
+        &job(
+            "job-rest-auth",
+            vec![repository],
+            vec![test_access("repo-1"), backup_step("repo-1", &["/srv"])],
+        ),
+    )
+    .await;
+    assert_eq!(result.result().outcome, JobStatus::Succeeded as i32);
+    let argv = recorded_arguments(&fixture.path);
+    assert_eq!(argv.lines().count(), 2, "{argv}");
+    for secret in [REST_USER, REST_PASSWORD, PASSWORD] {
+        assert!(!argv.contains(secret), "{argv}");
+    }
+    let names = std::fs::read_to_string(format!("{}.restichub-env", fixture.path.display()))
+        .expect("restic gets the rest credentials");
+    assert_eq!(
+        names.lines().collect::<Vec<_>>(),
+        vec![
+            "RESTIC_REST_USERNAME RESTIC_REST_PASSWORD",
+            "RESTIC_REST_USERNAME RESTIC_REST_PASSWORD"
+        ]
+    );
+    assert!(!result.log_text().contains(REST_PASSWORD));
 }
 
 /// FR-PR-02: `unlock` removes stale locks only; `--remove-all` belongs to the `unlock_all` step.

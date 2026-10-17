@@ -57,6 +57,35 @@ test('the repositories screen creates, edits and deletes a repository', async ({
 	await expect(page.getByText('No repositories yet')).toBeVisible();
 });
 
+test('ac_rp_01 a rest-server repository keeps its user name and the user name changes', async ({
+	page
+}) => {
+	await signIn(page);
+	await page
+		.getByRole('navigation', { name: 'Primary navigation' })
+		.getByRole('link', { name: 'Repositories', exact: true })
+		.click();
+	await page.getByRole('button', { name: 'Add repository' }).click();
+	await page.locator('#repo-name').fill('rest-main');
+	await page.locator('#repo-kind').selectOption('rest');
+	await page.locator('#repo-endpoint').fill('https://rest.example.net/main');
+	await page.locator('#repo-password').fill('repo-password');
+	await page.locator('#repo-rest-username').fill('backup');
+	await page.locator('#repo-rest-password').fill('rest-password');
+	await page.getByRole('button', { name: 'Save', exact: true }).click();
+	await expect(page.getByText('The repository is created.')).toBeVisible();
+
+	await page.getByRole('link', { name: 'rest-main', exact: true }).click();
+	await expect(page.locator('#repo-rest-username')).toHaveValue('backup');
+	// The secret value never comes back.
+	await expect(page.locator('#repo-rest-password')).toHaveValue('');
+	await page.locator('#repo-rest-username').fill('archive');
+	await page.getByRole('button', { name: 'Save', exact: true }).click();
+	await expect(page.getByText('The repository is updated.')).toBeVisible();
+	await page.getByRole('link', { name: 'rest-main', exact: true }).click();
+	await expect(page.locator('#repo-rest-username')).toHaveValue('archive');
+});
+
 test('the repository init dialog picks a host and shows the job result', async ({ page }) => {
 	await page.addInitScript(() => localStorage.setItem('restichub.mock.agents', 'sample'));
 	await signIn(page);

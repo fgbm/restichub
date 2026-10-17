@@ -567,6 +567,9 @@ export const ru: Record<MessageKey, string> = {
 		'ResticHub больше никогда не показывает это значение после сохранения. Его можно только заменить.',
 	'repositories.s3AccessKey': 'Ключ доступа S3',
 	'repositories.s3SecretKey': 'Секретный ключ S3',
+	'repositories.restUsername': 'Имя пользователя',
+	'repositories.restUsernameHint':
+		'Необязательно. Учётная запись из файла .htpasswd rest-server. Это не секрет.',
 	'repositories.restPassword': 'Пароль REST-сервера',
 	'repositories.restPasswordHint':
 		'Необязательно. Панель управления отправляет его агенту с каждым заданием.',
