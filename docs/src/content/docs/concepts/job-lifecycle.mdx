@@ -3,9 +3,16 @@ title: Job lifecycle
 description: How the queue sends jobs to the agents, and how it limits and retries them.
 ---
 
+import Diagram from '../../../components/Diagram.astro';
+
+
 A job is one run of a plan or one manual operation. The control plane keeps the jobs in a queue in the database. The queue dispatcher sends each job to an online agent over the open stream.
 
 ## Job states
+
+<Diagram name="job-lifecycle" label="The job states and the transitions between them" />
+
+The diagram does not show the redelivery. A job stays in `sent` while the control plane sends it again after the lease or after a busy answer. A lock retry ends the job as `failed` and queues a new job. After the last retry the job goes to `dead_letter`. "Cancelled" and "Succeeded" with warnings are not separate stored states. The table below shows them.
 
 | State in the web interface | Stored state | Meaning |
 |---|---|---|

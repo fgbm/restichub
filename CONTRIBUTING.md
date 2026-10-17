@@ -34,6 +34,7 @@ docs(design): add ADR for log storage
 - Write English documentation in ASD-STE100 Simplified Technical English. Read [`design/style/ste-en.md`](design/style/ste-en.md).
 - Write Russian documentation by the rules in [`design/style/ru-technical.md`](design/style/ru-technical.md).
 - Vale checks the documentation in CI. Fix all errors before you ask for a review.
+- Write a diagram in Mermaid in `docs/src/diagrams/<name>.<en|ru>.mmd`, and show it with the `Diagram` component in an `.mdx` page. The build makes an SVG that follows the site theme. Write `{{message.key}}` to show a label of the web interface.
 
 ## Pull requests
 

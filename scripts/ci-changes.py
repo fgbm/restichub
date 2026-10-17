@@ -62,7 +62,14 @@ def classify(files, agent):
     if any(starts(f, EVERYTHING) for f in files):
         return {group: True for group in GROUPS}
     agent_dirs = tuple(f"crates/{name}/" for name in sorted(agent))
-    rust = ("crates/", "proto/", ".cargo/", "packaging/fetch-restic.sh")
+    # A test in the database crate compares the job lifecycle diagram with the job statuses.
+    rust = (
+        "crates/",
+        "proto/",
+        ".cargo/",
+        "packaging/fetch-restic.sh",
+        "docs/src/diagrams/job-lifecycle.",
+    )
     return {
         "rust": any(starts(f, rust) for f in files),
         "windows": any(starts(f, agent_dirs) for f in files),
@@ -75,7 +82,8 @@ def classify(files, agent):
             or f in ("README.md", "CONTRIBUTING.md", "SECURITY.md", ".vale.ini")
             for f in files
         ),
-        "site": any(starts(f, ("docs/",)) for f in files),
+        # The site quotes the UI labels from the message catalogs.
+        "site": any(starts(f, ("docs/", "ui/src/lib/i18n/")) for f in files),
         "comments": any(
             starts(f, ("crates/", "scripts/check-comments.sh", "scripts/testdata/")) for f in files
         ),

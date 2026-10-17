@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
 	listAgents: vi.fn(),
 	runMaintenance: vi.fn(),
 	unlockAllRepository: vi.fn(),
+	initRepository: vi.fn(),
+	testAccessRepository: vi.fn(),
 	pushToast: vi.fn(),
 	goto: vi.fn()
 }));
@@ -48,7 +50,9 @@ vi.mock('#lib/api/index.ts', async (importOriginal) => {
 			listRepositories: mocks.listRepositories,
 			listAgents: mocks.listAgents,
 			runMaintenance: mocks.runMaintenance,
-			unlockAllRepository: mocks.unlockAllRepository
+			unlockAllRepository: mocks.unlockAllRepository,
+			initRepository: mocks.initRepository,
+			testAccessRepository: mocks.testAccessRepository
 		}
 	};
 });
@@ -208,5 +212,66 @@ describe('the Repositories screen maintenance', () => {
 		expect(
 			screen.queryByRole('button', { name: 'More actions for repo-a' })
 		).not.toBeInTheDocument();
+	});
+});
+
+describe('the host of an init and an access test', () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		session.role = 'admin';
+		mocks.listAgents.mockResolvedValue([
+			{ id: 'a_1', hostname: 'nas-backup', status: 'active' },
+			{ id: 'a_2', hostname: 'web-01', status: 'active' }
+		]);
+	});
+
+	async function openAction(label: string): Promise<HTMLElement> {
+		const user = userEvent.setup();
+		render(Repositories);
+		await screen.findByText('repo-a');
+		await user.click(screen.getByRole('button', { name: 'More actions for repo-a' }));
+		await user.click(await screen.findByText(label));
+		return screen.findByRole('dialog');
+	}
+
+	it('fr_rp_08 initializes on the maintenance host and does not offer another host', async () => {
+		mocks.listRepositories.mockResolvedValue([repository({ initialized: false })]);
+		mocks.initRepository.mockResolvedValue({ id: 'j_1', status: 'queued' });
+		const dialog = await openAction('Initialize');
+
+		const host = within(dialog).getByLabelText('Host');
+		expect(host).toHaveValue('nas-backup');
+		expect(host).toBeDisabled();
+		expect(within(dialog).queryByRole('combobox')).not.toBeInTheDocument();
+		await userEvent.click(within(dialog).getByRole('button', { name: 'Start' }));
+
+		await waitFor(() =>
+			expect(mocks.initRepository).toHaveBeenCalledWith('r_1', { agent_id: 'a_1' })
+		);
+	});
+
+	it('fr_rp_08 says why an init cannot start without a maintenance host', async () => {
+		mocks.listRepositories.mockResolvedValue([
+			repository({ initialized: false, maintenance_agent_id: null })
+		]);
+		const dialog = await openAction('Initialize');
+
+		expect(within(dialog).getByText('The repository has no maintenance host')).toBeInTheDocument();
+		expect(
+			within(dialog).getByRole('link', { name: 'Select the maintenance host' })
+		).toHaveAttribute('href', '/repositories/r_1#repo-agent');
+		expect(within(dialog).getByRole('button', { name: 'Start' })).toBeDisabled();
+		expect(mocks.initRepository).not.toHaveBeenCalled();
+	});
+
+	it('fr_rp_08 lets an access test of an S3 repository choose another host', async () => {
+		mocks.listRepositories.mockResolvedValue([
+			repository({ backend: { kind: 's3', endpoint: 'https://s3.example.net', bucket: 'b' } })
+		]);
+		const dialog = await openAction('Test access');
+
+		const host = within(dialog).getByRole('combobox', { name: /Host/ });
+		expect(host).toHaveValue('a_1');
+		expect(host).toBeEnabled();
 	});
 });

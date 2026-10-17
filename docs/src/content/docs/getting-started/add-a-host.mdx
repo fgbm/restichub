@@ -3,6 +3,9 @@ title: Add a host
 description: Register a host with the control plane and check the connection.
 ---
 
+import Diagram from '../../../components/Diagram.astro';
+
+
 An agent registers by hand with a one-time enrollment token. A person on the host unpacks the agent package anywhere, for example in the Downloads folder, and runs one command. The command `register` does everything: it installs the agent, enrolls the host, starts the service and reports the connection.
 
 ## The registration command
@@ -45,6 +48,12 @@ After `register --no-service` the command prints that the service is not install
 After a successful registration, the host appears on the "Hosts" screen with the status "Waiting for connection". The status changes to "Online" when the agent opens its stream.
 
 The token is single use. The control plane consumes the token at the first successful registration. A used token, an expired token and a revoked token give a clear error.
+
+## How enrollment works
+
+<Diagram name="enrollment" label="The enrollment of an agent, from the one-time token to the mTLS stream" />
+
+The private key of the agent never leaves the host. The control plane signs a certificate for the public key in the CSR. The agent pins the root CA from the answer. After that, the agent trusts only this CA on the agent listener port. The token works one time.
 
 ## The host clock
 
