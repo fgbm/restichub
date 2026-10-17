@@ -84,6 +84,7 @@ impl ScriptStore {
     }
 
     /// A store with a chosen file and trust rule, for a test.
+    #[cfg(any(test, feature = "test-util"))]
     #[must_use]
     pub fn new(path: PathBuf, trust: Trust, cache: &Path) -> Self {
         Self {
@@ -105,6 +106,7 @@ impl ScriptStore {
     }
 
     /// Filters this search path instead of the one of the process, for a test.
+    #[cfg(any(test, feature = "test-util"))]
     #[must_use]
     pub fn with_search_path(mut self, path: std::ffi::OsString) -> Self {
         self.search_path = Some(path);

@@ -224,7 +224,8 @@ fn spawn_shutdown(shutdown: Option<Receiver<()>>, stop: watch::Sender<bool>) -> 
 /// # Errors
 ///
 /// Returns [`IdentityReplaced::Agent`] when a registration stored the identity of another agent,
-/// so the service starts again with it. A failed connection is retried.
+/// so the service starts again with it, and [`crate::commands::UnsafeIdentity`] when another
+/// account could change the identity that a reconnect loads. A failed connection is retried.
 pub async fn run(
     identity: &StoredIdentity,
     dir: &Path,
@@ -295,7 +296,7 @@ pub async fn run(
             }
         };
         // A rotation stored a newer certificate during the stream; the next connection uses it.
-        if let Some(fresh) = fresher_identity(dir, rotated.as_ref().unwrap_or(identity)).await {
+        if let Some(fresh) = fresher_identity(dir, rotated.as_ref().unwrap_or(identity)).await? {
             rotated = Some(fresh);
         }
         if *stop.borrow() {
@@ -313,7 +314,7 @@ pub async fn run(
         };
         let current = rotated.as_ref().unwrap_or(identity);
         tokio::select! {
-            () = wait_before_retry(dir, current, delay, refused) => {}
+            waited = wait_before_retry(dir, current, delay, refused) => waited?,
             result = stop.changed() => {
                 if result.is_err() || *stop.borrow() {
                     return Ok(());
@@ -329,32 +330,53 @@ const IDENTITY_POLL: Duration = Duration::from_secs(2);
 /// Sleeps for `delay`. After a refusal it also ends early when the identity file holds a newer
 /// certificate: the control plane closes the stream of a re-registered host before the register
 /// command has stored the new identity (FR-ID-10).
-async fn wait_before_retry(dir: &Path, current: &StoredIdentity, delay: Duration, refused: bool) {
+async fn wait_before_retry(
+    dir: &Path,
+    current: &StoredIdentity,
+    delay: Duration,
+    refused: bool,
+) -> Result<()> {
     if !refused {
         tokio::time::sleep(delay).await;
-        return;
+        return Ok(());
     }
     let mut waited = Duration::ZERO;
     while waited < delay {
         let step = IDENTITY_POLL.min(delay - waited);
         tokio::time::sleep(step).await;
         waited += step;
-        if fresher_identity(dir, current).await.is_some() {
-            return;
+        if fresher_identity(dir, current).await?.is_some() {
+            return Ok(());
         }
     }
+    Ok(())
 }
 
 /// Reads the identity that a rotation stored, when it holds a newer certificate of the same agent
 /// (FR-ID-03).
-async fn fresher_identity(dir: &Path, active: &StoredIdentity) -> Option<StoredIdentity> {
+///
+/// # Errors
+///
+/// Returns [`crate::commands::UnsafeIdentity`] when another account could change the identity, so
+/// the service stops with the exit code 78 (T20). A file that a save is writing only waits.
+async fn fresher_identity(dir: &Path, active: &StoredIdentity) -> Result<Option<StoredIdentity>> {
     if !StoredIdentity::exists(dir) {
-        return None;
+        return Ok(None);
     }
-    let stored = load_off_runtime(dir).await.ok()?;
+    let stored = match load_off_runtime(dir).await {
+        Ok(stored) => stored,
+        Err(error) if crate::commands::needs_administrator(&error) => {
+            tracing::error!("{error:#}");
+            return Err(error);
+        }
+        Err(_) => return Ok(None),
+    };
     let same_agent = stored.agent_id == active.agent_id && stored.tenant_id == active.tenant_id;
-    let newer = stored.certificate_expiry().ok()? > active.certificate_expiry().ok()?;
-    (same_agent && newer).then_some(stored)
+    let newer = match (stored.certificate_expiry(), active.certificate_expiry()) {
+        (Ok(stored), Ok(active)) => stored > active,
+        _ => false,
+    };
+    Ok((same_agent && newer).then_some(stored))
 }
 
 /// Logs that an expired certificate cannot connect (FR-ID-03). The rotation needs a valid
@@ -796,9 +818,15 @@ async fn install(
 }
 
 /// The identity lock can wait for up to a minute, so the load leaves the runtime worker free.
+///
+/// Another account can change the files after the start check, so every load checks again (T20).
 async fn load_off_runtime(dir: &Path) -> Result<StoredIdentity> {
     let dir = dir.to_path_buf();
-    tokio::task::spawn_blocking(move || StoredIdentity::load(&dir)).await?
+    tokio::task::spawn_blocking(move || {
+        crate::commands::check_identity(&dir)?;
+        StoredIdentity::load(&dir)
+    })
+    .await?
 }
 
 /// Answers a heartbeat with the echoed nonce (FR-ID-07).
@@ -1041,6 +1069,32 @@ mod tests {
             panic!("the first message must be an AgentHello");
         };
         assert!(restichub_proto::AgentCapability::ForgetAllTags.is_listed(&hello.capabilities));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn fr_ag_04_a_reconnect_refuses_an_identity_that_another_account_could_change() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = std::env::temp_dir().join(format!(
+            "restichub-agent-reconnect-identity-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let identity = crate::identity::tests::sample();
+        identity.save(&dir).expect("cannot save the identity");
+        super::fresher_identity(&dir, &identity)
+            .await
+            .expect("a protected identity passes");
+
+        let metadata = dir.join(crate::identity::METADATA_FILE);
+        std::fs::set_permissions(&metadata, std::fs::Permissions::from_mode(0o666))
+            .expect("cannot open the file");
+        let error = super::fresher_identity(&dir, &identity)
+            .await
+            .expect_err("a file that every account can change");
+        assert!(crate::commands::needs_administrator(&error), "{error:#}");
+        assert!(format!("{error:#}").contains("identity.json"), "{error:#}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]

@@ -276,7 +276,7 @@ pub(crate) fn check_identity(config: &Path, root: &Path) -> Result<()> {
         }
         refuse_exposure(&entry, level, Rights::Change)?;
     }
-    let names = crate::identity::loaded_names();
+    let names = crate::identity::trusted_names();
     for dir in [config, backup.as_path()] {
         for (name, secret) in &names {
             let path = dir.join(name);

@@ -149,7 +149,12 @@ impl ServiceManager for HostService {
 /// Returns an error when the executable, restic or a parent directory is writable by another
 /// account.
 pub fn check_install_location(restic: &Path) -> Result<()> {
-    location::check(&crate::paths::agent_exe(), restic)
+    check_location(&crate::paths::agent_exe(), restic)
+}
+
+/// Like [`check_install_location`], for an agent at `exe`.
+pub(crate) fn check_location(exe: &Path, restic: &Path) -> Result<()> {
+    location::check(exe, restic)
 }
 
 /// Logs a warning for each restore or repository root that the installed service cannot write

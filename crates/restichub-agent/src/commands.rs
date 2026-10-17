@@ -30,6 +30,32 @@ pub fn needs_administrator(error: &anyhow::Error) -> bool {
     error.downcast_ref::<NoIdentity>().is_some()
         || error.downcast_ref::<UnsafeIdentity>().is_some()
         || error.downcast_ref::<NoRestic>().is_some()
+        || error.downcast_ref::<UnsafeProgram>().is_some()
+}
+
+/// Another account could change the agent program or restic, so the service does not run them
+/// (T20). On Windows a DLL beside the program runs with the rights of the service.
+#[derive(Debug)]
+pub struct UnsafeProgram {
+    cause: String,
+}
+
+impl std::fmt::Display for UnsafeProgram {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "another account could change the agent program or restic: {}; the service stays stopped until an administrator runs `install-service` of the release package",
+            self.cause
+        )
+    }
+}
+
+impl std::error::Error for UnsafeProgram {}
+
+fn check_program(exe: &Path, restic: &Path) -> Result<(), UnsafeProgram> {
+    crate::service::check_location(exe, restic).map_err(|error| UnsafeProgram {
+        cause: format!("{error:#}"),
+    })
 }
 
 /// Restic is absent or differs from its record, and the service never downloads it (ADR-0038).
@@ -737,6 +763,16 @@ pub fn run(dir: &Path, shutdown: Option<Receiver<()>>) -> Result<()> {
     let restic = installed_restic(&Layout::host(), migration, || {
         std::thread::sleep(std::time::Duration::from_secs(2));
     })?;
+    // `register` and `install-service` check the location, but a service that an older build or
+    // a manual copy installed starts without them.
+    #[cfg(any(target_os = "linux", windows))]
+    {
+        let exe = std::env::current_exe().context("cannot find the agent program")?;
+        if let Err(refused) = check_program(&exe, restic.path()) {
+            tracing::error!("{refused}");
+            return Err(anyhow::Error::new(refused));
+        }
+    }
     let restic_version = restic.version().unwrap_or_default();
     // The job journal lives in the configuration directory; the runner uses the verified restic
     // binary (ADR-0020, ADR-0038).
@@ -1226,6 +1262,34 @@ mod tests {
         );
         record(b"changed");
         installed_restic(&layout, Ok(()), || {}).expect("the recorded binary passes");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn fr_ag_01_the_service_refuses_a_program_that_another_account_could_change() {
+        // The temporary directory belongs to the test account, not to root or Administrators.
+        let base = std::env::temp_dir().join(format!(
+            "restichub-agent-open-program-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).expect("base");
+        let exe = base.join("restichub-agent");
+        let restic = base.join(crate::restic::RESTIC_FILE_NAME);
+        std::fs::write(&exe, b"agent").expect("agent");
+        std::fs::write(&restic, b"restic").expect("restic");
+
+        let error = anyhow::Error::new(check_program(&exe, &restic).expect_err("an open program"));
+        assert!(needs_administrator(&error), "{error:#}");
+        let text = format!("{error:#}");
+        assert!(
+            text.starts_with("another account could change the agent program or restic: "),
+            "{text}"
+        );
+        assert!(
+            text.contains("runs `install-service` of the release package"),
+            "{text}"
+        );
         let _ = std::fs::remove_dir_all(&base);
     }
 

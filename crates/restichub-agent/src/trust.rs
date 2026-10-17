@@ -16,7 +16,8 @@ pub enum Trust {
     Host,
     /// The account that runs the process or root, and only the file and its directory. A test
     /// uses it to build a fixture without administrator rights; it is never the setting of a
-    /// running agent.
+    /// running agent, so only a test build has it.
+    #[cfg(any(test, feature = "test-util"))]
     CurrentUser,
 }
 
@@ -88,6 +89,7 @@ fn check_chain(path: &Path, trust: Trust, leaf_is_file: bool) -> Result<()> {
             break;
         }
         // The test trust covers a file and its directory, or only a directory.
+        #[cfg(any(test, feature = "test-util"))]
         if trust == Trust::CurrentUser && checked >= if leaf_is_file { 2 } else { 1 } {
             break;
         }
@@ -126,6 +128,7 @@ fn check_element(path: &Path, _role: Role, trust: Trust) -> Result<()> {
     // Root also passes the test trust, so a system directory in `PATH` stays in a test.
     let owned = match trust {
         Trust::Host => metadata.uid() == 0,
+        #[cfg(any(test, feature = "test-util"))]
         Trust::CurrentUser => metadata.uid() == current_uid() || metadata.uid() == 0,
     };
     if !owned || metadata.mode() & 0o022 != 0 {
@@ -140,7 +143,7 @@ fn check_element(path: &Path, _role: Role, trust: Trust) -> Result<()> {
     Ok(())
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, any(test, feature = "test-util")))]
 #[allow(unsafe_code)]
 fn current_uid() -> u32 {
     // SAFETY: `geteuid` has no preconditions and cannot fail.
@@ -149,9 +152,12 @@ fn current_uid() -> u32 {
 
 #[cfg(windows)]
 fn check_element(path: &Path, role: Role, trust: Trust) -> Result<()> {
+    #[cfg(any(test, feature = "test-util"))]
     if trust == Trust::CurrentUser {
         return Ok(());
     }
+    #[cfg(not(any(test, feature = "test-util")))]
+    let Trust::Host = trust;
     match role {
         Role::File => crate::winsec::check_admin_only(path),
         Role::Directory => crate::winsec::check_program_directory(path),

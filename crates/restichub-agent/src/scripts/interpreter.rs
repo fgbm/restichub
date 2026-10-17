@@ -28,6 +28,7 @@ pub(super) fn locate(kind: ScriptInterpreter, trust: Trust) -> Option<PathBuf> {
     candidates(kind).into_iter().find_map(|path| match trust {
         Trust::Host => trust::check_executable(&path, Trust::Host).ok(),
         // A test host has no interpreter that the current account owns.
+        #[cfg(any(test, feature = "test-util"))]
         Trust::CurrentUser => path
             .canonicalize()
             .ok()

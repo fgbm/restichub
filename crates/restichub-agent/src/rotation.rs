@@ -12,7 +12,7 @@
 use anyhow::{Context, Result, bail};
 use restichub_proto::agent::v1::CertificateIssued;
 use time::OffsetDateTime;
-use x509_parser::prelude::{FromDer as _, GeneralName, X509Certificate};
+use x509_parser::prelude::{FromDer as _, X509Certificate};
 
 use crate::identity::{GeneratedKey, Rotated, StoredIdentity, generate_key_and_csr};
 
@@ -52,9 +52,9 @@ pub fn begin() -> Result<(PendingRotation, Vec<u8>)> {
 
 /// Checks the issued certificate and returns the files to install.
 ///
-/// The certificate must carry the identity of this agent, the new public key and a validity that
-/// has not ended. The chain must lead from the certificate over the issuing CA to the root that
-/// the agent pinned at enrollment; the chain never replaces the pinned root.
+/// The certificate gets the checks of an enrollment: the identity of this agent, the new public
+/// key, the validity windows and the CA constraints of the chain. The chain must end in the root
+/// that the agent pinned at enrollment; the chain never replaces the pinned root.
 ///
 /// # Errors
 ///
@@ -65,61 +65,21 @@ pub fn accept(
     issued: &CertificateIssued,
     now: OffsetDateTime,
 ) -> Result<Rotated> {
-    let (_, leaf) = X509Certificate::from_der(&issued.certificate_der)
-        .map_err(|error| anyhow::anyhow!("the issued certificate is not valid: {error}"))?;
-    let expected = format!(
-        "restichub://tenant/{}/agent/{}",
-        identity.tenant_id, identity.agent_id
-    );
-    let uri = leaf
-        .subject_alternative_name()
-        .ok()
-        .flatten()
-        .and_then(|san| {
-            san.value.general_names.iter().find_map(|name| match name {
-                GeneralName::URI(uri) => Some((*uri).to_owned()),
-                _ => None,
-            })
-        })
-        .context("the issued certificate holds no identity URI")?;
-    if uri != expected {
-        bail!("the issued certificate names another identity");
-    }
-    if leaf.public_key().subject_public_key.data.as_ref() != pending.key.public_key.as_slice() {
-        bail!("the issued certificate does not hold the requested public key");
-    }
-    let validity = leaf.validity();
-    if now >= validity.not_after.to_datetime() {
-        bail!("the issued certificate is already expired");
-    }
-
     let pinned_root = identity
         .ca_chain_der
         .last()
         .context("the identity holds no pinned root")?;
-    let Some((root_der, issuers)) = issued.ca_chain_der.split_last() else {
-        bail!("the issued chain is empty");
-    };
-    if root_der != pinned_root {
+    if issued.ca_chain_der.last() != Some(pinned_root) {
         bail!("the issued chain does not end in the pinned root CA");
     }
-    let mut child = leaf;
-    let mut parsed = Vec::with_capacity(issued.ca_chain_der.len());
-    for der in &issued.ca_chain_der {
-        let (_, certificate) = X509Certificate::from_der(der)
-            .map_err(|error| anyhow::anyhow!("a chain certificate is not valid: {error}"))?;
-        parsed.push(certificate);
-    }
-    for parent in &parsed {
-        child
-            .verify_signature(Some(parent.public_key()))
-            .map_err(|error| anyhow::anyhow!("the issued chain does not verify: {error}"))?;
-        child = parent.clone();
-    }
-    if issuers.is_empty() {
-        bail!("the issued chain holds no issuing CA");
-    }
-
+    crate::verify::check_certificate(
+        &pending.key.public_key,
+        &identity.agent_id,
+        &identity.tenant_id,
+        &issued.certificate_der,
+        &issued.ca_chain_der,
+        now,
+    )?;
     Ok(Rotated {
         key_pem: pending.key.key_pem.clone(),
         certificate_der: issued.certificate_der.clone(),
@@ -142,8 +102,91 @@ pub fn serial_of(certificate_der: &[u8]) -> Result<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
-    use super::rotation_due;
+    #![allow(clippy::expect_used)]
+
+    use super::{CertificateIssued, accept, begin, rotation_due};
+    use rcgen::{
+        BasicConstraints, CertificateParams, CertifiedIssuer, IsCa, KeyPair,
+        PKCS_ECDSA_P256_SHA256, SanType,
+    };
     use time::{Duration, OffsetDateTime};
+
+    fn ca(
+        path_len: Option<u8>,
+        issuer: Option<&CertifiedIssuer<'static, KeyPair>>,
+    ) -> CertifiedIssuer<'static, KeyPair> {
+        let key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).expect("CA key");
+        let mut params = CertificateParams::new(Vec::new()).expect("CA parameters");
+        params.is_ca = IsCa::Ca(path_len.map_or(
+            BasicConstraints::Unconstrained,
+            BasicConstraints::Constrained,
+        ));
+        match issuer {
+            Some(issuer) => CertifiedIssuer::signed_by(params, key, issuer).expect("issuing CA"),
+            None => CertifiedIssuer::self_signed(params, key).expect("root CA"),
+        }
+    }
+
+    #[test]
+    fn fr_id_03_a_rotation_applies_the_chain_checks_of_an_enrollment() {
+        let root = ca(None, None);
+        let issuing = ca(Some(0), Some(&root));
+        let mut identity = crate::identity::tests::sample();
+        identity.ca_chain_der = vec![issuing.der().to_vec(), root.der().to_vec()];
+        let san = crate::verify::san_uri(&identity.tenant_id, &identity.agent_id);
+        let (pending, _) = begin().expect("a pending rotation");
+        let key = KeyPair::from_pem(&pending.key.key_pem).expect("the pending key");
+        let issue = |is_ca: IsCa, chain: Vec<Vec<u8>>| {
+            let mut params = CertificateParams::new(Vec::new()).expect("leaf parameters");
+            params
+                .subject_alt_names
+                .push(SanType::URI(san.clone().try_into().expect("SAN URI")));
+            params.is_ca = is_ca;
+            CertificateIssued {
+                certificate_der: params
+                    .signed_by(&key, &issuing)
+                    .expect("leaf")
+                    .der()
+                    .to_vec(),
+                ca_chain_der: chain,
+            }
+        };
+        let now = OffsetDateTime::now_utc();
+
+        accept(
+            &identity,
+            &pending,
+            &issue(IsCa::ExplicitNoCa, identity.ca_chain_der.clone()),
+            now,
+        )
+        .expect("an end entity passes");
+        let error = accept(
+            &identity,
+            &pending,
+            &issue(
+                IsCa::Ca(BasicConstraints::Unconstrained),
+                identity.ca_chain_der.clone(),
+            ),
+            now,
+        )
+        .expect_err("a leaf that is a CA");
+        assert!(
+            format!("{error:#}").contains("is a certificate authority"),
+            "{error:#}"
+        );
+        let other_root = ca(None, None);
+        let error = accept(
+            &identity,
+            &pending,
+            &issue(
+                IsCa::ExplicitNoCa,
+                vec![issuing.der().to_vec(), other_root.der().to_vec()],
+            ),
+            now,
+        )
+        .expect_err("another root");
+        assert!(format!("{error:#}").contains("pinned root"), "{error:#}");
+    }
 
     #[test]
     fn fr_id_03_the_rotation_starts_at_two_thirds_of_the_lifetime() {
