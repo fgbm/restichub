@@ -717,6 +717,8 @@ jobs:
           # administrator with Modify, as a client edition gives through CREATOR OWNER.
           Copy-Item (Join-Path $env:GITHUB_WORKSPACE 'LICENSE') $agentDir
           Copy-Item (Join-Path $env:GITHUB_WORKSPACE 'packaging\THIRD_PARTY_NOTICES') $agentDir
+          # The downloaded archive, left beside the copy.
+          Set-Content (Join-Path $agentDir 'restichub-agent-old-windows-amd64.zip') 'zip'
           Get-ChildItem $agentDir -File | Get-FileHash | ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path -Leaf $_.Path)" } | Set-Content (Join-Path $agentDir 'SHA256SUMS')
           $user = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
           icacls $tree /reset /T /Q
@@ -780,6 +782,7 @@ jobs:
           & $expect ($first.Code -ne 0) 'install-service refuses the identity of the old agent'
           & $expect ($text -match 'repaired the access control of \d+ entr(y|ies) under') 'the repair of ProgramData prints summary lines'
           & $expect ($text -match 'repairs it in place') 'the held tree is repaired in place'
+          & $expect ($text -match 'removed .*restichub-agent-old-windows-amd64\.zip') 'the file that the agent does not know is removed'
           & $expect ($text -match "warning: a process kept .*\(PID $($holder.Id)\).*starts only by hand") 'the warning names the holder and the manual start'
           & $expect ($text -match 'could be changed by another account') 'the identity is refused'
           & $expect ($text -match 'register --force') 'the next step is named'
@@ -796,6 +799,8 @@ jobs:
           Push-Location $env:GITHUB_WORKSPACE; bash scripts/install-smoke.sh token $token; Pop-Location
           $planted = Join-Path $agentDir 'version.dll'
           Set-Content $planted 'x'
+          # An administrator owns it, so only the check before the start can refuse it.
+          icacls $planted /setowner '*S-1-5-32-544' | Out-Null
           $refused = & $run '(4) register --force with a file that the agent does not know' @('register', '--force', '--url', 'https://localhost:8443', '--token-stdin', '--ca-file', "$env:SMOKE_DIR/ca.pem") (Get-Content $token)
           & $expect ($refused.Code -ne 0 -and $refused.Text -match 'version\.dll') 'register refuses the planted file and names it'
           & $expect (Test-Path (Join-Path $config 'identity.json')) 'the refusal keeps the old identity'
