@@ -13,12 +13,12 @@
 	import {
 		Alert,
 		Button,
-		Checkbox,
 		CopyField,
 		Dialog,
 		FilterBar,
 		ListView,
 		Select,
+		SwitchField,
 		TagInput,
 		TextField
 	} from '#lib/components/ui/index.ts';
@@ -462,7 +462,12 @@
 			</div>
 		{/if}
 	{/if}
-	<Checkbox label={t('channels.enabled')} bind:checked={enabled} />
+	<SwitchField
+		id="channel-send"
+		label={t('channels.send')}
+		help={t('channels.sendHelp')}
+		bind:checked={enabled}
+	/>
 	{#snippet footer()}
 		{#if editing}
 			<span class="footer__start">

@@ -23,6 +23,7 @@ mod output;
 pub mod paths;
 pub mod pem;
 pub mod preflight;
+pub mod program_repair;
 pub mod repository_roots;
 pub mod restic;
 pub mod restic_install;

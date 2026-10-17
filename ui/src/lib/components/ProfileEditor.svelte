@@ -130,6 +130,8 @@
 		])
 	);
 	const dirty = $derived(!loading && stateKey !== baseline);
+	// A copy is a record that is not saved yet, even before the first change.
+	const unsavedCopy = $derived(Boolean(copyFrom) && !existing && !loading);
 	const allOpen = $derived(SECTIONS.every((key) => open[key]));
 
 	const titles: Record<SummaryKey, MessageKey> = {
@@ -314,6 +316,13 @@
 		}
 	}
 
+	let commandsOpen = $state(false);
+	const hasPaths = $derived(
+		[draft.pathsAll, draft.pathsWindows, draft.pathsLinux, draft.pathsMacos].some(
+			(text) => text.trim() !== ''
+		)
+	);
+
 	async function copyCommands(): Promise<void> {
 		await navigator.clipboard?.writeText(steps.map((step) => step.command).join('\n\n'));
 		copied = true;
@@ -327,10 +336,27 @@
 	{loading}
 	error={loadError}
 	onsubmit={() => void save()}
+	save={{
+		dirty: dirty || unsavedCopy,
+		saving,
+		create: !profileId,
+		readonly: canWrite ? null : t('pe.save.readonly'),
+		note: existing && planCount > 0 ? t('pe.save.plans', { count: planCount }) : undefined,
+		oncancel: () => goto(resolve('/(app)/profiles'))
+	}}
 >
 	{#snippet actions()}
 		<Button size="sm" onclick={() => setAll(true)} disabled={allOpen}>{t('pe.expandAll')}</Button>
 		<Button size="sm" onclick={() => setAll(false)}>{t('pe.collapseAll')}</Button>
+		<Button
+			size="sm"
+			icon="terminal"
+			onclick={() => (commandsOpen = true)}
+			disabled={!hasPaths}
+			title={hasPaths ? undefined : t('pe.commands.noPaths')}
+		>
+			{t('pe.side.commands')}
+		</Button>
 		{#if existing}
 			<Button size="sm" icon="eye" onclick={openPreview}>{t('profiles.preview')}</Button>
 		{/if}
@@ -353,53 +379,6 @@
 		<SummaryPanel title={t('pe.side.result')} items={resultItems}>
 			<p class="muted">{t('pe.side.count', { on: counts.on, total: counts.total })}</p>
 		</SummaryPanel>
-		<SummaryPanel title={t('pe.side.commands')}>
-			{#snippet actions()}
-				<Button size="sm" icon="copy" onclick={copyCommands}>
-					{copied ? t('pe.side.copied') : t('pe.side.copy')}
-				</Button>
-			{/snippet}
-			<div class="os">
-				<label for="preview-os">{t('pe.side.os')}</label>
-				<Select
-					id="preview-os"
-					options={[
-						{ value: 'linux', label: 'Linux' },
-						{ value: 'windows', label: 'Windows' },
-						{ value: 'macos', label: 'macOS' }
-					]}
-					bind:value={os}
-				/>
-			</div>
-			{#each steps as step, index (step.kind + index)}
-				<div class="step">
-					<div class="step__title">{step.title}</div>
-					<pre
-						class="step__cmd"
-						class:step__cmd--script={step.kind === 'script'}>{step.command}</pre>
-				</div>
-			{/each}
-			<p class="muted note">
-				<Icon name="clock" size="xs" />
-				{summaries.limits.text}
-			</p>
-		</SummaryPanel>
-	{/snippet}
-	{#snippet footer()}
-		<div class="savebar">
-			<span class="muted savebar__text">
-				{#if !canWrite}
-					{t('pe.save.readonly')}
-				{:else}
-					{dirty ? t('pe.save.dirty') : ''}
-					{#if existing && planCount > 0}{t('pe.save.plans', { count: planCount })}{/if}
-				{/if}
-			</span>
-			<Button onclick={() => goto(resolve('/(app)/profiles'))}>{t('common.cancel')}</Button>
-			{#if canWrite}
-				<Button type="submit" variant="primary" loading={saving}>{t('common.save')}</Button>
-			{/if}
-		</div>
 	{/snippet}
 
 	<ProfileSection
@@ -699,6 +678,44 @@
 	</ProfileSection>
 
 	<SidePanel
+		bind:open={commandsOpen}
+		title={t('pe.side.commands')}
+		subtitle={t('pe.commands.description')}
+	>
+		<div class="commands">
+			<div class="os">
+				<label for="preview-os">{t('pe.side.os')}</label>
+				<Select
+					id="preview-os"
+					options={[
+						{ value: 'linux', label: 'Linux' },
+						{ value: 'windows', label: 'Windows' },
+						{ value: 'macos', label: 'macOS' }
+					]}
+					bind:value={os}
+				/>
+			</div>
+			{#each steps as step, index (step.kind + index)}
+				<div class="step">
+					<div class="step__title">{step.title}</div>
+					<pre
+						class="step__cmd"
+						class:step__cmd--script={step.kind === 'script'}>{step.command}</pre>
+				</div>
+			{/each}
+			<p class="muted note">
+				<Icon name="clock" size="xs" />
+				{summaries.limits.text}
+			</p>
+		</div>
+		{#snippet footer()}
+			<Button icon="copy" onclick={copyCommands}>
+				{copied ? t('pe.side.copied') : t('pe.side.copy')}
+			</Button>
+		{/snippet}
+	</SidePanel>
+
+	<SidePanel
 		bind:open={previewOpen}
 		title={t('profiles.previewTitle')}
 		subtitle={t('profiles.previewDescription')}
@@ -816,20 +833,6 @@
 		font-size: var(--rh-font-size-sm);
 	}
 
-	.savebar {
-		display: flex;
-		align-items: center;
-		gap: var(--rh-space-3);
-		padding: var(--rh-space-3) var(--rh-space-4);
-		border: var(--rh-border-width) solid var(--rh-color-border);
-		border-radius: var(--rh-radius-lg);
-		background-color: var(--rh-color-surface);
-	}
-
-	.savebar__text {
-		flex: 1;
-	}
-
 	@media (max-width: 720px) {
 		.grid2,
 		.grid3 {
@@ -837,7 +840,8 @@
 		}
 	}
 
-	.preview {
+	.preview,
+	.commands {
 		display: flex;
 		flex-direction: column;
 		gap: var(--rh-space-4);

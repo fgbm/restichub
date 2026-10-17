@@ -195,6 +195,22 @@ pub fn uninstall() -> Result<()> {
     }
 }
 
+/// Lets an installed service start only by hand; Linux has no repair that needs it (T20).
+///
+/// # Errors
+///
+/// Returns an error when the service exists and its configuration cannot be changed.
+pub fn set_manual_start() -> Result<()> {
+    #[cfg(windows)]
+    {
+        windows::set_manual_start()
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(())
+    }
+}
+
 /// Restarts the installed service so that it runs with the new restic, and tells whether a
 /// service was installed (ADR-0038).
 ///

@@ -165,6 +165,7 @@
 	--rh-color-overlay: rgba(31, 35, 40, 0.45);
 	--rh-shadow-overlay: 0 8px 24px rgba(31, 35, 40, 0.18);
 	--rh-shadow-menu: 0 4px 14px rgba(31, 35, 40, 0.14);
+	--rh-shadow-bar: 0 -4px 12px rgba(31, 35, 40, 0.08);
 	--rh-color-skeleton: #e4e8ed;
 	--rh-color-skeleton-shine: #eef1f4;
 	--rh-color-code-bg: #f6f8fa;
@@ -248,6 +249,7 @@
 	--rh-color-overlay: rgba(1, 4, 9, 0.62);
 	--rh-shadow-overlay: 0 8px 24px rgba(0, 0, 0, 0.55);
 	--rh-shadow-menu: 0 4px 14px rgba(0, 0, 0, 0.45);
+	--rh-shadow-bar: 0 -4px 12px rgba(0, 0, 0, 0.4);
 	--rh-color-skeleton: #21262d;
 	--rh-color-skeleton-shine: #2b313a;
 	--rh-color-code-bg: #0b0e12;
@@ -331,6 +333,7 @@
 		--rh-color-overlay: rgba(1, 4, 9, 0.62);
 		--rh-shadow-overlay: 0 8px 24px rgba(0, 0, 0, 0.55);
 		--rh-shadow-menu: 0 4px 14px rgba(0, 0, 0, 0.45);
+		--rh-shadow-bar: 0 -4px 12px rgba(0, 0, 0, 0.4);
 		--rh-color-skeleton: #21262d;
 		--rh-color-skeleton-shine: #2b313a;
 		--rh-color-code-bg: #0b0e12;

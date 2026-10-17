@@ -19,8 +19,8 @@ import Ui from '../../../../components/Ui.astro';
 | <Ui k="jobs.status.queued" /> | `queued` | Задание в очереди. Сервер управления его не отправил. |
 | <Ui k="jobs.status.sent" /> | `sent` | Сервер управления отправил задание. Агент его не подтвердил. |
 | <Ui k="jobs.status.running" /> | `running` | Агент подтвердил задание и выполняет его. |
-| <Ui k="jobs.status.succeeded" /> | `succeeded` | Все шаги выполнены успешно. |
-| <Ui k="jobs.status.succeeded_with_warnings" />, жёлтым цветом | `succeeded` | Все шаги выполнены, restic сообщил предупреждения. Подсказка показывает «<Ui k="jobs.statusFull.succeeded_with_warnings" />». Код результата — `succeeded_with_warnings`. |
+| <Ui k="jobs.status.succeeded" />, зелёным цветом | `succeeded` | Все шаги выполнены успешно. |
+| <Ui k="jobs.status.succeeded_with_warnings" />, жёлтым цветом | `succeeded` | Все шаги выполнены, restic сообщил предупреждения. Список показывает метку с этим названием. Подсказка показывает «<Ui k="jobs.statusFull.succeeded_with_warnings" />». Код результата — `succeeded_with_warnings`. |
 | <Ui k="jobs.status.failed" /> | `failed` | Шаг завершился ошибкой или сервер управления отклонил задание. Код результата и причина дают подробности. |
 | <Ui k="jobs.status.cancelled" /> | `failed` | Оператор отменил задание. Код результата — `cancelled`. |
 | <Ui k="jobs.status.expired" /> | `expired` | Задание ждало в очереди дольше окна приёма. Выполняющееся задание никогда не истекает. |

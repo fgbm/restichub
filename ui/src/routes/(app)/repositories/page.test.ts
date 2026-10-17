@@ -10,6 +10,16 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Repositories from './+page.svelte';
 
+const HOST = {
+	status: 'active',
+	os: 'linux',
+	arch: 'amd64',
+	labels: [],
+	online: true,
+	first_connected_at: '2026-01-01T00:00:00Z',
+	last_seen_at: '2026-01-01T00:00:00Z'
+};
+
 const mocks = vi.hoisted(() => ({
 	listRepositories: vi.fn(),
 	listAgents: vi.fn(),
@@ -87,7 +97,7 @@ describe('the Repositories screen maintenance', () => {
 		vi.clearAllMocks();
 		session.role = 'admin';
 		mocks.listRepositories.mockResolvedValue([repository()]);
-		mocks.listAgents.mockResolvedValue([{ id: 'a_1', hostname: 'nas-backup', status: 'active' }]);
+		mocks.listAgents.mockResolvedValue([{ id: 'a_1', hostname: 'nas-backup', ...HOST }]);
 	});
 
 	it('fr_rp_08 warns about a repository without a maintenance host', async () => {
@@ -222,8 +232,8 @@ describe('the host of an init and an access test', () => {
 		vi.clearAllMocks();
 		session.role = 'admin';
 		mocks.listAgents.mockResolvedValue([
-			{ id: 'a_1', hostname: 'nas-backup', status: 'active' },
-			{ id: 'a_2', hostname: 'web-01', status: 'active' }
+			{ id: 'a_1', hostname: 'nas-backup', ...HOST },
+			{ id: 'a_2', hostname: 'web-01', ...HOST }
 		]);
 	});
 
@@ -241,10 +251,9 @@ describe('the host of an init and an access test', () => {
 		mocks.initRepository.mockResolvedValue({ id: 'j_1', status: 'queued' });
 		const dialog = await openAction('Initialize');
 
-		const host = within(dialog).getByLabelText('Host');
-		expect(host).toHaveValue('nas-backup');
+		const host = within(dialog).getByRole('combobox', { name: /^Host/ });
+		expect(host).toHaveTextContent('nas-backup');
 		expect(host).toBeDisabled();
-		expect(within(dialog).queryByRole('combobox')).not.toBeInTheDocument();
 		await userEvent.click(within(dialog).getByRole('button', { name: 'Start' }));
 
 		await waitFor(() =>
@@ -291,8 +300,8 @@ describe('the host of an init and an access test', () => {
 		]);
 		const dialog = await openAction('Test access');
 
-		const host = within(dialog).getByRole('combobox', { name: /Host/ });
-		expect(host).toHaveValue('a_1');
+		const host = within(dialog).getByRole('combobox', { name: /^Host/ });
+		expect(host).toHaveTextContent('nas-backup');
 		expect(host).toBeEnabled();
 	});
 });

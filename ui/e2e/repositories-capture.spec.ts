@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { pickRecord } from './pickers';
 import { mkdirSync } from 'node:fs';
 
 // Captures the Repositories screen with the maintenance section for a review. It runs only with
@@ -14,7 +15,6 @@ type Labels = {
 	repositories: string;
 	addRepository: string;
 	save: string;
-	cancel: string;
 	edit: string;
 	initialize: string;
 	start: string;
@@ -28,7 +28,6 @@ const EN: Labels = {
 	repositories: 'Repositories',
 	addRepository: 'Add repository',
 	save: 'Save',
-	cancel: 'Cancel',
 	edit: 'Edit',
 	initialize: 'Initialize',
 	start: 'Start',
@@ -42,7 +41,6 @@ const RU: Labels = {
 	repositories: 'Репозитории',
 	addRepository: 'Добавить репозиторий',
 	save: 'Сохранить',
-	cancel: 'Отмена',
 	edit: 'Изменить',
 	initialize: 'Инициализировать',
 	start: 'Запустить',
@@ -73,7 +71,7 @@ async function addRepository(page: Page, labels: Labels, name: string, host: str
 		await page.locator('#repo-endpoint').fill(`https://rest.example.net/${name}`);
 	}
 	await page.locator('#repo-password').fill('repo-password');
-	if (host) await page.locator('#repo-agent').selectOption({ label: host });
+	if (host) await pickRecord(page, page.locator('#repo-agent'), host);
 	await page.locator('form button[type="submit"]').click();
 	await expect(page.getByText(name, { exact: true })).toBeVisible();
 }
@@ -103,7 +101,8 @@ async function capture(page: Page, labels: Labels, suffix: string): Promise<void
 		.evaluate((element) => element.scrollIntoView({ block: 'start' }));
 	await page.waitForTimeout(150);
 	await shot(page, `new-repository-maintenance${suffix}`);
-	await page.getByRole('button', { name: labels.cancel, exact: true }).click();
+	// Without a change the bar has no Cancel button, so the page goes back to the list.
+	await page.goBack();
 
 	await addRepository(page, labels, 'backups-prod', labels.hostName);
 	await addRepository(page, labels, 'scratch-remote', null);
@@ -136,7 +135,8 @@ async function capture(page: Page, labels: Labels, suffix: string): Promise<void
 		.evaluate((element) => element.scrollIntoView({ block: 'end' }));
 	await page.waitForTimeout(150);
 	await shot(page, `repository-maintenance-check${suffix}`);
-	await page.getByRole('button', { name: labels.cancel, exact: true }).click();
+	// Without a change the bar has no Cancel button, so the page goes back to the list.
+	await page.goBack();
 
 	await page.getByRole('button', { name: labels.moreActions('scratch-remote') }).click();
 	await page.getByRole('menuitem', { name: labels.edit }).click();

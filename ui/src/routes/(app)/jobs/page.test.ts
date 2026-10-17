@@ -10,6 +10,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '#lib/api/index.ts';
 import Jobs from './+page.svelte';
 
+const HOST = {
+	status: 'active',
+	os: 'linux',
+	arch: 'amd64',
+	labels: [],
+	online: true,
+	first_connected_at: '2026-01-01T00:00:00Z',
+	last_seen_at: '2026-01-01T00:00:00Z'
+};
+
 const mocks = vi.hoisted(() => ({
 	listJobs: vi.fn(),
 	cancelJob: vi.fn(),
@@ -114,7 +124,7 @@ describe('the Jobs screen', () => {
 		vi.clearAllMocks();
 		session.role = 'operator';
 		mocks.listJobs.mockResolvedValue({ items: [], next_cursor: null, total: 0 });
-		mocks.listAgents.mockResolvedValue([{ id: 'a_1', hostname: 'win-fs01' }]);
+		mocks.listAgents.mockResolvedValue([{ ...HOST, id: 'a_1', hostname: 'win-fs01' }]);
 	});
 
 	it('lists a job with its status, plan, host and repository', async () => {
@@ -216,7 +226,7 @@ describe('the Jobs screen', () => {
 		});
 		render(Jobs);
 
-		const pill = await screen.findByText('Succeeded', { selector: '.status' });
+		const pill = await screen.findByText('With warnings', { selector: '.status' });
 		expect(pill).toHaveClass('status--warning');
 		expect(pill).toHaveAttribute('title', 'Succeeded with warnings');
 		expect(pill).toHaveAttribute('aria-label', 'Succeeded with warnings');
@@ -229,7 +239,7 @@ describe('the Jobs screen', () => {
 		expect(screen.queryByText('Forget selected no snapshots')).not.toBeInTheDocument();
 	});
 
-	it('shows a successful job without a pill and a grey icon', async () => {
+	it('shows a successful job without a pill and a green icon', async () => {
 		mocks.listJobs.mockResolvedValue({
 			items: [job({ status: 'succeeded', finished_at: '2026-10-14T10:02:00Z' })],
 			next_cursor: null,
@@ -239,7 +249,7 @@ describe('the Jobs screen', () => {
 
 		await screen.findByText('nightly-web');
 		expect(container.querySelector('.status')).toBeNull();
-		expect(container.querySelector('.item__lead')?.className).not.toMatch(/tone--/);
+		expect(container.querySelector('.item__lead')).toHaveClass('tone--success');
 	});
 
 	it('opens the job page from the row link', async () => {

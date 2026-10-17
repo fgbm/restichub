@@ -5,7 +5,7 @@
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { ApiError, service } from '#lib/api/index.ts';
-	import type { Job, JobGroup, JobKind, JobListResponse, JobQuery } from '#lib/api/index.ts';
+	import type { Agent, Job, JobGroup, JobKind, JobListResponse, JobQuery } from '#lib/api/index.ts';
 	import { Page } from '#lib/components/layout/index.ts';
 	import { Alert, Button, ConfirmDialog, FilterBar, ListView } from '#lib/components/ui/index.ts';
 	import type { FilterFacet, RowAction } from '#lib/components/ui/index.ts';
@@ -13,6 +13,7 @@
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
 	import { formatCount } from '#lib/format.ts';
+	import { withHosts } from '#lib/host-picker.ts';
 	import { isTimed, isUnfinished, jobDuration, jobMeta, jobTitle } from '#lib/job-item.ts';
 	import { iconOf, isCancelled, jobState, pillOf } from '#lib/vocabulary.ts';
 	import { PAGE_SIZES, lastPageIfPast, pageNumber, pageSizeOf } from '#lib/list-page.ts';
@@ -40,7 +41,7 @@
 	let counts = $state<JobListResponse['counts'] | null>(null);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
-	let hosts = $state<{ id: string; hostname: string }[]>([]);
+	let hosts = $state<Agent[]>([]);
 	let repositories = $state<{ id: string; name: string }[]>([]);
 	let plans = $state<{ id: string; name: string }[]>([]);
 	// The list filters, sorts and pages on the server (FR-UI-01). The host page links here with the
@@ -144,7 +145,11 @@
 		{
 			key: 'agent_id',
 			label: t('jobs.host'),
-			options: hosts.map((host) => ({ value: host.id, label: host.hostname }))
+			search: true,
+			options: withHosts(
+				hosts.map((host) => ({ value: host.id })),
+				hosts
+			)
 		},
 		{
 			key: 'kind',

@@ -979,7 +979,7 @@ mod tests {
             panic!("the old hash must no longer match");
         };
         assert!(
-            format!("{stale:#}").contains("restart the service"),
+            format!("{stale:#}").contains("an administrator runs `restichub-agent restic update`"),
             "{stale:#}"
         );
         assert_eq!(jobs.expected_sha256().expect("hash"), second.sha256);

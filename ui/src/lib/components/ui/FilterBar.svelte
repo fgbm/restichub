@@ -18,9 +18,18 @@
 	import DropdownMenu from './DropdownMenu.svelte';
 	import Icon from './Icon.svelte';
 	import Popover from './Popover.svelte';
+	import RecordLine from './RecordLine.svelte';
+	import { matchesRecord } from './record';
 	import TextField from './TextField.svelte';
 	import Tooltip from './Tooltip.svelte';
-	import type { FilterFacet, FilterSearch, FilterSort, FilterTabs, MenuItem } from './types';
+	import type {
+		FilterFacet,
+		FilterOption,
+		FilterSearch,
+		FilterSort,
+		FilterTabs,
+		MenuItem
+	} from './types';
 
 	let {
 		label,
@@ -111,11 +120,14 @@
 	// A long option list gets a search field inside the popover.
 	const FACET_SEARCH_FROM = 7;
 
+	function searchable(facet: FilterFacet): boolean {
+		return facet.search === true || optionsOf(facet).length >= FACET_SEARCH_FROM;
+	}
+
 	function visibleOptions(facet: FilterFacet) {
 		const all = optionsOf(facet);
-		const query = facetQuery.trim().toLowerCase();
-		if (all.length < FACET_SEARCH_FROM || query === '') return all;
-		return all.filter((option) => option.label.toLowerCase().includes(query));
+		if (!searchable(facet)) return all;
+		return all.filter((option) => matchesRecord(option.label, option.description, facetQuery));
 	}
 
 	const periodValue = $derived(periodOf(value));
@@ -134,7 +146,7 @@
 	}
 
 	// A value from the address that the options do not hold stays in the facet, so a person can clear it.
-	function optionsOf(facet: FilterFacet): { value: string; label: string; count?: number }[] {
+	function optionsOf(facet: FilterFacet): (FilterOption & { label: string })[] {
 		const options = facet.options ?? [];
 		const known = new Set(options.map((option) => option.value));
 		return [
@@ -269,7 +281,7 @@
 			oninput={(event) => onchange({ [facet.key]: event.currentTarget.value })}
 		/>
 	{:else}
-		{#if optionsOf(facet).length >= FACET_SEARCH_FROM}
+		{#if searchable(facet)}
 			<div class="facet__search">
 				<TextField
 					type="search"
@@ -281,16 +293,25 @@
 			</div>
 		{/if}
 		<ul class="options">
-			{#each visibleOptions(facet) as option (option.value)}
+			{#each visibleOptions(facet) as option, index (option.value)}
+				{@const detailId = option.description?.length
+					? `filter-${facet.key}-o${index}-d`
+					: undefined}
 				<li class="option">
 					{#if facet.multiple === false}
 						<button
 							type="button"
 							class="choice"
 							aria-pressed={chosen.includes(option.value)}
+							aria-describedby={detailId}
 							onclick={() => pick(facet, option.value)}
 						>
-							<span>{option.label}</span>
+							<span class="choice__text">
+								<span>{option.label}</span>
+								{#if option.description?.length}
+									<RecordLine parts={option.description} id={detailId} />
+								{/if}
+							</span>
 							<span class="choice__end">
 								{#if option.count !== undefined}
 									<span class="option__count">{option.count}</span>
@@ -299,11 +320,19 @@
 							</span>
 						</button>
 					{:else}
-						<Checkbox
-							label={option.label}
-							checked={chosen.includes(option.value)}
-							onchange={() => pick(facet, option.value)}
-						/>
+						<span class="option__main">
+							<Checkbox
+								label={option.label}
+								checked={chosen.includes(option.value)}
+								aria-describedby={detailId}
+								onchange={() => pick(facet, option.value)}
+							/>
+							{#if option.description?.length}
+								<span class="option__detail">
+									<RecordLine parts={option.description} id={detailId} />
+								</span>
+							{/if}
+						</span>
 						{#if option.count !== undefined}
 							<span class="option__count">{option.count}</span>
 						{/if}
@@ -639,6 +668,23 @@
 		justify-content: space-between;
 		gap: var(--rh-space-3);
 		padding: var(--rh-space-1) 0;
+	}
+
+	.option__main {
+		display: flex;
+		flex-direction: column;
+		min-width: 0;
+	}
+
+	.option__detail {
+		padding-left: calc(16px + var(--rh-space-2));
+	}
+
+	.choice__text {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		min-width: 0;
 	}
 
 	.option__count {

@@ -234,3 +234,26 @@ export function landingPath(target: string, snapshotPath: string, windows: boole
 	const rest = snapshotPath.replace(/^\/+/, '');
 	return rest === '' ? base : `${base}${separator}${windows ? rest.replaceAll('/', '\\') : rest}`;
 }
+
+const DRIVE_PATH = /^([a-zA-Z]):(?:[\\/](.*))?$/;
+const TREE_DRIVE_PATH = /^\/([a-zA-Z])(?:\/(.*))?$/;
+
+/** True when the snapshot holds Windows paths: restic stores them with a drive letter. */
+export function isWindowsSnapshot(snapshotPaths: readonly string[]): boolean {
+	return snapshotPaths.some((path) => DRIVE_PATH.test(path));
+}
+
+/** A path of the file tree in the format of the host that made the snapshot: `/C/Users` is `C:\Users`. */
+export function hostPath(treePath: string, windows: boolean): string {
+	const match = windows ? TREE_DRIVE_PATH.exec(treePath) : null;
+	if (!match) return treePath;
+	return `${match[1].toUpperCase()}:\\${(match[2] ?? '').replaceAll('/', '\\')}`;
+}
+
+/** A snapshot path in the format of the file tree, the way restic restores it: `C:\Users` is `/C/Users`. */
+export function treePath(path: string): string {
+	const match = DRIVE_PATH.exec(path);
+	if (!match) return path;
+	const rest = (match[2] ?? '').replaceAll('\\', '/').replace(/\/+$/, '');
+	return rest === '' ? `/${match[1]}` : `/${match[1]}/${rest}`;
+}

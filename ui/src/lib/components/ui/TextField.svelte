@@ -2,6 +2,8 @@
 	import type { HTMLInputAttributes } from 'svelte/elements';
 	import { t } from '#lib/i18n/index.ts';
 	import Field from './Field.svelte';
+	import Icon from './Icon.svelte';
+	import type { IconName } from './icons';
 
 	let {
 		value = $bindable(''),
@@ -15,6 +17,7 @@
 		disabled = false,
 		readonly = false,
 		placeholder,
+		action,
 		class: className,
 		...rest
 	}: {
@@ -26,6 +29,8 @@
 		type?: HTMLInputAttributes['type'];
 		mono?: boolean;
 		required?: boolean;
+		/** An icon button at the end of the field, for example a reset to the default value. */
+		action?: { icon: IconName; label: string; onclick: () => void };
 	} & HTMLInputAttributes = $props();
 
 	const uid = $props.id();
@@ -44,7 +49,7 @@
 </script>
 
 <Field {label} {help} {error} for={inputId} {required} {helpId} {errorId}>
-	<div class="rh-input-wrap">
+	<div class={action && !locked ? 'rh-input-affix' : 'rh-input-wrap'}>
 		<input
 			id={inputId}
 			{type}
@@ -61,6 +66,17 @@
 		/>
 		{#if showEmpty}
 			<span class="rh-input-wrap__empty" id={emptyId}>{t('common.notSet')}</span>
+		{/if}
+		{#if action && !locked}
+			<button
+				type="button"
+				class="rh-input-affix__button"
+				title={action.label}
+				aria-label={action.label}
+				onclick={action.onclick}
+			>
+				<Icon name={action.icon} />
+			</button>
 		{/if}
 	</div>
 </Field>

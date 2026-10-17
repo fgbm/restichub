@@ -10,12 +10,12 @@ A plan assigns one profile to one agent with a schedule. The control plane keeps
 | Field | Meaning |
 |---|---|
 | Name | The name of the plan. It is unique in the tenant. |
-| Profile | The backup definition that the control plane compiles for each job. |
+| Profile | The backup definition that the control plane compiles for each job. The field shows the repository of each profile and the backend kind. For a local repository, it also shows the repository host. The search finds a profile by its name or by its repository. |
 | Host | The agent that runs the plan. |
 | Cron expression | Five fields: minute, hour, day of month, month, day of week. |
 | Time zone | An IANA name, for example `Europe/Berlin`. |
 | Missed runs | The rule for a fire time that the control plane missed. |
-| Enabled | A disabled plan creates no job. |
+| Run on schedule | The switch in the header of the section **Schedule**. When it is off, the scheduler creates no job for the plan, and the plan shows the pill **Disabled** next to its name. **Run now** still starts a job, and the alerts about a missed backup and the recovery point stay silent. |
 
 The profile and the agent belong to the same tenant. The control plane compiles the stored profile for the operating system of the agent before it writes the plan. A profile without a path for that operating system is refused.
 

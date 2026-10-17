@@ -23,11 +23,13 @@ export { default as Panel } from './Panel.svelte';
 export { default as PasswordField } from './PasswordField.svelte';
 export { default as NewPasswordField } from './NewPasswordField.svelte';
 export { default as Popover } from './Popover.svelte';
+export { default as RecordPicker } from './RecordPicker.svelte';
 export { default as Select } from './Select.svelte';
 export { default as SidePanel } from './SidePanel.svelte';
 export { default as Skeleton } from './Skeleton.svelte';
 export { default as StatusPill } from './StatusPill.svelte';
 export { default as Switch } from './Switch.svelte';
+export { default as SwitchField } from './SwitchField.svelte';
 export { default as Tabs } from './Tabs.svelte';
 export { default as TagInput } from './TagInput.svelte';
 export { default as TextField } from './TextField.svelte';
@@ -51,6 +53,9 @@ export type {
 	ListPill,
 	ListTone,
 	MenuItem,
+	RecordDot,
+	RecordOption,
+	RecordPart,
 	RowAction,
 	SelectOption,
 	StatusTone,

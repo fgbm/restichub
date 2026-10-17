@@ -141,7 +141,7 @@ fn mismatch(actual: &[u8], expected_hex: &str) -> Option<String> {
 /// Returns an error when the digest differs from `expected_hex`.
 pub fn verify_digest(actual: &[u8], expected_hex: &str) -> Result<()> {
     if let Some(mismatch) = mismatch(actual, expected_hex) {
-        bail!("{mismatch}; run `restichub-agent restic update` again or restart the service");
+        bail!("{mismatch}; an administrator runs `restichub-agent restic update`");
     }
     Ok(())
 }

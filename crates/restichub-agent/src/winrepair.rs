@@ -19,7 +19,7 @@ use crate::winsec::{Entry, Exposure, Rights};
 
 mod program;
 
-pub(crate) use program::rebuild_open_program_tree;
+pub(crate) use program::{check_program_tree, rebuild_open_program_tree};
 
 /// The directory that an older build used as the default restore root. The repair never reads
 /// inside it.
@@ -52,6 +52,19 @@ pub(crate) enum Action {
     KeptMoved {
         path: PathBuf,
         cause: String,
+    },
+    /// A program tree that another process keeps open, so it cannot move.
+    RepairingInPlace {
+        dir: PathBuf,
+        cause: String,
+        holders: String,
+    },
+    RemovedAgent(PathBuf),
+    RemovedUnused(PathBuf),
+    /// A program that runs cannot be removed, but it can be renamed.
+    SetAside {
+        from: PathBuf,
+        to: PathBuf,
     },
 }
 
@@ -114,6 +127,31 @@ impl std::fmt::Display for Action {
                 f,
                 "cannot remove {} ({cause}); the agent does not use it; an administrator removes it after a restart of the computer",
                 path.display()
+            ),
+            Self::RepairingInPlace {
+                dir,
+                cause,
+                holders,
+            } => write!(
+                f,
+                "cannot move {} ({cause}); open in: {holders}; so the agent repairs it in place: it gives each level and file the access of SYSTEM and Administrators only, and replaces the agent and restic",
+                dir.display()
+            ),
+            Self::RemovedAgent(path) => write!(
+                f,
+                "removed {}: another account could change it, so the agent copies the running agent there again",
+                path.display()
+            ),
+            Self::RemovedUnused(path) => write!(
+                f,
+                "removed {}: another account could change it, and the agent does not use it",
+                path.display()
+            ),
+            Self::SetAside { from, to } => write!(
+                f,
+                "moved {} to {}: a process runs it, so it cannot be removed now; Windows removes it at the next restart",
+                from.display(),
+                to.display()
             ),
         }
     }

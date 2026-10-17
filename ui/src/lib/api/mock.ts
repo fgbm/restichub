@@ -182,6 +182,16 @@ const SAMPLE_PLANS_KEY = 'restichub.mock.plans';
 // see a profile with scripts, its plan and a finished job with a log for each step (FR-HK-11).
 const SAMPLE_SCRIPTS_KEY = 'restichub.mock.scripts';
 
+// A review capture sets this storage key, besides the profile and the repository keys, to see a
+// profile on each backend kind: S3, REST and a local path.
+const SAMPLE_BACKENDS_KEY = 'restichub.mock.backends';
+
+function backendsSample(): boolean {
+	return (
+		typeof localStorage !== 'undefined' && localStorage.getItem(SAMPLE_BACKENDS_KEY) === 'sample'
+	);
+}
+
 function scriptsSample(): boolean {
 	return (
 		typeof localStorage !== 'undefined' && localStorage.getItem(SAMPLE_SCRIPTS_KEY) === 'sample'
@@ -223,6 +233,7 @@ function makeAgents(): Agent[] {
 			duplicateOf?: { id: string; hostname: string; isOlder: boolean; lastSeenMinutes: number };
 			createdMinutesAgo?: number;
 			oldCertificateMinutesAgo?: number;
+			labels?: string[];
 		} = {}
 	): Agent => ({
 		id,
@@ -231,7 +242,7 @@ function makeAgents(): Agent[] {
 		arch,
 		agent_version: version,
 		restic_version: '0.19.0',
-		labels: [],
+		labels: options.labels ?? [],
 		status: options.status ?? 'active',
 		restore_roots:
 			os === 'windows'
@@ -282,11 +293,13 @@ function makeAgents(): Agent[] {
 		agent('1', 'win-fs01', 'windows', 'amd64', '0.4.2', 14, {
 			expiresInMinutes: 24 * 27 * 60,
 			rotatedMinutesAgo: 3 * 24 * 60,
-			duplicateOf: { id: '7', hostname: 'win-fs01-new', isOlder: false, lastSeenMinutes: 5 }
+			duplicateOf: { id: '7', hostname: 'win-fs01-new', isOlder: false, lastSeenMinutes: 5 },
+			labels: ['prod', 'files']
 		}),
 		agent('2', 'srv-db-01', 'linux', 'amd64', '0.4.2', 26, {
 			expiresInMinutes: 2 * 24 * 60,
-			rotatedMinutesAgo: null
+			rotatedMinutesAgo: null,
+			labels: ['prod', 'db']
 		}),
 		agent('3', 'win-dc01', 'windows', 'amd64', '0.4.1', 60, {
 			versionStatus: 'update_available',
@@ -296,7 +309,8 @@ function makeAgents(): Agent[] {
 		}),
 		agent('4', 'nas-backup', 'linux', 'arm64', '0.4.2', 120, {
 			expiresInMinutes: 22 * 24 * 60,
-			rotatedMinutesAgo: 8 * 24 * 60
+			rotatedMinutesAgo: 8 * 24 * 60,
+			labels: ['storage']
 		}),
 		agent('5', 'mac-build-01', 'darwin', 'arm64', '0.1.0', 60 * 48, {
 			versionStatus: 'unsupported',
@@ -367,7 +381,22 @@ function makeRepositories(): Repository[] {
 			lock_state: 'stale',
 			last_check: { finished_at: iso(60 * 24 * 6), result: 'passed' },
 			snapshot_count: 62
-		})
+		}),
+		...(backendsSample()
+			? [
+					repository(
+						'r_3',
+						'rest-main',
+						{ kind: 'rest', endpoint: 'https://rest.example.net' },
+						'2',
+						{
+							lock_state: 'free',
+							last_check: { finished_at: iso(60 * 24), result: 'passed' },
+							snapshot_count: 31
+						}
+					)
+				]
+			: [])
 	];
 }
 
@@ -462,7 +491,22 @@ function makeProfiles(): Profile[] {
 			updated_at: iso(60 * 6),
 			created_by: 'u_01'
 		}
-	].filter((item) => item.id !== 'p_3' || scriptsSample());
+	]
+		.filter((item) => item.id !== 'p_3' || scriptsSample())
+		.flatMap((item) =>
+			backendsSample() && item.id === 'p_2'
+				? [
+						{ ...item, repository_id: 'r_3' },
+						{
+							...item,
+							id: 'p_4',
+							name: 'nas-files',
+							repository_id: 'r_2',
+							paths: { all: ['/srv/files'], windows: [], linux: [], macos: [] }
+						}
+					]
+				: [item]
+		);
 }
 
 /// The sample scripts of the profile `db-nightly`: a check and a dump before the backup, and a

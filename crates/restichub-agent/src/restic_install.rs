@@ -40,13 +40,27 @@ impl Installer<'static> {
 }
 
 impl Installer<'_> {
-    /// Installs restic when no record exists, and otherwise only checks the installed one.
+    /// Installs restic when no record exists or the recorded binary is missing, and otherwise only
+    /// checks the installed one.
     ///
     /// # Errors
     ///
     /// Returns an error when the download or a verification step fails, or when an installed
     /// binary differs from its record.
     pub async fn ensure(&self, supply: &Supply) -> Result<Record> {
+        let binary = self.layout.binary_path();
+        if self.layout.has_record() && is_missing(&binary)? {
+            // A missing binary holds nothing to protect, and its record would refuse an older
+            // release of an offline archive as a downgrade.
+            let record = self.layout.record_path();
+            std::fs::remove_file(&record)
+                .with_context(|| format!("cannot remove {}", record.display()))?;
+            println!(
+                "restic is missing at {}, so its record {} is removed and restic is installed again",
+                binary.display(),
+                record.display()
+            );
+        }
         if self.layout.has_record() {
             let record = self.layout.verify_installed().context(
                 "the installed restic is not intact; run `restichub-agent restic update`",
@@ -180,6 +194,14 @@ impl Installer<'_> {
             .into());
         }
         self.layout.install(&release, self.probe)
+    }
+}
+
+fn is_missing(path: &Path) -> Result<bool> {
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => Ok(false),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(true),
+        Err(error) => Err(error).with_context(|| format!("cannot read {}", path.display())),
     }
 }
 
@@ -375,6 +397,24 @@ mod tests {
         std::fs::write(installer.layout.binary_path(), b"evil").expect("tamper");
         let error = installer.ensure(&supply).await.expect_err("changed binary");
         assert!(format!("{error:#}").contains("restic update"), "{error:#}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn fr_ag_11_ensure_reinstalls_a_missing_binary_with_a_record() {
+        let dir = base("ensure-missing");
+        let installer = installer(&dir, key("test-key"));
+        let supply = offline(&dir, "restic_0.19.1_linux_amd64.bz2");
+        std::fs::create_dir_all(dir.join("config")).expect("config");
+        // A newer record would refuse the archive as a downgrade.
+        std::fs::write(
+            installer.layout.record_path(),
+            format!(r#"{{"version":"0.20.0","sha256":"{}"}}"#, "a".repeat(64)),
+        )
+        .expect("record");
+        let record = installer.ensure(&supply).await.expect("reinstall");
+        assert_eq!(record.version, "0.19.1");
+        installer.layout.verify_installed().expect("intact");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

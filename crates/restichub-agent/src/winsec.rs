@@ -55,9 +55,11 @@ use windows_sys::Win32::System::SystemServices::{
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
 mod entry;
+mod holders;
 mod image;
 
 pub(crate) use entry::{Entry, Exposure, Rights};
+pub(crate) use holders::holders;
 pub(crate) use image::open_running_image;
 
 /// A protected DACL: full control for SYSTEM and Administrators only, inherited by the children,
@@ -675,7 +677,7 @@ fn wide_string(value: &str) -> Vec<u16> {
         .collect()
 }
 
-fn wide_path(path: &Path) -> Vec<u16> {
+pub(crate) fn wide_path(path: &Path) -> Vec<u16> {
     path.as_os_str()
         .encode_wide()
         .chain(std::iter::once(0))

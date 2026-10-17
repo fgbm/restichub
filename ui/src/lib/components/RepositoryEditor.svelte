@@ -4,6 +4,7 @@
 	import { resolve } from '$app/paths';
 	import { ApiError, fieldError, service } from '#lib/api/index.ts';
 	import type {
+		Agent,
 		ApiProblem,
 		BackendSettings,
 		CreateRepositoryRequest,
@@ -14,6 +15,7 @@
 		RepositoryBackendKind,
 		UpdateRepositoryRequest
 	} from '#lib/api/index.ts';
+	import HostPicker from './HostPicker.svelte';
 	import ProfileSection from './ProfileSection.svelte';
 	import { RecordPage, SummaryPanel } from './layout/index.ts';
 	import { Alert, Button, PasswordField, Select, StatusPill, TextField } from './ui/index.ts';
@@ -49,7 +51,7 @@
 	let loading = $state(true);
 	let loadError = $state<string | null>(null);
 	let existing = $state<Repository | null>(null);
-	let agents = $state<{ id: string; hostname: string; status: string }[]>([]);
+	let agents = $state<Agent[]>([]);
 	let saving = $state(false);
 	let saved = false;
 	let formError = $state<string | null>(null);
@@ -97,15 +99,12 @@
 		{ value: 'local', label: t('repositories.backendKind.local') }
 	]);
 
-	const agentOptions = $derived<SelectOption[]>([
-		...(isLocal ? [] : [{ value: '', label: t('repositories.maintenanceHostNone') }]),
-		...agents
-			.filter(
-				(agent) =>
-					agent.status === 'active' || (hostLocked && agent.id === existing?.maintenance_agent_id)
-			)
-			.map((agent) => ({ value: agent.id, label: agent.hostname }))
-	]);
+	const hostChoices = $derived(
+		agents.filter(
+			(agent) =>
+				agent.status === 'active' || (hostLocked && agent.id === existing?.maintenance_agent_id)
+		)
+	);
 
 	const stateKey = $derived(
 		JSON.stringify([
@@ -462,6 +461,13 @@
 	{loading}
 	error={loadError}
 	onsubmit={() => void save()}
+	save={{
+		dirty,
+		saving,
+		create: !repositoryId,
+		readonly: canWrite ? null : t('rp.save.readonly'),
+		oncancel: () => goto(resolve('/(app)/repositories'))
+	}}
 >
 	{#snippet actions()}
 		<Button size="sm" onclick={() => setAll(true)} disabled={allOpen}>{t('pe.expandAll')}</Button>
@@ -474,21 +480,6 @@
 	{/snippet}
 	{#snippet side()}
 		<SummaryPanel title={t('rp.side.result')} items={resultItems} />
-	{/snippet}
-	{#snippet footer()}
-		<div class="savebar">
-			<span class="muted savebar__text">
-				{#if !canWrite}
-					{t('rp.save.readonly')}
-				{:else if dirty}
-					{t('rp.save.dirty')}
-				{/if}
-			</span>
-			<Button onclick={() => goto(resolve('/(app)/repositories'))}>{t('common.cancel')}</Button>
-			{#if canWrite}
-				<Button type="submit" variant="primary" loading={saving}>{t('common.save')}</Button>
-			{/if}
-		</div>
 	{/snippet}
 
 	<ProfileSection
@@ -761,11 +752,12 @@
 		required={isLocal}
 		bind:open={open.host}
 	>
-		<Select
+		<HostPicker
 			id="repo-agent"
 			label={t(titles.host)}
 			help={t(hostHelp)}
-			options={agentOptions}
+			hosts={hostChoices}
+			allLabel={isLocal ? undefined : t('repositories.maintenanceHostNone')}
 			placeholder={isLocal ? t('repositories.hostPlaceholder') : undefined}
 			error={fieldError(formProblem, 'maintenance_agent_id')}
 			bind:value={maintenanceAgentId}
@@ -835,20 +827,6 @@
 		display: flex;
 		align-items: center;
 		gap: var(--rh-space-2);
-	}
-
-	.savebar {
-		display: flex;
-		align-items: center;
-		gap: var(--rh-space-3);
-		padding: var(--rh-space-3) var(--rh-space-4);
-		border: var(--rh-border-width) solid var(--rh-color-border);
-		border-radius: var(--rh-radius-lg);
-		background-color: var(--rh-color-surface);
-	}
-
-	.savebar__text {
-		flex: 1;
 	}
 
 	@media (max-width: 720px) {

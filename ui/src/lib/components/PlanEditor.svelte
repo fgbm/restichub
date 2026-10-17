@@ -13,13 +13,16 @@
 		Repository,
 		UpdatePlanRequest
 	} from '#lib/api/index.ts';
+	import HostPicker from './HostPicker.svelte';
+	import ProfilePicker from './ProfilePicker.svelte';
 	import ProfileSection from './ProfileSection.svelte';
 	import { RecordPage, SummaryPanel } from './layout/index.ts';
-	import { Alert, Button, Checkbox, ConfirmDialog, Select, TextField } from './ui/index.ts';
+	import { Alert, Button, ConfirmDialog, Select, StatusPill, TextField } from './ui/index.ts';
 	import type { KeyValueItem, SelectOption } from './ui/index.ts';
 	import { formatLocalTime, formatTimeInZone } from '#lib/format.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
+	import type { HostRef } from '#lib/host-picker.ts';
 	import type { SummaryState } from '#lib/profile-form.ts';
 	import {
 		browserTimeZone,
@@ -33,7 +36,7 @@
 	let { planId = null }: { planId?: string | null } = $props();
 
 	type SectionKey = 'basics' | 'source' | 'schedule' | 'objective';
-	const SECTIONS: SectionKey[] = ['basics', 'source', 'schedule', 'objective'];
+	const SECTIONS: SectionKey[] = ['source', 'basics', 'schedule', 'objective'];
 
 	const POLICIES: MissedRunPolicy[] = ['run_all', 'latest_only', 'skip'];
 	// The number of fire times that the preview requests (FR-SC-01).
@@ -79,9 +82,6 @@
 	const canWrite = $derived(['admin', 'operator'].includes(getSession()?.role ?? ''));
 	const allOpen = $derived(SECTIONS.every((key) => open[key]));
 
-	const profileOptions = $derived<SelectOption[]>(
-		profiles.map((profile) => ({ value: profile.id, label: profile.name }))
-	);
 	function repositoryOf(id: string): Repository | undefined {
 		const repositoryId = profiles.find((profile) => profile.id === id)?.repository_id;
 		return repositories.find((item) => item.id === repositoryId);
@@ -94,15 +94,15 @@
 	const localHost = $derived(localHostOf(repository));
 	// The stored host of a plan stays an option, so the field shows the real value and its error
 	// instead of a silent move to another host.
-	const agentOptions = $derived<SelectOption[]>(
-		agents
-			.filter(
-				(agent) =>
-					(agent.status === 'active' && (localHost === null || agent.id === localHost)) ||
-					agent.id === existing?.agent_id
-			)
-			.map((agent) => ({ value: agent.id, label: agent.hostname }))
+	const hostChoices = $derived(
+		agents.filter((agent) => agent.status === 'active' || agent.id === existing?.agent_id)
 	);
+	function hostReason(agent: HostRef): string | null {
+		if (localHost === null || agent.id === localHost) return null;
+		return localHost === ''
+			? t('pl.source.localNoHost', { name: repositoryName })
+			: t('hostPicker.localRepository', { repository: repositoryName, host: localHostName });
+	}
 	const hostMismatch = $derived(
 		localHost !== null && agentId !== localHost ? t('reason.not_repository_host') : undefined
 	);
@@ -133,9 +133,7 @@
 	}
 
 	const summaries = $derived<Record<SectionKey, { text: string; state: SummaryState }>>({
-		basics: name
-			? { text: `${name} · ${t(enabled ? 'plans.enabled' : 'plans.disabled')}`, state: 'on' }
-			: { text: t('pl.summary.noName'), state: 'warn' },
+		basics: name ? { text: name, state: 'on' } : { text: t('pl.summary.noName'), state: 'warn' },
 		source:
 			profileName && hostName
 				? { text: `${profileName} · ${hostName}`, state: 'on' }
@@ -180,7 +178,11 @@
 		{
 			key: 'next',
 			label: t('plans.nextRun'),
-			value: runs && runs.length > 0 ? formatTimeInZone(runs[0], timeZone) : t('common.none')
+			value: !enabled
+				? t('plans.nextRunOff')
+				: runs && runs.length > 0
+					? formatTimeInZone(runs[0], timeZone)
+					: t('common.none')
 		}
 	]);
 
@@ -207,7 +209,8 @@
 				service.listPlans(),
 				service.listProfiles(),
 				service.listAgents(),
-				// The repository name is only a hint in the summary, so its failure does not block the form.
+				// The repository is only a hint in the profile field and the summary, so its failure does not
+				// block the form.
 				service.listRepositories().catch(() => [])
 			]);
 			profiles = profileList;
@@ -229,8 +232,8 @@
 				enabled = found.enabled;
 				rpoHours = found.rpo_seconds ? String(found.rpo_seconds / 3600) : '';
 			} else {
-				profileId = profileOptions[0]?.value ?? '';
-				agentId = agentOptions[0]?.value ?? '';
+				profileId = profiles[0]?.id ?? '';
+				agentId = hostChoices.find((agent) => hostReason(agent) === null)?.id ?? '';
 				timeZone = browserTimeZone();
 			}
 			baseline = stateKey;
@@ -358,7 +361,17 @@
 	{loading}
 	error={loadError}
 	onsubmit={() => void save()}
+	save={{
+		dirty,
+		saving,
+		create: !planId,
+		readonly: canWrite ? null : t('pl.save.readonly'),
+		oncancel: () => goto(resolve('/(app)/plans'))
+	}}
 >
+	{#snippet status()}
+		{#if !loading && !enabled}<StatusPill>{t('plans.disabled')}</StatusPill>{/if}
+	{/snippet}
 	{#snippet actions()}
 		<Button size="sm" onclick={() => setAll(true)} disabled={allOpen}>{t('pe.expandAll')}</Button>
 		<Button size="sm" onclick={() => setAll(false)}>{t('pe.collapseAll')}</Button>
@@ -382,21 +395,43 @@
 	{#snippet side()}
 		<SummaryPanel title={t('rp.side.result')} items={resultItems} />
 	{/snippet}
-	{#snippet footer()}
-		<div class="savebar">
-			<span class="muted savebar__text">
-				{#if !canWrite}
-					{t('pl.save.readonly')}
-				{:else if dirty}
-					{t('rp.save.dirty')}
-				{/if}
-			</span>
-			<Button onclick={() => goto(resolve('/(app)/plans'))}>{t('common.cancel')}</Button>
-			{#if canWrite}
-				<Button type="submit" variant="primary" loading={saving}>{t('common.save')}</Button>
-			{/if}
+
+	<ProfileSection
+		id="source"
+		title={t(titles.source)}
+		summary={summaries.source.text}
+		state={summaries.source.state}
+		required
+		bind:open={open.source}
+	>
+		<div class="grid2">
+			<ProfilePicker
+				id="plan-profile"
+				{profiles}
+				{repositories}
+				{agents}
+				error={fieldError(formProblem, 'profile_id')}
+				bind:value={profileId}
+				onchange={selectProfile}
+				required
+			/>
+			<HostPicker
+				id="plan-agent"
+				hosts={hostChoices}
+				reason={hostReason}
+				error={fieldError(formProblem, 'agent_id') ?? hostMismatch}
+				bind:value={agentId}
+				required
+			/>
 		</div>
-	{/snippet}
+		{#if repositoryName && localHost === ''}
+			<p class="muted">{t('pl.source.localNoHost', { name: repositoryName })}</p>
+		{:else if repositoryName && localHost !== null}
+			<p class="muted">
+				{t('pl.source.localHost', { name: repositoryName, host: localHostName })}
+			</p>
+		{/if}
+	</ProfileSection>
 
 	<ProfileSection
 		id="basics"
@@ -413,45 +448,6 @@
 			bind:value={name}
 			required
 		/>
-		<Checkbox label={t('plans.enabled')} bind:checked={enabled} />
-	</ProfileSection>
-
-	<ProfileSection
-		id="source"
-		title={t(titles.source)}
-		summary={summaries.source.text}
-		state={summaries.source.state}
-		required
-		bind:open={open.source}
-	>
-		<div class="grid2">
-			<Select
-				id="plan-profile"
-				label={t('plans.profile')}
-				options={profileOptions}
-				error={fieldError(formProblem, 'profile_id')}
-				bind:value={profileId}
-				onchange={(event) => selectProfile(event.currentTarget.value)}
-				required
-			/>
-			<Select
-				id="plan-agent"
-				label={t('plans.host')}
-				options={agentOptions}
-				error={fieldError(formProblem, 'agent_id') ?? hostMismatch}
-				bind:value={agentId}
-				required
-			/>
-		</div>
-		{#if repositoryName && localHost === ''}
-			<p class="muted">{t('pl.source.localNoHost', { name: repositoryName })}</p>
-		{:else if repositoryName && localHost !== null}
-			<p class="muted">
-				{t('pl.source.localHost', { name: repositoryName, host: localHostName })}
-			</p>
-		{:else if repositoryName}
-			<p class="muted">{t('pl.source.repository', { name: repositoryName })}</p>
-		{/if}
 	</ProfileSection>
 
 	<ProfileSection
@@ -460,6 +456,10 @@
 		summary={summaries.schedule.text}
 		state={summaries.schedule.state}
 		required
+		switchable
+		switchLabel={t('plans.runOnSchedule')}
+		note={enabled ? undefined : t('plans.offNote')}
+		bind:enabled
 		bind:open={open.schedule}
 	>
 		<TextField
@@ -588,20 +588,6 @@
 	.runs li {
 		width: fit-content;
 		cursor: help;
-	}
-
-	.savebar {
-		display: flex;
-		align-items: center;
-		gap: var(--rh-space-3);
-		padding: var(--rh-space-3) var(--rh-space-4);
-		border: var(--rh-border-width) solid var(--rh-color-border);
-		border-radius: var(--rh-radius-lg);
-		background-color: var(--rh-color-surface);
-	}
-
-	.savebar__text {
-		flex: 1;
 	}
 
 	@media (max-width: 720px) {

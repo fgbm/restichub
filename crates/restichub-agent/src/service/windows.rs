@@ -131,19 +131,14 @@ pub fn install(restic: &Path) -> Result<()> {
         ServiceManagerAccess::CONNECT | ServiceManagerAccess::CREATE_SERVICE,
     )
     .context("cannot open the service manager; run as an administrator")?;
-    let info = ServiceInfo {
-        name: OsString::from(SERVICE_NAME),
-        display_name: OsString::from("ResticHub Agent"),
-        service_type: ServiceType::OWN_PROCESS,
-        start_type: ServiceStartType::AutoStart,
-        error_control: ServiceErrorControl::Normal,
-        executable_path: exe,
-        launch_arguments: vec![OsString::from("run")],
-        dependencies: vec![],
-        // A missing account runs the service as LocalSystem (FR-AG-01).
-        account_name: None,
-        account_password: None,
+    // Until a clean run after a restart, a process that kept the program directory open during a
+    // repair in place can still add a library there, so the boot must not start the service (T20).
+    let start_type = if crate::program_repair::manual_start()? {
+        ServiceStartType::OnDemand
+    } else {
+        ServiceStartType::AutoStart
     };
+    let info = service_info(start_type);
     // STOP is needed because a reinstall restarts a running service.
     let access = ServiceAccess::QUERY_STATUS
         | ServiceAccess::CHANGE_CONFIG
@@ -176,6 +171,43 @@ pub fn install(restic: &Path) -> Result<()> {
     Ok(())
 }
 
+fn service_info(start_type: ServiceStartType) -> ServiceInfo {
+    ServiceInfo {
+        name: OsString::from(SERVICE_NAME),
+        display_name: OsString::from("ResticHub Agent"),
+        service_type: ServiceType::OWN_PROCESS,
+        start_type,
+        error_control: ServiceErrorControl::Normal,
+        executable_path: crate::paths::agent_exe(),
+        launch_arguments: vec![OsString::from("run")],
+        dependencies: vec![],
+        // A missing account runs the service as LocalSystem (FR-AG-01).
+        account_name: None,
+        account_password: None,
+    }
+}
+
+/// Lets an installed service start only by hand; an absent service is not an error.
+///
+/// # Errors
+///
+/// Returns an error when the service exists and its configuration cannot be changed.
+pub fn set_manual_start() -> Result<()> {
+    let manager = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)
+        .context("cannot open the service manager; run as an administrator")?;
+    match manager.open_service(SERVICE_NAME, ServiceAccess::CHANGE_CONFIG) {
+        Ok(service) => service
+            .change_config(&service_info(ServiceStartType::OnDemand))
+            .context("cannot set the manual start of the service"),
+        Err(windows_service::Error::Winapi(error))
+            if error.raw_os_error() == Some(ERROR_SERVICE_DOES_NOT_EXIST) =>
+        {
+            Ok(())
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
 /// The service restarts after each failure. The service control manager repeats the last action for
 /// each later failure, so the restarts never end. The count resets after a day without a failure.
 fn failure_actions() -> ServiceFailureActions {
@@ -191,21 +223,91 @@ fn failure_actions() -> ServiceFailureActions {
     }
 }
 
-fn stop_and_wait(service: &windows_service::service::Service) -> Result<()> {
-    if service.query_status()?.current_state == ServiceState::Stopped {
-        return Ok(());
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StopStep {
+    Done,
+    Wait,
+    Stop,
+}
+
+/// A service that starts or stops already accepts no stop control, so the command waits for it.
+fn stop_step(state: ServiceState) -> StopStep {
+    match state {
+        ServiceState::Stopped => StopStep::Done,
+        ServiceState::StartPending | ServiceState::StopPending => StopStep::Wait,
+        _ => StopStep::Stop,
     }
-    service.stop().context("cannot stop the service")?;
+}
+
+fn stop_and_wait(service: &windows_service::service::Service) -> Result<()> {
     let deadline = std::time::Instant::now() + STOP_WAIT;
-    while service.query_status()?.current_state != ServiceState::Stopped {
+    // The process reports the stopped state before it exits, and until then its image and its
+    // restic keep files of the program directory open. The handle is opened before the stop, so a
+    // reused process id cannot take its place.
+    let mut process = None;
+    let mut sent = false;
+    loop {
+        let status = service.query_status()?;
+        let step = stop_step(status.current_state);
+        if step == StopStep::Done {
+            break;
+        }
+        if process.is_none() {
+            process = status.process_id.and_then(open_process);
+        }
+        if step == StopStep::Stop
+            && !sent
+            && let Err(error) = service.stop()
+        {
+            // The state can change between the query and the control.
+            if stop_step(service.query_status()?.current_state) == StopStep::Stop {
+                return Err(error).context("cannot stop the service");
+            }
+        }
+        sent |= step == StopStep::Stop;
         if std::time::Instant::now() >= deadline {
-            anyhow::bail!(
-                "the service {SERVICE_NAME} did not stop in time; start it by hand after it stops"
-            );
+            return Err(late_stop());
         }
         std::thread::sleep(Duration::from_millis(500));
     }
+    if let Some(process) = process
+        && !wait_for_exit(
+            &process,
+            deadline.saturating_duration_since(std::time::Instant::now()),
+        )
+    {
+        return Err(late_stop());
+    }
     Ok(())
+}
+
+/// The tree stays as it was, so the advice is a new run and never a start from it.
+fn late_stop() -> anyhow::Error {
+    anyhow::anyhow!(
+        "the service {SERVICE_NAME} did not stop in {} seconds; wait until `Get-Service {SERVICE_NAME}` shows Stopped, then run the command again",
+        STOP_WAIT.as_secs()
+    )
+}
+
+#[allow(unsafe_code)]
+fn open_process(pid: u32) -> Option<std::os::windows::io::OwnedHandle> {
+    use std::os::windows::io::FromRawHandle as _;
+    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE};
+    // SAFETY: the call takes no pointer; a null result means no handle.
+    let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
+    // SAFETY: a non-null handle is open and owned by nothing else.
+    (!handle.is_null())
+        .then(|| unsafe { std::os::windows::io::OwnedHandle::from_raw_handle(handle) })
+}
+
+#[allow(unsafe_code)]
+fn wait_for_exit(process: &std::os::windows::io::OwnedHandle, timeout: Duration) -> bool {
+    use std::os::windows::io::AsRawHandle as _;
+    use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
+    use windows_sys::Win32::System::Threading::WaitForSingleObject;
+    let millis = u32::try_from(timeout.as_millis()).unwrap_or(u32::MAX - 1);
+    // SAFETY: the handle is open with SYNCHRONIZE for the call.
+    unsafe { WaitForSingleObject(process.as_raw_handle(), millis) == WAIT_OBJECT_0 }
 }
 
 /// # Errors
@@ -298,6 +400,7 @@ pub fn uninstall() -> Result<()> {
             if error.raw_os_error() == Some(ERROR_SERVICE_DOES_NOT_EXIST) =>
         {
             println!("the service {SERVICE_NAME} is not installed");
+            crate::program_repair::forget()?;
             return crate::logging::remove_event_source();
         }
         Err(error) => return Err(error.into()),
@@ -306,6 +409,7 @@ pub fn uninstall() -> Result<()> {
     // The stopping service still writes events, so the source goes only after it stopped.
     stop_and_wait(&service)?;
     crate::logging::remove_event_source()?;
+    crate::program_repair::forget()?;
     println!("the service {SERVICE_NAME} is removed");
     Ok(())
 }
@@ -313,6 +417,24 @@ pub fn uninstall() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fr_in_07_a_service_that_starts_or_stops_is_waited_for_and_not_sent_a_stop() {
+        assert_eq!(stop_step(ServiceState::Stopped), StopStep::Done);
+        assert_eq!(stop_step(ServiceState::StopPending), StopStep::Wait);
+        assert_eq!(stop_step(ServiceState::StartPending), StopStep::Wait);
+        for state in [
+            ServiceState::Running,
+            ServiceState::Paused,
+            ServiceState::PausePending,
+            ServiceState::ContinuePending,
+        ] {
+            assert_eq!(stop_step(state), StopStep::Stop, "{state:?}");
+        }
+        let advice = late_stop().to_string();
+        assert!(advice.contains("run the command again"), "{advice}");
+        assert!(!advice.contains("start it"), "{advice}");
+    }
 
     #[test]
     fn fr_ag_01_every_failure_restarts_the_service() {

@@ -50,6 +50,34 @@ describe('FilterBar', () => {
 		expect(onchange).toHaveBeenLastCalledWith({ os: 'linux,windows' });
 	});
 
+	it('shows the secondary line of a record facet and searches it', async () => {
+		const user = userEvent.setup();
+		const onchange = vi.fn();
+		const profile: FilterFacet = {
+			key: 'profile',
+			label: 'Profile',
+			search: true,
+			options: [
+				{ value: 'web', count: 1, description: ['test-s3-yandex', { tag: 'S3' }] },
+				{ value: 'nas', count: 1, description: ['nas-local', { tag: 'Local' }, 'host NAS'] }
+			]
+		};
+		render(FilterBar, {
+			props: { label: 'Plan filters', value: {}, facets: [profile], onchange }
+		});
+		await user.click(screen.getByRole('button', { name: /^Profile/ }));
+		// Two options are under the threshold, so the search field is there because of `search`.
+		const find = await screen.findByPlaceholderText('Find: Profile');
+		const nas = screen.getByLabelText('nas');
+		expect(document.getElementById(nas.getAttribute('aria-describedby') ?? '')).toHaveTextContent(
+			/nas-local\s*Local\s*·\s*host NAS/
+		);
+		await user.type(find, 'S3-YANDEX');
+		expect(screen.queryByLabelText('nas')).not.toBeInTheDocument();
+		await user.click(screen.getByLabelText('web'));
+		expect(onchange).toHaveBeenLastCalledWith({ profile: 'web' });
+	});
+
 	it('chooses one value of a single-value facet', async () => {
 		const user = userEvent.setup();
 		const onchange = vi.fn();

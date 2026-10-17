@@ -4,6 +4,7 @@
 	import { resolve } from '$app/paths';
 	import { ApiError, service } from '#lib/api/index.ts';
 	import type {
+		Agent,
 		Job,
 		JobResultCode,
 		JobStatus,
@@ -19,19 +20,14 @@
 		Dialog,
 		FilterBar,
 		ListView,
-		Select,
 		StatusPill,
 		TextField
 	} from '#lib/components/ui/index.ts';
-	import type {
-		FilterFacet,
-		ListMeta,
-		RowAction,
-		SelectOption,
-		StatusTone
-	} from '#lib/components/ui/index.ts';
+	import type { FilterFacet, ListMeta, RowAction, StatusTone } from '#lib/components/ui/index.ts';
 	import { facetCounts, matchesSearch, splitList } from '#lib/filters.ts';
 	import { focusFirstInvalid } from '#lib/form.ts';
+	import { withHosts } from '#lib/host-picker.ts';
+	import HostPicker from '#lib/components/HostPicker.svelte';
 	import { ago, plural } from '#lib/list-format.ts';
 	import { iconOf, pillOf, repositoryState } from '#lib/vocabulary.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
@@ -40,7 +36,7 @@
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
 	let repositories = $state<Repository[]>([]);
-	let agents = $state<{ id: string; hostname: string; status: string }[]>([]);
+	let agents = $state<Agent[]>([]);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 
@@ -118,11 +114,7 @@
 			Date.parse(job.expires_at) <= Date.now()
 	);
 
-	const jobAgentOptions = $derived<SelectOption[]>(
-		agents
-			.filter((agent) => agent.status === 'active')
-			.map((agent) => ({ value: agent.id, label: agent.hostname }))
-	);
+	const activeHosts = $derived(agents.filter((agent) => agent.status === 'active'));
 
 	const canWrite = $derived(getSession()?.role === 'admin');
 	const canRun = $derived(getSession()?.role === 'admin' || getSession()?.role === 'operator');
@@ -170,9 +162,13 @@
 		{
 			key: 'maintenance',
 			label: t('repositories.maintenanceHost'),
-			options: facetCounts(repositories, (repository) =>
-				repository.maintenance_agent_id ? [repository.maintenance_agent_id] : []
-			).map((option) => ({ ...option, label: agentNames.get(option.value) ?? option.value }))
+			search: true,
+			options: withHosts(
+				facetCounts(repositories, (repository) =>
+					repository.maintenance_agent_id ? [repository.maintenance_agent_id] : []
+				),
+				agents
+			)
 		}
 	]);
 
@@ -607,20 +603,21 @@
 				<!-- eslint-enable svelte/no-navigation-without-resolve -->
 			</Alert>
 		{:else if jobHostFixed && jobRepository}
-			<TextField
+			<HostPicker
 				id="job-host"
 				label={t('repositories.jobHost')}
 				help={jobKind === 'init' ? t('repositories.jobHostInit') : t('repositories.jobHostLocal')}
-				value={maintenanceName(jobRepository)}
+				hosts={agents}
+				value={jobRepository.maintenance_agent_id ?? ''}
 				disabled
 			/>
 		{:else}
-			<Select
+			<HostPicker
 				id="job-host"
 				label={t('repositories.jobHost')}
 				help={t('repositories.jobHostHint')}
 				error={jobSubmitted && jobHost === '' ? t('repositories.jobHostRequired') : undefined}
-				options={jobAgentOptions}
+				hosts={activeHosts}
 				bind:value={jobHost}
 			/>
 		{/if}

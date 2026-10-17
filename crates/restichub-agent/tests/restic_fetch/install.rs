@@ -252,7 +252,11 @@ async fn fr_in_07_register_without_restic_and_network_fails_before_the_enrollmen
     )
     .await
     .expect_err("no network");
-    assert!(error.to_string().contains("GitHub"), "{error:#}");
+    assert!(format!("{error:#}").contains("GitHub"), "{error:#}");
+    assert!(
+        error.to_string().contains("the token is not used"),
+        "{error:#}"
+    );
     assert!(
         control_plane.paths().is_empty(),
         "the enrollment request must not start"

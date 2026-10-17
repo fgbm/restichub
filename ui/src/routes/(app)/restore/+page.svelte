@@ -31,6 +31,7 @@
 	import type { RestoreFilters } from '#lib/restore.ts';
 	import { BrowseTimeout, settle } from '#lib/restore-poll.ts';
 	import { applyFilters, facetCounts, tagLabel } from '#lib/snapshot-filter.ts';
+	import { loadRepository, pickRepository, saveRepository } from '#lib/restore-repository.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 
 	const PAGE_SIZE = 25;
@@ -208,6 +209,7 @@
 	}
 
 	function changeRepository(): void {
+		saveRepository(getSession(), repositoryId);
 		void open().then(remember);
 	}
 
@@ -229,9 +231,7 @@
 				]);
 				repositories = allRepositories.filter((item) => item.initialized);
 				profiles = new Map(allProfiles.map((item) => [item.id, item.name]));
-				if (!repositories.some((item) => item.id === repositoryId)) {
-					repositoryId = repositories[0]?.id ?? '';
-				}
+				repositoryId = pickRepository(repositories, repositoryId, loadRepository(getSession()));
 			} catch (problem) {
 				error = describe(problem);
 			} finally {
