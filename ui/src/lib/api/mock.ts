@@ -363,6 +363,7 @@ function makeRepositories(): Repository[] {
 		created_at: iso(60 * 24 * 40),
 		updated_at: iso(60 * 24 * 2),
 		created_by: 'u_01',
+		shares_location_with: [],
 		...health
 	});
 	return [
@@ -1389,7 +1390,8 @@ export class MockApiService {
 			created_at: now,
 			updated_at: now,
 			created_by: this.users[0].id,
-			lock_state: 'free'
+			lock_state: 'free',
+			shares_location_with: []
 		};
 		this.repositories = [...this.repositories, repository];
 		return repository;

@@ -28,6 +28,8 @@ A repository is the place where restic stores the snapshots. The control plane k
 | REST server | "REST server password" | Optional. The password of the same account |
 | Local path | "Path" | An absolute path on the disk of the repository host, for example `/var/spool/restichub/fs-01` |
 
+One location holds one repository. The control plane refuses a repository with the location of another repository of your tenant, with the code `repository_location_taken`. The page names the repository that holds the location. A local location is the host and the path. An S3 location is the endpoint, the bucket and the prefix. A rest-server location is the URL.
+
 An "Endpoint" uses the scheme `https` or `http`. It cannot hold a user name, a password, a query or a fragment. Enter the credentials of the rest-server in the fields "User name" and "REST server password" in the section "Access".
 
 The user name is not a secret: the repository page shows it, and you can change it at any time. The password is a secret. The agent gives both values to restic in the environment variables `RESTIC_REST_USERNAME` and `RESTIC_REST_PASSWORD`, never in the command line. A rest-server with `--no-auth` needs no credentials.

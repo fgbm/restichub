@@ -166,8 +166,11 @@ export function rpoPlanState(plan: { enabled: boolean; state: RpoState }): Entit
 
 export function repositoryState(
 	repository: Pick<Repository, 'initialized'> &
-		Partial<Pick<Repository, 'lock_state' | 'last_check'>>
+		Partial<Pick<Repository, 'lock_state' | 'last_check' | 'shares_location_with'>>
 ): EntityState {
+	if (repository.shares_location_with?.length) {
+		return state('sharedLocation', 'repositories.status.sharedLocation', 'warning', 'alert');
+	}
 	if (!repository.initialized) {
 		return state('notInitialized', 'repositories.status.notInitialized', 'warning', 'repository');
 	}

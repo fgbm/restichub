@@ -1208,6 +1208,8 @@ export const ru: Record<MessageKey, string> = {
 		'На хосте работает старый агент, он не умеет это делать. Обновите пакет агента и повторите.',
 	'error.restore_target_denied':
 		'Хост не восстанавливает в этот путь. Используйте корень восстановления хоста. Корень добавляет администратор на хосте.',
+	'error.repository_location_taken':
+		'Репозиторий «{name}» уже занимает это расположение. Укажите другое расположение или используйте существующий репозиторий.',
 	'error.repository_host_locked':
 		'Хост инициализированного локального репозитория нельзя изменить. Снимки лежат на диске этого хоста.',
 	'error.not_repository_host':
@@ -2061,6 +2063,9 @@ export const ru: Record<MessageKey, string> = {
 	'hosts.status.outdated': 'Агент устарел',
 	'plans.ok': 'В норме',
 	'repositories.status.ready': 'Готов',
+	'repositories.status.sharedLocation': 'Общее расположение',
+	'repositories.sharedLocation':
+		'Это расположение занимает другой репозиторий: {names}. Два репозитория в одном месте делят блокировки и снимки. Удалите один из них.',
 	'alerts.status.resolved': 'Закрыто',
 	'channels.disabled': 'Отключён',
 	'channels.send': 'Отправлять оповещения',

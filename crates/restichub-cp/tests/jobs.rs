@@ -322,7 +322,7 @@ async fn create_repository(app: &Router, cookie: &str, agent_id: Uuid, password:
     // A unique name, so a test may create more than one repository in one tenant.
     let body = json!({
         "name": format!("repo-{}", Uuid::now_v7()),
-        "backend": {"kind": "local", "path": "/srv/backup/restic"},
+        "backend": {"kind": "local", "path": format!("/srv/backup/restic-{}", Uuid::now_v7())},
         "password": password,
         "maintenance_agent_id": agent_id.to_string(),
     });
