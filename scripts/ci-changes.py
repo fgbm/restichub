@@ -26,7 +26,7 @@ EVERYTHING = (
     "scripts/ci-changes.py",
 )
 
-GROUPS = ("rust", "windows", "ui", "openapi", "proto", "docs", "site", "comments", "deps")
+GROUPS = ("rust", "backends", "windows", "ui", "openapi", "proto", "docs", "site", "comments", "deps")
 
 
 def agent_crates():
@@ -70,8 +70,15 @@ def classify(files, agent):
         "packaging/fetch-restic.sh",
         "docs/src/diagrams/job-lifecycle.",
     )
+    backends = (
+        "crates/restichub-cp/src/repositories/",
+        "crates/restichub-db/src/repositories",
+        "crates/restichub-agent/tests/",
+    )
     return {
         "rust": any(starts(f, rust) for f in files),
+        # The tests of the backends create repositories through the control plane API.
+        "backends": any(starts(f, backends) for f in files),
         "windows": any(starts(f, agent_dirs) for f in files),
         "ui": any(starts(f, ("ui/",)) for f in files),
         # The document comes from the control plane; the types are in the UI.

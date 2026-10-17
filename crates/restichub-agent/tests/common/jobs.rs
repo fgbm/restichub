@@ -243,6 +243,21 @@ pub async fn create_repository(
         .to_owned()
 }
 
+/// Removes a repository record; the data behind its location stay.
+pub async fn delete_repository(app: &axum::Router, cookie: &str, repository_id: &str) {
+    let (status, _, body) = super::send(
+        app,
+        super::request(
+            "DELETE",
+            &format!("/api/v1/repositories/{repository_id}"),
+            Some(cookie),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+}
+
 /// Starts an init or a test-access job and returns its identifier.
 pub async fn start_action(
     app: &axum::Router,

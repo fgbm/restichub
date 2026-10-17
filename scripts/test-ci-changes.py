@@ -53,6 +53,12 @@ class Classify(unittest.TestCase):
     def test_unrelated_file_runs_nothing(self):
         self.assertEqual(picked("bench/run.sh"), set())
 
+    def test_repository_api_runs_backends(self):
+        self.assertIn("backends", picked("crates/restichub-cp/src/repositories/location.rs"))
+        self.assertIn("backends", picked("crates/restichub-db/src/repositories.rs"))
+        self.assertIn("backends", picked("crates/restichub-agent/tests/common/jobs.rs"))
+        self.assertNotIn("backends", picked("crates/restichub-cp/src/lib.rs"))
+
     def test_agent_package_args(self):
         self.assertEqual(
             ci_changes.package_args(AGENT),
