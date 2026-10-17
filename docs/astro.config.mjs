@@ -34,6 +34,7 @@ export default defineConfig({
 					'about',
 					'operations/install-control-plane',
 					'operations/register-an-agent',
+					'operations/add-a-repository',
 					'operations/migrate-from-resticprofile',
 				]),
 				group('Daily work', 'Ежедневная работа', [
