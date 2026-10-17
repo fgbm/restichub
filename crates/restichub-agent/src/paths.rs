@@ -198,6 +198,7 @@ pub fn rebuild_program_dir(
             &root,
             &record,
             running,
+            std::env::current_dir().ok().as_deref(),
             stop_service,
             &mut |action| log(&action.to_string()),
         )

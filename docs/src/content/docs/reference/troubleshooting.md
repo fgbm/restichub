@@ -26,7 +26,7 @@ Find the symptom in the tables below. The column "Action" tells what to do first
 | The host is "Offline" | The service stopped, or the network to the control plane is down. | Read the log of the agent. See [Agent logs](/restichub/reference/agent-logs/). |
 | The host shows "Agent too old" | The control plane refuses the protocol version of the agent. | Upgrade the agent. See [Upgrade](/restichub/guides/upgrade/). |
 | The list shows "Possible duplicate" | The computer enrolled again, and the old record stays. | On the newer record, select "Replace the old record". See [Possible duplicates](/restichub/guides/enroll-a-host-again/#possible-duplicates). |
-| The service exits with the code 78 | The agent has no usable identity. | Register the host again with `register --force`. |
+| The service exits with the code 78 | The agent has no usable identity, or restic is missing or differs from its record. The event log `ResticHub` (Linux: journald) names the cause. | For the identity, register the host again with `register --force`. For restic, run `install-service`. If the host cannot download restic, add `--restic-archive <ARCHIVE>`. |
 
 For a message of an agent command, see [Agent commands and files](/restichub/reference/agent-commands/#troubleshooting).
 

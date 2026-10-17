@@ -20,15 +20,35 @@ use crate::restic_store::Layout;
 use crate::service::{HostService, ServiceManager};
 use crate::setup::{SetupReport, WaitOptions};
 
-/// The exit code of a service start without a usable identity. The service manager does not
-/// restart on it, because only an administrator can fix the identity (FR-AG-01).
+/// The exit code of a service start without a usable identity or restic. The service manager does
+/// not restart on it, because only an administrator can fix them (FR-AG-01).
 pub const EXIT_NO_IDENTITY: u8 = 78;
 
 /// Tells whether the service stopped for a reason that only an administrator can fix.
 #[must_use]
 pub fn needs_administrator(error: &anyhow::Error) -> bool {
-    error.downcast_ref::<NoIdentity>().is_some() || error.downcast_ref::<UnsafeIdentity>().is_some()
+    error.downcast_ref::<NoIdentity>().is_some()
+        || error.downcast_ref::<UnsafeIdentity>().is_some()
+        || error.downcast_ref::<NoRestic>().is_some()
 }
+
+/// Restic is absent or differs from its record, and the service never downloads it (ADR-0038).
+#[derive(Debug)]
+pub struct NoRestic {
+    cause: String,
+}
+
+impl std::fmt::Display for NoRestic {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "restic is not installed or differs from its record: {}; the service stays stopped until an administrator runs `restichub-agent install-service`, which installs restic and starts the service; on a host without the restic download, add `--restic-archive <ARCHIVE>` with the restic release archive for this host",
+            self.cause
+        )
+    }
+}
+
+impl std::error::Error for NoRestic {}
 
 /// The identity is absent or damaged, so the service cannot run (FR-AG-01).
 #[derive(Debug)]
@@ -264,7 +284,7 @@ fn prepare_program(config: &Path, manager: &dyn ServiceManager) -> Result<()> {
     // at the end anyway.
     let rebuilt = crate::paths::rebuild_program_dir(
         config,
-        &running,
+        running.path(),
         &mut || {
             if manager.state()?.running {
                 manager.stop()?;
@@ -711,8 +731,7 @@ pub fn run(dir: &Path, shutdown: Option<Receiver<()>>) -> Result<()> {
     #[cfg(windows)]
     crate::self_install::migrate_restic_at_start(&crate::self_install::Placement::host());
     // The service never downloads restic; an absent or changed binary stops the start (ADR-0038).
-    let restic = ResticBinary::installed(&Layout::host())?;
-    restic.verify()?;
+    let restic = installed_restic(&Layout::host())?;
     let restic_version = restic.version().unwrap_or_default();
     // The job journal lives in the configuration directory; the runner uses the verified restic
     // binary (ADR-0020, ADR-0038).
@@ -749,6 +768,22 @@ fn is_missing_or_damaged(error: &anyhow::Error) -> bool {
         .chain()
         .find_map(|cause| cause.downcast_ref::<std::io::Error>())
         .is_none_or(|io| io.kind() == std::io::ErrorKind::NotFound)
+}
+
+/// A restart cannot bring restic back, so its absence stops the service for good (FR-AG-01).
+fn installed_restic(layout: &Layout) -> Result<ResticBinary> {
+    ResticBinary::installed(layout)
+        .and_then(|restic| restic.verify().map(|()| restic))
+        .map_err(|error| {
+            if !is_missing_or_damaged(&error) {
+                return error;
+            }
+            let no_restic = NoRestic {
+                cause: format!("{error:#}"),
+            };
+            tracing::error!("{no_restic}");
+            anyhow::Error::new(no_restic)
+        })
 }
 
 fn restic_version(restic: &dyn Restic) -> Result<String> {
@@ -1104,6 +1139,42 @@ mod tests {
 
         assert!(format!("{error:#}").contains("differs from its record after the move"));
         assert!(layout.binary_path().exists());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn fr_ag_01_a_missing_or_changed_restic_stops_the_service_for_an_administrator() {
+        use sha2::Digest as _;
+        let base =
+            std::env::temp_dir().join(format!("restichub-agent-no-restic-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let layout = Layout::new(base.join("bin"), base.join("config"));
+        std::fs::create_dir_all(layout.bin_dir()).expect("bin");
+        std::fs::create_dir_all(base.join("config")).expect("config");
+        let refused = |state: &str| {
+            let error = installed_restic(&layout).expect_err(state);
+            assert!(needs_administrator(&error), "{state}: {error:#}");
+            let text = format!("{error:#}");
+            assert!(text.contains("the service stays stopped"), "{text}");
+            assert!(text.contains("install-service"), "{text}");
+            assert!(text.contains("--restic-archive <ARCHIVE>"), "{text}");
+        };
+
+        refused("no record");
+        let record = |bytes: &[u8]| {
+            let hash = crate::restic_release::hex(&sha2::Sha256::digest(bytes));
+            std::fs::write(
+                layout.record_path(),
+                format!(r#"{{"version":"0.19.1","sha256":"{hash}"}}"#),
+            )
+            .expect("record");
+        };
+        record(b"restic");
+        refused("no binary");
+        std::fs::write(layout.binary_path(), b"changed").expect("restic");
+        refused("a changed binary");
+        record(b"changed");
+        installed_restic(&layout).expect("the recorded binary passes");
         let _ = std::fs::remove_dir_all(&base);
     }
 

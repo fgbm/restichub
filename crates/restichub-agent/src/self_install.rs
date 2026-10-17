@@ -50,6 +50,27 @@ impl Placement {
     }
 }
 
+/// The agent executable that a copy writes, read once.
+#[derive(Debug)]
+pub struct AgentImage {
+    path: PathBuf,
+    bytes: Vec<u8>,
+}
+
+impl AgentImage {
+    pub fn read(path: &Path) -> Result<Self> {
+        Ok(Self {
+            path: path.to_path_buf(),
+            bytes: read_source(path)?,
+        })
+    }
+
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Outcome {
     pub copied_agent: bool,
@@ -67,7 +88,7 @@ pub struct Outcome {
 /// when the service does not stop.
 pub fn prepare(
     placement: &Placement,
-    source: &Path,
+    source: &AgentImage,
     manager: &dyn ServiceManager,
 ) -> Result<Outcome> {
     crate::paths::ensure_program_dir(&placement.restic_dir)?;
@@ -81,7 +102,7 @@ pub fn prepare(
         outcome.stopped_service = true;
     }
     if copy_agent {
-        copy_file(source, &placement.exe)?;
+        write_file(&source.bytes, &placement.exe)?;
         outcome.copied_agent = true;
     }
     if !legacy.is_empty() {
@@ -93,8 +114,8 @@ pub fn prepare(
 
 /// Copies the agent alone into a program directory that the repair made again. The move of an old
 /// restic waits for the check of the directory that holds it.
-pub(crate) fn copy_agent(placement: &Placement, source: &Path) -> Result<()> {
-    copy_file(source, &placement.exe)
+pub(crate) fn copy_agent(placement: &Placement, source: &AgentImage) -> Result<()> {
+    write_file(&source.bytes, &placement.exe)
 }
 
 /// Moves restic from an earlier install location into the restic directory.
@@ -231,33 +252,45 @@ fn sha256_hex(path: &Path) -> Result<String> {
     Ok(crate::restic_release::hex(&digest(path)?))
 }
 
-fn same_content(source: &Path, target: &Path) -> Result<bool> {
+fn same_content(source: &AgentImage, target: &Path) -> Result<bool> {
     if !target.is_file() {
         return Ok(false);
     }
-    if let (Ok(a), Ok(b)) = (source.canonicalize(), target.canonicalize())
+    if let (Ok(a), Ok(b)) = (source.path.canonicalize(), target.canonicalize())
         && a == b
     {
         return Ok(true);
     }
-    Ok(digest(source)? == digest(target)?)
+    Ok(Sha256::digest(&source.bytes).to_vec() == digest(target)?)
 }
 
 /// A path in a user folder can be swapped by another process between the start and the copy, and
-/// the service would run the swapped file as an administrator (T20). On Linux this path names the
-/// running image itself.
+/// the service would run the swapped file as an administrator (T20). So the copy reads the running
+/// image itself: on Linux through `/proc/self/exe`, on Windows through the one handle that is
+/// checked against the image.
 ///
 /// # Errors
 ///
-/// Returns an error when the platform does not tell the path of the executable.
-pub fn running_image() -> Result<PathBuf> {
+/// Returns an error when the image cannot be found or read, or on Windows when the file at its path
+/// is not the image that runs.
+pub fn running_image() -> Result<AgentImage> {
     #[cfg(target_os = "linux")]
     {
-        Ok(PathBuf::from("/proc/self/exe"))
+        AgentImage::read(Path::new("/proc/self/exe"))
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(windows)]
     {
-        std::env::current_exe().context("cannot find the agent executable")
+        use std::io::Read as _;
+        let path = std::env::current_exe().context("cannot find the agent executable")?;
+        let mut bytes = Vec::new();
+        crate::winsec::open_running_image(&path)?
+            .read_to_end(&mut bytes)
+            .with_context(|| format!("cannot read {}", path.display()))?;
+        Ok(AgentImage { path, bytes })
+    }
+    #[cfg(not(any(target_os = "linux", windows)))]
+    {
+        AgentImage::read(&std::env::current_exe().context("cannot find the agent executable")?)
     }
 }
 
@@ -285,13 +318,16 @@ fn read_source(path: &Path) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-/// Writes `target` with one rename, so a reader sees the old or the new file (FR-IN-07).
 fn copy_file(source: &Path, target: &Path) -> Result<()> {
-    let bytes = read_source(source)?;
+    write_file(&read_source(source)?, target)
+}
+
+/// Writes `target` with one rename, so a reader sees the old or the new file (FR-IN-07).
+fn write_file(bytes: &[u8], target: &Path) -> Result<()> {
     let staging = staging_path(target);
     // A killed earlier run with the same process id leaves its staging file, and `create_new` refuses it.
     let _ = std::fs::remove_file(&staging);
-    crate::paths::create_protected_file(&staging, &bytes)?;
+    crate::paths::create_protected_file(&staging, bytes)?;
     make_executable(&staging)
         .and_then(|()| rename_with_retry(&staging, target))
         .inspect_err(|_| {
@@ -399,6 +435,10 @@ mod tests {
         }
     }
 
+    fn image(path: &Path) -> AgentImage {
+        AgentImage::read(path).expect("cannot read the source")
+    }
+
     fn temp_dir(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
             "restichub-agent-selfinstall-{name}-{}",
@@ -422,7 +462,7 @@ mod tests {
         let placement = Placement::under(&base.join("program"), vec![base.join("old-bin")]);
         let fake = Fake::new(false);
 
-        let outcome = prepare(&placement, &source, &fake).expect("prepare");
+        let outcome = prepare(&placement, &image(&source), &fake).expect("prepare");
 
         assert!(outcome.copied_agent);
         assert!(!outcome.stopped_service);
@@ -454,7 +494,7 @@ mod tests {
         crate::paths::ensure_program_dir(&placement.restic_dir).expect("tree");
         std::fs::write(staging_path(&placement.exe), b"half").expect("stale file");
 
-        prepare(&placement, &source, &Fake::new(false)).expect("prepare");
+        prepare(&placement, &image(&source), &Fake::new(false)).expect("prepare");
 
         assert_eq!(std::fs::read(&placement.exe).expect("copy"), b"agent v2");
         assert!(!staging_path(&placement.exe).exists());
@@ -467,10 +507,10 @@ mod tests {
         let source = base.join("agent-download");
         std::fs::write(&source, b"agent v1").expect("source");
         let placement = Placement::under(&base.join("program"), vec![base.join("old-bin")]);
-        prepare(&placement, &source, &Fake::new(true)).expect("first");
+        prepare(&placement, &image(&source), &Fake::new(true)).expect("first");
         let fake = Fake::new(true);
 
-        let outcome = prepare(&placement, &source, &fake).expect("second");
+        let outcome = prepare(&placement, &image(&source), &fake).expect("second");
 
         assert_eq!(outcome, Outcome::default());
         assert!(fake.events.borrow().is_empty());
@@ -483,11 +523,11 @@ mod tests {
         let source = base.join("agent-download");
         let placement = Placement::under(&base.join("program"), vec![base.join("old-bin")]);
         std::fs::write(&source, b"agent v1").expect("source");
-        prepare(&placement, &source, &Fake::new(false)).expect("first");
+        prepare(&placement, &image(&source), &Fake::new(false)).expect("first");
         std::fs::write(&source, b"agent v2").expect("newer source");
         let fake = Fake::new(true);
 
-        let outcome = prepare(&placement, &source, &fake).expect("replace");
+        let outcome = prepare(&placement, &image(&source), &fake).expect("replace");
 
         assert!(outcome.copied_agent && outcome.stopped_service);
         assert_eq!(*fake.events.borrow(), vec!["stop"]);
@@ -506,7 +546,7 @@ mod tests {
         let placement = Placement::under(&base.join("program"), vec![legacy.clone()]);
         let fake = Fake::new(true);
 
-        let outcome = prepare(&placement, &source, &fake).expect("migrate");
+        let outcome = prepare(&placement, &image(&source), &fake).expect("migrate");
 
         assert!(outcome.moved_restic && outcome.stopped_service);
         assert_eq!(
@@ -530,7 +570,7 @@ mod tests {
         std::fs::create_dir_all(&placement.restic_dir).expect("bin");
         std::fs::write(placement.restic_dir.join(RESTIC_FILE_NAME), b"current").expect("current");
 
-        prepare(&placement, &source, &Fake::new(false)).expect("migrate");
+        prepare(&placement, &image(&source), &Fake::new(false)).expect("migrate");
 
         assert_eq!(
             std::fs::read(placement.restic_dir.join(RESTIC_FILE_NAME)).expect("kept"),
@@ -548,7 +588,7 @@ mod tests {
         std::fs::write(&placement.exe, b"agent").expect("exe");
         let fake = Fake::new(true);
 
-        let outcome = prepare(&placement, &placement.exe, &fake).expect("prepare");
+        let outcome = prepare(&placement, &image(&placement.exe), &fake).expect("prepare");
 
         assert_eq!(outcome, Outcome::default());
         assert!(fake.events.borrow().is_empty());
@@ -568,7 +608,7 @@ mod tests {
         }
         let placement = Placement::under(&base.join("program"), vec![newer.clone(), older.clone()]);
 
-        let outcome = prepare(&placement, &source, &Fake::new(false)).expect("migrate");
+        let outcome = prepare(&placement, &image(&source), &Fake::new(false)).expect("migrate");
 
         assert!(outcome.moved_restic);
         assert_eq!(
