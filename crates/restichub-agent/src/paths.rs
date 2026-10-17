@@ -229,7 +229,6 @@ pub fn check_identity_dir(dir: &Path) -> Result<()> {
     }
     #[cfg(unix)]
     {
-        use std::os::unix::fs::MetadataExt as _;
         let backup = crate::identity::sibling(dir, ".old");
         let names = crate::identity::trusted_names();
         let mut entries = Vec::new();
@@ -242,29 +241,7 @@ pub fn check_identity_dir(dir: &Path) -> Result<()> {
             );
         }
         for (path, secret) in entries {
-            let metadata = match std::fs::symlink_metadata(&path) {
-                Ok(metadata) => metadata,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-                Err(error) => {
-                    return Err(error).with_context(|| format!("cannot read {}", path.display()));
-                }
-            };
-            if let Some(reason) = unix_exposure(
-                metadata.file_type().is_symlink(),
-                metadata.uid(),
-                metadata.mode(),
-                current_uid(),
-                secret,
-            ) {
-                anyhow::bail!("{} {reason}", path.display());
-            }
-            // An extended ACL can grant another account an access that the mode does not show.
-            if crate::acl::has_extended_acl(&path)? {
-                anyhow::bail!(
-                    "{} holds an extended access control list, so another account may change it",
-                    path.display()
-                );
-            }
+            check_identity_entry(&path, secret, crate::acl::has_extended_acl)?;
         }
         Ok(())
     }
@@ -272,6 +249,49 @@ pub fn check_identity_dir(dir: &Path) -> Result<()> {
     {
         let _ = dir;
         Ok(())
+    }
+}
+
+/// `read_acl` is a parameter, so a test can remove the entry between the two reads.
+#[cfg(unix)]
+fn check_identity_entry(
+    path: &Path,
+    secret: bool,
+    read_acl: impl Fn(&Path) -> Result<bool>,
+) -> Result<()> {
+    use std::os::unix::fs::MetadataExt as _;
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(error).with_context(|| format!("cannot read {}", path.display()));
+        }
+    };
+    if let Some(reason) = unix_exposure(
+        metadata.file_type().is_symlink(),
+        metadata.uid(),
+        metadata.mode(),
+        current_uid(),
+        secret,
+    ) {
+        anyhow::bail!("{} {reason}", path.display());
+    }
+    // An extended ACL can grant another account an access that the mode does not show.
+    match read_acl(path) {
+        Ok(false) => Ok(()),
+        Ok(true) => anyhow::bail!(
+            "{} holds an extended access control list, so another account may change it",
+            path.display()
+        ),
+        // A swap of the identity removes the entry between the two reads; a missing entry passes.
+        Err(error)
+            if error
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound) =>
+        {
+            Ok(())
+        }
+        Err(error) => Err(error.context(format!("cannot check {}", path.display()))),
     }
 }
 
@@ -665,6 +685,21 @@ mod tests {
         } else {
             eprintln!("setfacl cannot add an entry here; the ACL refusal is not tested");
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn fr_ag_04_an_entry_that_vanishes_before_the_acl_read_passes() {
+        let dir = temp_dir("identity-vanish");
+        ensure_config_dir(&dir).expect("cannot create the configuration directory");
+        let chain = dir.join(crate::identity::CA_CHAIN_FILE);
+        create_protected_file(&chain, b"chain").expect("cannot write the chain");
+        check_identity_entry(&chain, false, |path| {
+            std::fs::remove_file(path).expect("cannot remove the entry");
+            crate::acl::has_extended_acl(path)
+        })
+        .expect("an entry that a swap removed passes");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
