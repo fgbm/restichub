@@ -53,7 +53,7 @@
 </script>
 
 <section class="section" class:section--open={open} data-section={id}>
-	<header class="section__head">
+	<header class="section__head" class:section__head--labelled={Boolean(switchLabel)}>
 		<button
 			type="button"
 			class="section__toggle"
@@ -75,8 +75,8 @@
 		{/if}
 	</header>
 	{#if open}
+		{#if note}<p class="section__note">{note}</p>{/if}
 		<div class="section__body" class:section__body--off={switchable && !enabled} id={bodyId}>
-			{#if note}<p class="section__note">{note}</p>{/if}
 			{@render children()}
 		</div>
 	{/if}
@@ -137,7 +137,7 @@
 		white-space: nowrap;
 	}
 
-	.section__head :global(.rh-switch__label) {
+	.section__head:not(.section__head--labelled) :global(.rh-switch__label) {
 		display: none;
 	}
 
@@ -150,6 +150,7 @@
 
 	.section__note {
 		margin: 0;
+		padding: 0 var(--rh-space-4) var(--rh-space-2);
 		color: var(--rh-color-text-muted);
 		font-size: var(--rh-font-size-sm);
 	}
