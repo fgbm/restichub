@@ -1958,13 +1958,10 @@ export interface components {
         Blocker: {
             id: string;
             kind: components["schemas"]["BlockerKind"];
-            /** @description The name of the record. A job has its kind as the name. */
+            /** @description For a job: its kind. */
             name: string;
         };
-        /**
-         * @description The kind of a record that blocks a delete.
-         * @enum {string}
-         */
+        /** @enum {string} */
         BlockerKind: "repository" | "channel" | "profile" | "job_template" | "plan" | "job";
         /** @description At most `restichub_db::referrers::REFERRER_LIMIT` records, and the count of all of them. */
         Blockers: {
