@@ -989,9 +989,17 @@ export class MockApiService {
 		return this.me();
 	}
 
-	async changePassword(_request: ChangePasswordRequest): Promise<void> {
-		void _request;
-		return undefined;
+	async changePassword(request: ChangePasswordRequest): Promise<void> {
+		// The e2e tests sign in with this password; the mock sign-in accepts any password.
+		if (request.current_password !== 'secret') {
+			throw new ApiError({
+				status: 400,
+				code: 'invalid_argument',
+				title: 'Bad Request',
+				field: 'current_password',
+				reason: 'invalid_credentials'
+			});
+		}
 	}
 
 	async setupStatus(): Promise<SetupStatus> {
