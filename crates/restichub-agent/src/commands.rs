@@ -1177,6 +1177,28 @@ mod tests {
         assert!(!error.contains("running service"), "{error}");
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn fr_ag_04_the_service_does_not_start_with_an_identity_that_another_account_could_change() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let (base, dir) = planted_rotation("unsafe-run");
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o777))
+            .expect("cannot set the mode");
+        let error = run(&dir, None).expect_err("the service must refuse");
+        assert!(needs_administrator(&error), "{error:#}");
+        let text = format!("{error:#}");
+        assert!(text.contains("install-service"), "{text}");
+        assert!(text.contains("register --force"), "{text}");
+        assert!(
+            dir.join("agent-key.pem.next").exists(),
+            "the refusal reads nothing and finishes no rotation"
+        );
+        let report = crate::setup::collect_status(&StopCounter::new(false), &dir, None);
+        let identity = report.identity.expect_err("status must report the refusal");
+        assert!(identity.contains("does not use the identity"), "{identity}");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     #[test]
     fn the_token_sources_are_mutually_exclusive() {
         let options = RegisterOptions {

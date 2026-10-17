@@ -205,8 +205,9 @@ pub fn repair_program_dir(config: &Path, verbose: bool, log: &mut dyn FnMut(&str
 
 /// Refuses an identity in `dir` that another account could change (FR-AG-04, threat T20).
 ///
-/// The service runs it before it loads the identity. It repairs nothing. Linux refuses a directory
-/// or an identity file that a group or another account can write.
+/// The service runs it before it loads the identity. It repairs nothing. Linux refuses a link and a
+/// directory or an identity file that every account can write; a group write passes, because a
+/// umask of 002 gives it to a directory of a test run.
 ///
 /// # Errors
 ///
@@ -230,11 +231,8 @@ pub fn check_identity_dir(dir: &Path) -> Result<()> {
                     return Err(error).with_context(|| format!("cannot read {}", path.display()));
                 }
             };
-            if metadata.file_type().is_symlink() || metadata.mode() & 0o022 != 0 {
-                anyhow::bail!(
-                    "{} is a link or a group or another account can write it",
-                    path.display()
-                );
+            if metadata.file_type().is_symlink() || metadata.mode() & 0o002 != 0 {
+                anyhow::bail!("{} is a link or every account can write it", path.display());
             }
         }
         Ok(())
@@ -498,6 +496,24 @@ mod tests {
         );
         assert!(!real.join("bin").exists());
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fr_ag_04_an_identity_that_another_account_could_change_is_refused() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = temp_dir("identity-check");
+        ensure_config_dir(&dir).expect("cannot create the configuration directory");
+        let key = dir.join(crate::identity::KEY_FILE);
+        create_protected_file(&key, b"key").expect("cannot write the key");
+        check_identity_dir(&dir).expect("an owner-only identity passes");
+        std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o666)).expect("mode");
+        let error = format!("{:#}", check_identity_dir(&dir).expect_err("a shared key"));
+        assert!(error.contains("agent-key.pem"), "{error}");
+        std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o600)).expect("mode");
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o777)).expect("mode");
+        assert!(check_identity_dir(&dir).is_err(), "a shared directory");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[cfg(unix)]

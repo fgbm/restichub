@@ -35,7 +35,8 @@ const MAX_STEP_ID_LEN: usize = 64;
 const MAX_ERROR_CODE_LEN: usize = 64;
 const MAX_ERROR_PARAMS: usize = 8;
 const MAX_PARAM_KEY_LEN: usize = 32;
-const MAX_PARAM_VALUE_LEN: usize = 200;
+/// The agent sends the cause of a step that did not start in one parameter of this length.
+const MAX_PARAM_VALUE_LEN: usize = 500;
 const MAX_CURRENT_FILE_LEN: usize = 512;
 
 /// Records the progress of a running step.
@@ -592,6 +593,22 @@ mod tests {
         assert_eq!(fraction(7.0), 1.0);
         assert_eq!(non_negative(-1.0), 0.0);
         assert_eq!(clean("a\u{0}b\nc", 2), "ab");
+    }
+
+    #[test]
+    fn fr_ag_09_the_reason_of_a_step_that_did_not_start_is_kept_and_bounded() {
+        let reason = format!("restic did not start: {}", "x".repeat(600));
+        let (code, params) = error_of(&ErrorDetail {
+            code: "step_not_started".to_owned(),
+            params: vec![restichub_proto::agent::v1::KeyValue {
+                key: "reason".to_owned(),
+                value: reason.clone(),
+            }],
+        });
+        assert_eq!(code.as_deref(), Some("step_not_started"));
+        let kept = params.get("reason").expect("the reason must be stored");
+        assert_eq!(kept.chars().count(), MAX_PARAM_VALUE_LEN);
+        assert!(reason.starts_with(kept.as_str()));
     }
 
     fn log_chunk(sequence: u64, size: usize) -> LogChunk {

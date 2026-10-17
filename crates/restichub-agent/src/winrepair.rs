@@ -739,6 +739,128 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
     }
 
+    fn open_cache(config: &Path, files: usize) -> PathBuf {
+        let data = config.join("cache").join("0123").join("data");
+        std::fs::create_dir_all(&data).expect("cannot create the cache");
+        for index in 0..files {
+            std::fs::write(data.join(format!("blob-{index}")), b"x").expect("cannot write");
+        }
+        grant(&config.join("cache"), "(OI)(CI)(M)").expect("cannot add the entry");
+        data
+    }
+
+    fn report_lines(config: &Path, root: &Path, verbose: bool) -> Vec<String> {
+        let mut lines = Vec::new();
+        let mut print = |line: &str| lines.push(line.to_owned());
+        let mut report = Report::new(root, verbose, &mut print);
+        let result = repair_agent_tree(config, root, UntrustedIdentity::Keep, &mut |action| {
+            report.action(action);
+        });
+        report.finish();
+        result.expect("the repair must succeed");
+        lines
+    }
+
+    #[test]
+    fn fr_ag_04_the_repair_prints_one_line_for_each_top_level_directory() {
+        let (base, root, config) = tree("repair-summary");
+        let data = open_cache(&config, 40);
+        let mode = root.join("Agent-server-scripts");
+        create_protected_file(&mode, b"server_scripts = enabled\n").expect("cannot write");
+        grant(&mode, "(R,W)").expect("cannot add the entry");
+
+        let lines = report_lines(&config, &root, false);
+
+        // The cache, its two levels and the 40 files, under one top-level directory.
+        let summary = format!(
+            "repaired the access control of 43 entries under {}",
+            config.display()
+        );
+        assert!(lines.contains(&summary), "{lines:?}");
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("trust-server-scripts")),
+            "a removal keeps its own line: {lines:?}"
+        );
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert!(!is_open(&data.join("blob-0")));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn fr_ag_04_verbose_prints_each_repaired_entry() {
+        let (base, root, config) = tree("repair-verbose");
+        let data = open_cache(&config, 3);
+        let lines = report_lines(&config, &root, true);
+        assert_eq!(lines.len(), 6, "{lines:?}");
+        assert!(
+            lines.contains(&Action::Protected(data.join("blob-2")).to_string()),
+            "{lines:?}"
+        );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn fr_ag_04_a_refusal_in_the_cache_keeps_the_identity_for_register_force() {
+        let (base, root, config) = tree("repair-force-order");
+        crate::identity::tests::sample()
+            .save(&config)
+            .expect("cannot save the identity");
+        let target = base.join("target");
+        std::fs::create_dir(&target).expect("cannot create the target");
+        let cache = config.join("cache");
+        std::fs::create_dir(&cache).expect("cannot create the cache");
+        junction(&cache.join("link"), &target);
+        grant(&config, "(OI)(CI)(WD)").expect("cannot add the entry");
+
+        let error =
+            crate::preflight::repair_in_two_passes(UntrustedIdentity::Remove, &mut |mode| {
+                repair_agent_tree(&config, &root, mode, &mut |_| {})
+            })
+            .expect_err("a junction must stop register --force");
+
+        assert!(format!("{error:#}").contains("reparse point"), "{error:#}");
+        for file in crate::identity::IDENTITY_FILES {
+            assert!(
+                config.join(file).exists(),
+                "{file} must stay after a refusal"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn fr_ag_04_the_service_refuses_an_identity_that_another_account_could_change() {
+        let (base, root, config) = tree("check-identity");
+        crate::identity::tests::sample()
+            .save(&config)
+            .expect("cannot save the identity");
+        check_identity(&config, &root).expect("a protected identity passes");
+
+        let key = config.join(crate::identity::KEY_FILE);
+        grant(&key, "(R,W)").expect("cannot add the entry");
+        let error = format!(
+            "{:#}",
+            check_identity(&config, &root).expect_err("an open key")
+        );
+        assert!(error.contains("agent-key.pem"), "{error}");
+        Entry::open(&key)
+            .expect("cannot open")
+            .expect("the key must exist")
+            .protect()
+            .expect("cannot protect");
+        check_identity(&config, &root).expect("a protected key passes again");
+
+        grant(&root, "(OI)(CI)(WD)").expect("cannot add the entry");
+        let error = format!(
+            "{:#}",
+            check_identity(&config, &root).expect_err("an open level")
+        );
+        assert!(error.contains("grants a write access"), "{error}");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     #[test]
     fn fr_ag_04_a_protected_tree_is_not_changed() {
         let (base, root, config) = tree("repair-clean");
