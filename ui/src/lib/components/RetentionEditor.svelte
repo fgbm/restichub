@@ -78,68 +78,70 @@
 	{/each}
 </div>
 
-<div class="rules">
-	{#each RULES as rule (rule.key)}
+<div class="rh-field">
+	<span class="rh-field__label" id="profile-rules-label">{t('pe.rules.title')}</span>
+	<div class="rules" role="group" aria-labelledby="profile-rules-label">
+		{#each RULES as rule (rule.key)}
+			<div class="rule">
+				<div class="rule__head">
+					<span class="rule__title">{t(titleOf(rule.unit))}</span>
+					<code class="flag">{rule.flag}</code>
+				</div>
+				<div class="rule__input">
+					<TextField
+						id={`profile-${rule.key.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`}
+						type="number"
+						min="0"
+						aria-label={t(titleOf(rule.unit))}
+						bind:value={draft[rule.key]}
+					/>
+					<span class="muted">{t(`pe.rule.${rule.unit}.unit` as MessageKey)}</span>
+				</div>
+				<p class="rule__text">{t(`pe.rule.${rule.unit}.text` as MessageKey)}</p>
+				<div class="rule__count">
+					{#if countOf(rule.key) > 0}
+						<RichText text={t('pe.rule.count', { count: countOf(rule.key) })} />
+					{:else}
+						<span class="muted">{t('pe.rule.off')}</span>
+					{/if}
+				</div>
+			</div>
+		{/each}
 		<div class="rule">
 			<div class="rule__head">
-				<span class="rule__title">{t(titleOf(rule.unit))}</span>
-				<code class="flag">{rule.flag}</code>
+				<span class="rule__title">{t('pe.rule.within.title')}</span>
+				<code class="flag">--keep-within</code>
 			</div>
 			<div class="rule__input">
 				<TextField
-					id={`profile-${rule.key.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`}
-					type="number"
-					min="0"
-					aria-label={t(titleOf(rule.unit))}
-					bind:value={draft[rule.key]}
+					id="profile-keep-within"
+					mono
+					placeholder={t('common.example', { value: '30d' })}
+					aria-label={t('pe.rule.within.title')}
+					error={preview.withinInvalid
+						? t('pe.rule.within.invalid')
+						: fieldError(problem, 'retention.keep_within')}
+					bind:value={draft.keepWithin}
 				/>
-				<span class="muted">{t(`pe.rule.${rule.unit}.unit` as MessageKey)}</span>
+				<span class="muted rule__hint">{t('pe.rule.within.hint')}</span>
 			</div>
-			<p class="rule__text">{t(`pe.rule.${rule.unit}.text` as MessageKey)}</p>
+			<p class="rule__text"><RichText text={t('pe.rule.within.text')} /></p>
 			<div class="rule__count">
-				{#if countOf(rule.key) > 0}
-					<RichText text={t('pe.rule.count', { count: countOf(rule.key) })} />
+				{#if countOf('keepWithin') > 0}
+					<RichText text={t('pe.rule.count', { count: countOf('keepWithin') })} />
 				{:else}
 					<span class="muted">{t('pe.rule.off')}</span>
 				{/if}
 			</div>
 		</div>
-	{/each}
-	<div class="rule">
-		<div class="rule__head">
-			<span class="rule__title">{t('pe.rule.within.title')}</span>
-			<code class="flag">--keep-within</code>
-		</div>
-		<div class="rule__input">
-			<TextField
-				id="profile-keep-within"
-				mono
-				placeholder={t('common.example', { value: '30d' })}
-				aria-label={t('pe.rule.within.title')}
-				error={preview.withinInvalid
-					? t('pe.rule.within.invalid')
-					: fieldError(problem, 'retention.keep_within')}
-				bind:value={draft.keepWithin}
-			/>
-			<span class="muted rule__hint">{t('pe.rule.within.hint')}</span>
-		</div>
-		<p class="rule__text"><RichText text={t('pe.rule.within.text')} /></p>
-		<div class="rule__count">
-			{#if countOf('keepWithin') > 0}
-				<RichText text={t('pe.rule.count', { count: countOf('keepWithin') })} />
-			{:else}
-				<span class="muted">{t('pe.rule.off')}</span>
-			{/if}
-		</div>
 	</div>
 </div>
 
-<div class="rule rule--wide">
-	<div class="rule__head">
-		<span class="rule__title">{t('pe.rule.tags.title')}</span>
+<div class="rh-field">
+	<span class="rh-field__label">
+		{t('pe.rule.tags.title')}
 		<code class="flag">--keep-tag</code>
-	</div>
-	<p class="rule__text">{t('pe.rule.tags.text')}</p>
+	</span>
 	<TagInput
 		id="profile-keep-tags"
 		label={t('profiles.tags')}
@@ -148,6 +150,7 @@
 		error={fieldError(problem, 'retention.keep_tags')}
 		bind:value={draft.keepTags}
 	/>
+	<p class="rh-field__help">{t('pe.rule.tags.text')}</p>
 	<div class="rule__count">
 		{#if countOf('keepTags') > 0}
 			<RichText text={t('pe.rule.count', { count: countOf('keepTags') })} />
@@ -157,17 +160,17 @@
 	</div>
 </div>
 
-<div class="rule rule--wide">
-	<div class="rule__head">
-		<span class="rule__title">{t('pe.rule.group.title')}</span>
+<div class="rh-field">
+	<span class="rh-field__label">
+		{t('pe.rule.group.title')}
 		<code class="flag">--group-by</code>
-	</div>
-	<p class="rule__text">{t('pe.rule.group.text')}</p>
+	</span>
 	<div class="checks">
 		<Checkbox label={t('profiles.retention.groupBy.host')} bind:checked={draft.groupByHost} />
 		<Checkbox label={t('profiles.retention.groupBy.paths')} bind:checked={draft.groupByPaths} />
 		<Checkbox label={t('profiles.retention.groupBy.tags')} bind:checked={draft.groupByTags} />
 	</div>
+	<p class="rh-field__help">{t('pe.rule.group.text')}</p>
 </div>
 
 <Disclosure label={t('pe.filter.title')} hint={filterSummary}>
@@ -285,27 +288,15 @@
 	.rules {
 		display: flex;
 		flex-direction: column;
-		border: var(--rh-border-width) solid var(--rh-color-border);
-		border-radius: var(--rh-radius-md);
+		border-top: var(--rh-border-width) solid var(--rh-color-border-muted);
 	}
 
 	.rule {
 		display: grid;
 		grid-template-columns: minmax(0, 1fr) 14rem;
 		gap: var(--rh-space-1) var(--rh-space-4);
-		padding: var(--rh-space-3) var(--rh-space-4);
+		padding: var(--rh-space-3) 0;
 		border-bottom: var(--rh-border-width) solid var(--rh-color-border-muted);
-	}
-
-	.rules .rule:last-child {
-		border-bottom: 0;
-	}
-
-	.rule--wide {
-		display: flex;
-		flex-direction: column;
-		border: var(--rh-border-width) solid var(--rh-color-border);
-		border-radius: var(--rh-radius-md);
 	}
 
 	.rule__head {
@@ -379,9 +370,8 @@
 		flex-direction: column;
 		gap: var(--rh-space-2);
 		padding: var(--rh-space-3) var(--rh-space-4);
-		border: var(--rh-border-width) solid var(--rh-color-border);
 		border-radius: var(--rh-radius-md);
-		background-color: var(--rh-color-canvas-subtle);
+		background-color: var(--rh-color-surface-muted);
 	}
 
 	.preview__head {
