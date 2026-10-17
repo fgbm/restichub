@@ -160,6 +160,7 @@ jobs:
           set -euo pipefail
           unit=/etc/systemd/system/restichub-agent.service
           grep -qx 'SystemCallFilter=@system-service' "$unit"
+          grep -qx 'SystemCallErrorNumber=EPERM' "$unit"
           grep -qx 'ProtectProc=invisible' "$unit"
           properties=()
           while IFS= read -r line; do
