@@ -20,7 +20,8 @@ vi.mock('#lib/stores/session.svelte.ts', () => ({
 		user: { id: 'u_01', username: 'admin', display_name: 'Anna', role: session.role },
 		tenant: { id: 't_01', name: 'acme' },
 		role: session.role
-	})
+	}),
+	hasRole: (...roles: string[]) => roles.includes(session.role)
 }));
 
 vi.mock('#lib/stores/toasts.svelte.ts', () => ({ pushToast: mocks.pushToast }));

@@ -6,7 +6,7 @@
 	import { Alert, Button, Panel, Skeleton, Switch, TextField } from '#lib/components/ui/index.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
-	import { getSession } from '#lib/stores/session.svelte.ts';
+	import { hasRole } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
 	interface Row {
@@ -18,7 +18,7 @@
 	}
 
 	// An Admin changes the rules of the organization (ADR-0036, operation `alerts_write`).
-	const canWrite = $derived(['admin', 'platform_admin'].includes(getSession()?.role ?? ''));
+	const canWrite = $derived(hasRole('admin', 'platform_admin'));
 
 	let rows = $state<Row[]>([]);
 	let loading = $state(true);

@@ -31,7 +31,7 @@
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { t, tChannelError, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
-	import { getSession } from '#lib/stores/session.svelte.ts';
+	import { hasRole } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
 	const FIELDS = ['name', 'kind', 'recipients', 'url'];
@@ -40,7 +40,7 @@
 	const ADDRESS = /^[^\s@<>,;"]+@[^\s@<>,;"]+$/;
 
 	// A tenant Admin manages the channels (ADR-0036, operation `channels_read` and `channels_write`).
-	const canWrite = $derived(['admin', 'platform_admin'].includes(getSession()?.role ?? ''));
+	const canWrite = $derived(hasRole('admin', 'platform_admin'));
 
 	let channels = $state<NotificationChannel[]>([]);
 	let emailConfigured = $state(true);
