@@ -129,7 +129,15 @@ beforeEach(() => {
 		stall_timeout_minutes: 45,
 		max_duration_minutes: 1080
 	});
-	mocks.listRepositories.mockResolvedValue([{ id: 'r_1', name: 'offsite' }]);
+	mocks.listRepositories.mockResolvedValue([
+		{
+			id: 'r_1',
+			name: 'offsite',
+			backend: { kind: 'rest', endpoint: 'https://rest.example.net/a' },
+			maintenance_agent_id: null,
+			initialized: true
+		}
+	]);
 	mocks.listAgents.mockResolvedValue([agent()]);
 	mocks.listPlans.mockResolvedValue([{ id: 'pl_1', profile_id: 'p_1', agent_id: 'a_1' }]);
 	mocks.listScriptTemplates.mockResolvedValue([]);
@@ -276,38 +284,62 @@ describe('Profile editor sections', () => {
 		expect(toggle).toHaveAttribute('aria-expanded', 'true');
 	});
 
-	it('fr_pf_04 shows the restic commands of the host system in a side panel', async () => {
+	it('fr_pf_04 shows the restic commands of the chosen host and repository', async () => {
 		const u = user();
 		mocks.listProfiles.mockResolvedValue([
 			profile({ paths: { all: ['/srv'], windows: ['C:\\Data'], linux: ['/etc'], macos: [] } })
 		]);
+		mocks.listAgents.mockResolvedValue([
+			agent(),
+			agent({ id: 'a_2', hostname: 'win-fs01', os: 'windows' })
+		]);
 		render(ProfileEditor, { profileId: 'p_1' });
 		await screen.findByLabelText(/^Profile/);
-		expect(screen.queryByText(/^restic backup/)).not.toBeInTheDocument();
+		expect(screen.queryByText(/^restic -r/)).not.toBeInTheDocument();
 		await u.click(screen.getByRole('button', { name: 'Restic commands' }));
 		const panel = await screen.findByRole('dialog', { name: 'Restic commands' });
-		expect(within(panel).getByText(/^restic backup/)).toHaveTextContent('/etc');
+		expect(within(panel).getByText(/^restic -r/)).toHaveTextContent(
+			'-r rest:https://rest.example.net/a backup'
+		);
+		expect(within(panel).getByText(/^restic -r/)).toHaveTextContent('/etc');
 		expect(within(panel).getByRole('button', { name: 'Copy' })).toBeInTheDocument();
-		await u.selectOptions(screen.getByLabelText('Commands for the host:'), 'windows');
-		expect(screen.getByText(/^restic backup/)).toHaveTextContent('C:\\Data');
-		expect(screen.getByText(/^restic backup/)).not.toHaveTextContent('/etc');
+
+		await u.click(within(panel).getByRole('combobox', { name: /^Host/ }));
+		await u.click(await screen.findByText('win-fs01', { selector: '.rh-record__option-label' }));
+		expect(within(panel).getByText(/^restic -r/)).toHaveTextContent('C:\\Data');
+		expect(within(panel).getByText(/^restic -r/)).not.toHaveTextContent('/etc');
 	});
 
-	it('ac_ui_11_restic_commands_keep_the_system', async () => {
+	it('ac_ui_11_restic_commands_keep_the_host', async () => {
 		const u = user();
-		const paths = { all: ['/srv'], windows: ['C:\\Data'], linux: ['/etc'], macos: [] };
-		mocks.listProfiles.mockResolvedValue([profile({ paths })]);
+		mocks.listAgents.mockResolvedValue([
+			agent(),
+			agent({ id: 'a_2', hostname: 'win-fs01', os: 'windows' })
+		]);
 		const first = render(ProfileEditor, { profileId: 'p_1' });
 		await screen.findByLabelText(/^Profile/);
 		await u.click(screen.getByRole('button', { name: 'Restic commands' }));
-		await u.selectOptions(await screen.findByLabelText('Commands for the host:'), 'windows');
-		expect(JSON.parse(localStorage.getItem('restichub.v1.commands.os') ?? '""')).toBe('windows');
+		const panel = await screen.findByRole('dialog', { name: 'Restic commands' });
+		await u.click(within(panel).getByRole('combobox', { name: /^Host/ }));
+		await u.click(await screen.findByText('win-fs01', { selector: '.rh-record__option-label' }));
+		expect(JSON.parse(localStorage.getItem('restichub.v1.commands.host') ?? '""')).toBe('a_2');
 		first.unmount();
 
 		render(ProfileEditor, { profileId: 'p_1' });
 		await screen.findByLabelText(/^Profile/);
 		await u.click(screen.getByRole('button', { name: 'Restic commands' }));
-		expect(await screen.findByLabelText('Commands for the host:')).toHaveValue('windows');
+		expect(await screen.findByRole('combobox', { name: /^Host/ })).toHaveTextContent('win-fs01');
+	});
+
+	it('adr_0047 has no repository field and no repository in the summary', async () => {
+		render(ProfileEditor, { profileId: 'p_1' });
+		await screen.findByLabelText(/^Profile/);
+
+		expect(document.querySelector('#profile-repository')).toBeNull();
+		expect(screen.queryByLabelText('Repository')).not.toBeInTheDocument();
+		const side = document.querySelector('.record__side') as HTMLElement;
+		expect(within(side).queryByText('Repository')).not.toBeInTheDocument();
+		expect(within(side).getByText('db-nightly')).toBeInTheDocument();
 	});
 
 	it('ac_ui_10_profile_editor_keeps_the_closed_sections', async () => {

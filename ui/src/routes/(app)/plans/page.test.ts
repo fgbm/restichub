@@ -93,47 +93,82 @@ describe('the Plans screen', () => {
 		session.role = 'admin';
 		mocks.listPlans.mockResolvedValue([]);
 		mocks.listProfiles.mockResolvedValue([
-			{ id: 'p_1', name: 'web-daily', repository_id: 'r_1' },
-			{ id: 'p_2', name: 'nas-files', repository_id: 'r_2' }
+			{ id: 'p_1', name: 'web-daily', paths: { all: ['/srv'] }, retention: null },
+			{ id: 'p_2', name: 'nas-files', paths: { all: ['/srv/files'] }, retention: null }
 		]);
 		mocks.listRepositories.mockResolvedValue([
-			{ id: 'r_1', name: 'test-s3-yandex', backend: { kind: 's3', bucket: 'b' } },
+			{
+				id: 'r_1',
+				name: 'test-s3-yandex',
+				backend: { kind: 's3', endpoint: 'storage.example.net', bucket: 'b' },
+				initialized: true
+			},
 			{
 				id: 'r_2',
 				name: 'nas-local',
 				backend: { kind: 'local', path: '/srv/restic' },
-				maintenance_agent_id: 'a_2'
+				maintenance_agent_id: 'a_2',
+				initialized: true
 			}
 		]);
 		mocks.listAgents.mockResolvedValue([{ id: 'a_2', hostname: 'MINDCORE' }]);
 	});
 
-	it('shows the repository of each profile in the profile facet and finds it', async () => {
+	it('adr_0047 puts the repository third in line 2 and filters by it', async () => {
 		const user = userEvent.setup();
 		mocks.listPlans.mockResolvedValue([
 			plan(),
-			plan({ id: 'pl_2', name: 'nas-nightly', profile_id: 'p_2', profile_name: 'nas-files' })
+			plan({
+				id: 'pl_2',
+				name: 'nas-nightly',
+				profile_id: 'p_2',
+				profile_name: 'nas-files',
+				repository_id: 'r_2'
+			})
+		]);
+		render(Plans);
+
+		const item = (await screen.findByText('nightly-web')).closest('li') as HTMLElement;
+		expect(item).toHaveTextContent('win-fs01 · web-daily · test-s3-yandex ·');
+
+		await user.click(screen.getByRole('button', { name: /^Repository/ }));
+		const nas = await screen.findByLabelText('nas-local');
+		expect(document.getElementById(nas.getAttribute('aria-describedby') ?? '')).toHaveTextContent(
+			/Local\s*·\s*\/srv\/restic\s*·\s*host MINDCORE/
+		);
+		await user.click(nas);
+		await waitFor(() => expect(screen.queryByText('nightly-web')).not.toBeInTheDocument());
+		expect(screen.getByText('nas-nightly')).toBeInTheDocument();
+	});
+
+	it('searches the repository name of a plan', async () => {
+		const user = userEvent.setup();
+		mocks.listPlans.mockResolvedValue([
+			plan(),
+			plan({
+				id: 'pl_2',
+				name: 'nas-nightly',
+				profile_id: 'p_2',
+				profile_name: 'nas-files',
+				repository_id: 'r_2'
+			})
 		]);
 		render(Plans);
 
 		await screen.findByText('nas-nightly');
-		await user.click(screen.getByRole('button', { name: /^Profile/ }));
-		const nas = await screen.findByLabelText('nas-files');
-		expect(document.getElementById(nas.getAttribute('aria-describedby') ?? '')).toHaveTextContent(
-			/nas-local\s*Local\s*·\s*host MINDCORE/
-		);
-		await user.type(screen.getByPlaceholderText('Find: Profile'), 'yandex');
-		expect(screen.queryByLabelText('nas-files')).not.toBeInTheDocument();
-		expect(screen.getByLabelText('web-daily')).toBeInTheDocument();
+		await user.type(screen.getByPlaceholderText('Search plans'), 'nas-local');
+		await waitFor(() => expect(screen.queryByText('nightly-web')).not.toBeInTheDocument());
+		expect(screen.getByText('nas-nightly')).toBeInTheDocument();
 	});
 
-	it('lists a plan with its host and its schedule', async () => {
+	it('lists a plan with its host, its profile, its repository and its schedule', async () => {
 		mocks.listPlans.mockResolvedValue([plan()]);
 		render(Plans);
 
 		await waitFor(() => expect(screen.getByText('nightly-web')).toBeInTheDocument());
 		expect(screen.getByText('win-fs01')).toBeInTheDocument();
 		expect(screen.getByText('web-daily')).toBeInTheDocument();
+		expect(screen.getByText('test-s3-yandex')).toBeInTheDocument();
 		// The schedule shows the phrase; the cron expression and the zone are in its tooltip.
 		expect(screen.getByText('every day at 02:00')).toHaveAttribute(
 			'title',
@@ -216,7 +251,12 @@ describe('the Plans screen', () => {
 		await waitFor(() =>
 			expect(mocks.updatePlan).toHaveBeenCalledWith(
 				'pl_1',
-				expect.objectContaining({ enabled: false, cron: '0 2 * * *', profile_id: 'p_1' })
+				expect.objectContaining({
+					enabled: false,
+					cron: '0 2 * * *',
+					profile_id: 'p_1',
+					repository_id: 'r_1'
+				})
 			)
 		);
 	});

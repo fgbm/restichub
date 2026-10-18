@@ -48,7 +48,8 @@ describe('the profile picker options', () => {
 	});
 
 	it('shows the retention without a rule as an empty text', () => {
-		expect(profileRetention(profile({ retention: { ...retention, keep_daily: 0 } }))).toBe('');
+		const noRule = { ...retention, keep_daily: 0, keep_weekly: 0 };
+		expect(profileRetention(profile({ retention: noRule }))).toBe('');
 		expect(profileRetention(profile({ retention: null }))).toBe('');
 		expect(profileRetention(profile({ retention: { ...retention, keep_within: '30d' } }))).toBe(
 			'7 d · 2 wk · within 30d'

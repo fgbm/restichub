@@ -1217,7 +1217,7 @@ export const en = {
 	'error.not_repository_host':
 		'The plan runs on another host than its local repository. Open the plan and select the repository host.',
 	'error.repository_in_use':
-		'Profiles use this repository. Switch them to another repository or delete them.',
+		'Plans use this repository. Switch them to another repository or delete them.',
 	'error.repository_has_active_job':
 		'A job runs on this repository now. Wait until it ends or cancel the job.',
 	'error.profile_in_use': 'Plans use this profile. Switch them to another profile or delete them.',

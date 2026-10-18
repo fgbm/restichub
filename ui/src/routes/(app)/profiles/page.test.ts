@@ -8,7 +8,6 @@ import Profiles from './+page.svelte';
 
 const mocks = vi.hoisted(() => ({
 	listProfiles: vi.fn(),
-	listRepositories: vi.fn(),
 	listPlans: vi.fn(),
 	profileUsage: vi.fn(),
 	deleteProfile: vi.fn(),
@@ -34,7 +33,6 @@ vi.mock('#lib/api/index.ts', async (importOriginal) => {
 		service: {
 			...actual.service,
 			listProfiles: mocks.listProfiles,
-			listRepositories: mocks.listRepositories,
 			listPlans: mocks.listPlans,
 			profileUsage: mocks.profileUsage,
 			deleteProfile: mocks.deleteProfile
@@ -48,14 +46,12 @@ beforeEach(() => {
 		{
 			id: 'p_1',
 			name: 'db-nightly',
-			repository_id: 'r_1',
 			tags: ['db'],
 			retention: { keep_daily: 7, keep_weekly: 4 },
 			paths: { all: ['/srv/db', '/etc'] },
 			updated_at: '2026-10-01T00:00:00Z'
 		}
 	]);
-	mocks.listRepositories.mockResolvedValue([{ id: 'r_1', name: 'offsite' }]);
 	mocks.listPlans.mockResolvedValue([{ id: 'pl_1', profile_id: 'p_1' }]);
 });
 
@@ -74,10 +70,19 @@ describe('Profiles list', () => {
 		expect(remove).toBeEnabled();
 		expect(remove).toHaveAttribute('title', 'A plan uses the profile. Delete the plans first.');
 		expect(screen.queryByRole('button', { name: 'More actions for db-nightly' })).toBeNull();
-		expect(screen.getByText('offsite')).toBeInTheDocument();
 		expect(screen.getByText('1 plan')).toBeInTheDocument();
 		expect(screen.getByText('/srv/db +1')).toBeInTheDocument();
 		expect(screen.getByText('7 d · 4 wk')).toBeInTheDocument();
+	});
+
+	it('adr_0047 shows the paths, the retention and the plans without a repository', async () => {
+		render(Profiles);
+
+		const link = await screen.findByRole('link', { name: 'db-nightly' });
+		const item = link.closest('li') as HTMLElement;
+		expect(item.querySelector('.item__meta')).toHaveTextContent('/srv/db +1 · 7 d · 4 wk · 1 plan');
+		expect(screen.queryByRole('button', { name: /^Repository/ })).toBeNull();
+		expect(screen.getByRole('button', { name: /^Tags/ })).toBeInTheDocument();
 	});
 
 	it('opens a new profile as a copy', async () => {

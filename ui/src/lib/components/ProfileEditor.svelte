@@ -56,6 +56,7 @@
 	import type { Os, ProfileDraft, SummaryKey } from '#lib/profile-form.ts';
 	import { repositoryAddress } from '#lib/repository-picker.ts';
 	import { rememberSections } from '#lib/section-state.svelte.ts';
+	import { loadPreference, savePreference } from '#lib/stores/ui-preferences.svelte.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
@@ -182,8 +183,11 @@
 			repositories = repositoryList;
 			agents = agentList;
 			plans = planList;
-			// The commands panel opens with a host and a repository, which the person changes.
-			commandHostId = agentList.find((agent) => agent.status === 'active')?.id ?? '';
+			// The commands panel opens with the host that the person kept, or the first active one.
+			const active = agentList.filter((agent) => agent.status === 'active');
+			if (!active.some((agent) => agent.id === commandHostId)) {
+				commandHostId = active[0]?.id ?? '';
+			}
 			commandRepositoryId =
 				repositoryList.find((item) => item.initialized)?.id ?? repositoryList[0]?.id ?? '';
 			if (profileId) {
@@ -342,8 +346,21 @@
 	}
 
 	let commandsOpen = $state(false);
-	let commandHostId = $state('');
+	// AC-UI-11 keeps the host of the commands panel for the browser.
+	let commandHostId = $state(
+		loadPreference(
+			'browser',
+			'commands.host',
+			(value): value is string => typeof value === 'string',
+			''
+		)
+	);
 	let commandRepositoryId = $state('');
+
+	function selectCommandHost(id: string): void {
+		commandHostId = id;
+		savePreference('browser', 'commands.host', id);
+	}
 	const hasPaths = $derived(
 		[draft.pathsAll, draft.pathsWindows, draft.pathsLinux, draft.pathsMacos].some(
 			(text) => text.trim() !== ''
@@ -702,7 +719,12 @@
 	>
 		<div class="commands">
 			<div class="grid2">
-				<HostPicker id="commands-host" hosts={activeHosts} bind:value={commandHostId} />
+				<HostPicker
+					id="commands-host"
+					hosts={activeHosts}
+					value={commandHostId}
+					onchange={selectCommandHost}
+				/>
 				<RepositoryPicker
 					id="commands-repository"
 					{repositories}
