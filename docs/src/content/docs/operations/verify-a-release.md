@@ -94,7 +94,7 @@ Use any CycloneDX tool, for example `grype sbom:<file>`, to match the components
 
 ## Reproduce a Linux package
 
-The Linux agent packages are reproducible. A build of the same commit with the same toolchain gives the same archive bytes. The workflow sets `SOURCE_DATE_EPOCH` to the commit time and maps the build paths with `--remap-path-prefix`. It writes each archive with sorted entries, a fixed owner and a fixed time. The SBOM files hold their generation time. The Windows package, the SBOM files and the images are not byte-reproducible, and the workflow does not check them.
+The Linux agent packages are reproducible. A build of the same commit with the same toolchain gives the same archive bytes. The workflow sets `SOURCE_DATE_EPOCH` to the commit time and maps the build paths with `--remap-path-prefix`. It writes each archive with sorted entries, a fixed owner and a fixed time. The SBOM files hold their generation time. The Windows package, the SBOM files and the images are not byte-reproducible, and the workflow does not check them. A reproducible Windows package and reproducible images are planned for the 1.0 release.
 
 To compare a package with the release, build the same commit on Ubuntu 24.04 (`x86_64`) with the `musl-tools` package, the Rust toolchain of the file `rust-toolchain.toml` (1.96) and `rustup`. The commands below build the `amd64` package. Set `VERSION` to the version of the release.
 
@@ -117,4 +117,4 @@ The hash must equal the line of the package in the signed `SHA256SUMS` file of t
 
 ## Windows
 
-The Windows package has a cosign signature like the Linux packages. The `restichub-agent.exe` file has no Authenticode signature in this release, so Windows SmartScreen can warn when you run it from a download. Verify the package with the commands above before you unpack it.
+The Windows package has a cosign signature like the Linux packages. The `restichub-agent.exe` file has no Authenticode signature in this release, so Windows SmartScreen can warn when you run it from a download. Authenticode signing is planned for the 1.0 release. Verify the package with the commands above before you unpack it.

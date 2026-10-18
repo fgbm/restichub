@@ -394,7 +394,7 @@ async fn fr_ag_08_the_maintenance_steps_give_typed_results() {
 /// best-effort I/O class.
 #[cfg(target_os = "linux")]
 #[tokio::test(flavor = "multi_thread")]
-async fn fr_ag_15_a_low_priority_step_lowers_the_process_priority() {
+async fn ac_ag_14_a_low_priority_step_lowers_the_process_priority() {
     let fixture = Fixture::new("step-priority");
     let jobs = fixture.jobs();
     let step = make_step(

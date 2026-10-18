@@ -56,7 +56,7 @@ async fn create_plan(app: &Router, cookie: &str, body: Value) -> Value {
 }
 
 #[tokio::test]
-async fn the_plan_crud_writes_the_audit_and_keeps_the_view() {
+async fn ac_sc_11_the_plan_crud_writes_the_audit_and_keeps_the_view() {
     let Some(db) = common::test_db().await else {
         return;
     };
@@ -165,7 +165,7 @@ async fn the_plan_crud_writes_the_audit_and_keeps_the_view() {
 }
 
 #[tokio::test]
-async fn the_plan_create_validates_the_schedule_and_the_references() {
+async fn ac_sc_11_the_plan_create_validates_the_schedule_and_the_references() {
     let Some(db) = common::test_db().await else {
         return;
     };

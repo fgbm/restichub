@@ -183,7 +183,7 @@ fn a_bad_log_format_names_the_parameter() {
 }
 
 #[test]
-fn the_log_format_from_the_environment_is_json() {
+fn ac_nfr_11_the_log_format_from_the_environment_is_json() {
     let env = MapEnv::new(&[
         ("RESTICHUB_DATABASE_URL", "postgres://host/db"),
         ("RESTICHUB_LOG_FORMAT", "json"),

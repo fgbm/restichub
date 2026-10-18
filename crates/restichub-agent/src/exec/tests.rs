@@ -323,7 +323,7 @@ fn fr_ag_10_the_forced_kill_stops_the_whole_tree() {
 /// FR-AG-15: the low priority is relative to the agent and never passes the highest nice value.
 #[cfg(target_os = "linux")]
 #[test]
-fn fr_ag_15_the_low_priority_is_relative_to_the_agent() {
+fn ac_ag_14_the_low_priority_is_relative_to_the_agent() {
     assert_eq!(super::lowered_nice(0), 10);
     assert_eq!(super::lowered_nice(5), 15);
     assert_eq!(super::lowered_nice(15), 19);

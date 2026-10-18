@@ -169,7 +169,7 @@ The control plane deletes log lines that are older than the retention period. A 
 |---|---|---|
 | Days that the control plane keeps the log text | 30 | `RESTICHUB_LOG_RETENTION_DAYS` |
 
-The configuration file holds the same value as `log_retention_days`. The value is the same for every tenant. A value below 1 is raised to 1. A value above 36500 stops the start.
+The configuration file holds the same value as `log_retention_days`. The value is the same for every tenant, and the control plane keeps the log text by age only. Retention by size and a different period for each tenant are planned for the 1.0 release. A value below 1 is raised to 1. A value above 36500 stops the start.
 
 ## Roles
 
