@@ -35,7 +35,7 @@ async fn fixture() -> Option<Fixture> {
     let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
     let secret = seed_secret(db.database(), tenant, "names.password").await;
     let repository = seed_repository(db.database(), tenant, "names-repo", secret).await;
-    let profile = seed_profile(db.database(), tenant, "names-profile", repository).await;
+    let profile = seed_profile(db.database(), tenant, "names-profile").await;
     let agent = seed_agent(db.database(), tenant, "names-host").await;
     Some(Fixture {
         app,
@@ -51,7 +51,6 @@ impl Fixture {
     fn profile(&self, name: &str) -> Value {
         json!({
             "name": name,
-            "repository_id": self.repository_id,
             "paths": {"all": ["/srv"]},
         })
     }
@@ -61,6 +60,7 @@ impl Fixture {
             "name": name,
             "profile_id": self.profile_id,
             "agent_id": self.agent_id,
+            "repository_id": self.repository_id,
             "cron": "0 2 * * *",
             "time_zone": "UTC",
             "missed_run_policy": "run_all",

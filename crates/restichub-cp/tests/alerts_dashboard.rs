@@ -43,7 +43,7 @@ async fn ac_mn_09_dashboard_overview() {
         seed_secret(db.database(), tenant, "dash.two").await,
     )
     .await;
-    let profile = seed_profile(db.database(), tenant, "dash-profile", repository).await;
+    let profile = seed_profile(db.database(), tenant, "dash-profile").await;
     let online = seed_agent(db.database(), tenant, "host-online").await;
     let offline = seed_agent(db.database(), tenant, "host-offline").await;
     seed_agent(db.database(), tenant, "host-waiting").await;
@@ -61,6 +61,7 @@ async fn ac_mn_09_dashboard_overview() {
         "UTC",
         restichub_db::MissedRunPolicy::Skip,
         None,
+        repository,
     )
     .await;
     let risky = seed_scheduled_plan(
@@ -73,6 +74,7 @@ async fn ac_mn_09_dashboard_overview() {
         "UTC",
         restichub_db::MissedRunPolicy::Skip,
         None,
+        repository,
     )
     .await;
     let broken = seed_scheduled_plan(
@@ -85,6 +87,7 @@ async fn ac_mn_09_dashboard_overview() {
         "UTC",
         restichub_db::MissedRunPolicy::Skip,
         None,
+        repository,
     )
     .await;
     let mut tx = scoped(&db, tenant).await;
@@ -224,13 +227,13 @@ async fn ac_mn_01_plan_api_rpo_field() {
     let cookie = seed_session(db.database(), tenant, "operator", "operator").await;
     let secret = seed_secret(db.database(), tenant, "rpo.password").await;
     let repository = seed_repository(db.database(), tenant, "rpo-repo", secret).await;
-    let profile = seed_profile(db.database(), tenant, "rpo-profile", repository).await;
+    let profile = seed_profile(db.database(), tenant, "rpo-profile").await;
     let agent = seed_agent(db.database(), tenant, "rpo-host").await;
     let body = |rpo: serde_json::Value| {
         json!({
             "name": "p", "profile_id": profile.to_string(), "agent_id": agent.to_string(),
-            "cron": "0 2 * * *", "time_zone": "UTC", "missed_run_policy": "skip",
-            "rpo_seconds": rpo,
+            "repository_id": repository.to_string(), "cron": "0 2 * * *", "time_zone": "UTC",
+            "missed_run_policy": "skip", "rpo_seconds": rpo,
         })
     };
     for bad in [json!(899), json!(34_560_001), json!(-5)] {

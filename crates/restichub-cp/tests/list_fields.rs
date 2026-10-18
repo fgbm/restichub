@@ -64,13 +64,13 @@ async fn fr_ui_01_the_plan_list_shows_the_rpo_state_and_the_last_success() {
     let other = create_tenant_with_key(db.database(), "plan-facts-other").await;
     let secret = seed_secret(db.database(), tenant, "pw").await;
     let repository = seed_repository(db.database(), tenant, "repo", secret).await;
-    let profile = seed_profile(db.database(), tenant, "files", repository).await;
+    let profile = seed_profile(db.database(), tenant, "files").await;
     let host = seed_agent(db.database(), tenant, "web-01").await;
     let gone = seed_agent(db.database(), tenant, "old-01").await;
-    let fresh = seed_plan(db.database(), tenant, "fresh", profile, host).await;
-    let late = seed_plan(db.database(), tenant, "late", profile, host).await;
-    let never = seed_plan(db.database(), tenant, "never", profile, host).await;
-    let orphan = seed_plan(db.database(), tenant, "orphan", profile, gone).await;
+    let fresh = seed_plan(db.database(), tenant, "fresh", profile, host, repository).await;
+    let late = seed_plan(db.database(), tenant, "late", profile, host, repository).await;
+    let never = seed_plan(db.database(), tenant, "never", profile, host, repository).await;
+    let orphan = seed_plan(db.database(), tenant, "orphan", profile, gone, repository).await;
     // The daily schedule gives an objective of 26 hours; 75 % of it is 19.5 hours.
     for (plan, age) in [(fresh, "1 hour"), (late, "20 hours")] {
         let id = seed_job(db.database(), tenant, host, repository).await;

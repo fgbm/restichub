@@ -73,8 +73,8 @@ async fn fr_sc_09_the_job_list_counts_the_state_tabs_searches_the_names_and_sort
     let repo_b = seed_repository(db.database(), tenant, "repo_b", secret).await;
     let web = seed_agent(db.database(), tenant, "web-01").await;
     let database = seed_agent(db.database(), tenant, "db-01").await;
-    let profile = seed_profile(db.database(), tenant, "files", repo_a).await;
-    let nightly = seed_plan(db.database(), tenant, "Nightly", profile, web).await;
+    let profile = seed_profile(db.database(), tenant, "files").await;
+    let nightly = seed_plan(db.database(), tenant, "Nightly", profile, web, repo_a).await;
     let plan = format!("plan_id = '{nightly}', ");
 
     let running = job(
@@ -325,9 +325,9 @@ async fn fr_au_01_the_audit_list_names_the_object_and_the_actor_and_searches_the
     let other = create_tenant_with_key(db.database(), "audit-names-other").await;
     let secret = seed_secret(db.database(), tenant, "pw").await;
     let repository = seed_repository(db.database(), tenant, "repo", secret).await;
-    let profile = seed_profile(db.database(), tenant, "user-profiles", repository).await;
+    let profile = seed_profile(db.database(), tenant, "user-profiles").await;
     let host = seed_agent(db.database(), tenant, "web-01").await;
-    let plan = seed_plan(db.database(), tenant, "nightly", profile, host).await;
+    let plan = seed_plan(db.database(), tenant, "nightly", profile, host, repository).await;
     let run = seed_job(db.database(), tenant, host, repository).await;
     exec(
         &db,

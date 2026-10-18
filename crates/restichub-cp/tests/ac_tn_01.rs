@@ -336,12 +336,19 @@ async fn ac_tn_01_a_cross_tenant_identifier_returns_404_and_changes_nothing() {
     let secret_b = seed_secret(db.database(), tenant_b, CANARY_SECRET).await;
     let repository_b =
         common::seed_repository(db.database(), tenant_b, CANARY_REPOSITORY, secret_b).await;
-    let profile_b =
-        common::seed_profile(db.database(), tenant_b, CANARY_PROFILE, repository_b).await;
+    let profile_b = common::seed_profile(db.database(), tenant_b, CANARY_PROFILE).await;
     let agent_b = common::seed_agent(db.database(), tenant_b, "canary-host").await;
     let enrollment_token_b = common::seed_enrollment_token(db.database(), tenant_b, user_b).await;
     let job_b = common::seed_job(db.database(), tenant_b, agent_b, repository_b).await;
-    let plan_b = common::seed_plan(db.database(), tenant_b, CANARY_PLAN, profile_b, agent_b).await;
+    let plan_b = common::seed_plan(
+        db.database(),
+        tenant_b,
+        CANARY_PLAN,
+        profile_b,
+        agent_b,
+        repository_b,
+    )
+    .await;
     let channel_b = seed_channel(&db, tenant_b, CANARY_CHANNEL).await;
     let (script_template_b, job_template_b) = seed_templates(&db, tenant_b).await;
     seed_api_token(db.database(), tenant_b, "viewer").await;
@@ -392,8 +399,7 @@ async fn ac_tn_01_a_cross_tenant_identifier_returns_404_and_changes_nothing() {
     let secret_a = seed_secret(db.database(), tenant_a, "cross-a-secret").await;
     let repository_a =
         common::seed_repository(db.database(), tenant_a, "cross-a-repo", secret_a).await;
-    let profile_a =
-        common::seed_profile(db.database(), tenant_a, "cross-a-profile", repository_a).await;
+    let profile_a = common::seed_profile(db.database(), tenant_a, "cross-a-profile").await;
     let agent_a = common::seed_agent(db.database(), tenant_a, "cross-a-host").await;
 
     let (status, _, document) =

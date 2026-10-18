@@ -46,11 +46,17 @@ struct Host {
 }
 
 /// A plan that runs every night at 02:00 UTC and runs the latest missed fire time (FR-SC-01).
-async fn nightly_plan(env: &Env, profile: uuid::Uuid, agent: restichub_db::AgentId) -> uuid::Uuid {
+async fn nightly_plan(
+    env: &Env,
+    profile: uuid::Uuid,
+    agent: restichub_db::AgentId,
+    repository: uuid::Uuid,
+) -> uuid::Uuid {
     let body = json!({
         "name": format!("nightly-{agent}"),
         "profile_id": profile.to_string(),
         "agent_id": agent.to_string(),
+        "repository_id": repository.to_string(),
         "cron": "0 2 * * *",
         "time_zone": "UTC",
         "missed_run_policy": "latest_only",
@@ -69,8 +75,8 @@ async fn host(env: &Env, index: usize) -> Host {
         .start_emulator(&format!("e2e-host-{index}"), Arc::new(Quick))
         .await;
     let repository = env.create_repository(emulator.id, "pw").await;
-    let profile = env.create_profile(repository, json!({})).await;
-    let plan = nightly_plan(env, profile, emulator.id).await;
+    let profile = env.create_profile(json!({})).await;
+    let plan = nightly_plan(env, profile, emulator.id, repository).await;
     Host {
         emulator,
         repository,
@@ -255,8 +261,8 @@ async fn adr_0030_an_agent_one_rotation_behind_follows_the_chain_after_a_comprom
 
     let emulator = env.start_emulator_for(identity, Arc::new(Quick)).await;
     let repository = env.create_repository(agent, "pw").await;
-    let profile = env.create_profile(repository, json!({})).await;
-    let plan = env.create_plan(profile, agent).await;
+    let profile = env.create_profile(json!({})).await;
+    let plan = env.create_plan(profile, agent, repository).await;
     let job = env.run_plan(plan).await;
     eventually(|| async {
         env.pass().await;
@@ -283,8 +289,8 @@ async fn adr_0030_an_agent_two_rotations_behind_does_not_run_the_job() {
 
     let emulator = env.start_emulator_for(identity, Arc::new(Quick)).await;
     let repository = env.create_repository(agent, "pw").await;
-    let profile = env.create_profile(repository, json!({})).await;
-    let plan = env.create_plan(profile, agent).await;
+    let profile = env.create_profile(json!({})).await;
+    let plan = env.create_plan(profile, agent, repository).await;
     let job = env.run_plan(plan).await;
     env.pass().await;
     tokio::time::sleep(Duration::from_secs(2)).await;

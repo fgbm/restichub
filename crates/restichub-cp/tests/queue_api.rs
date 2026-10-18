@@ -26,8 +26,8 @@ async fn world(db: restichub_db::test_util::TestDatabase) -> World {
     let env = Env::start(db, test_queue()).await;
     let agent = env.connect_agent("api-host").await;
     let repository = env.create_repository(agent.id, "pw").await;
-    let profile = env.create_profile(repository, json!({})).await;
-    let plan = env.create_plan(profile, agent.id).await;
+    let profile = env.create_profile(json!({})).await;
+    let plan = env.create_plan(profile, agent.id, repository).await;
     World {
         env,
         agent,
@@ -52,8 +52,10 @@ async fn fr_sc_09_the_role_matrix_of_the_run_and_cancel_actions() {
     assert_eq!(body["status"], "queued");
     assert_eq!(body["kind"], "backup");
     let job = id_of(&body);
-    let second_profile = env.create_profile(w.repository, json!({})).await;
-    let second_plan = env.create_plan(second_profile, w.agent.id).await;
+    let second_profile = env.create_profile(json!({})).await;
+    let second_plan = env
+        .create_plan(second_profile, w.agent.id, w.repository)
+        .await;
     let (status, _) = env
         .call(
             &env.admin,
@@ -216,8 +218,8 @@ async fn fr_sc_09_the_list_filters_and_paginates() {
     let env = &w.env;
     env.run_plan(w.plan).await;
     for _ in 0..5 {
-        let profile = env.create_profile(w.repository, json!({})).await;
-        let plan = env.create_plan(profile, w.agent.id).await;
+        let profile = env.create_profile(json!({})).await;
+        let plan = env.create_plan(profile, w.agent.id, w.repository).await;
         env.run_plan(plan).await;
     }
 

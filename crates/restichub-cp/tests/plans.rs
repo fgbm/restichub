@@ -22,7 +22,7 @@ use common::{
 async fn plan_fixture(db: &Database, tenant: TenantId) -> (String, String, String) {
     let secret = seed_secret(db, tenant, "plan.password").await;
     let repository = seed_repository(db, tenant, "plan-repo", secret).await;
-    let profile = seed_profile(db, tenant, "plan-profile", repository).await;
+    let profile = seed_profile(db, tenant, "plan-profile").await;
     let agent = seed_agent(db, tenant, "plan-host").await;
     (
         repository.to_string(),
@@ -31,11 +31,12 @@ async fn plan_fixture(db: &Database, tenant: TenantId) -> (String, String, Strin
     )
 }
 
-fn plan_body(name: &str, profile_id: &str, agent_id: &str) -> Value {
+fn plan_body(name: &str, profile_id: &str, agent_id: &str, repository_id: &str) -> Value {
     json!({
         "name": name,
         "profile_id": profile_id,
         "agent_id": agent_id,
+        "repository_id": repository_id,
         "cron": "0 2 * * *",
         "time_zone": "Europe/Berlin",
         "missed_run_policy": "run_all",
@@ -63,11 +64,16 @@ async fn ac_sc_11_the_plan_crud_writes_the_audit_and_keeps_the_view() {
     let tenant = create_tenant_with_key(db.database(), "plan-crud").await;
     let app = app_with_kek(db.database());
     let cookie = seed_session(db.database(), tenant, "operator", "operator").await;
-    let (_repository, profile_id, agent_id) = plan_fixture(db.database(), tenant).await;
+    let (repository_id, profile_id, agent_id) = plan_fixture(db.database(), tenant).await;
 
     let audit_before = common::count(db.database(), tenant, "audit_log").await;
 
-    let plan = create_plan(&app, &cookie, plan_body("nightly", &profile_id, &agent_id)).await;
+    let plan = create_plan(
+        &app,
+        &cookie,
+        plan_body("nightly", &profile_id, &agent_id, &repository_id),
+    )
+    .await;
     let plan_id = plan["id"]
         .as_str()
         .expect("the plan holds an id")
@@ -113,6 +119,7 @@ async fn ac_sc_11_the_plan_crud_writes_the_audit_and_keeps_the_view() {
             Some(json!({
                 "profile_id": profile_id,
                 "agent_id": agent_id,
+                "repository_id": repository_id,
                 "cron": "30 3 * * *",
                 "time_zone": "UTC",
                 "missed_run_policy": "latest_only",
@@ -182,6 +189,7 @@ async fn ac_sc_11_the_plan_create_validates_the_schedule_and_the_references() {
                 "name": "bad-cron",
                 "profile_id": profile_id,
                 "agent_id": agent_id,
+                "repository_id": repository_id,
                 "cron": "* * * *",
                 "time_zone": "UTC",
                 "missed_run_policy": "run_all",
@@ -194,6 +202,7 @@ async fn ac_sc_11_the_plan_create_validates_the_schedule_and_the_references() {
                 "name": "impossible-cron",
                 "profile_id": profile_id,
                 "agent_id": agent_id,
+                "repository_id": repository_id,
                 "cron": "0 0 31 2 *",
                 "time_zone": "UTC",
                 "missed_run_policy": "run_all",
@@ -206,6 +215,7 @@ async fn ac_sc_11_the_plan_create_validates_the_schedule_and_the_references() {
                 "name": "bad-zone",
                 "profile_id": profile_id,
                 "agent_id": agent_id,
+                "repository_id": repository_id,
                 "cron": "0 2 * * *",
                 "time_zone": "Mars/Olympus",
                 "missed_run_policy": "run_all",
@@ -218,6 +228,7 @@ async fn ac_sc_11_the_plan_create_validates_the_schedule_and_the_references() {
                 "name": "bad-profile",
                 "profile_id": unknown,
                 "agent_id": agent_id,
+                "repository_id": repository_id,
                 "cron": "0 2 * * *",
                 "time_zone": "UTC",
                 "missed_run_policy": "run_all",
@@ -230,11 +241,25 @@ async fn ac_sc_11_the_plan_create_validates_the_schedule_and_the_references() {
                 "name": "bad-agent",
                 "profile_id": profile_id,
                 "agent_id": unknown,
+                "repository_id": repository_id,
                 "cron": "0 2 * * *",
                 "time_zone": "UTC",
                 "missed_run_policy": "run_all",
             }),
             "agent_id",
+        ),
+        (
+            "a repository of another tenant",
+            json!({
+                "name": "bad-repository",
+                "profile_id": profile_id,
+                "agent_id": agent_id,
+                "repository_id": unknown,
+                "cron": "0 2 * * *",
+                "time_zone": "UTC",
+                "missed_run_policy": "run_all",
+            }),
+            "repository_id",
         ),
     ];
 
@@ -260,7 +285,6 @@ async fn ac_sc_11_the_plan_create_validates_the_schedule_and_the_references() {
             Some(&cookie),
             Some(json!({
                 "name": "windows-only",
-                "repository_id": repository_id,
                 "paths": {"windows": ["C:\\Data"]},
             })),
         ),
@@ -281,6 +305,7 @@ async fn ac_sc_11_the_plan_create_validates_the_schedule_and_the_references() {
                 "name": "windows-plan",
                 "profile_id": windows_profile,
                 "agent_id": agent_id,
+                "repository_id": repository_id,
                 "cron": "0 2 * * *",
                 "time_zone": "UTC",
                 "missed_run_policy": "run_all",
@@ -303,11 +328,11 @@ async fn the_next_runs_preview_returns_the_fire_times() {
     let app = app_with_kek(db.database());
     let operator = seed_session(db.database(), tenant, "operator", "operator").await;
     let viewer = seed_session(db.database(), tenant, "viewer", "viewer").await;
-    let (_repository, profile_id, agent_id) = plan_fixture(db.database(), tenant).await;
+    let (repository_id, profile_id, agent_id) = plan_fixture(db.database(), tenant).await;
     let plan = create_plan(
         &app,
         &operator,
-        plan_body("preview", &profile_id, &agent_id),
+        plan_body("preview", &profile_id, &agent_id, &repository_id),
     )
     .await;
     let plan_id = plan["id"]
@@ -372,10 +397,15 @@ async fn the_plan_list_is_paginated() {
     let tenant = create_tenant_with_key(db.database(), "plan-page").await;
     let app = app_with_kek(db.database());
     let cookie = seed_session(db.database(), tenant, "operator", "operator").await;
-    let (_repository, profile_id, agent_id) = plan_fixture(db.database(), tenant).await;
+    let (repository_id, profile_id, agent_id) = plan_fixture(db.database(), tenant).await;
 
     for name in ["plan-a", "plan-b", "plan-c"] {
-        create_plan(&app, &cookie, plan_body(name, &profile_id, &agent_id)).await;
+        create_plan(
+            &app,
+            &cookie,
+            plan_body(name, &profile_id, &agent_id, &repository_id),
+        )
+        .await;
     }
 
     let (status, _, first) = send(
@@ -414,7 +444,7 @@ async fn the_plan_role_matrix_and_the_platform_tenant() {
     };
     let tenant = create_tenant_with_key(db.database(), "plan-roles").await;
     let app = app_with_kek(db.database());
-    let (_repository, profile_id, agent_id) = plan_fixture(db.database(), tenant).await;
+    let (repository_id, profile_id, agent_id) = plan_fixture(db.database(), tenant).await;
 
     // A Viewer may read the list of the plans of the tenant.
     let viewer = seed_session(db.database(), tenant, "viewer", "viewer").await;
@@ -427,7 +457,12 @@ async fn the_plan_role_matrix_and_the_platform_tenant() {
             "POST",
             "/api/v1/plans",
             Some(&viewer),
-            Some(plan_body("viewer-plan", &profile_id, &agent_id)),
+            Some(plan_body(
+                "viewer-plan",
+                &profile_id,
+                &agent_id,
+                &repository_id,
+            )),
         ),
     )
     .await;
@@ -441,7 +476,12 @@ async fn the_plan_role_matrix_and_the_platform_tenant() {
             "POST",
             "/api/v1/plans",
             Some(&operator),
-            Some(plan_body("operator-plan", &profile_id, &agent_id)),
+            Some(plan_body(
+                "operator-plan",
+                &profile_id,
+                &agent_id,
+                &repository_id,
+            )),
         ),
     )
     .await;
@@ -465,12 +505,12 @@ async fn the_plan_update_recomputes_the_fire_time_only_when_the_schedule_changes
     let tenant = create_tenant_with_key(db.database(), "plan-recompute").await;
     let app = app_with_kek(db.database());
     let cookie = seed_session(db.database(), tenant, "operator", "operator").await;
-    let (_repository, profile_id, agent_id) = plan_fixture(db.database(), tenant).await;
+    let (repository_id, profile_id, agent_id) = plan_fixture(db.database(), tenant).await;
 
     let plan = create_plan(
         &app,
         &cookie,
-        plan_body("rename-me", &profile_id, &agent_id),
+        plan_body("rename-me", &profile_id, &agent_id, &repository_id),
     )
     .await;
     let plan_id = plan["id"]
@@ -493,6 +533,7 @@ async fn the_plan_update_recomputes_the_fire_time_only_when_the_schedule_changes
                 "name": "renamed",
                 "profile_id": profile_id,
                 "agent_id": agent_id,
+                "repository_id": repository_id,
                 "cron": "0 2 * * *",
                 "time_zone": "Europe/Berlin",
                 "missed_run_policy": "run_all",
@@ -518,6 +559,7 @@ async fn the_plan_update_recomputes_the_fire_time_only_when_the_schedule_changes
             Some(json!({
                 "profile_id": profile_id,
                 "agent_id": agent_id,
+                "repository_id": repository_id,
                 "cron": "0 2 * * *",
                 "time_zone": "Europe/Berlin",
                 "missed_run_policy": "run_all",
@@ -606,7 +648,7 @@ async fn deleting_a_plan_cancels_its_queued_jobs() {
     let plan = create_plan(
         &app,
         &cookie,
-        plan_body("cancelled", &profile_id, &agent_id),
+        plan_body("cancelled", &profile_id, &agent_id, &repository_id),
     )
     .await;
     let plan_id = plan["id"]

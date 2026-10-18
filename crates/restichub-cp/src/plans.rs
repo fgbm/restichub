@@ -5,9 +5,9 @@
 //! tenant refuses every plan operation with HTTP 403.
 //!
 //! The control plane validates a plan before a write (FR-PF-05): the cron expression and the IANA
-//! time zone, the profile and the agent inside the tenant, and the compiler accepts the stored
-//! profile for the operating system of the agent. A rejected compile names the profile field
-//! (AC-SC-01).
+//! time zone, the profile, the agent and the repository inside the tenant, and the compiler accepts
+//! the stored profile for the operating system of the agent. A rejected compile names the profile
+//! field (AC-SC-01). A local repository binds the plan to its repository host (ADR-0046).
 //!
 //! The schedule belongs to the plan (FR-SC-01). The endpoint `GET /api/v1/plans/{id}/next-runs`
 //! returns the next fire times in UTC, for the user interface preview in the plan time zone.
@@ -19,7 +19,9 @@ use restichub_db::agents::{self as agents_repo};
 use restichub_db::audit::{AuditAction, diff};
 use restichub_db::plans::{self as repo, Plan, PlanCursor, PlanPage};
 use restichub_db::profiles::{self as profiles_repo};
-use restichub_db::{AgentId, AgentStatus, MissedRunPolicy, PlanId, ProfileId};
+use restichub_db::{
+    AgentId, AgentStatus, BackendKind, MissedRunPolicy, PlanId, ProfileId, RepositoryId,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use time::Duration;
@@ -65,6 +67,7 @@ pub struct CreatePlanRequest {
     pub name: String,
     pub profile_id: String,
     pub agent_id: String,
+    pub repository_id: String,
     pub cron: String,
     /// An IANA name, such as `Europe/Berlin`, validated before the write.
     pub time_zone: String,
@@ -87,6 +90,7 @@ pub struct UpdatePlanRequest {
     pub name: Option<String>,
     pub profile_id: String,
     pub agent_id: String,
+    pub repository_id: String,
     pub cron: String,
     pub time_zone: String,
     pub missed_run_policy: MissedRunPolicy,
@@ -307,15 +311,16 @@ pub async fn create_plan(
     ApiJson(body): ApiJson<CreatePlanRequest>,
 ) -> Result<(StatusCode, Json<PlanResponse>), ApiError> {
     context.authorize(Operation::PlansWrite)?;
-    let mut input = validate_input(
-        Some(body.name),
-        &body.profile_id,
-        &body.agent_id,
-        &body.cron,
-        &body.time_zone,
-        body.missed_run_policy,
-        body.enabled,
-    )?;
+    let mut input = validate_input(PlanPayload {
+        name: Some(body.name),
+        profile_id: &body.profile_id,
+        agent_id: &body.agent_id,
+        repository_id: &body.repository_id,
+        cron: &body.cron,
+        time_zone: &body.time_zone,
+        missed_run_policy: body.missed_run_policy,
+        enabled: body.enabled,
+    })?;
     input.rpo_seconds = validate_rpo(body.rpo_seconds)?;
     let now = state.auth().clock.now();
     let schedule = parse_schedule(&input.cron, &input.time_zone)?;
@@ -323,7 +328,15 @@ pub async fn create_plan(
     let created_by = crate::secrets::actor_user(&context.actor);
 
     let mut tx = state.db().begin_tenant(context.tenant_id).await?;
-    check_references(&mut tx, input.profile_id, input.agent_id, None, now).await?;
+    check_references(
+        &mut tx,
+        input.profile_id,
+        input.agent_id,
+        input.repository_id,
+        None,
+        now,
+    )
+    .await?;
     let next_run_at = next_run_at(&schedule, input.enabled, now)?;
     repo::create(
         &mut tx,
@@ -332,6 +345,7 @@ pub async fn create_plan(
             name: &input.name,
             profile_id: input.profile_id,
             agent_id: input.agent_id,
+            repository_id: input.repository_id,
             cron: &input.cron,
             time_zone: &input.time_zone,
             missed_run_policy: input.missed_run_policy,
@@ -391,21 +405,23 @@ pub async fn update_plan(
     let Some(current) = repo::get_for_update(&mut tx, plan_id).await? else {
         return Err(ApiError::not_found());
     };
-    let mut input = validate_input(
-        body.name.or(Some(current.name.clone())),
-        &body.profile_id,
-        &body.agent_id,
-        &body.cron,
-        &body.time_zone,
-        body.missed_run_policy,
-        body.enabled,
-    )?;
+    let mut input = validate_input(PlanPayload {
+        name: body.name.or(Some(current.name.clone())),
+        profile_id: &body.profile_id,
+        agent_id: &body.agent_id,
+        repository_id: &body.repository_id,
+        cron: &body.cron,
+        time_zone: &body.time_zone,
+        missed_run_policy: body.missed_run_policy,
+        enabled: body.enabled,
+    })?;
     input.rpo_seconds = validate_rpo(body.rpo_seconds)?;
     let schedule = parse_schedule(&input.cron, &input.time_zone)?;
     check_references(
         &mut tx,
         input.profile_id,
         input.agent_id,
+        input.repository_id,
         Some(current.agent_id),
         now,
     )
@@ -422,6 +438,7 @@ pub async fn update_plan(
             name: &input.name,
             profile_id: input.profile_id,
             agent_id: input.agent_id,
+            repository_id: input.repository_id,
             cron: &input.cron,
             time_zone: &input.time_zone,
             missed_run_policy: input.missed_run_policy,
@@ -609,6 +626,7 @@ struct PlanInput {
     name: String,
     profile_id: ProfileId,
     agent_id: AgentId,
+    repository_id: RepositoryId,
     cron: String,
     time_zone: String,
     missed_run_policy: MissedRunPolicy,
@@ -632,20 +650,29 @@ fn validate_rpo(value: Option<i32>) -> Result<Option<i32>, ApiError> {
     }
 }
 
-fn validate_input(
+/// The request fields that a plan create and a plan update share.
+struct PlanPayload<'a> {
     name: Option<String>,
-    profile_id: &str,
-    agent_id: &str,
-    cron: &str,
-    time_zone: &str,
+    profile_id: &'a str,
+    agent_id: &'a str,
+    repository_id: &'a str,
+    cron: &'a str,
+    time_zone: &'a str,
     missed_run_policy: MissedRunPolicy,
     enabled: bool,
-) -> Result<PlanInput, ApiError> {
-    let name = crate::validation::validate_record_name("name", &name.unwrap_or_default())?;
-    let profile_id = parse_id("profile_id", profile_id, ProfileId::from_uuid)?;
-    let agent_id = parse_id("agent_id", agent_id, AgentId::from_uuid)?;
-    let cron = cron.trim().to_owned();
-    let time_zone = time_zone.trim().to_owned();
+}
+
+fn validate_input(payload: PlanPayload<'_>) -> Result<PlanInput, ApiError> {
+    let name = crate::validation::validate_record_name("name", &payload.name.unwrap_or_default())?;
+    let profile_id = parse_id("profile_id", payload.profile_id, ProfileId::from_uuid)?;
+    let agent_id = parse_id("agent_id", payload.agent_id, AgentId::from_uuid)?;
+    let repository_id = parse_id(
+        "repository_id",
+        payload.repository_id,
+        RepositoryId::from_uuid,
+    )?;
+    let cron = payload.cron.trim().to_owned();
+    let time_zone = payload.time_zone.trim().to_owned();
     // A schedule that the cron parser refuses names the fields here, so the handler and the preview
     // agree on the reason.
     Schedule::parse(&cron, &time_zone)
@@ -654,10 +681,11 @@ fn validate_input(
         name,
         profile_id,
         agent_id,
+        repository_id,
         cron,
         time_zone,
-        missed_run_policy,
-        enabled,
+        missed_run_policy: payload.missed_run_policy,
+        enabled: payload.enabled,
         rpo_seconds: None,
     })
 }
@@ -701,19 +729,20 @@ pub(crate) fn next_run_at(
         .map_err(|error| schedule_error_to_api("cron", error))
 }
 
-/// Refuses a profile or an agent that is not in the tenant, an agent that is revoked
-/// (FR-TN-01, FR-ID-04), and an agent other than the host of a local repository.
+/// Refuses a profile, an agent or a repository that is not in the tenant, an agent that is revoked
+/// (FR-TN-01, FR-ID-04), and an agent other than the host of a local repository (ADR-0046).
 async fn check_references(
     tx: &mut restichub_db::TenantTx<'_>,
     profile_id: ProfileId,
     agent_id: AgentId,
+    repository_id: RepositoryId,
     current_agent: Option<AgentId>,
     now: time::OffsetDateTime,
 ) -> Result<(), ApiError> {
-    // Lock order plan -> profile -> agent -> repository. The profile update locks profile ->
-    // repository, so a concurrent repoint of the profile to a local repository cannot pass the
-    // host check with the old repository. A replace locks agent -> plans -> repositories, so the
-    // agent that the write binds is locked before the repository.
+    // Lock order plan -> profile -> agent -> repository. The repository update locks repository ->
+    // plans, so the repository row here cannot change its host between the check and the write. A
+    // replace locks agent -> plans -> repositories, so the agent that the write binds is locked
+    // before the repository.
     let profile = match profiles_repo::get_for_share(tx, profile_id).await? {
         Some(profile) => profile,
         None => return Err(ApiError::invalid_field("profile_id", Reason::Unknown)),
@@ -729,15 +758,18 @@ async fn check_references(
     if agent.status != AgentStatus::Active {
         return Err(ApiError::invalid_field("agent_id", Reason::Unknown));
     }
-    let Some(repository) =
-        restichub_db::repositories::get_for_update(tx, profile.repository_id).await?
+    let Some(repository) = restichub_db::repositories::get_for_update(tx, repository_id).await?
     else {
-        return Err(ApiError::invalid_field("profile_id", Reason::Unknown));
+        return Err(ApiError::invalid_field("repository_id", Reason::Unknown));
     };
-    crate::jobs::ensure_repository_host(&repository, agent_id)?;
+    // A local repository lives on the disk of its repository host, so a plan of it runs there only.
+    if repository.backend == BackendKind::Local && repository.maintenance_agent_id != Some(agent_id)
+    {
+        return Err(ApiError::invalid_field("agent_id", Reason::PlanOnOtherHost));
+    }
     // The stored profile must compile for the operating system of the agent (FR-PF-05). The compile
     // refuses a missing path for that operating system with a field error.
-    crate::profiles::compile_for_agent(&profile, &agent, now)?;
+    crate::profiles::compile_for_agent(&profile, repository_id, &agent, now)?;
     Ok(())
 }
 
@@ -781,6 +813,7 @@ fn plan_value(input: &PlanInput) -> serde_json::Value {
         "name": input.name,
         "profile_id": input.profile_id.to_string(),
         "agent_id": input.agent_id.to_string(),
+        "repository_id": input.repository_id.to_string(),
         "cron": input.cron,
         "time_zone": input.time_zone,
         "missed_run_policy": input.missed_run_policy.as_str(),
@@ -794,6 +827,7 @@ fn stored_value(plan: &Plan) -> serde_json::Value {
         "name": plan.name,
         "profile_id": plan.profile_id.to_string(),
         "agent_id": plan.agent_id.to_string(),
+        "repository_id": plan.repository_id.to_string(),
         "cron": plan.cron,
         "time_zone": plan.time_zone,
         "missed_run_policy": plan.missed_run_policy.as_str(),

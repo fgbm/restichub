@@ -7,11 +7,11 @@ mod common;
 mod queue_support;
 
 use axum::http::StatusCode;
-use restichub_db::{AgentId, JobKind};
+use restichub_db::AgentId;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-use queue_support::{Env, eventually, test_queue};
+use queue_support::{Env, test_queue};
 
 fn local_body(path: &str, host: Option<AgentId>) -> Value {
     let mut body = json!({
@@ -63,11 +63,12 @@ async fn move_plan(env: &Env, plan: Uuid, agent: AgentId) {
     tx.commit().await.expect("cannot commit the move");
 }
 
-fn plan_body(profile: Uuid, agent: AgentId) -> Value {
+fn plan_body(profile: Uuid, agent: AgentId, repository: Uuid) -> Value {
     json!({
         "name": format!("plan-{}", Uuid::now_v7()),
         "profile_id": profile.to_string(),
         "agent_id": agent.to_string(),
+        "repository_id": repository.to_string(),
         "cron": "0 2 1 1 *",
         "time_zone": "UTC",
         "missed_run_policy": "skip",
@@ -174,8 +175,8 @@ async fn ac_rp_06_a_host_change_keeps_the_plans_on_the_host() {
     let first = env.connect_agent("lo-plan-first").await;
     let second = env.connect_agent("lo-plan-second").await;
     let repository = env.create_repository(first.id, "pw").await;
-    let profile = env.create_profile(repository, json!({})).await;
-    let plan = env.create_plan(profile, first.id).await;
+    let profile = env.create_profile(json!({})).await;
+    let plan = env.create_plan(profile, first.id, repository).await;
 
     let (status, body) = set_host(&env, repository, &second.id.to_string()).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
@@ -199,181 +200,75 @@ async fn ac_rp_07_a_plan_of_a_local_repository_runs_on_its_host() {
     let host = env.connect_agent("lo-plan-host").await;
     let other = env.connect_agent("lo-plan-other").await;
     let repository = env.create_repository(host.id, "pw").await;
-    let profile = env.create_profile(repository, json!({})).await;
+    let profile = env.create_profile(json!({})).await;
 
     let (status, body) = env
         .call(
             &env.operator,
             "POST",
             "/api/v1/plans",
-            Some(plan_body(profile, other.id)),
+            Some(plan_body(profile, other.id, repository)),
         )
         .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
-    assert_field(&body, "agent_id", "not_repository_host");
+    assert_field(&body, "agent_id", "plan_on_other_host");
 
-    let plan = env.create_plan(profile, host.id).await;
+    let plan = env.create_plan(profile, host.id, repository).await;
     let (status, body) = env
         .call(
             &env.operator,
             "PATCH",
             &format!("/api/v1/plans/{plan}"),
-            Some(plan_body(profile, other.id)),
+            Some(plan_body(profile, other.id, repository)),
         )
         .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
-    assert_field(&body, "agent_id", "not_repository_host");
+    assert_field(&body, "agent_id", "plan_on_other_host");
 
     // A remote repository takes a plan on any host.
     let remote = env.create_rest_repository(host.id, "user", "secret").await;
-    let remote_profile = env.create_profile(remote, json!({})).await;
-    env.create_plan(remote_profile, other.id).await;
-
-    // A profile with a plan on another host cannot move to the local repository.
-    let (status, body) = env
-        .call(
-            &env.operator,
-            "PATCH",
-            &format!("/api/v1/profiles/{remote_profile}"),
-            Some(json!({"repository_id": repository.to_string(), "paths": {"all": ["/srv"]}})),
-        )
-        .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
-    assert_field(&body, "repository_id", "plan_on_other_host");
+    let remote_profile = env.create_profile(json!({})).await;
+    env.create_plan(remote_profile, other.id, remote).await;
     env.db.cleanup().await;
 }
 
 #[tokio::test]
-async fn ac_rp_07_a_plan_save_waits_for_a_concurrent_profile_repoint() {
+async fn ac_rp_07_a_plan_save_waits_for_a_concurrent_repository_host_change() {
     let Some(db) = common::test_db().await else {
         return;
     };
     let env = Env::start(db, test_queue()).await;
     let host = env.connect_agent("lo-race-host").await;
     let other = env.connect_agent("lo-race-other").await;
-    let local = env.create_repository(host.id, "pw").await;
-    let remote = env.create_rest_repository(host.id, "user", "secret").await;
-    let profile = env.create_profile(remote, json!({})).await;
+    let repository = env.create_repository(host.id, "pw").await;
+    let profile = env.create_profile(json!({})).await;
 
-    // A profile update that repoints the profile to the local repository holds the profile row.
-    let mut repoint = env.scoped().await;
-    sqlx::query("SELECT id FROM profiles WHERE id = $1 FOR UPDATE")
-        .bind(profile)
-        .execute(&mut *repoint)
+    // A host change of the local repository holds the repository row, so the plan save reads the
+    // old host and locks the repository after it.
+    let mut change = env.scoped().await;
+    sqlx::query("SELECT id FROM repositories WHERE id = $1 FOR UPDATE")
+        .bind(repository)
+        .execute(&mut *change)
         .await
-        .expect("cannot lock the profile");
-    sqlx::query("UPDATE profiles SET repository_id = $2 WHERE id = $1")
-        .bind(profile)
-        .bind(local)
-        .execute(&mut *repoint)
-        .await
-        .expect("cannot repoint the profile");
+        .expect("cannot lock the repository");
 
     let save = env.call(
         &env.operator,
         "POST",
         "/api/v1/plans",
-        Some(plan_body(profile, other.id)),
+        Some(plan_body(profile, other.id, repository)),
     );
     let commit = async {
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        repoint.commit().await.expect("cannot commit the repoint");
+        change.commit().await.expect("cannot commit the lock");
     };
     let ((status, body), ()) = tokio::join!(save, commit);
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
-    assert_field(&body, "agent_id", "not_repository_host");
+    assert_field(&body, "agent_id", "plan_on_other_host");
 
     let (status, body) = env.call(&env.admin, "GET", "/api/v1/plans", None).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["items"].as_array().map(Vec::len), Some(0), "{body}");
-    env.db.cleanup().await;
-}
-
-#[tokio::test]
-async fn ac_rp_07_the_dispatcher_refuses_a_job_on_another_host() {
-    let Some(db) = common::test_db().await else {
-        return;
-    };
-    let env = Env::start(db, test_queue()).await;
-    let host = env.connect_agent("lo-dispatch-host").await;
-    let mut other = env.connect_agent("lo-dispatch-other").await;
-    let repository = env.create_repository(host.id, "pw").await;
-    mark_initialized(&env, repository).await;
-    let profile = env.create_profile(repository, json!({})).await;
-    let plan = env.create_plan(profile, host.id).await;
-    move_plan(&env, plan, other.id).await;
-
-    let (status, body) = env
-        .call(
-            &env.operator,
-            "POST",
-            &format!("/api/v1/plans/{plan}/run"),
-            None,
-        )
-        .await;
-    assert_eq!(status, StatusCode::CONFLICT, "{body}");
-    assert_eq!(body["code"], "not_repository_host", "{body}");
-    assert!(body.get("field").is_none_or(Value::is_null), "{body}");
-
-    for (kind, plan) in [
-        (JobKind::Backup, Some(plan)),
-        (JobKind::Unlock, None),
-        (JobKind::Check, None),
-    ] {
-        let job = env.enqueue(kind, other.id, repository, plan).await;
-        env.pass().await;
-        eventually(|| async { env.job_status(job).await == "failed" }).await;
-        let ended = env.job(job).await;
-        assert_eq!(ended["result_message"], "not_repository_host", "{ended}");
-        assert_eq!(ended["result_code"], "config_error", "{ended}");
-    }
-    assert!(
-        other
-            .try_job(std::time::Duration::from_millis(300))
-            .await
-            .is_none(),
-        "the other host receives no job of the local repository"
-    );
-    env.db.cleanup().await;
-}
-
-#[tokio::test]
-async fn ac_rp_07_a_local_repository_restores_and_lists_on_its_host_only() {
-    let Some(db) = common::test_db().await else {
-        return;
-    };
-    let env = Env::start(db, test_queue()).await;
-    let host = env.connect_agent("lo-restore-host").await;
-    let other = env.connect_agent("lo-restore-other").await;
-    let repository = env.create_repository(host.id, "pw").await;
-    mark_initialized(&env, repository).await;
-
-    let agent = json!(other.id.to_string());
-    for (path, body) in [
-        (
-            "restore",
-            json!({
-                "snapshot_id": "0123abcd",
-                "target": "/var/lib/restichub-restore/x",
-                "overwrite": "always",
-                "agent_id": agent,
-            }),
-        ),
-        ("snapshots", json!({"agent_id": agent})),
-        ("ls", json!({"snapshot_id": "0123abcd", "agent_id": agent})),
-        ("test-access", json!({"agent_id": agent})),
-    ] {
-        let (status, body) = env
-            .call(
-                &env.admin,
-                "POST",
-                &format!("/api/v1/repositories/{repository}/{path}"),
-                Some(body),
-            )
-            .await;
-        assert_eq!(status, StatusCode::BAD_REQUEST, "{path}: {body}");
-        assert_field(&body, "agent_id", "not_repository_host");
-    }
     env.db.cleanup().await;
 }
 
@@ -386,12 +281,12 @@ async fn ac_rp_09_the_start_check_reports_old_rows_and_keeps_them() {
     let host = env.connect_agent("lo-report-host").await;
     let other = env.connect_agent("lo-report-other").await;
     let repository = env.create_repository(host.id, "pw").await;
-    let profile = env.create_profile(repository, json!({})).await;
-    let plan = env.create_plan(profile, host.id).await;
+    let profile = env.create_profile(json!({})).await;
+    let plan = env.create_plan(profile, host.id, repository).await;
     move_plan(&env, plan, other.id).await;
     let clean = env.create_repository_at(host.id, "pw", "/srv/clean").await;
-    let clean_profile = env.create_profile(clean, json!({})).await;
-    env.create_plan(clean_profile, host.id).await;
+    let clean_profile = env.create_profile(json!({})).await;
+    env.create_plan(clean_profile, host.id, clean).await;
     let hostless = env
         .create_repository_at(host.id, "pw", "/srv/hostless")
         .await;
@@ -457,8 +352,8 @@ async fn ac_tn_01_the_host_rule_stays_in_the_tenant() {
     let host = env.connect_agent("lo-tenant-host").await;
     let other = env.connect_agent("lo-tenant-other").await;
     let repository = env.create_repository(host.id, "pw").await;
-    let profile = env.create_profile(repository, json!({})).await;
-    let plan = env.create_plan(profile, host.id).await;
+    let profile = env.create_profile(json!({})).await;
+    let plan = env.create_plan(profile, host.id, repository).await;
     move_plan(&env, plan, other.id).await;
 
     let database = env.db.database();

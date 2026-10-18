@@ -62,7 +62,7 @@ async fn fixture(name: &str) -> Option<Fixture> {
     let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
     let secret = seed_secret(db.database(), tenant, "alert.password").await;
     let repository = seed_repository(db.database(), tenant, "alert-repo", secret).await;
-    let profile = seed_profile(db.database(), tenant, "alert-profile", repository).await;
+    let profile = seed_profile(db.database(), tenant, "alert-profile").await;
     let agent = seed_agent(db.database(), tenant, "alert-host").await;
     let plan = seed_scheduled_plan(
         db.database(),
@@ -74,6 +74,7 @@ async fn fixture(name: &str) -> Option<Fixture> {
         "UTC",
         restichub_db::MissedRunPolicy::RunAll,
         None,
+        repository,
     )
     .await;
     let t0 = plan_created_at(&db, tenant, plan).await;
@@ -515,6 +516,7 @@ async fn ac_mn_07_dead_letter_warnings_and_rule_toggles() {
         "UTC",
         restichub_db::MissedRunPolicy::Skip,
         None,
+        fx.repository,
     )
     .await;
     fx.finished_job(
@@ -651,6 +653,7 @@ async fn ac_mn_07_two_instances_send_once() {
                 "UTC",
                 restichub_db::MissedRunPolicy::Skip,
                 None,
+                fx.repository,
             )
             .await,
         );

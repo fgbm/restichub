@@ -14,6 +14,12 @@ use crate::template::{self, TemplateError};
 /// The prefix of the tags that only the control plane sets (FR-RP-08).
 const RESERVED_TAG_PREFIX: &str = "restichub-";
 
+/// The repository identifier of the compile contract when the caller has none (ADR-0047).
+///
+/// A profile does not name a repository, so the save-time check and the preview of a profile
+/// without a plan still build the steps. The value never reaches an agent.
+pub const UNBOUND_REPOSITORY_ID: &str = "unbound";
+
 /// The steps of one target agent, in execution order (FR-PF-04).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Plan {
@@ -29,17 +35,22 @@ pub struct PlannedStep {
     pub maintenance: bool,
 }
 
-/// Converts a profile to a plan for one target agent (FR-PF-04).
+/// Converts a profile to a plan for one target agent and one repository (FR-PF-04, ADR-0047).
 ///
 /// The step order is the `before` scripts, the `backup` step, the remaining
-/// scripts, then the maintenance steps `forget`, `prune` and `check`.
+/// scripts, then the maintenance steps `forget`, `prune` and `check`. A `None` repository gives
+/// the steps of [`UNBOUND_REPOSITORY_ID`].
 ///
 /// # Errors
 ///
 /// Returns a [`CompileError`] for an unsupported restic version, an option
 /// that the operating system or the restic version does not allow, an invalid value or a
 /// template that does not expand.
-pub fn compile(profile: &Profile, target: &TargetFacts) -> Result<Plan, CompileError> {
+pub fn compile(
+    profile: &Profile,
+    repository_id: Option<&str>,
+    target: &TargetFacts,
+) -> Result<Plan, CompileError> {
     if target.restic_version < ResticVersion::MIN_SUPPORTED {
         return Err(CompileError::UnsupportedRestic {
             installed: target.restic_version,
@@ -49,8 +60,9 @@ pub fn compile(profile: &Profile, target: &TargetFacts) -> Result<Plan, CompileE
     validate_platform(profile, target)?;
     validate_scripts(profile, target)?;
 
-    let steps = build_steps(profile, target)?;
-    check_contract(profile, &steps)?;
+    let repository_id = repository_id.unwrap_or(UNBOUND_REPOSITORY_ID);
+    let steps = build_steps(profile, repository_id, target)?;
+    check_contract(&steps, repository_id)?;
 
     Ok(Plan {
         steps,
@@ -177,13 +189,17 @@ fn validate_scripts(profile: &Profile, target: &TargetFacts) -> Result<(), Compi
     Ok(())
 }
 
-fn build_steps(profile: &Profile, target: &TargetFacts) -> Result<Vec<PlannedStep>, CompileError> {
+fn build_steps(
+    profile: &Profile,
+    repository_id: &str,
+    target: &TargetFacts,
+) -> Result<Vec<PlannedStep>, CompileError> {
     let mut steps = Vec::new();
 
     push_scripts(&mut steps, profile, HookPhase::Before);
 
     steps.push(PlannedStep {
-        step: backup_step(profile, target)?,
+        step: backup_step(profile, repository_id, target)?,
         maintenance: false,
     });
 
@@ -200,18 +216,18 @@ fn build_steps(profile: &Profile, target: &TargetFacts) -> Result<Vec<PlannedSte
 
     if let Some(retention) = &profile.retention {
         steps.push(PlannedStep {
-            step: forget_step(profile, retention, target)?,
+            step: forget_step(profile, repository_id, retention, target)?,
             maintenance: true,
         });
         steps.push(PlannedStep {
-            step: prune_step(profile),
+            step: prune_step(repository_id),
             maintenance: true,
         });
     }
 
     if let Some(check) = &profile.check {
         steps.push(PlannedStep {
-            step: check_step(profile, check, target)?,
+            step: check_step(repository_id, check, target)?,
             maintenance: true,
         });
     }
@@ -231,7 +247,11 @@ fn push_scripts(steps: &mut Vec<PlannedStep>, profile: &Profile, phase: HookPhas
     }
 }
 
-fn backup_step(profile: &Profile, target: &TargetFacts) -> Result<Step, CompileError> {
+fn backup_step(
+    profile: &Profile,
+    repository_id: &str,
+    target: &TargetFacts,
+) -> Result<Step, CompileError> {
     let mut paths = Vec::new();
     for (index, path) in profile.paths.all.iter().enumerate() {
         paths.push(expand_field(path, target, &format!("paths.all[{index}]"))?);
@@ -276,7 +296,7 @@ fn backup_step(profile: &Profile, target: &TargetFacts) -> Result<Step, CompileE
         step_id: "backup".to_owned(),
         timeout_seconds: 0,
         kind: Some(step::Kind::Backup(BackupStep {
-            repository_id: profile.repository_id.clone(),
+            repository_id: repository_id.to_owned(),
             paths,
             excludes,
             exclude_files,
@@ -294,6 +314,7 @@ fn backup_step(profile: &Profile, target: &TargetFacts) -> Result<Step, CompileE
 
 fn forget_step(
     profile: &Profile,
+    repository_id: &str,
     retention: &Retention,
     target: &TargetFacts,
 ) -> Result<Step, CompileError> {
@@ -337,7 +358,7 @@ fn forget_step(
         step_id: "forget".to_owned(),
         timeout_seconds: 0,
         kind: Some(step::Kind::Forget(ForgetStep {
-            repository_id: profile.repository_id.clone(),
+            repository_id: repository_id.to_owned(),
             keep_last: retention.keep_last,
             keep_hourly: retention.keep_hourly,
             keep_daily: retention.keep_daily,
@@ -359,12 +380,12 @@ fn forget_step(
     })
 }
 
-fn prune_step(profile: &Profile) -> Step {
+fn prune_step(repository_id: &str) -> Step {
     Step {
         step_id: "prune".to_owned(),
         timeout_seconds: 0,
         kind: Some(step::Kind::Prune(PruneStep {
-            repository_id: profile.repository_id.clone(),
+            repository_id: repository_id.to_owned(),
             max_unused: String::new(),
             max_repack_size: String::new(),
             retry_lock: true,
@@ -374,7 +395,7 @@ fn prune_step(profile: &Profile) -> Step {
 }
 
 fn check_step(
-    profile: &Profile,
+    repository_id: &str,
     check: &CheckOptions,
     target: &TargetFacts,
 ) -> Result<Step, CompileError> {
@@ -382,7 +403,7 @@ fn check_step(
         step_id: "check".to_owned(),
         timeout_seconds: 0,
         kind: Some(step::Kind::Check(CheckStep {
-            repository_id: profile.repository_id.clone(),
+            repository_id: repository_id.to_owned(),
             read_data_subset: expand_field(
                 &check.read_data_subset,
                 target,
@@ -441,16 +462,15 @@ fn template_error(error: TemplateError, field: &str) -> CompileError {
     }
 }
 
-fn check_contract(profile: &Profile, steps: &[PlannedStep]) -> Result<(), CompileError> {
-    // The profile holds the repository identifier, not its location. The
-    // control plane validates the real location when it assembles the job, so
-    // this placeholder only satisfies the shared contract.
+fn check_contract(steps: &[PlannedStep], repository_id: &str) -> Result<(), CompileError> {
+    // The caller names the repository, not its location. The control plane validates the real
+    // location when it assembles the job, so this placeholder only satisfies the shared contract.
     let job = Job {
         job_id: "compile".to_owned(),
         tenant_id: "compile".to_owned(),
         agent_id: "compile".to_owned(),
         repositories: vec![RepositoryAccess {
-            repository_id: profile.repository_id.clone(),
+            repository_id: repository_id.to_owned(),
             location: "/".to_owned(),
             ..RepositoryAccess::default()
         }],

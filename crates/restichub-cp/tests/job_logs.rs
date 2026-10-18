@@ -57,8 +57,8 @@ fn log_chunk(job: &str, stream: LogStream, sequence: u64, data: &str) -> LogChun
 /// Starts a queued manual backup on the agent and returns the plan and the running job.
 async fn running_job(env: &Env, agent: &mut FakeAgent) -> (Uuid, Uuid, String) {
     let repository = env.create_repository(agent.id, "pw").await;
-    let profile = env.create_profile(repository, serde_json::json!({})).await;
-    let plan = env.create_plan(profile, agent.id).await;
+    let profile = env.create_profile(serde_json::json!({})).await;
+    let plan = env.create_plan(profile, agent.id, repository).await;
     let job = env.run_plan(plan).await;
     env.pass().await;
     let signed = agent.job().await;

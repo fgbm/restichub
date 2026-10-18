@@ -62,8 +62,8 @@ async fn world(
     let env = Env::start(db, queue).await;
     let agent = env.connect_agent("review-host").await;
     let repository = env.create_repository(agent.id, "pw").await;
-    let profile = env.create_profile(repository, json!({})).await;
-    let plan = env.create_plan(profile, agent.id).await;
+    let profile = env.create_profile(json!({})).await;
+    let plan = env.create_plan(profile, agent.id, repository).await;
     World { env, agent, plan }
 }
 
@@ -173,12 +173,9 @@ async fn ac_sc_06_a_running_job_past_its_maximum_duration_fails_while_the_agent_
     let mut agent = env.connect_agent("review-host").await;
     let repository = env.create_repository(agent.id, "pw").await;
     let profile = env
-        .create_profile(
-            repository,
-            json!({"options": {"max_duration_minutes": 120}}),
-        )
+        .create_profile(json!({"options": {"max_duration_minutes": 120}}))
         .await;
-    let plan = env.create_plan(profile, agent.id).await;
+    let plan = env.create_plan(profile, agent.id, repository).await;
     let job = env.run_plan(plan).await;
     env.pass().await;
     let id = decode_job_id(&agent.job().await);
@@ -311,8 +308,8 @@ async fn fr_sc_04_a_backlog_of_one_repository_never_hides_another_repository_of_
         env.enqueue(JobKind::Backup, agent.id, busy, None).await;
     }
     let other = env.create_repository(agent.id, "pw").await;
-    let profile = env.create_profile(other, json!({})).await;
-    let plan = env.create_plan(profile, agent.id).await;
+    let profile = env.create_profile(json!({})).await;
+    let plan = env.create_plan(profile, agent.id, other).await;
     let wanted = env.run_plan(plan).await;
 
     env.pass().await;

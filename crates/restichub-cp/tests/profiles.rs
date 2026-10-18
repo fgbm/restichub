@@ -61,11 +61,17 @@ async fn repository_fixture(db: &restichub_db::Database, tenant: TenantId) -> St
         .to_string()
 }
 
+/// The identifier of a repository fixture as a typed value.
+fn repository_key(value: &str) -> restichub_db::RepositoryId {
+    restichub_db::RepositoryId::from_uuid(
+        uuid::Uuid::parse_str(value).expect("a repository identifier"),
+    )
+}
+
 /// Builds a create request body with only the required fields.
-fn profile_body(name: &str, repository_id: &str, paths_all: Value) -> Value {
+fn profile_body(name: &str, paths_all: Value) -> Value {
     json!({
         "name": name,
-        "repository_id": repository_id,
         "paths": {"all": paths_all},
         "tags": ["daily"],
     })
@@ -131,7 +137,6 @@ async fn ac_pf_01_the_preview_masks_the_secrets() {
         &cookie,
         json!({
             "name": "web-daily",
-            "repository_id": repository_id,
             "paths": {"all": ["/srv"], "linux": ["/etc"]},
             "excludes": ["*.tmp"],
             "tags": ["daily"],
@@ -140,6 +145,27 @@ async fn ac_pf_01_the_preview_masks_the_secrets() {
     )
     .await;
     let profile_id = profile["id"].as_str().expect("the identifier").to_owned();
+
+    // The preview takes the repository of the plan of the profile on this agent (ADR-0047).
+    let (status, _, plan) = send(
+        &app,
+        request(
+            "POST",
+            "/api/v1/plans",
+            Some(&cookie),
+            Some(json!({
+                "name": "web-daily",
+                "profile_id": profile_id,
+                "agent_id": agent.to_string(),
+                "repository_id": repository_id,
+                "cron": "0 2 * * *",
+                "time_zone": "UTC",
+                "missed_run_policy": "run_all",
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{plan}");
 
     let (status, _, preview) = send(
         &app,
@@ -152,6 +178,7 @@ async fn ac_pf_01_the_preview_masks_the_secrets() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{preview}");
+    assert_eq!(preview["repository_id"], repository_id.as_str());
 
     let steps = preview["steps"].as_array().expect("the steps");
     assert!(!steps.is_empty());
@@ -200,7 +227,6 @@ async fn ac_pf_02_the_preview_points_to_the_field() {
     let tenant = create_tenant_with_key(db.database(), "acme").await;
     let app = app_with_kek(db.database());
     let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
-    let repository_id = repository_fixture(db.database(), tenant).await;
 
     let linux_agent =
         seed_agent_full(db.database(), tenant, "linux-1", "linux", "0.19.0", &[]).await;
@@ -212,7 +238,6 @@ async fn ac_pf_02_the_preview_points_to_the_field() {
         &cookie,
         json!({
             "name": "vss-profile",
-            "repository_id": repository_id,
             "paths": {"all": ["/srv"]},
             "options": {"use_fs_snapshot": true},
         }),
@@ -262,7 +287,6 @@ async fn ac_pf_02_the_preview_points_to_the_field() {
             Some(&cookie),
             Some(json!({
                 "name": "template-profile",
-                "repository_id": repository_id,
                 "paths": {"all": ["/srv/{{nope}}"]},
             })),
         ),
@@ -281,7 +305,6 @@ async fn ac_pf_02_the_preview_points_to_the_field() {
             Some(&cookie),
             Some(json!({
                 "name": "unclosed-template",
-                "repository_id": repository_id,
                 "paths": {"all": ["/srv/{{hostname"]},
             })),
         ),
@@ -301,7 +324,6 @@ async fn ac_pf_02_the_preview_points_to_the_field() {
             Some(&cookie),
             Some(json!({
                 "name": "vss-warning",
-                "repository_id": repository_id,
                 "paths": {"all": ["/srv"]},
                 "options": {"use_fs_snapshot": true},
             })),
@@ -330,7 +352,6 @@ async fn ac_pf_02_the_save_validation_points_to_the_field() {
     let tenant = create_tenant_with_key(db.database(), "acme").await;
     let app = app_with_kek(db.database());
     let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
-    let repository_id = repository_fixture(db.database(), tenant).await;
 
     // A bidirectional override is refused in a name.
     let (status, _, problem) = send(
@@ -339,11 +360,7 @@ async fn ac_pf_02_the_save_validation_points_to_the_field() {
             "POST",
             "/api/v1/profiles",
             Some(&cookie),
-            Some(profile_body(
-                "up\u{202E}per",
-                &repository_id,
-                json!(["/srv"]),
-            )),
+            Some(profile_body("up\u{202E}per", json!(["/srv"]))),
         ),
     )
     .await;
@@ -357,34 +374,12 @@ async fn ac_pf_02_the_save_validation_points_to_the_field() {
             "POST",
             "/api/v1/profiles",
             Some(&cookie),
-            Some(profile_body(
-                "relative",
-                &repository_id,
-                json!(["relative/path"]),
-            )),
+            Some(profile_body("relative", json!(["relative/path"]))),
         ),
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
     assert_eq!(problem["field"], "paths.all");
-
-    // Unknown repository identifiers are refused.
-    let (status, _, problem) = send(
-        &app,
-        request(
-            "POST",
-            "/api/v1/profiles",
-            Some(&cookie),
-            Some(profile_body(
-                "no-repo",
-                &uuid::Uuid::now_v7().to_string(),
-                json!(["/srv"]),
-            )),
-        ),
-    )
-    .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
-    assert_eq!(problem["field"], "repository_id");
 
     // A duplicate tag is not refused, but an empty tag is.
     let (status, _, problem) = send(
@@ -395,7 +390,6 @@ async fn ac_pf_02_the_save_validation_points_to_the_field() {
             Some(&cookie),
             Some(json!({
                 "name": "bad-tag",
-                "repository_id": repository_id,
                 "paths": {"all": ["/srv"]},
                 "tags": [""],
             })),
@@ -417,7 +411,6 @@ async fn ac_pf_03_each_agent_gets_its_own_values() {
     let tenant = create_tenant_with_key(db.database(), "acme").await;
     let app = app_with_kek(db.database());
     let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
-    let repository_id = repository_fixture(db.database(), tenant).await;
 
     let prod = seed_agent_full(
         db.database(),
@@ -443,7 +436,6 @@ async fn ac_pf_03_each_agent_gets_its_own_values() {
         &cookie,
         json!({
             "name": "templated",
-            "repository_id": repository_id,
             "paths": {"all": ["/srv/{{hostname}}/{{agent.label.env}}"]},
             "tags": ["{{os}}"],
         }),
@@ -508,13 +500,8 @@ async fn ac_tn_01_a_profile_of_another_tenant_gives_404() {
     let cookie_a = seed_session(db.database(), tenant_a, "admin-a", "admin").await;
     let cookie_b = seed_session(db.database(), tenant_b, "admin-b", "admin").await;
 
-    let repository_b = repository_fixture(db.database(), tenant_b).await;
-    let profile_b = create_profile(
-        &app,
-        &cookie_b,
-        profile_body("b-profile", &repository_b, json!(["/srv"])),
-    )
-    .await;
+    let profile_b =
+        create_profile(&app, &cookie_b, profile_body("b-profile", json!(["/srv"]))).await;
     let id_b = profile_b["id"].as_str().expect("the identifier");
 
     let (status, _, _) = send(
@@ -549,7 +536,6 @@ async fn the_role_matrix_and_the_platform_tenant() {
     };
     let tenant = create_tenant_with_key(db.database(), "acme").await;
     let app = app_with_kek(db.database());
-    let repository_id = repository_fixture(db.database(), tenant).await;
 
     let viewer = seed_session(db.database(), tenant, "viewer", "viewer").await;
     let operator = seed_session(db.database(), tenant, "operator", "operator").await;
@@ -561,11 +547,7 @@ async fn the_role_matrix_and_the_platform_tenant() {
             "POST",
             "/api/v1/profiles",
             Some(&viewer),
-            Some(profile_body(
-                "viewer-profile",
-                &repository_id,
-                json!(["/srv"]),
-            )),
+            Some(profile_body("viewer-profile", json!(["/srv"]))),
         ),
     )
     .await;
@@ -575,7 +557,7 @@ async fn the_role_matrix_and_the_platform_tenant() {
     let created = create_profile(
         &app,
         &operator,
-        profile_body("operator-profile", &repository_id, json!(["/srv"])),
+        profile_body("operator-profile", json!(["/srv"])),
     )
     .await;
     assert_eq!(created["name"], "operator-profile");
@@ -607,14 +589,8 @@ async fn an_update_replaces_the_settings_and_a_delete_removes_the_row() {
     let tenant = create_tenant_with_key(db.database(), "acme").await;
     let app = app_with_kek(db.database());
     let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
-    let repository_id = repository_fixture(db.database(), tenant).await;
 
-    let created = create_profile(
-        &app,
-        &cookie,
-        profile_body("editable", &repository_id, json!(["/srv"])),
-    )
-    .await;
+    let created = create_profile(&app, &cookie, profile_body("editable", json!(["/srv"]))).await;
     let id = created["id"].as_str().expect("the identifier").to_owned();
 
     let (status, _, updated) = send(
@@ -625,7 +601,6 @@ async fn an_update_replaces_the_settings_and_a_delete_removes_the_row() {
             Some(&cookie),
             Some(json!({
                 "name": "edited",
-                "repository_id": repository_id,
                 "paths": {"all": ["/data"], "linux": ["/etc"]},
                 "tags": ["weekly"],
                 "retention": {"keep_daily": 7},
@@ -667,12 +642,7 @@ async fn a_profile_in_use_by_a_plan_cannot_be_deleted() {
     let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
     let repository_id = repository_fixture(db.database(), tenant).await;
 
-    let profile = create_profile(
-        &app,
-        &cookie,
-        profile_body("plan-bound", &repository_id, json!(["/srv"])),
-    )
-    .await;
+    let profile = create_profile(&app, &cookie, profile_body("plan-bound", json!(["/srv"]))).await;
     let profile_id = profile["id"].as_str().expect("the identifier").to_owned();
     let agent = seed_agent(db.database(), tenant, "plan-host").await;
     let plan = seed_plan(
@@ -683,6 +653,7 @@ async fn a_profile_in_use_by_a_plan_cannot_be_deleted() {
             uuid::Uuid::parse_str(&profile_id).expect("a profile id"),
         ),
         agent,
+        repository_key(&repository_id),
     )
     .await;
 
@@ -739,12 +710,7 @@ async fn a_profile_update_reports_the_plans_that_no_longer_compile() {
     let repository_id = repository_fixture(db.database(), tenant).await;
     let agent = seed_agent_full(db.database(), tenant, "linux-host", "linux", "0.19.0", &[]).await;
 
-    let profile = create_profile(
-        &app,
-        &cookie,
-        profile_body("linux-bound", &repository_id, json!(["/srv"])),
-    )
-    .await;
+    let profile = create_profile(&app, &cookie, profile_body("linux-bound", json!(["/srv"]))).await;
     let profile_id = profile["id"].as_str().expect("the identifier").to_owned();
     seed_plan(
         db.database(),
@@ -754,6 +720,7 @@ async fn a_profile_update_reports_the_plans_that_no_longer_compile() {
             uuid::Uuid::parse_str(&profile_id).expect("a profile id"),
         ),
         agent,
+        repository_key(&repository_id),
     )
     .await;
 
@@ -767,7 +734,6 @@ async fn a_profile_update_reports_the_plans_that_no_longer_compile() {
             Some(&cookie),
             Some(json!({
                 "name": "linux-bound",
-                "repository_id": repository_id,
                 "paths": {"windows": ["C:\\Data"]},
                 "tags": ["daily"],
             })),
@@ -785,64 +751,6 @@ async fn a_profile_update_reports_the_plans_that_no_longer_compile() {
     db.cleanup().await;
 }
 
-/// A repository that a profile uses cannot be removed until the profile is gone.
-#[tokio::test]
-async fn a_repository_in_use_by_a_profile_cannot_be_deleted() {
-    let Some(db) = common::test_db().await else {
-        return;
-    };
-    let tenant = create_tenant_with_key(db.database(), "acme").await;
-    let app = app_with_kek(db.database());
-    let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
-    let repository_id = repository_fixture(db.database(), tenant).await;
-
-    let profile = create_profile(
-        &app,
-        &cookie,
-        profile_body("in-use", &repository_id, json!(["/srv"])),
-    )
-    .await;
-    let profile_id = profile["id"].as_str().expect("the identifier");
-
-    let (status, _, _) = send(
-        &app,
-        request(
-            "DELETE",
-            &format!("/api/v1/repositories/{repository_id}"),
-            Some(&cookie),
-            None,
-        ),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CONFLICT);
-
-    // After the profile is gone the repository can be removed.
-    let (status, _, _) = send(
-        &app,
-        request(
-            "DELETE",
-            &format!("/api/v1/profiles/{profile_id}"),
-            Some(&cookie),
-            None,
-        ),
-    )
-    .await;
-    assert_eq!(status, StatusCode::NO_CONTENT);
-    let (status, _, _) = send(
-        &app,
-        request(
-            "DELETE",
-            &format!("/api/v1/repositories/{repository_id}"),
-            Some(&cookie),
-            None,
-        ),
-    )
-    .await;
-    assert_eq!(status, StatusCode::NO_CONTENT);
-
-    db.cleanup().await;
-}
-
 /// The item limits, the root paths and the trailing separator (FR-PF-05).
 #[tokio::test]
 async fn the_item_limits_and_the_root_paths_are_enforced() {
@@ -852,7 +760,6 @@ async fn the_item_limits_and_the_root_paths_are_enforced() {
     let tenant = create_tenant_with_key(db.database(), "acme").await;
     let app = app_with_kek(db.database());
     let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
-    let repository_id = repository_fixture(db.database(), tenant).await;
 
     // Root paths are allowed.
     let root = create_profile(
@@ -860,7 +767,6 @@ async fn the_item_limits_and_the_root_paths_are_enforced() {
         &cookie,
         json!({
             "name": "root-path",
-            "repository_id": repository_id,
             "paths": {"all": ["/"], "windows": ["C:\\"]},
         }),
     )
@@ -874,7 +780,6 @@ async fn the_item_limits_and_the_root_paths_are_enforced() {
         &cookie,
         json!({
             "name": "trailing",
-            "repository_id": repository_id,
             "paths": {"all": ["/srv/"], "windows": ["C:\\Data\\"]},
         }),
     )
@@ -892,7 +797,6 @@ async fn the_item_limits_and_the_root_paths_are_enforced() {
             Some(&cookie),
             Some(json!({
                 "name": "many-paths",
-                "repository_id": repository_id,
                 "paths": {"all": paths},
             })),
         ),
@@ -914,7 +818,6 @@ async fn the_item_limits_and_the_root_paths_are_enforced() {
             Some(&cookie),
             Some(json!({
                 "name": "many-excludes",
-                "repository_id": repository_id,
                 "paths": {"all": ["/srv"]},
                 "excludes": excludes,
             })),
@@ -935,7 +838,6 @@ async fn the_item_limits_and_the_root_paths_are_enforced() {
             Some(&cookie),
             Some(json!({
                 "name": "many-tags",
-                "repository_id": repository_id,
                 "paths": {"all": ["/srv"]},
                 "tags": tags,
             })),
@@ -959,17 +861,32 @@ async fn a_foreign_tenant_agent_and_repository_are_refused() {
     let tenant_b = create_tenant_with_key(db.database(), "globex").await;
     let app = app_with_kek(db.database());
     let cookie_a = seed_session(db.database(), tenant_a, "admin-a", "admin").await;
-    let repository_a = repository_fixture(db.database(), tenant_a).await;
     let repository_b = repository_fixture(db.database(), tenant_b).await;
+    let agent_a = seed_agent_full(db.database(), tenant_a, "a-host", "linux", "0.19.0", &[]).await;
 
-    // A profile that names the repository of tenant B is refused.
+    // A plan that names the repository of tenant B is refused.
+    let profile = create_profile(
+        &app,
+        &cookie_a,
+        profile_body("foreign-repo", json!(["/srv"])),
+    )
+    .await;
+    let profile_id = profile["id"].as_str().expect("the identifier");
     let (status, _, problem) = send(
         &app,
         request(
             "POST",
-            "/api/v1/profiles",
+            "/api/v1/plans",
             Some(&cookie_a),
-            Some(profile_body("foreign-repo", &repository_b, json!(["/srv"]))),
+            Some(json!({
+                "name": "foreign-repo",
+                "profile_id": profile_id,
+                "agent_id": agent_a.to_string(),
+                "repository_id": repository_b,
+                "cron": "0 2 * * *",
+                "time_zone": "UTC",
+                "missed_run_policy": "run_all",
+            })),
         ),
     )
     .await;
@@ -978,12 +895,7 @@ async fn a_foreign_tenant_agent_and_repository_are_refused() {
 
     // A preview with the agent of tenant B is refused.
     let agent_b = seed_agent_full(db.database(), tenant_b, "b-host", "linux", "0.19.0", &[]).await;
-    let profile = create_profile(
-        &app,
-        &cookie_a,
-        profile_body("local", &repository_a, json!(["/srv"])),
-    )
-    .await;
+    let profile = create_profile(&app, &cookie_a, profile_body("local", json!(["/srv"]))).await;
     let profile_id = profile["id"].as_str().expect("the identifier");
     let (status, _, problem) = send(
         &app,
@@ -1010,15 +922,9 @@ async fn an_unparsable_restic_version_is_refused() {
     let tenant = create_tenant_with_key(db.database(), "acme").await;
     let app = app_with_kek(db.database());
     let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
-    let repository_id = repository_fixture(db.database(), tenant).await;
     let agent = seed_agent_full(db.database(), tenant, "no-version", "linux", "", &[]).await;
 
-    let profile = create_profile(
-        &app,
-        &cookie,
-        profile_body("no-version", &repository_id, json!(["/srv"])),
-    )
-    .await;
+    let profile = create_profile(&app, &cookie, profile_body("no-version", json!(["/srv"]))).await;
     let profile_id = profile["id"].as_str().expect("the identifier");
     let (status, _, problem) = send(
         &app,
@@ -1047,9 +953,8 @@ async fn adr_0040_a_request_with_hooks_names_the_removed_field() {
     let tenant = create_tenant_with_key(db.database(), "acme").await;
     let app = app_with_kek(db.database());
     let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
-    let repository_id = repository_fixture(db.database(), tenant).await;
 
-    let mut body = profile_body("with-hooks", &repository_id, json!(["/srv"]));
+    let mut body = profile_body("with-hooks", json!(["/srv"]));
     body["hooks"] = json!([{"hook_id": "pg-dump", "phase": "before"}]);
     let (status, _, problem) = send(
         &app,
@@ -1060,7 +965,7 @@ async fn adr_0040_a_request_with_hooks_names_the_removed_field() {
     assert_eq!(problem["field"], "hooks");
     assert_eq!(problem["reason"], "removed");
 
-    let mut body = profile_body("old-client", &repository_id, json!(["/srv"]));
+    let mut body = profile_body("old-client", json!(["/srv"]));
     body["hooks"] = json!([]);
     create_profile(&app, &cookie, body).await;
 }

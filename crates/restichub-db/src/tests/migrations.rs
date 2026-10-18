@@ -4,7 +4,7 @@ use sqlx::AssertSqlSafe;
 use sqlx::migrate::Migrator;
 use sqlx::postgres::PgPoolOptions;
 
-use super::{TestResult, admin_pool, admin_query};
+use super::{TestResult, admin_pool, admin_query, assert_code};
 use crate::MIGRATOR;
 use crate::test_util::test_database;
 
@@ -316,6 +316,151 @@ async fn db_the_right_migration_skips_a_revoked_membership_and_revokes_the_token
 
 /// ADR-0040: the migration writes one audit record for each profile that held a hook, before it
 /// drops the column.
+/// The migration 0056 moves the repository from the profile to the plan (ADR-0047).
+///
+/// Each plan keeps the repository of its former profile, the profile loses the column, and the new
+/// key refuses a repository of another tenant.
+#[tokio::test]
+async fn db_the_plan_repository_migration_keeps_the_repository_of_each_plan() -> TestResult {
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let admin = admin_pool(&db).await?;
+    let name = format!("restichub_mig_{}", uuid::Uuid::now_v7().simple());
+    admin_query(&admin, &format!("CREATE DATABASE \"{name}\"")).await?;
+
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect_with(db.admin_options().database(name.as_str()))
+        .await?;
+
+    let before: Vec<_> = MIGRATOR
+        .iter()
+        .filter(|migration| migration.version <= 55)
+        .cloned()
+        .collect();
+    let up_to_55 = Migrator {
+        migrations: Cow::Owned(before),
+        ignore_missing: false,
+        locking: true,
+        no_tx: false,
+        table_name: Cow::Borrowed("_sqlx_migrations"),
+        create_schemas: Cow::Owned(Vec::new()),
+    };
+    up_to_55.run(&pool).await?;
+
+    let tenant = uuid::Uuid::now_v7();
+    let other_tenant = uuid::Uuid::now_v7();
+    let first_repository = uuid::Uuid::now_v7();
+    let second_repository = uuid::Uuid::now_v7();
+    let first_profile = uuid::Uuid::now_v7();
+    let second_profile = uuid::Uuid::now_v7();
+    let first_plan = uuid::Uuid::now_v7();
+    let second_plan = uuid::Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO tenants (id, tenant_id, name) VALUES ($1, $1, 'plans'), ($2, $2, 'other')",
+    )
+    .bind(tenant)
+    .bind(other_tenant)
+    .execute(&pool)
+    .await?;
+    // The rest of the row is not part of this check, so the foreign keys stay off for the inserts.
+    sqlx::query("SET session_replication_role = replica")
+        .execute(&pool)
+        .await?;
+    sqlx::query(
+        "INSERT INTO repositories (id, tenant_id, name, backend, local_path, password_secret_id) \
+         VALUES ($1, $3, 'first', 'local', '/srv/first', $4), \
+                ($2, $3, 'second', 'local', '/srv/second', $4)",
+    )
+    .bind(first_repository)
+    .bind(second_repository)
+    .bind(tenant)
+    .bind(uuid::Uuid::now_v7())
+    .execute(&pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO profiles (id, tenant_id, name, repository_id) \
+         VALUES ($1, $3, 'first', $4), ($2, $3, 'second', $5)",
+    )
+    .bind(first_profile)
+    .bind(second_profile)
+    .bind(tenant)
+    .bind(first_repository)
+    .bind(second_repository)
+    .execute(&pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO plans \
+         (id, tenant_id, name, profile_id, agent_id, cron, time_zone, missed_run_policy) \
+         VALUES ($1, $3, 'first', $4, $6, '0 2 * * *', 'UTC', 'run_all'), \
+                ($2, $3, 'second', $5, $6, '0 3 * * *', 'UTC', 'run_all')",
+    )
+    .bind(first_plan)
+    .bind(second_plan)
+    .bind(tenant)
+    .bind(first_profile)
+    .bind(second_profile)
+    .bind(uuid::Uuid::now_v7())
+    .execute(&pool)
+    .await?;
+    sqlx::query("SET session_replication_role = DEFAULT")
+        .execute(&pool)
+        .await?;
+
+    let sql = MIGRATOR
+        .iter()
+        .find(|migration| migration.version == 56)
+        .expect("the plan repository migration is present")
+        .sql
+        .as_str()
+        .to_owned();
+    sqlx::raw_sql(AssertSqlSafe(sql)).execute(&pool).await?;
+
+    let rows: Vec<(uuid::Uuid, uuid::Uuid)> =
+        sqlx::query_as("SELECT id, repository_id FROM plans ORDER BY name")
+            .fetch_all(&pool)
+            .await?;
+    assert_eq!(
+        rows,
+        vec![
+            (first_plan, first_repository),
+            (second_plan, second_repository)
+        ],
+        "each plan keeps the repository of its former profile"
+    );
+
+    let column: Option<(String,)> = sqlx::query_as(
+        "SELECT column_name FROM information_schema.columns \
+         WHERE table_name = 'profiles' AND column_name = 'repository_id'",
+    )
+    .fetch_optional(&pool)
+    .await?;
+    assert!(column.is_none(), "the profile keeps no repository");
+
+    // The new key refuses a repository of another tenant.
+    let foreign = sqlx::query(
+        "UPDATE plans SET repository_id = $2 WHERE id = $1 \
+         AND NOT EXISTS (SELECT 1 FROM repositories WHERE id = $2 AND tenant_id = $3)",
+    )
+    .bind(first_plan)
+    .bind(uuid::Uuid::now_v7())
+    .bind(other_tenant)
+    .execute(&pool)
+    .await;
+    assert_code(foreign, "23503");
+
+    pool.close().await;
+    admin_query(
+        &admin,
+        &format!("DROP DATABASE IF EXISTS \"{name}\" WITH (FORCE)"),
+    )
+    .await?;
+    admin.close().await;
+    db.cleanup().await;
+    Ok(())
+}
+
 #[tokio::test]
 async fn db_the_hook_removal_migration_audits_each_profile_with_hooks() -> TestResult {
     let Some(db) = test_database().await else {
@@ -352,7 +497,8 @@ async fn db_the_hook_removal_migration_audits_each_profile_with_hooks() -> TestR
         .bind(tenant)
         .execute(&pool)
         .await?;
-    // The repository is not part of this check, so the foreign keys stay off for the inserts.
+    // The repository and the tenant are not part of this check, so the foreign keys stay off for
+    // the inserts. The profile of this version still holds its repository (ADR-0047).
     sqlx::query("SET session_replication_role = replica")
         .execute(&pool)
         .await?;

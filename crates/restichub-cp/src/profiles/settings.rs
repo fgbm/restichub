@@ -17,7 +17,7 @@ use restichub_compiler::{
     Retention as CompilerRetention, SnapshotFilter as CompilerSnapshotFilter, TargetFacts, compile,
 };
 use restichub_db::profiles::{NewProfile, Profile, ProfileUpdate};
-use restichub_db::{ProfileId, RepositoryId, UserId};
+use restichub_db::{ProfileId, UserId};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use utoipa::ToSchema;
@@ -262,8 +262,6 @@ pub struct CreateProfileRequest {
     /// Free text of 1 to 100 characters. Unique in the tenant, ignoring the letter case. Holds no control or format character.
     #[schema(max_length = 100)]
     pub name: String,
-    /// The identifier of the repository that the profile uses.
-    pub repository_id: String,
     #[serde(default)]
     pub paths: ProfilePaths,
     #[serde(default)]
@@ -299,7 +297,6 @@ pub struct UpdateProfileRequest {
     #[schema(max_length = 100)]
     #[serde(default)]
     pub name: Option<String>,
-    pub repository_id: String,
     #[serde(default)]
     pub paths: ProfilePaths,
     #[serde(default)]
@@ -329,7 +326,6 @@ pub struct UpdateProfileRequest {
 pub struct ProfileView {
     pub id: String,
     pub name: String,
-    pub repository_id: String,
     pub paths: ProfilePaths,
     pub excludes: Vec<String>,
     pub exclude_files: Vec<String>,
@@ -434,7 +430,7 @@ pub fn save_warnings(profile: &ValidatedProfile) -> Result<Vec<ProfileWarning>, 
         OperatingSystem::Macos,
     ] {
         let target = synthetic_target(os);
-        if let Err(error) = compile(&compiler_profile, &target) {
+        if let Err(error) = compile(&compiler_profile, None, &target) {
             match classify_save_error(error) {
                 SaveOutcome::Refusal(api) => return Err(api),
                 SaveOutcome::Warning(warning) => {
@@ -515,6 +511,11 @@ fn classify_save_error(error: CompileError) -> SaveOutcome {
 pub struct PreviewRequest {
     /// The identifier of the registered agent that supplies the target facts.
     pub agent_id: String,
+    /// The repository of the plan to preview. Absent uses the repository of the first plan of the
+    /// profile on this agent, then of the first plan of the profile, and a placeholder without a
+    /// repository environment when the profile has no plan (ADR-0047).
+    #[serde(default)]
+    pub repository_id: Option<String>,
 }
 
 /// One environment variable of a previewed step. A secret value is masked (AC-PF-01).
@@ -542,7 +543,8 @@ pub struct PreviewStepView {
 #[derive(Debug, Serialize, ToSchema)]
 pub struct PreviewResponse {
     pub profile_id: String,
-    pub repository_id: String,
+    /// Null when no plan of the profile names a repository, so the steps carry no repository.
+    pub repository_id: Option<String>,
     pub steps: Vec<PreviewStepView>,
 }
 
@@ -553,7 +555,6 @@ impl TryFrom<&Profile> for ProfileView {
         Ok(Self {
             id: profile.id.to_string(),
             name: profile.name.clone(),
-            repository_id: profile.repository_id.to_string(),
             paths: paths_from_row(profile),
             excludes: profile.excludes.clone(),
             exclude_files: profile.exclude_files.clone(),
@@ -617,7 +618,6 @@ fn check_from_row(profile: &Profile) -> Result<Option<CheckOptions>, ApiError> {
 #[derive(Debug, Clone)]
 pub struct ValidatedProfile {
     pub name: String,
-    pub repository_id: RepositoryId,
     pub paths: ProfilePaths,
     pub excludes: Vec<String>,
     pub exclude_files: Vec<String>,
@@ -633,7 +633,6 @@ impl ValidatedProfile {
         NewProfile {
             id,
             name: &self.name,
-            repository_id: self.repository_id,
             paths_all: &self.paths.all,
             paths_windows: &self.paths.windows,
             paths_linux: &self.paths.linux,
@@ -658,7 +657,6 @@ impl ValidatedProfile {
     pub fn update<'a>(&'a self) -> ProfileUpdate<'a> {
         ProfileUpdate {
             name: &self.name,
-            repository_id: self.repository_id,
             paths_all: &self.paths.all,
             paths_windows: &self.paths.windows,
             paths_linux: &self.paths.linux,
@@ -714,7 +712,6 @@ impl ValidatedProfile {
             by_os.insert(OperatingSystem::Macos, self.paths.macos.clone());
         }
         CompilerProfile {
-            repository_id: self.repository_id.to_string(),
             paths: CompilerProfilePaths {
                 all: self.paths.all.clone(),
                 by_os,
@@ -765,7 +762,6 @@ pub const RESERVED_TAG_PREFIX: &str = "restichub-";
 pub fn compiler_profile_from_row(profile: &Profile) -> Result<CompilerProfile, ApiError> {
     let validated = ValidatedProfile {
         name: profile.name.clone(),
-        repository_id: profile.repository_id,
         paths: paths_from_row(profile),
         excludes: profile.excludes.clone(),
         exclude_files: profile.exclude_files.clone(),
@@ -823,7 +819,6 @@ pub fn validate_create(body: CreateProfileRequest) -> Result<ValidatedProfile, A
     reject_hooks(body.hooks.as_deref())?;
     validate_profile(
         Some(body.name),
-        body.repository_id,
         body.paths,
         body.excludes,
         body.exclude_files,
@@ -844,7 +839,6 @@ pub fn validate_update(
     let name = body.name.unwrap_or_else(|| current_name.to_owned());
     validate_profile(
         Some(name),
-        body.repository_id,
         body.paths,
         body.excludes,
         body.exclude_files,
@@ -866,7 +860,6 @@ fn reject_hooks(hooks: Option<&[serde_json::Value]>) -> Result<(), ApiError> {
 #[allow(clippy::too_many_arguments)]
 fn validate_profile(
     name: Option<String>,
-    repository_id: String,
     paths: ProfilePaths,
     excludes: Vec<String>,
     exclude_files: Vec<String>,
@@ -877,7 +870,6 @@ fn validate_profile(
     check: Option<CheckOptions>,
 ) -> Result<ValidatedProfile, ApiError> {
     let name = crate::validation::validate_record_name("name", &name.unwrap_or_default())?;
-    let repository_id = parse_repository_id("repository_id", &repository_id)?;
     let paths = validate_paths(paths)?;
     let excludes = validate_patterns("excludes", excludes)?;
     ensure_count("excludes", excludes.len(), MAX_EXCLUDES)?;
@@ -897,7 +889,6 @@ fn validate_profile(
     };
     Ok(ValidatedProfile {
         name,
-        repository_id,
         paths,
         excludes,
         exclude_files,
@@ -1104,20 +1095,10 @@ pub fn parse_profile_id(value: &str) -> Result<ProfileId, ApiError> {
         })
 }
 
-/// The identifier of a repository from a request field.
-pub fn parse_repository_id(field: &'static str, value: &str) -> Result<RepositoryId, ApiError> {
-    Uuid::parse_str(value)
-        .map(RepositoryId::from_uuid)
-        .map_err(|error| {
-            ApiError::invalid_field_cause(field, Reason::InvalidFormat, error.to_string())
-        })
-}
-
 /// The settings of a validated profile for an audit diff. It holds no secret (FR-PF-01).
 pub fn profile_value(profile: &ValidatedProfile) -> Value {
     json!({
         "name": profile.name,
-        "repository_id": profile.repository_id.to_string(),
         "paths": {
             "all": profile.paths.all,
             "windows": profile.paths.windows,
@@ -1146,7 +1127,6 @@ pub fn profile_value(profile: &ValidatedProfile) -> Value {
 pub fn stored_value(profile: &Profile) -> Value {
     json!({
         "name": profile.name,
-        "repository_id": profile.repository_id.to_string(),
         "paths": {
             "all": profile.paths_all,
             "windows": profile.paths_windows,

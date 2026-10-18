@@ -42,10 +42,10 @@ async fn ac_pr_03_the_job_carries_only_the_secrets_of_its_own_repository() {
     let mut agent = env.connect_agent("pr03-host").await;
     let repository_a = env.create_repository(agent.id, "canary-secret-of-a").await;
     let repository_b = env.create_repository(agent.id, "canary-secret-of-b").await;
-    let profile = env.create_profile(repository_a, json!({})).await;
-    let plan = env.create_plan(profile, agent.id).await;
-    let other_profile = env.create_profile(repository_b, json!({})).await;
-    let _other_plan = env.create_plan(other_profile, agent.id).await;
+    let profile = env.create_profile(json!({})).await;
+    let plan = env.create_plan(profile, agent.id, repository_a).await;
+    let other_profile = env.create_profile(json!({})).await;
+    let _other_plan = env.create_plan(other_profile, agent.id, repository_b).await;
 
     let job_id = env.run_plan(plan).await;
     env.pass().await;
@@ -73,8 +73,8 @@ async fn ac_rp_01_a_rest_job_carries_the_user_name_and_the_password() {
     let repository = env
         .create_rest_repository(agent.id, "backup", "rest-canary-password")
         .await;
-    let profile = env.create_profile(repository, json!({})).await;
-    let plan = env.create_plan(profile, agent.id).await;
+    let profile = env.create_profile(json!({})).await;
+    let plan = env.create_plan(profile, agent.id, repository).await;
 
     env.run_plan(plan).await;
     env.pass().await;
@@ -101,8 +101,8 @@ async fn fr_sc_05_every_restic_step_carries_retry_lock() {
     let env = Env::start(db, test_queue()).await;
     let mut agent = env.connect_agent("lock-host").await;
     let repository = env.create_repository(agent.id, "pw").await;
-    let profile = env.create_profile(repository, json!({})).await;
-    let plan = env.create_plan(profile, agent.id).await;
+    let profile = env.create_profile(json!({})).await;
+    let plan = env.create_plan(profile, agent.id, repository).await;
 
     env.run_plan(plan).await;
     env.pass().await;
@@ -134,8 +134,8 @@ async fn ac_rp_03_the_delivery_record_commits_before_the_job_is_sent() {
     let repository = env
         .create_repository(agent.id, "rp03-canary-password")
         .await;
-    let profile = env.create_profile(repository, json!({})).await;
-    let plan = env.create_plan(profile, agent.id).await;
+    let profile = env.create_profile(json!({})).await;
+    let plan = env.create_plan(profile, agent.id, repository).await;
 
     env.run_plan(plan).await;
     assert_eq!(
@@ -169,8 +169,8 @@ async fn ac_pr_04_an_unacknowledged_job_is_delivered_again_after_the_lease() {
     let env = Env::start(db, test_queue()).await;
     let mut agent = env.connect_agent("pr04-host").await;
     let repository = env.create_repository(agent.id, "pw").await;
-    let profile = env.create_profile(repository, json!({})).await;
-    let plan = env.create_plan(profile, agent.id).await;
+    let profile = env.create_profile(json!({})).await;
+    let plan = env.create_plan(profile, agent.id, repository).await;
     let job = env.run_plan(plan).await;
 
     env.pass().await;
@@ -207,8 +207,8 @@ async fn ac_pr_04_a_job_that_is_never_acknowledged_fails_after_the_delivery_limi
     let env = Env::start(db, queue).await;
     let mut agent = env.connect_agent("pr04-limit").await;
     let repository = env.create_repository(agent.id, "pw").await;
-    let profile = env.create_profile(repository, json!({})).await;
-    let plan = env.create_plan(profile, agent.id).await;
+    let profile = env.create_profile(json!({})).await;
+    let plan = env.create_plan(profile, agent.id, repository).await;
     let job = env.run_plan(plan).await;
 
     for _ in 0..2 {
@@ -231,8 +231,8 @@ async fn ac_tn_03_a_suspended_tenant_dispatches_nothing_and_its_agents_stay_conn
     let env = Env::start(db, test_queue()).await;
     let mut agent = env.connect_agent("tn03-host").await;
     let repository = env.create_repository(agent.id, "pw").await;
-    let profile = env.create_profile(repository, json!({})).await;
-    let plan = env.create_plan(profile, agent.id).await;
+    let profile = env.create_profile(json!({})).await;
+    let plan = env.create_plan(profile, agent.id, repository).await;
     let job = env.run_plan(plan).await;
 
     common::set_tenant_status(env.db.database(), env.tenant, "suspended").await;
@@ -257,8 +257,8 @@ async fn an_offline_agent_gets_no_send_and_no_secret_is_read() {
     let env = Env::start(db, test_queue()).await;
     let first = env.connect_agent("later-host").await;
     let repository = env.create_repository(first.id, "pw").await;
-    let profile = env.create_profile(repository, json!({})).await;
-    let plan = env.create_plan(profile, first.id).await;
+    let profile = env.create_profile(json!({})).await;
+    let plan = env.create_plan(profile, first.id, repository).await;
     let job = env.run_plan(plan).await;
     let agent_id = first.id;
     drop(first);
@@ -316,8 +316,8 @@ async fn ac_ag_09_an_agent_with_an_older_restic_gets_no_job_and_the_status_is_in
     let env = Env::start(db, test_queue()).await;
     let mut agent = env.connect_agent("compile-host").await;
     let repository = env.create_repository(agent.id, "pw").await;
-    let profile = env.create_profile(repository, json!({})).await;
-    let plan = env.create_plan(profile, agent.id).await;
+    let profile = env.create_profile(json!({})).await;
+    let plan = env.create_plan(profile, agent.id, repository).await;
     let job = env.run_plan(plan).await;
 
     // The agent downgrades restic below the supported minimum after the job was queued.
@@ -359,8 +359,8 @@ async fn a_profile_that_no_longer_compiles_fails_the_job_with_a_typed_reason() {
     let env = Env::start(db, test_queue()).await;
     let mut agent = env.connect_agent("compile-host").await;
     let repository = env.create_repository(agent.id, "pw").await;
-    let profile = env.create_profile(repository, json!({})).await;
-    let plan = env.create_plan(profile, agent.id).await;
+    let profile = env.create_profile(json!({})).await;
+    let plan = env.create_plan(profile, agent.id, repository).await;
     let job = env.run_plan(plan).await;
 
     // The profile loses its paths after the job was queued.

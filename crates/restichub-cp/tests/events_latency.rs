@@ -86,8 +86,8 @@ async fn ac_ui_02_progress_reaches_the_stream_within_two_seconds_at_p95() {
         )
         .await;
     let repository = env.create_repository(emulator.id, "pw").await;
-    let profile = env.create_profile(repository, serde_json::json!({})).await;
-    let plan = env.create_plan(profile, emulator.id).await;
+    let profile = env.create_profile(serde_json::json!({})).await;
+    let plan = env.create_plan(profile, emulator.id, repository).await;
 
     let response = common::send_response(
         &env.app,

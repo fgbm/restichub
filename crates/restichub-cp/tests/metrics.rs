@@ -253,8 +253,8 @@ async fn ac_mn_03_the_metrics_endpoint_passes_a_strict_format_check() {
     let env = Env::start(db, test_queue()).await;
     let mut agent = env.connect_agent("metrics-agent").await;
     let repository = env.create_repository(agent.id, "pw").await;
-    let profile = env.create_profile(repository, serde_json::json!({})).await;
-    let plan = env.create_plan(profile, agent.id).await;
+    let profile = env.create_profile(serde_json::json!({})).await;
+    let plan = env.create_plan(profile, agent.id, repository).await;
     let job = env.run_plan(plan).await;
     env.pass().await;
     let signed = agent.job().await;
@@ -355,8 +355,8 @@ async fn fr_mn_05_the_metrics_show_a_held_repository_lock() {
     let env = Env::start(db, test_queue()).await;
     let mut agent = env.connect_agent("lock-agent").await;
     let repository = env.create_repository(agent.id, "pw").await;
-    let profile = env.create_profile(repository, serde_json::json!({})).await;
-    let plan = env.create_plan(profile, agent.id).await;
+    let profile = env.create_profile(serde_json::json!({})).await;
+    let plan = env.create_plan(profile, agent.id, repository).await;
     env.run_plan(plan).await;
     env.pass().await;
     let signed = agent.job().await;

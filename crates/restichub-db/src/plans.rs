@@ -1,7 +1,8 @@
 //! The plan rows of a tenant (FR-SC-01, FR-SC-07, FR-SC-11, ADR-0010).
 //!
-//! One row binds a profile to one agent with a cron schedule and a time zone (FR-SC-01). The
-//! scheduler reads the due rows and creates one job for each fire time; the unique key
+//! One row binds a profile to one agent and one repository with a cron schedule and a time zone
+//! (FR-SC-01, ADR-0047). The scheduler reads the due rows and creates one job for each fire time;
+//! the unique key
 //! `(plan_id, fire_time)` on the `jobs` table makes the create idempotent (FR-SC-02).
 //!
 //! The row holds no secret and no compiled command: a scheduled job names the plan and the fire
@@ -25,9 +26,9 @@ pub const MAX_PAGE_LIMIT: i64 = 200;
 // `jobs_plan_last_success_idx` (0039) serves the lateral read of the last success.
 macro_rules! plan_select {
     () => {
-        "SELECT p.id, p.name, p.profile_id, p.agent_id, p.cron, p.time_zone, \
+        "SELECT p.id, p.name, p.profile_id, p.agent_id, p.repository_id, p.cron, p.time_zone, \
                 p.missed_run_policy, p.enabled, p.next_run_at, p.last_fire_time, p.created_at, \
-                p.updated_at, p.created_by, pr.name AS profile_name, pr.repository_id, \
+                p.updated_at, p.created_by, pr.name AS profile_name, \
                 a.hostname AS agent_hostname, a.status AS agent_status, p.rpo_seconds, \
                 s.finished_at AS last_success_at \
          FROM plans p \
@@ -41,8 +42,8 @@ macro_rules! plan_select {
     };
 }
 
-/// A schedule that binds a profile to one agent, with a cron expression and a time zone
-/// (FR-SC-01, ADR-0010).
+/// A schedule that binds a profile to one agent and one repository, with a cron expression and a
+/// time zone (FR-SC-01, ADR-0010, ADR-0047).
 ///
 /// The names of the profile and of the agent are read with the row, so the list needs no second
 /// lookup. They are display values, not part of the identity of the plan.
@@ -65,7 +66,7 @@ pub struct Plan {
     /// The host name of the bound agent (display only).
     pub agent_hostname: String,
     pub agent_status: AgentStatus,
-    /// The repository of the bound profile (display only).
+    /// The repository that the plan backs up into.
     pub repository_id: RepositoryId,
     /// The recovery point objective in seconds. `None` means the default of the schedule (ADR-0036).
     pub rpo_seconds: Option<i32>,
@@ -109,6 +110,7 @@ pub struct NewPlan<'a> {
     pub name: &'a str,
     pub profile_id: ProfileId,
     pub agent_id: AgentId,
+    pub repository_id: RepositoryId,
     pub cron: &'a str,
     pub time_zone: &'a str,
     pub missed_run_policy: MissedRunPolicy,
@@ -126,6 +128,7 @@ pub struct PlanUpdate<'a> {
     pub name: &'a str,
     pub profile_id: ProfileId,
     pub agent_id: AgentId,
+    pub repository_id: RepositoryId,
     pub cron: &'a str,
     pub time_zone: &'a str,
     pub missed_run_policy: MissedRunPolicy,
@@ -144,22 +147,23 @@ pub struct DuePlan {
     /// The next fire time in UTC. Not null for a claimed row.
     pub next_run_at: OffsetDateTime,
     pub agent_status: AgentStatus,
-    /// The repository of the bound profile. A scheduled job names it (FR-SC-04).
+    /// The repository of the plan. A scheduled job names it (FR-SC-04).
     pub repository_id: RepositoryId,
 }
 
 pub async fn create(tx: &mut TenantTx<'_>, new: &NewPlan<'_>) -> Result<PlanId, DbError> {
     sqlx::query(
         "INSERT INTO plans \
-         (id, tenant_id, name, profile_id, agent_id, cron, time_zone, missed_run_policy, enabled, \
-          next_run_at, created_by, rpo_seconds) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+         (id, tenant_id, name, profile_id, agent_id, repository_id, cron, time_zone, \
+          missed_run_policy, enabled, next_run_at, created_by, rpo_seconds) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
     )
     .bind(new.id)
     .bind(tx.tenant())
     .bind(new.name)
     .bind(new.profile_id)
     .bind(new.agent_id)
+    .bind(new.repository_id)
     .bind(new.cron)
     .bind(new.time_zone)
     .bind(new.missed_run_policy.as_str())
@@ -225,6 +229,69 @@ pub async fn referrers_of_profile(
     .await
 }
 
+/// Lists the plans of the tenant that back up into the repository.
+///
+/// A repository that a plan uses cannot be removed until the plan is removed or repointed.
+pub async fn referrers_of_repository(
+    tx: &mut TenantTx<'_>,
+    repository_id: RepositoryId,
+) -> Result<Referrers, DbError> {
+    crate::referrers::fetch(
+        tx,
+        "SELECT id, name, count(*) OVER () FROM plans WHERE repository_id = $1 \
+         ORDER BY lower(name), id LIMIT $2",
+        repository_id.as_uuid(),
+    )
+    .await
+}
+
+/// The distinct profiles of the plans that back up into the repository, oldest profile first.
+///
+/// The maintenance job builds one `forget` step for each of them. A tie on `created_at` goes to the
+/// older identifier, so two control planes agree on the order (ADR-0034).
+pub async fn profiles_of_repository(
+    tx: &mut TenantTx<'_>,
+    repository_id: RepositoryId,
+) -> Result<Vec<ProfileId>, DbError> {
+    let rows = sqlx::query_as::<_, (uuid::Uuid,)>(
+        "SELECT pr.id FROM profiles pr \
+         WHERE EXISTS (SELECT 1 FROM plans p \
+                       WHERE p.tenant_id = pr.tenant_id AND p.profile_id = pr.id \
+                         AND p.repository_id = $1) \
+         ORDER BY pr.created_at, pr.id",
+    )
+    .bind(repository_id)
+    .fetch_all(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(rows
+        .into_iter()
+        .map(|(id,)| ProfileId::from_uuid(id))
+        .collect())
+}
+
+/// Lists the plans of the profile that back up into the repository, oldest first.
+///
+/// The maintenance job reads the agents of these plans only, so a plan of the same profile in
+/// another repository never supplies the facts for a `forget` step of this repository (ADR-0034).
+pub async fn list_by_profile_and_repository(
+    tx: &mut TenantTx<'_>,
+    profile_id: ProfileId,
+    repository_id: RepositoryId,
+) -> Result<Vec<Plan>, DbError> {
+    let rows = sqlx::query_as::<_, PlanRow>(concat!(
+        plan_select!(),
+        " WHERE p.profile_id = $1 AND p.repository_id = $2 \
+         ORDER BY p.created_at, p.id",
+    ))
+    .bind(profile_id)
+    .bind(repository_id)
+    .fetch_all(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(rows.into_iter().map(Plan::from).collect())
+}
+
 /// Lists the plans of the tenant that bind the profile, oldest first (FR-SC-11).
 ///
 /// An update of a profile revalidates each plan against the facts of its agent, so the query names
@@ -245,7 +312,7 @@ pub async fn list_by_profile(
     Ok(rows.into_iter().map(Plan::from).collect())
 }
 
-/// True when a plan of a profile that uses the repository runs on another agent than `host`.
+/// True when a plan of the repository runs on another agent than `host`.
 ///
 /// A local repository lives on the disk of one host, so each of its plans must run there.
 pub async fn has_plan_off_host(
@@ -255,8 +322,7 @@ pub async fn has_plan_off_host(
 ) -> Result<bool, DbError> {
     let (found,): (bool,) = sqlx::query_as(
         "SELECT EXISTS (SELECT 1 FROM plans p \
-         JOIN profiles pr ON pr.tenant_id = p.tenant_id AND pr.id = p.profile_id \
-         WHERE pr.repository_id = $1 AND p.agent_id <> $2)",
+         WHERE p.repository_id = $1 AND p.agent_id <> $2)",
     )
     .bind(repository_id)
     .bind(host)
@@ -282,8 +348,7 @@ pub async fn local_host_problems(tx: &mut TenantTx<'_>) -> Result<Vec<LocalHostP
                     FILTER (WHERE p.id IS NOT NULL \
                         AND p.agent_id IS DISTINCT FROM r.maintenance_agent_id), '{}'::uuid[]) \
          FROM repositories r \
-         LEFT JOIN profiles pr ON pr.tenant_id = r.tenant_id AND pr.repository_id = r.id \
-         LEFT JOIN plans p ON p.tenant_id = pr.tenant_id AND p.profile_id = pr.id \
+         LEFT JOIN plans p ON p.tenant_id = r.tenant_id AND p.repository_id = r.id \
          WHERE r.backend = 'local' \
          GROUP BY r.id, r.maintenance_agent_id \
          HAVING r.maintenance_agent_id IS NULL \
@@ -324,14 +389,16 @@ pub async fn update(
     patch: &PlanUpdate<'_>,
 ) -> Result<bool, DbError> {
     let result = sqlx::query(
-        "UPDATE plans SET name = $2, profile_id = $3, agent_id = $4, cron = $5, time_zone = $6, \
-                missed_run_policy = $7, enabled = $8, rpo_seconds = $9, updated_at = now() \
+        "UPDATE plans SET name = $2, profile_id = $3, agent_id = $4, repository_id = $5, \
+                cron = $6, time_zone = $7, missed_run_policy = $8, enabled = $9, \
+                rpo_seconds = $10, updated_at = now() \
          WHERE id = $1",
     )
     .bind(id)
     .bind(patch.name)
     .bind(patch.profile_id)
     .bind(patch.agent_id)
+    .bind(patch.repository_id)
     .bind(patch.cron)
     .bind(patch.time_zone)
     .bind(patch.missed_run_policy.as_str())
@@ -379,11 +446,10 @@ pub async fn claim_due(
     limit: i64,
 ) -> Result<Vec<DuePlan>, DbError> {
     let rows = sqlx::query_as::<_, DuePlanRow>(
-        "SELECT p.id, p.agent_id, p.cron, p.time_zone, p.missed_run_policy, p.next_run_at, \
-                a.status, pr.repository_id \
+        "SELECT p.id, p.agent_id, p.repository_id, p.cron, p.time_zone, p.missed_run_policy, \
+                p.next_run_at, a.status \
          FROM plans p \
          JOIN agents a ON a.tenant_id = p.tenant_id AND a.id = p.agent_id \
-         JOIN profiles pr ON pr.tenant_id = p.tenant_id AND pr.id = p.profile_id \
          WHERE p.enabled AND p.next_run_at IS NOT NULL AND p.next_run_at <= $1 \
          ORDER BY p.next_run_at \
          LIMIT $2 \

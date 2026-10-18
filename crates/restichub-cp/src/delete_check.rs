@@ -47,16 +47,16 @@ impl From<Option<Block>> for UsageView {
     }
 }
 
-/// A profile binds the repository, or an active job holds it. The profile check comes first.
+/// A plan backs up into the repository, or an active job holds it. The plan check comes first.
 pub async fn repository_block(
     tx: &mut TenantTx<'_>,
     id: RepositoryId,
 ) -> Result<Option<Block>, ApiError> {
-    let profiles = restichub_db::profiles::referrers_of_repository(tx, id).await?;
-    if !profiles.is_empty() {
+    let plans = restichub_db::plans::referrers_of_repository(tx, id).await?;
+    if !plans.is_empty() {
         return Ok(Some(Block {
             code: ErrorCode::RepositoryInUse,
-            blockers: Blockers::new(BlockerKind::Profile, &profiles),
+            blockers: Blockers::new(BlockerKind::Plan, &plans),
         }));
     }
     let jobs = restichub_db::jobs::active_for_repository(tx, id).await?;

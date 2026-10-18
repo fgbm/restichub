@@ -375,7 +375,9 @@ async fn plan_steps(
     let Some(profile) = profiles_repo::get(tx, plan.profile_id).await? else {
         return Err(BuildError::Refused(Refusal::ProfileMissing));
     };
-    if profile.repository_id != repository_id {
+    // The repository lives in the plan, so a job keeps the repository that its plan named when the
+    // queue took it (ADR-0047). A change since then would write into another repository.
+    if plan.repository_id != repository_id {
         return Err(BuildError::Refused(Refusal::RepositoryChanged));
     }
     let target = target_facts(agent, now).map_err(|error| {
@@ -386,7 +388,12 @@ async fn plan_steps(
         tracing::warn!(job = %job.id, cause = ?error, "the stored profile does not convert");
         BuildError::Refused(Refusal::CompileFailed)
     })?;
-    let compiled = compile(&compiler_profile, &target).map_err(|error| {
+    let compiled = compile(
+        &compiler_profile,
+        Some(&plan.repository_id.to_string()),
+        &target,
+    )
+    .map_err(|error| {
         tracing::warn!(job = %job.id, cause = ?error, "the stored profile does not compile");
         if let Some(params) = IncompatibleParams::of(&error) {
             BuildError::Incompatible(params)

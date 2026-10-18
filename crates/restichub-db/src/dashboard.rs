@@ -54,12 +54,11 @@ async fn rpo_plans_page(
     sqlx::query_as::<_, RpoPlan>(
         "SELECT p.id, p.name, p.cron, p.time_zone, p.enabled, p.rpo_seconds, p.created_at, \
                 p.agent_id, a.hostname AS agent_hostname, a.status AS agent_status, \
-                pr.repository_id, r.name AS repository_name, s.finished_at AS last_success_at, \
+                p.repository_id, r.name AS repository_name, s.finished_at AS last_success_at, \
                 s.id AS last_success_job_id \
          FROM plans p \
          JOIN agents a ON a.tenant_id = p.tenant_id AND a.id = p.agent_id \
-         JOIN profiles pr ON pr.tenant_id = p.tenant_id AND pr.id = p.profile_id \
-         JOIN repositories r ON r.tenant_id = p.tenant_id AND r.id = pr.repository_id \
+         JOIN repositories r ON r.tenant_id = p.tenant_id AND r.id = p.repository_id \
          LEFT JOIN LATERAL ( \
              SELECT j.id, j.finished_at FROM jobs j \
              WHERE j.plan_id = p.id AND j.kind = 'backup' AND j.status = 'succeeded' \

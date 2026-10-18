@@ -25,13 +25,18 @@ use common::{
 async fn fixture(
     db: &Database,
     name: &str,
-) -> (TenantId, restichub_db::ProfileId, restichub_db::AgentId) {
+) -> (
+    TenantId,
+    restichub_db::ProfileId,
+    restichub_db::AgentId,
+    restichub_db::RepositoryId,
+) {
     let tenant = create_tenant_with_key(db, name).await;
     let secret = seed_secret(db, tenant, "s").await;
     let repository = seed_repository(db, tenant, "r", secret).await;
-    let profile = seed_profile(db, tenant, "p", repository).await;
+    let profile = seed_profile(db, tenant, "p").await;
     let agent = seed_agent(db, tenant, "h").await;
-    (tenant, profile, agent)
+    (tenant, profile, agent, repository)
 }
 
 /// Creates a plan whose next fire time is the first after `start`, and returns it.
@@ -41,6 +46,7 @@ async fn plan_at(
     tenant: TenantId,
     profile: restichub_db::ProfileId,
     agent: restichub_db::AgentId,
+    repository: restichub_db::RepositoryId,
     name: &str,
     cron: &str,
     time_zone: &str,
@@ -58,6 +64,7 @@ async fn plan_at(
         time_zone,
         MissedRunPolicy::RunAll,
         Some(next),
+        repository,
     )
     .await
 }
@@ -70,7 +77,7 @@ async fn ac_sc_01_moscow_runs_at_the_local_wall_clock() {
         return;
     };
     let database = db.database();
-    let (tenant, profile, agent) = fixture(database, "dst-moscow").await;
+    let (tenant, profile, agent, repository) = fixture(database, "dst-moscow").await;
 
     let start = utc(2025, Month::June, 1, 0, 0);
     let plan = plan_at(
@@ -78,6 +85,7 @@ async fn ac_sc_01_moscow_runs_at_the_local_wall_clock() {
         tenant,
         profile,
         agent,
+        repository,
         "moscow",
         "0 2 * * *",
         "Europe/Moscow",
@@ -113,7 +121,7 @@ async fn ac_sc_01_the_spring_change_gives_one_run_right_after_the_clock_change()
         return;
     };
     let database = db.database();
-    let (tenant, profile, agent) = fixture(database, "dst-spring").await;
+    let (tenant, profile, agent, repository) = fixture(database, "dst-spring").await;
 
     let start = utc(2025, Month::March, 29, 12, 0);
     let plan = plan_at(
@@ -121,6 +129,7 @@ async fn ac_sc_01_the_spring_change_gives_one_run_right_after_the_clock_change()
         tenant,
         profile,
         agent,
+        repository,
         "spring",
         "30 2 * * *",
         "Europe/Berlin",
@@ -166,7 +175,7 @@ async fn ac_sc_01_the_autumn_change_gives_one_run_at_the_first_occurrence() {
         return;
     };
     let database = db.database();
-    let (tenant, profile, agent) = fixture(database, "dst-autumn").await;
+    let (tenant, profile, agent, repository) = fixture(database, "dst-autumn").await;
 
     let start = utc(2025, Month::October, 25, 12, 0);
     let plan = plan_at(
@@ -174,6 +183,7 @@ async fn ac_sc_01_the_autumn_change_gives_one_run_at_the_first_occurrence() {
         tenant,
         profile,
         agent,
+        repository,
         "autumn",
         "30 2 * * *",
         "Europe/Berlin",

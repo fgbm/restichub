@@ -109,16 +109,13 @@ async fn fr_rp_08_the_profile_filter_narrows_the_forget_step() {
     let backup = env.connect_agent("host-b").await;
     let repository = initialized_repository(&env, maintenance.id).await;
     let profile = env
-        .create_profile(
-            repository,
-            json!({"retention": {
-                "keep_last": 2,
-                "filter": {"hosts": ["host-a"], "tags": ["daily", "db"], "paths": ["/srv"]},
-            }}),
-        )
+        .create_profile(json!({"retention": {
+            "keep_last": 2,
+            "filter": {"hosts": ["host-a"], "tags": ["daily", "db"], "paths": ["/srv"]},
+        }}))
         .await;
-    env.create_plan(profile, maintenance.id).await;
-    env.create_plan(profile, backup.id).await;
+    env.create_plan(profile, maintenance.id, repository).await;
+    env.create_plan(profile, backup.id, repository).await;
 
     let (status, queued) = run_retention(&env, repository).await;
     assert_eq!(status, StatusCode::ACCEPTED, "{queued}");
@@ -149,16 +146,13 @@ async fn fr_rp_08_a_plan_agent_outside_the_host_filter_gives_no_forget_step() {
     let backup = env.connect_agent("host-b").await;
     let repository = initialized_repository(&env, maintenance.id).await;
     let profile = env
-        .create_profile(
-            repository,
-            json!({"retention": {"keep_last": 2, "filter": {"hosts": ["host-a"]}}}),
-        )
+        .create_profile(json!({"retention": {"keep_last": 2, "filter": {"hosts": ["host-a"]}}}))
         .await;
-    env.create_plan(profile, backup.id).await;
+    env.create_plan(profile, backup.id, repository).await;
     let other = env
-        .create_profile(repository, json!({"retention": {"keep_last": 1}}))
+        .create_profile(json!({"retention": {"keep_last": 1}}))
         .await;
-    env.create_plan(other, backup.id).await;
+    env.create_plan(other, backup.id, repository).await;
 
     let (status, queued) = run_retention(&env, repository).await;
     assert_eq!(status, StatusCode::ACCEPTED, "{queued}");
@@ -186,10 +180,10 @@ async fn fr_rp_08_the_forget_step_does_not_depend_on_the_agent_name() {
     let second = env.connect_agent("host-two").await;
     let repository = initialized_repository(&env, maintenance.id).await;
     let profile = env
-        .create_profile(repository, json!({"retention": {"keep_last": 2}}))
+        .create_profile(json!({"retention": {"keep_last": 2}}))
         .await;
-    env.create_plan(profile, first.id).await;
-    env.create_plan(profile, second.id).await;
+    env.create_plan(profile, first.id, repository).await;
+    env.create_plan(profile, second.id, repository).await;
 
     let mut lines = Vec::new();
     for hostname in ["host-one", "renamed-host"] {
@@ -237,9 +231,9 @@ async fn fr_rp_08_a_forget_that_selects_nothing_gives_a_warning() {
     let mut maintenance = env.connect_agent("maintenance-host").await;
     let repository = initialized_repository(&env, maintenance.id).await;
     let profile = env
-        .create_profile(repository, json!({"retention": {"keep_last": 2}}))
+        .create_profile(json!({"retention": {"keep_last": 2}}))
         .await;
-    env.create_plan(profile, maintenance.id).await;
+    env.create_plan(profile, maintenance.id, repository).await;
 
     for (selected, expected) in [(false, "succeeded_with_warnings"), (true, "succeeded")] {
         let (status, queued) = run_retention(&env, repository).await;
@@ -292,8 +286,10 @@ async fn fr_pf_01_the_check_step_reads_the_largest_subset() {
     let mut maintenance = env.connect_agent("maintenance-host").await;
     let repository = initialized_repository(&env, maintenance.id).await;
     for subset in ["5%", "1/2", "30%"] {
-        env.create_profile(repository, json!({"check": {"read_data_subset": subset}}))
+        let profile = env
+            .create_profile(json!({"check": {"read_data_subset": subset}}))
             .await;
+        env.create_plan(profile, maintenance.id, repository).await;
     }
 
     let (status, queued) = env
@@ -331,9 +327,9 @@ async fn fr_rp_08_only_a_plan_of_an_active_agent_counts_for_the_retention() {
     let backup = env.connect_agent("backup-host").await;
     let repository = initialized_repository(&env, maintenance.id).await;
     let profile = env
-        .create_profile(repository, json!({"retention": {"keep_last": 2}}))
+        .create_profile(json!({"retention": {"keep_last": 2}}))
         .await;
-    env.create_plan(profile, backup.id).await;
+    env.create_plan(profile, backup.id, repository).await;
     let (status, revoked) = env
         .call(
             &env.admin,

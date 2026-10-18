@@ -18,6 +18,7 @@ use crate::target::{Architecture, OperatingSystem, ResticVersion, TargetFacts};
 const BAD_OPTION: &str = "--password-command=cmd /c calc";
 const BAD_SHORT: &str = "-x";
 const PROFILE_TAG: &str = "restichub-profile-test";
+const REPOSITORY_ID: &str = "repo-1";
 
 fn date(year: i32, month: u8, day: u8) -> OffsetDateTime {
     let month = Month::try_from(month).unwrap_or(Month::January);
@@ -45,7 +46,6 @@ fn target() -> TargetFacts {
 
 fn profile() -> Profile {
     Profile {
-        repository_id: "repo-1".to_owned(),
         paths: ProfilePaths {
             all: vec!["/srv".to_owned()],
             by_os: BTreeMap::new(),
@@ -66,14 +66,14 @@ fn repository() -> RepositoryAccess {
 }
 
 fn plan(profile: &Profile, target: &TargetFacts) -> Plan {
-    match compile(profile, target) {
+    match compile(profile, Some(REPOSITORY_ID), target) {
         Ok(value) => value,
         Err(error) => panic!("{error:?}"),
     }
 }
 
 fn error(profile: &Profile, target: &TargetFacts) -> CompileError {
-    match compile(profile, target) {
+    match compile(profile, Some(REPOSITORY_ID), target) {
         Ok(value) => panic!("expected an error, got {value:?}"),
         Err(error) => error,
     }
@@ -145,6 +145,39 @@ fn retention_and_check_add_maintenance_steps() {
     }
 }
 
+#[test]
+fn adr_0047_every_step_names_the_repository_of_the_plan() {
+    let mut profile = profile();
+    profile.retention = Some(Retention::default());
+    profile.check = Some(CheckOptions {
+        read_data_subset: "10%".to_owned(),
+    });
+    let plan = match compile(&profile, Some("repo-2"), &target()) {
+        Ok(plan) => plan,
+        Err(error) => panic!("{error:?}"),
+    };
+    for planned in &plan.steps {
+        let repository_id = match &planned.step.kind {
+            Some(step::Kind::Backup(value)) => &value.repository_id,
+            Some(step::Kind::Forget(value)) => &value.repository_id,
+            Some(step::Kind::Prune(value)) => &value.repository_id,
+            Some(step::Kind::Check(value)) => &value.repository_id,
+            other => panic!("unexpected step {other:?}"),
+        };
+        assert_eq!(repository_id, "repo-2");
+    }
+}
+
+#[test]
+fn adr_0047_a_profile_without_a_repository_compiles_without_repository_environment() {
+    let plan = match compile(&profile(), None, &target()) {
+        Ok(plan) => plan,
+        Err(error) => panic!("{error:?}"),
+    };
+    let preview = preview(&plan, None, OperatingSystem::Linux).expect("the preview");
+    assert!(preview.iter().all(|step| step.environment.is_empty()));
+}
+
 fn forget_filter(plan: &Plan) -> restichub_proto::agent::v1::SnapshotsFilter {
     plan.steps
         .iter()
@@ -171,7 +204,7 @@ fn fr_rp_08_the_forget_carries_the_profile_tag_and_the_filter_tags_as_one_and_li
     assert_eq!(filter.all_tags, [PROFILE_TAG, "daily"]);
     assert!(filter.tags.is_empty());
 
-    let preview = preview(&plan, &repository(), OperatingSystem::Linux).expect("the preview");
+    let preview = preview(&plan, Some(&repository()), OperatingSystem::Linux).expect("the preview");
     let forget = preview
         .iter()
         .find(|step| matches!(step.step.kind, Some(step::Kind::Forget(_))))
@@ -191,7 +224,7 @@ fn ac_pf_01_the_preview_shows_the_argv_that_the_agent_runs_in_the_quoting_of_the
     profile.paths.all = vec!["C:\\My Data".to_owned()];
     let plan = plan(&profile, &target());
     let command_on = |os| {
-        preview(&plan, &repository(), os)
+        preview(&plan, Some(&repository()), os)
             .expect("the preview")
             .into_iter()
             .find(|step| matches!(step.step.kind, Some(step::Kind::Backup(_))))
@@ -302,7 +335,7 @@ fn ac_pf_02_vss_on_windows_agent_is_accepted() {
     };
     let mut target = target();
     target.os = OperatingSystem::Windows;
-    assert!(compile(&profile, &target).is_ok());
+    assert!(compile(&profile, Some(REPOSITORY_ID), &target).is_ok());
 }
 
 #[test]
@@ -488,7 +521,7 @@ fn empty_paths_are_rejected() {
 #[test]
 fn ac_pf_01_preview_masks_secrets() {
     let plan = plan(&profile(), &target());
-    let previews = match preview(&plan, &repository(), OperatingSystem::Linux) {
+    let previews = match preview(&plan, Some(&repository()), OperatingSystem::Linux) {
         Ok(value) => value,
         Err(error) => panic!("{error:?}"),
     };
@@ -525,7 +558,6 @@ proptest! {
         values in prop::collection::vec(attack(), 0..6),
     ) {
         let profile = Profile {
-            repository_id: "repo-1".to_owned(),
             paths: ProfilePaths {
                 all: values.clone(),
                 by_os: BTreeMap::new(),
@@ -549,7 +581,7 @@ proptest! {
             ..Profile::default()
         };
 
-        let Ok(plan) = compile(&profile, &target()) else {
+        let Ok(plan) = compile(&profile, Some(REPOSITORY_ID), &target()) else {
             return Ok(());
         };
         let validated = match ValidatedJob::new(Job {
@@ -632,7 +664,8 @@ fn trusting_target() -> TargetFacts {
 fn ac_hk_07_a_script_for_a_host_without_the_trust_mode_is_refused() {
     let mut profile = profile();
     profile.scripts = vec![script("dump", HookPhase::Before)];
-    let error = compile(&profile, &target()).expect_err("the host did not turn on the mode");
+    let error = compile(&profile, Some(REPOSITORY_ID), &target())
+        .expect_err("the host did not turn on the mode");
     assert!(matches!(error, CompileError::ServerScriptsDisabled { .. }));
     assert!(error.is_script());
 }
@@ -643,7 +676,8 @@ fn fr_hk_10_a_script_needs_an_interpreter_of_the_host() {
     let mut powershell = script("dump", HookPhase::Before);
     powershell.interpreter = crate::script::ScriptInterpreter::Powershell;
     profile.scripts = vec![powershell];
-    let error = compile(&profile, &trusting_target()).expect_err("no powershell on this host");
+    let error = compile(&profile, Some(REPOSITORY_ID), &trusting_target())
+        .expect_err("no powershell on this host");
     assert!(matches!(error, CompileError::InterpreterUnavailable { .. }));
 }
 
@@ -691,7 +725,7 @@ fn ac_pf_01_the_preview_of_a_script_shows_no_body_and_no_value() {
     }];
     profile.scripts = vec![dump];
     let plan = plan(&profile, &trusting_target());
-    let lines = preview(&plan, &repository(), OperatingSystem::Linux).expect("preview");
+    let lines = preview(&plan, Some(&repository()), OperatingSystem::Linux).expect("preview");
     let line = &lines[0].command;
     assert!(line.contains("script=dump"));
     assert!(line.contains("PGPASSWORD"));

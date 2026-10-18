@@ -526,10 +526,9 @@ impl Env {
     }
 
     /// The fields of `extra` replace or add to the request body.
-    pub async fn create_profile(&self, repository: Uuid, extra: Value) -> Uuid {
+    pub async fn create_profile(&self, extra: Value) -> Uuid {
         let mut body = json!({
             "name": format!("profile-{}", Uuid::now_v7()),
-            "repository_id": repository.to_string(),
             "paths": {"all": ["/srv"]},
         });
         if let (Some(target), Some(extra)) = (body.as_object_mut(), extra.as_object()) {
@@ -547,11 +546,12 @@ impl Env {
     }
 
     /// Creates a plan that no scheduler pass fires during the test (a far cron).
-    pub async fn create_plan(&self, profile: Uuid, agent: AgentId) -> Uuid {
+    pub async fn create_plan(&self, profile: Uuid, agent: AgentId, repository: Uuid) -> Uuid {
         let body = json!({
             "name": format!("plan-{}", Uuid::now_v7()),
             "profile_id": profile.to_string(),
             "agent_id": agent.to_string(),
+            "repository_id": repository.to_string(),
             "cron": "0 2 1 1 *",
             "time_zone": "UTC",
             "missed_run_policy": "skip",
@@ -568,8 +568,8 @@ impl Env {
     /// Runs a new plan on its own profile. A plan holds one queued manual run at most, so a test that
     /// needs many queued backups of one repository uses one plan for each.
     pub async fn run_fresh_plan(&self, repository: Uuid, agent: AgentId) -> Uuid {
-        let profile = self.create_profile(repository, json!({})).await;
-        let plan = self.create_plan(profile, agent).await;
+        let profile = self.create_profile(json!({})).await;
+        let plan = self.create_plan(profile, agent, repository).await;
         self.run_plan(plan).await
     }
 

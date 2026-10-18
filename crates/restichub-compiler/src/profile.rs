@@ -6,12 +6,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::target::OperatingSystem;
 
-/// A profile: the repository, the paths, the excludes, the tags, the options,
-/// the scripts and the retention (FR-PF-01).
+/// A profile: the paths, the excludes, the tags, the options, the scripts and the retention
+/// (FR-PF-01). The repository belongs to the plan, so it is not part of the profile (ADR-0047).
 #[derive(Debug, Clone, Default)]
 pub struct Profile {
-    /// Identifier of the repository in the control plane.
-    pub repository_id: String,
     pub paths: ProfilePaths,
     pub excludes: Vec<String>,
     pub exclude_files: Vec<String>,

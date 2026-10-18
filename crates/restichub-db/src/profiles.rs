@@ -1,8 +1,9 @@
 //! The profile rows of a tenant (FR-PF-01, FR-PF-03, ADR-0006).
 //!
-//! One row holds the repository, the paths, the excludes, the tags, the options, the
-//! retention and the check options. The row never holds a secret value: the repository password and
-//! the backend credentials live in the encrypted `secrets` table (ADR-0017).
+//! One row holds the paths, the excludes, the tags, the options, the retention and the check
+//! options. The repository belongs to the plan (ADR-0047). The row never holds a secret value: the
+//! repository password and the backend credentials live in the encrypted `secrets` table
+//! (ADR-0017).
 //!
 //! The list settings use text arrays. The retention, the check options and the scripts use a jsonb
 //! document. The control plane validates the document with the compiler before it writes the row
@@ -16,8 +17,7 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::DbError;
-use crate::ids::{ProfileId, RepositoryId, UserId};
-use crate::referrers::Referrers;
+use crate::ids::{ProfileId, UserId};
 use crate::tx::TenantTx;
 
 pub const DEFAULT_PAGE_LIMIT: i64 = 50;
@@ -29,7 +29,6 @@ pub const MAX_PAGE_LIMIT: i64 = 200;
 pub struct Profile {
     pub id: ProfileId,
     pub name: String,
-    pub repository_id: RepositoryId,
     pub paths_all: Vec<String>,
     pub paths_windows: Vec<String>,
     pub paths_linux: Vec<String>,
@@ -89,7 +88,6 @@ pub struct ProfilePageResult {
 pub struct NewProfile<'a> {
     pub id: ProfileId,
     pub name: &'a str,
-    pub repository_id: RepositoryId,
     pub paths_all: &'a [String],
     pub paths_windows: &'a [String],
     pub paths_linux: &'a [String],
@@ -115,7 +113,6 @@ pub struct NewProfile<'a> {
 #[derive(Debug, Clone)]
 pub struct ProfileUpdate<'a> {
     pub name: &'a str,
-    pub repository_id: RepositoryId,
     pub paths_all: &'a [String],
     pub paths_windows: &'a [String],
     pub paths_linux: &'a [String],
@@ -139,17 +136,16 @@ pub struct ProfileUpdate<'a> {
 pub async fn create(tx: &mut TenantTx<'_>, new: &NewProfile<'_>) -> Result<ProfileId, DbError> {
     sqlx::query(
         "INSERT INTO profiles \
-         (id, tenant_id, name, repository_id, paths_all, paths_windows, paths_linux, paths_macos, \
+         (id, tenant_id, name, paths_all, paths_windows, paths_linux, paths_macos, \
           excludes, exclude_files, tags, use_fs_snapshot, one_file_system, exclude_caches, \
           limit_upload_kib, limit_download_kib, retention, check_options, scripts, \
           created_by, stall_timeout_minutes, max_duration_minutes) \
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, \
-                 $18, $19, $20, $21, $22)",
+                 $18, $19, $20, $21)",
     )
     .bind(new.id)
     .bind(tx.tenant())
     .bind(new.name)
-    .bind(new.repository_id)
     .bind(new.paths_all)
     .bind(new.paths_windows)
     .bind(new.paths_linux)
@@ -174,28 +170,6 @@ pub async fn create(tx: &mut TenantTx<'_>, new: &NewProfile<'_>) -> Result<Profi
     Ok(new.id)
 }
 
-/// Lists the profiles that use a repository, oldest first (FR-RP-08, FR-PF-01).
-///
-/// The maintenance job reads them to build one `forget` step for each profile and agent.
-pub async fn list_for_repository(
-    tx: &mut TenantTx<'_>,
-    repository: RepositoryId,
-) -> Result<Vec<Profile>, DbError> {
-    let rows = sqlx::query_as::<_, ProfileRow>(
-        "SELECT id, name, repository_id, paths_all, paths_windows, paths_linux, paths_macos, \
-                excludes, exclude_files, tags, use_fs_snapshot, one_file_system, exclude_caches, \
-                limit_upload_kib, limit_download_kib, stall_timeout_minutes, \
-                max_duration_minutes, retention, check_options, scripts, created_at, \
-                updated_at, created_by \
-         FROM profiles WHERE repository_id = $1 ORDER BY created_at, id",
-    )
-    .bind(repository)
-    .fetch_all(tx.as_conn())
-    .await
-    .map_err(DbError::Query)?;
-    Ok(rows.into_iter().map(Profile::from).collect())
-}
-
 /// Lists the profiles of the tenant of the transaction, newest first.
 pub async fn list(tx: &mut TenantTx<'_>, page: &ProfilePage) -> Result<ProfilePageResult, DbError> {
     let limit = page.limit.clamp(1, MAX_PAGE_LIMIT);
@@ -204,7 +178,7 @@ pub async fn list(tx: &mut TenantTx<'_>, page: &ProfilePage) -> Result<ProfilePa
         None => (None, None),
     };
     let rows = sqlx::query_as::<_, ProfileRow>(
-        "SELECT id, name, repository_id, paths_all, paths_windows, paths_linux, paths_macos, \
+        "SELECT id, name, paths_all, paths_windows, paths_linux, paths_macos, \
                 excludes, exclude_files, tags, use_fs_snapshot, one_file_system, exclude_caches, \
                 limit_upload_kib, limit_download_kib, stall_timeout_minutes, \
                 max_duration_minutes, retention, check_options, scripts, created_at, \
@@ -229,7 +203,7 @@ pub async fn list(tx: &mut TenantTx<'_>, page: &ProfilePage) -> Result<ProfilePa
 /// Reads one profile of the tenant of the transaction. A profile of another tenant is absent.
 pub async fn get(tx: &mut TenantTx<'_>, id: ProfileId) -> Result<Option<Profile>, DbError> {
     let row = sqlx::query_as::<_, ProfileRow>(
-        "SELECT id, name, repository_id, paths_all, paths_windows, paths_linux, paths_macos, \
+        "SELECT id, name, paths_all, paths_windows, paths_linux, paths_macos, \
                 excludes, exclude_files, tags, use_fs_snapshot, one_file_system, exclude_caches, \
                 limit_upload_kib, limit_download_kib, stall_timeout_minutes, \
                 max_duration_minutes, retention, check_options, scripts, created_at, \
@@ -252,7 +226,7 @@ pub async fn get_for_update(
     id: ProfileId,
 ) -> Result<Option<Profile>, DbError> {
     let row = sqlx::query_as::<_, ProfileRow>(
-        "SELECT id, name, repository_id, paths_all, paths_windows, paths_linux, paths_macos, \
+        "SELECT id, name, paths_all, paths_windows, paths_linux, paths_macos, \
                 excludes, exclude_files, tags, use_fs_snapshot, one_file_system, exclude_caches, \
                 limit_upload_kib, limit_download_kib, stall_timeout_minutes, \
                 max_duration_minutes, retention, check_options, scripts, created_at, \
@@ -273,7 +247,7 @@ pub async fn get_for_share(
     id: ProfileId,
 ) -> Result<Option<Profile>, DbError> {
     let row = sqlx::query_as::<_, ProfileRow>(
-        "SELECT id, name, repository_id, paths_all, paths_windows, paths_linux, paths_macos, \
+        "SELECT id, name, paths_all, paths_windows, paths_linux, paths_macos, \
                 excludes, exclude_files, tags, use_fs_snapshot, one_file_system, exclude_caches, \
                 limit_upload_kib, limit_download_kib, stall_timeout_minutes, \
                 max_duration_minutes, retention, check_options, scripts, created_at, \
@@ -294,18 +268,17 @@ pub async fn update(
     patch: &ProfileUpdate<'_>,
 ) -> Result<bool, DbError> {
     let result = sqlx::query(
-        "UPDATE profiles SET name = $2, repository_id = $3, paths_all = $4, paths_windows = $5, \
-                paths_linux = $6, paths_macos = $7, excludes = $8, exclude_files = $9, tags = $10, \
-                use_fs_snapshot = $11, one_file_system = $12, exclude_caches = $13, \
-                limit_upload_kib = $14, limit_download_kib = $15, retention = $16, \
-                check_options = $17, scripts = $18, \
-                stall_timeout_minutes = COALESCE($19, stall_timeout_minutes), \
-                max_duration_minutes = COALESCE($20, max_duration_minutes), updated_at = now() \
+        "UPDATE profiles SET name = $2, paths_all = $3, paths_windows = $4, \
+                paths_linux = $5, paths_macos = $6, excludes = $7, exclude_files = $8, tags = $9, \
+                use_fs_snapshot = $10, one_file_system = $11, exclude_caches = $12, \
+                limit_upload_kib = $13, limit_download_kib = $14, retention = $15, \
+                check_options = $16, scripts = $17, \
+                stall_timeout_minutes = COALESCE($18, stall_timeout_minutes), \
+                max_duration_minutes = COALESCE($19, max_duration_minutes), updated_at = now() \
          WHERE id = $1",
     )
     .bind(id)
     .bind(patch.name)
-    .bind(patch.repository_id)
     .bind(patch.paths_all)
     .bind(patch.paths_windows)
     .bind(patch.paths_linux)
@@ -339,27 +312,10 @@ pub async fn delete(tx: &mut TenantTx<'_>, id: ProfileId) -> Result<bool, DbErro
     Ok(result.rows_affected() == 1)
 }
 
-/// Lists the profiles of the tenant that bind the repository.
-///
-/// A repository that a profile uses cannot be removed until the profile is removed or repointed.
-pub async fn referrers_of_repository(
-    tx: &mut TenantTx<'_>,
-    repository: RepositoryId,
-) -> Result<Referrers, DbError> {
-    crate::referrers::fetch(
-        tx,
-        "SELECT id, name, count(*) OVER () FROM profiles WHERE repository_id = $1 \
-         ORDER BY lower(name), id LIMIT $2",
-        repository.as_uuid(),
-    )
-    .await
-}
-
 #[derive(sqlx::FromRow)]
 struct ProfileRow {
     id: Uuid,
     name: String,
-    repository_id: Uuid,
     paths_all: Vec<String>,
     paths_windows: Vec<String>,
     paths_linux: Vec<String>,
@@ -387,7 +343,6 @@ impl From<ProfileRow> for Profile {
         Self {
             id: ProfileId::from_uuid(row.id),
             name: row.name,
-            repository_id: RepositoryId::from_uuid(row.repository_id),
             paths_all: row.paths_all,
             paths_windows: row.paths_windows,
             paths_linux: row.paths_linux,

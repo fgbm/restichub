@@ -127,8 +127,8 @@ async fn ac_id_03_the_confirmation_refuses_the_old_certificate_and_a_job_continu
     let id = agent.id;
 
     let repository = env.create_repository(id, "pw").await;
-    let profile = env.create_profile(repository, serde_json::json!({})).await;
-    let plan = env.create_plan(profile, id).await;
+    let profile = env.create_profile(serde_json::json!({})).await;
+    let plan = env.create_plan(profile, id, repository).await;
     let backup = env.run_plan(plan).await;
     env.pass().await;
     let signed = agent.job().await;

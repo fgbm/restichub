@@ -76,9 +76,9 @@ async fn fr_rp_08_an_agent_without_the_capability_gets_the_profile_tag_in_tags()
     let mut agent = env.connect_agent_with("old-host", Vec::new()).await;
     let repository = initialized_repository(&env, agent.id).await;
     let profile = env
-        .create_profile(repository, json!({"retention": {"keep_last": 2}}))
+        .create_profile(json!({"retention": {"keep_last": 2}}))
         .await;
-    env.create_plan(profile, agent.id).await;
+    env.create_plan(profile, agent.id, repository).await;
 
     run_retention(&env, repository).await;
     env.pass().await;
@@ -105,12 +105,9 @@ async fn fr_rp_08_an_agent_without_the_capability_never_gets_all_tags() {
     let mut agent = env.connect_agent_with("old-host", Vec::new()).await;
     let repository = initialized_repository(&env, agent.id).await;
     let profile = env
-        .create_profile(
-            repository,
-            json!({"retention": {"keep_last": 2, "filter": {"tags": ["daily"]}}}),
-        )
+        .create_profile(json!({"retention": {"keep_last": 2, "filter": {"tags": ["daily"]}}}))
         .await;
-    env.create_plan(profile, agent.id).await;
+    env.create_plan(profile, agent.id, repository).await;
 
     let job = run_retention(&env, repository).await;
     env.pass().await;
@@ -172,12 +169,9 @@ async fn fr_pr_09_a_downgraded_agent_never_gets_all_tags_in_a_first_send() {
     let mut agent = env.reconnect_agent(&capable, Vec::new()).await;
     let repository = initialized_repository(&env, agent.id).await;
     let profile = env
-        .create_profile(
-            repository,
-            json!({"retention": {"keep_last": 2, "filter": {"tags": ["daily"]}}}),
-        )
+        .create_profile(json!({"retention": {"keep_last": 2, "filter": {"tags": ["daily"]}}}))
         .await;
-    env.create_plan(profile, agent.id).await;
+    env.create_plan(profile, agent.id, repository).await;
 
     let job = run_retention(&env, repository).await;
     env.pass().await;
@@ -198,12 +192,9 @@ async fn fr_pr_09_a_redelivery_to_a_downgraded_agent_fails_and_is_not_sent() {
     let mut capable = env.connect_agent("redeliver-host").await;
     let repository = initialized_repository(&env, capable.id).await;
     let profile = env
-        .create_profile(
-            repository,
-            json!({"retention": {"keep_last": 2, "filter": {"tags": ["daily"]}}}),
-        )
+        .create_profile(json!({"retention": {"keep_last": 2, "filter": {"tags": ["daily"]}}}))
         .await;
-    env.create_plan(profile, capable.id).await;
+    env.create_plan(profile, capable.id, repository).await;
 
     let job = run_retention(&env, repository).await;
     env.pass().await;
@@ -247,12 +238,9 @@ async fn fr_pr_09_a_reconnected_capable_agent_still_gets_all_tags() {
         .await;
     let repository = initialized_repository(&env, agent.id).await;
     let profile = env
-        .create_profile(
-            repository,
-            json!({"retention": {"keep_last": 2, "filter": {"tags": ["daily"]}}}),
-        )
+        .create_profile(json!({"retention": {"keep_last": 2, "filter": {"tags": ["daily"]}}}))
         .await;
-    env.create_plan(profile, agent.id).await;
+    env.create_plan(profile, agent.id, repository).await;
 
     run_retention(&env, repository).await;
     env.pass().await;
@@ -275,13 +263,10 @@ async fn fr_rp_08_the_grouping_of_a_shared_profile_always_holds_the_host() {
     let other = env.connect_agent("host-b").await;
     let repository = initialized_repository(&env, maintenance.id).await;
     let profile = env
-        .create_profile(
-            repository,
-            json!({"retention": {"keep_last": 2, "group_by": ["paths"]}}),
-        )
+        .create_profile(json!({"retention": {"keep_last": 2, "group_by": ["paths"]}}))
         .await;
-    env.create_plan(profile, maintenance.id).await;
-    env.create_plan(profile, other.id).await;
+    env.create_plan(profile, maintenance.id, repository).await;
+    env.create_plan(profile, other.id, repository).await;
 
     run_retention(&env, repository).await;
     env.pass().await;
@@ -339,12 +324,9 @@ async fn fr_pr_09_an_agent_that_left_after_the_snapshot_keeps_its_queued_job() {
     let agent_id = agent.id;
     let repository = initialized_repository(&env, agent_id).await;
     let profile = env
-        .create_profile(
-            repository,
-            json!({"retention": {"keep_last": 2, "filter": {"tags": ["daily"]}}}),
-        )
+        .create_profile(json!({"retention": {"keep_last": 2, "filter": {"tags": ["daily"]}}}))
         .await;
-    env.create_plan(profile, agent_id).await;
+    env.create_plan(profile, agent_id, repository).await;
     let job = run_retention(&env, repository).await;
 
     let online = env.state.agent_registry().online_agents();
@@ -370,12 +352,9 @@ async fn fr_pr_09_an_agent_that_left_after_the_snapshot_keeps_the_lease_of_a_red
     let agent_id = agent.id;
     let repository = initialized_repository(&env, agent_id).await;
     let profile = env
-        .create_profile(
-            repository,
-            json!({"retention": {"keep_last": 2, "filter": {"tags": ["daily"]}}}),
-        )
+        .create_profile(json!({"retention": {"keep_last": 2, "filter": {"tags": ["daily"]}}}))
         .await;
-    env.create_plan(profile, agent_id).await;
+    env.create_plan(profile, agent_id, repository).await;
     let job = run_retention(&env, repository).await;
     env.pass().await;
     let _ = agent.job().await;
