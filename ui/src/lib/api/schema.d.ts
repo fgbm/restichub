@@ -2084,6 +2084,7 @@ export interface components {
             /** @description Free text of 1 to 100 characters. Unique in the tenant, ignoring the letter case. Holds no control or format character. */
             name: string;
             profile_id: string;
+            repository_id: string;
             /**
              * Format: int32
              * @description The recovery point objective in seconds, from 900 to 34560000. Absent or null uses the
@@ -2102,8 +2103,6 @@ export interface components {
             name: string;
             options?: components["schemas"]["BackupOptions"];
             paths?: components["schemas"]["ProfilePaths"];
-            /** @description The identifier of the repository that the profile uses. */
-            repository_id: string;
             retention?: components["schemas"]["Retention"] | null;
             /**
              * @description Scripts from the control plane, in the order they run in their phase (FR-HK-09). Only an
@@ -2921,11 +2920,18 @@ export interface components {
         PreviewRequest: {
             /** @description The identifier of the registered agent that supplies the target facts. */
             agent_id: string;
+            /**
+             * @description The repository of the plan to preview. Absent uses the repository of the first plan of the
+             *     profile on this agent, then of the first plan of the profile, and a placeholder without a
+             *     repository environment when the profile has no plan (ADR-0047).
+             */
+            repository_id?: string | null;
         };
         /** @description The preview of a profile for one target agent (FR-PF-04). */
         PreviewResponse: {
             profile_id: string;
-            repository_id: string;
+            /** @description Null when no plan of the profile names a repository, so the steps carry no repository. */
+            repository_id?: string | null;
             steps: components["schemas"]["PreviewStepView"][];
         };
         /** @description The request body of the schedule preview (FR-SC-01). */
@@ -3007,7 +3013,6 @@ export interface components {
             name: string;
             options: components["schemas"]["BackupOptions"];
             paths: components["schemas"]["ProfilePaths"];
-            repository_id: string;
             retention?: components["schemas"]["Retention"] | null;
             scripts: components["schemas"]["ScriptDef"][];
             tags: string[];
@@ -3623,6 +3628,7 @@ export interface components {
             /** @description Free text of 1 to 100 characters. Unique in the tenant, ignoring the letter case. Holds no control or format character. */
             name?: string | null;
             profile_id: string;
+            repository_id: string;
             /**
              * Format: int32
              * @description The recovery point objective in seconds. Null restores the default of the schedule.
@@ -3639,7 +3645,6 @@ export interface components {
             name?: string | null;
             options?: components["schemas"]["BackupOptions"];
             paths?: components["schemas"]["ProfilePaths"];
-            repository_id: string;
             retention?: components["schemas"]["Retention"] | null;
             /** @description Replaces the whole list. Only an Admin can change it (FR-HK-12). */
             scripts?: components["schemas"]["ScriptDef"][];
