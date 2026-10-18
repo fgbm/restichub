@@ -4,13 +4,16 @@
 //! A caller with the profile write right previews its draft. A caller without that right changes no
 //! setting, so the server compiles the stored profile that the request names and ignores every
 //! draft field.
+//!
+//! Only an Admin changes the code that runs on a host, so a caller without the script write right
+//! keeps the stored scripts of its draft (FR-HK-12).
 
 use axum::Json;
 use axum::extract::State;
 use restichub_compiler::compile;
 use restichub_db::agents as agents_repo;
 use restichub_db::plans as plans_repo;
-use restichub_db::profiles as repo;
+use restichub_db::profiles::{self as repo, Profile};
 use restichub_db::repositories::{self as repositories_repo, Repository};
 use restichub_db::{AgentId, ProfileId};
 use serde::{Deserialize, Serialize};
@@ -67,7 +70,8 @@ pub struct PreviewRequest {
     #[serde(default)]
     pub options: BackupOptions,
     /// Scripts from the control plane, in the order they run in their phase (FR-HK-09). The
-    /// preview accepts them from a caller with the profile write right only (FR-HK-12).
+    /// preview accepts them from a caller with the script write right only; another caller gets
+    /// the stored scripts (FR-HK-12).
     #[serde(default)]
     pub scripts: Vec<ScriptDef>,
     #[serde(default)]
@@ -138,7 +142,7 @@ pub struct PreviewResponse {
     post,
     path = "/api/v1/profiles/preview",
     summary = "Previews a profile draft for one target agent.",
-    description = "The steps and the command lines agree with the command that the agent runs. The draft is not stored. Secrets are masked (AC-PF-01). A caller without the profile write right receives the preview of the stored profile that `profile_id` names, and its draft fields are ignored.",
+    description = "The steps and the command lines agree with the command that the agent runs. The draft is not stored. Secrets are masked (AC-PF-01). A caller without the profile write right receives the preview of the stored profile that `profile_id` names, and its draft fields are ignored. A caller without the script write right receives the stored scripts and its draft scripts are ignored.",
     security(("cookie" = []), ("bearer" = [])),
     request_body = PreviewRequest,
     responses(
@@ -164,14 +168,10 @@ pub async fn preview_profile(
     // A draft names settings, so it needs the write right. Without it the stored profile gives
     // the settings: a template that a Viewer put into the draft would otherwise show a host value
     // in the rendered command (FR-HK-12, FR-PF-12).
-    let draft = if context.authorize(Operation::ProfilesWrite).is_ok() {
-        Some(validate_draft(body.into())?)
-    } else {
-        if profile_id.is_none() {
-            return Err(ApiError::invalid_field("profile_id", Reason::Empty));
-        }
-        None
-    };
+    let writes_profile = context.authorize(Operation::ProfilesWrite).is_ok();
+    if !writes_profile && profile_id.is_none() {
+        return Err(ApiError::invalid_field("profile_id", Reason::Empty));
+    }
 
     let mut tx = state.db().begin_tenant(context.tenant_id).await?;
     let Some(agent) = agents_repo::get(&mut tx, agent_id).await? else {
@@ -183,6 +183,17 @@ pub async fn preview_profile(
             None => return Err(ApiError::not_found()),
         },
         None => None,
+    };
+    let draft = if writes_profile {
+        let mut request: CreateProfileRequest = body.into();
+        // The scripts of the draft of a caller without the script write right change nothing: the
+        // stored scripts keep the code that runs on a host (FR-HK-12).
+        if context.authorize(Operation::ScriptsWrite).is_err() {
+            request.scripts = stored_scripts(stored.as_ref())?;
+        }
+        Some(validate_draft(request)?)
+    } else {
+        None
     };
     if let Some(draft) = draft.as_ref() {
         script_secrets::check_script_secrets(&mut tx, &draft.scripts).await?;
@@ -298,6 +309,15 @@ fn validate_draft(body: CreateProfileRequest) -> Result<ValidatedProfile, ApiErr
         body.retention,
         body.check,
     )
+}
+
+/// The scripts of the stored profile of the draft, or none when the draft has no stored profile
+/// (FR-HK-12).
+fn stored_scripts(stored: Option<&Profile>) -> Result<Vec<ScriptDef>, ApiError> {
+    match stored {
+        Some(profile) => crate::scripts::from_row(&profile.scripts),
+        None => Ok(Vec::new()),
+    }
 }
 
 /// The stored profile of the draft. It comes from the body, so a bad value names that field.

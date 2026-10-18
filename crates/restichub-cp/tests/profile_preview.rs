@@ -321,6 +321,159 @@ async fn fr_hk_12_a_reader_previews_the_stored_profile_only() {
     db.cleanup().await;
 }
 
+/// FR-HK-12: an Operator previews the draft of a stored profile, and the stored scripts stay as
+/// they are stored.
+#[tokio::test]
+async fn fr_hk_12_an_operator_previews_the_stored_scripts() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant_with_key(db.database(), "acme").await;
+    let app = app_with_kek(db.database());
+    let admin = seed_session(db.database(), tenant, "admin", "admin").await;
+    let operator = seed_session(db.database(), tenant, "operator", "operator").await;
+    let agent = seed_agent_full(
+        db.database(),
+        tenant,
+        "operator-host",
+        "linux",
+        "0.19.0",
+        &[],
+    )
+    .await;
+    trust_scripts(&db, tenant, agent).await;
+
+    let body_canary = "body-canary-of-the-stored-script";
+    let value_canary = "value-canary-of-the-stored-script";
+    let profile = create_profile(
+        &app,
+        &admin,
+        json!({
+            "name": "with-script",
+            "paths": {"all": ["/srv/stored"]},
+            "scripts": [script(body_canary, json!([
+                {"name": "PGDATABASE", "kind": "string", "value": value_canary}
+            ]))],
+        }),
+    )
+    .await;
+    let profile_id = profile["id"].as_str().expect("the identifier").to_owned();
+
+    // The draft of an Operator carries the stored scripts with empty bodies: only an Admin changes
+    // the code that runs on a host (FR-HK-12).
+    let (status, _, preview) = send(
+        &app,
+        request(
+            "POST",
+            "/api/v1/profiles/preview",
+            Some(&operator),
+            Some(json!({
+                "agent_id": agent.to_string(),
+                "profile_id": profile_id,
+                "paths": {"all": ["/srv/edited"]},
+                "scripts": [script("", json!([
+                    {"name": "PGDATABASE", "kind": "string", "value": ""}
+                ]))],
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+
+    let steps = preview["steps"].as_array().expect("the steps");
+    let backup = steps
+        .iter()
+        .find(|step| step["kind"] == "backup")
+        .expect("the backup step");
+    let command = backup["command"].as_str().expect("the command");
+    // The rest of the draft compiles as the person edited it.
+    assert!(command.contains("-- /srv/edited"), "{command}");
+    assert!(!command.contains("/srv/stored"), "{command}");
+    // The stored script keeps its place, and the preview shows no body and no value.
+    let script_step = steps
+        .iter()
+        .find(|step| {
+            step["kind"]
+                .as_str()
+                .is_some_and(|kind| kind.starts_with("script"))
+        })
+        .expect("the script step");
+    let script_command = script_step["command"].as_str().expect("the command");
+    assert!(script_command.contains("script=dump"), "{script_command}");
+    assert!(script_command.contains("phase=before"), "{script_command}");
+    let text = preview.to_string();
+    assert!(!text.contains(body_canary), "{preview}");
+    assert!(!text.contains(value_canary), "{preview}");
+
+    db.cleanup().await;
+}
+
+/// FR-HK-12: a script that an Operator puts into the draft changes nothing.
+#[tokio::test]
+async fn fr_hk_12_a_script_of_an_operator_draft_is_ignored() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant_with_key(db.database(), "acme").await;
+    let app = app_with_kek(db.database());
+    let admin = seed_session(db.database(), tenant, "admin", "admin").await;
+    let operator = seed_session(db.database(), tenant, "operator", "operator").await;
+    let agent = seed_agent_full(
+        db.database(),
+        tenant,
+        "crafted-host",
+        "linux",
+        "0.19.0",
+        &[],
+    )
+    .await;
+    trust_scripts(&db, tenant, agent).await;
+
+    let profile = create_profile(
+        &app,
+        &admin,
+        json!({
+            "name": "stored-script",
+            "paths": {"all": ["/srv"]},
+            "scripts": [script("pg_dump --all", json!([]))],
+        }),
+    )
+    .await;
+    let profile_id = profile["id"].as_str().expect("the identifier").to_owned();
+
+    let crafted = "crafted-script-of-the-draft";
+    let (status, _, preview) = send(
+        &app,
+        request(
+            "POST",
+            "/api/v1/profiles/preview",
+            Some(&operator),
+            Some(json!({
+                "agent_id": agent.to_string(),
+                "profile_id": profile_id,
+                "paths": {"all": ["/srv"]},
+                "scripts": [{
+                    "name": crafted,
+                    "interpreter": "bash",
+                    "phase": "after",
+                    "body": "echo crafted",
+                    "timeout_seconds": 60,
+                    "failure_policy": "abort_backup",
+                    "env": [],
+                }],
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    let text = preview.to_string();
+    assert!(!text.contains(crafted), "{preview}");
+    assert!(text.contains("script=dump"), "{preview}");
+    assert!(text.contains("phase=before"), "{preview}");
+
+    db.cleanup().await;
+}
+
 /// AC-PF-01: the preview takes a body that is as large as a profile create, and refuses a body that
 /// is larger (FR-PF-05, FR-HK-09).
 #[tokio::test]

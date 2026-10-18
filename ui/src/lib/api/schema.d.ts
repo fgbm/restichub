@@ -1011,7 +1011,7 @@ export interface paths {
         put?: never;
         /**
          * Previews a profile draft for one target agent.
-         * @description The steps and the command lines agree with the command that the agent runs. The draft is not stored. Secrets are masked (AC-PF-01). A caller without the profile write right receives the preview of the stored profile that `profile_id` names, and its draft fields are ignored.
+         * @description The steps and the command lines agree with the command that the agent runs. The draft is not stored. Secrets are masked (AC-PF-01). A caller without the profile write right receives the preview of the stored profile that `profile_id` names, and its draft fields are ignored. A caller without the script write right receives the stored scripts and its draft scripts are ignored.
          */
         post: operations["preview_profile"];
         delete?: never;
@@ -2951,7 +2951,8 @@ export interface components {
             retention?: components["schemas"]["Retention"] | null;
             /**
              * @description Scripts from the control plane, in the order they run in their phase (FR-HK-09). The
-             *     preview accepts them from a caller with the profile write right only (FR-HK-12).
+             *     preview accepts them from a caller with the script write right only; another caller gets
+             *     the stored scripts (FR-HK-12).
              */
             scripts?: components["schemas"]["ScriptDef"][];
             tags?: string[];

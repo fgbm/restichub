@@ -21,6 +21,7 @@ A value differs from one host to another: a mount point in a path, a database na
 - The server compiles the draft of a person with the profile write right, and stores nothing. A compile error points to the draft field (AC-PF-02).
 - The server compiles the stored profile for a person without that right. This person sends the identifiers only: `agent_id`, `repository_id` and `profile_id`, and `profile_id` is required. The server ignores the draft fields of this person, so a template in the draft cannot show a host value.
 - The script bodies and the string values stay hidden in the response of a person without the script read right.
+- The server ignores the scripts of the draft of a person without the script write right. This person keeps the stored scripts of `profile_id`, so the command lines agree with the profile that is saved (FR-HK-12).
 - An unsaved profile shows the placeholder tag `restichub-profile-new` in the commands. The saved profile shows the tag with its own identifier. The user interface says that the tag changes on save.
 - The route takes the body limit of the profile create (FR-HK-09).
 
