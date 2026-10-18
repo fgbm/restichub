@@ -444,6 +444,7 @@ function makeProfiles(): Profile[] {
 				max_duration_minutes: 2880
 			},
 			scripts: [],
+			parameters: [],
 			retention,
 			check: { read_data_subset: '10%' },
 			created_at: iso(60 * 24 * 10),
@@ -467,6 +468,7 @@ function makeProfiles(): Profile[] {
 				max_duration_minutes: 2880
 			},
 			scripts: [],
+			parameters: [],
 			retention: null,
 			check: null,
 			created_at: iso(60 * 24 * 5),
@@ -488,6 +490,7 @@ function makeProfiles(): Profile[] {
 				limit_download_kib: 0
 			},
 			scripts: sampleScripts(),
+			parameters: [],
 			retention: null,
 			check: null,
 			created_at: iso(60 * 24 * 3),
@@ -589,6 +592,7 @@ function makePlans(): Plan[] {
 			profile_id: 'p_1',
 			profile_name: 'web-daily',
 			repository_id: 'r_1',
+			parameter_values: [],
 			agent_id: '1',
 			agent_hostname: 'win-fs01',
 			cron: '0 2 * * *',
@@ -610,6 +614,7 @@ function makePlans(): Plan[] {
 			profile_id: 'p_3',
 			profile_name: 'db-nightly',
 			repository_id: 'r_1',
+			parameter_values: [],
 			agent_id: '2',
 			agent_hostname: 'srv-db-01',
 			cron: '30 1 * * *',
@@ -1984,6 +1989,11 @@ export class MockApiService {
 				max_duration_minutes: 2880
 			},
 			scripts: request.scripts ?? [],
+			parameters: (request.parameters ?? []).map((parameter) => ({
+				...parameter,
+				required: parameter.required ?? false,
+				hidden: false
+			})),
 			retention: request.retention ?? null,
 			check: request.check ?? null,
 			created_at: now,
@@ -2184,6 +2194,7 @@ export class MockApiService {
 			profile_id: request.profile_id,
 			profile_name: profile.name,
 			repository_id: repository.id,
+			parameter_values: [],
 			agent_id: request.agent_id,
 			agent_hostname: agent.hostname,
 			cron: request.cron,
@@ -2221,6 +2232,7 @@ export class MockApiService {
 			profile_id: request.profile_id,
 			profile_name: profile.name,
 			repository_id: repository.id,
+			parameter_values: [],
 			agent_id: request.agent_id,
 			agent_hostname: agent.hostname,
 			cron: request.cron,
