@@ -1845,6 +1845,7 @@ export const ru: Record<MessageKey, string> = {
 	'hp.param.hint':
 		'Значения общие для всех профилей на этом хосте. Изменение, после которого план останется без обязательного значения, сервер отклонит со списком планов.',
 	'hp.param.value': 'Значение',
+	'hp.param.valueOf': 'Значение параметра {name}',
 	'hp.param.neededBy': 'Нужен профилям',
 	'hp.param.unused': 'Не нужен профилям',
 	'hp.param.fromDefault': 'по умолчанию: {value}',
@@ -1853,10 +1854,6 @@ export const ru: Record<MessageKey, string> = {
 	'hp.param.save': 'Сохранить значения',
 	'hp.param.dirty': 'Значения не сохранены',
 	'hp.param.saved': 'Значения сохранены.',
-	'hp.param.count.one': '{n} параметр',
-	'hp.param.count.few': '{n} параметра',
-	'hp.param.count.many': '{n} параметров',
-	'hp.param.count.other': '{n} параметра',
 	'hp.param.missing.one': '{n} параметр без значения',
 	'hp.param.missing.few': '{n} параметра без значения',
 	'hp.param.missing.many': '{n} параметров без значения',

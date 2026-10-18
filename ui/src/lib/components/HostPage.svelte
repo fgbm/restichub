@@ -515,7 +515,7 @@
 				<Select
 					value={valueOf(row).secretId}
 					options={secretOptions}
-					aria-label={t('hp.param.value')}
+					aria-label={t('hp.param.valueOf', { name: row.name })}
 					onchange={(event) => setSecret(row, event.currentTarget.value)}
 					error={parameterFieldError(row)}
 				/>
@@ -527,18 +527,22 @@
 			<TextField
 				disabled
 				value={row.value?.secret_name ?? ''}
-				aria-label={t('hp.param.value')}
+				aria-label={t('hp.param.valueOf', { name: row.name })}
 				title={t('hp.param.secretLocked')}
 			/>
 		{/if}
 	{:else if !canSetText}
-		<TextField disabled value={viewerText(row)} aria-label={t('hp.param.value')} />
+		<TextField
+			disabled
+			value={viewerText(row)}
+			aria-label={t('hp.param.valueOf', { name: row.name })}
+		/>
 	{:else}
 		<TextField
 			value={valueOf(row).text}
 			oninput={(event) => setText(row, event.currentTarget.value)}
 			mono
-			aria-label={t('hp.param.value')}
+			aria-label={t('hp.param.valueOf', { name: row.name })}
 			placeholder={row.default_value
 				? t('hp.param.fromDefault', { value: row.default_value })
 				: undefined}

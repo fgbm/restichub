@@ -13,8 +13,11 @@ export type RecordPart = string | { tag: string; icon?: IconName };
 export interface RecordOption extends SelectOption {
 	/** The closed field shows the first part after the label. */
 	description?: RecordPart[];
-	/** The text after the label in the closed field. Default: the first part of `description`. */
-	detail?: string;
+	/**
+	 * The content after the label in the closed field. Default: the first part of `description`.
+	 * Parts render as in the secondary line, so a chip stays a chip.
+	 */
+	detail?: string | RecordPart[];
 	/** A status dot before the label. `state` gives the same fact in words. */
 	dot?: RecordDot;
 	/** The state in words at the right of the option. */

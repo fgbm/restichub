@@ -1837,6 +1837,7 @@ export const en = {
 	'hp.param.hint':
 		'The values are shared by every profile on this host. The server refuses a change that leaves a plan without a required value, and lists the plans.',
 	'hp.param.value': 'Value',
+	'hp.param.valueOf': 'Value of {name}',
 	'hp.param.neededBy': 'Needed by',
 	'hp.param.unused': 'No profile needs it',
 	'hp.param.fromDefault': 'default: {value}',
@@ -1845,10 +1846,6 @@ export const en = {
 	'hp.param.save': 'Save the values',
 	'hp.param.dirty': 'The values are not saved',
 	'hp.param.saved': 'The values are saved.',
-	'hp.param.count.one': '{n} parameter',
-	'hp.param.count.few': '{n} parameters',
-	'hp.param.count.many': '{n} parameters',
-	'hp.param.count.other': '{n} parameters',
 	'hp.param.missing.one': '{n} parameter without a value',
 	'hp.param.missing.few': '{n} parameters without a value',
 	'hp.param.missing.many': '{n} parameters without a value',

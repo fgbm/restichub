@@ -22,19 +22,19 @@ use utoipa::ToSchema;
 use crate::context::{Operation, RequestContext};
 use crate::error::ApiError;
 use crate::json::ApiJson;
+use crate::parameters::ParameterDefRequest;
 use crate::scripts::ScriptDef;
 use crate::server::AppState;
 use crate::validation::Reason;
 
 use super::settings::{
-    BackupOptions, CheckOptions, CreateProfileRequest, ProfilePaths, Retention, ValidatedProfile,
-    profile_tag, reject_hooks, validate_profile,
+    BackupOptions, CheckOptions, CreateProfileRequest, ProfilePaths, Retention, profile_tag,
+    validate_draft,
 };
 use super::{
     compile_error_to_api, compiler_profile_from_row, parse_agent_id, preview_error_to_api,
     repository_access, script_secrets, target_facts_with,
 };
-use crate::parameters::{self, ParameterDefRequest};
 
 /// The body of the draft preview (FR-PF-04, AC-PF-01).
 ///
@@ -75,14 +75,14 @@ pub struct PreviewRequest {
     /// the stored scripts (FR-HK-12).
     #[serde(default)]
     pub scripts: Vec<ScriptDef>,
-    /// A caller without the profile write right sends none, and the declarations of the stored
-    /// profile apply (FR-PF-09).
-    #[serde(default)]
-    pub parameters: Vec<ParameterDefRequest>,
     #[serde(default)]
     pub retention: Option<Retention>,
     #[serde(default)]
     pub check: Option<CheckOptions>,
+    /// A caller without the profile write right sends no fields, and the stored profile gives them
+    /// (FR-PF-09).
+    #[serde(default)]
+    pub parameters: Vec<ParameterDefRequest>,
     /// Accepted only as an empty list, so an old client keeps working; use `scripts` instead
     /// (ADR-0040).
     #[serde(default)]
@@ -100,9 +100,9 @@ impl From<PreviewRequest> for CreateProfileRequest {
             tags: body.tags,
             options: body.options,
             scripts: body.scripts,
-            parameters: body.parameters,
             retention: body.retention,
             check: body.check,
+            parameters: body.parameters,
             hooks: body.hooks,
         }
     }
@@ -210,32 +210,38 @@ pub async fn preview_profile(
     };
     // The preview shows the value that the job of the chosen plan runs with: the plan, then the
     // host, then the default (FR-PF-10, AC-PF-08). A new draft has no plan, so the host values and
-    // the defaults apply. The declarations come from the compiled side, so a draft of a caller
-    // without the profile write right fills no template of the stored profile (FR-PF-12).
-    let plan_values = match planned_plan(&mut tx, profile_id, agent_id, repository.as_ref()).await?
-    {
-        Some(plan) => restichub_db::parameters::plan_values(&mut tx, plan.id).await?,
+    // the defaults apply.
+    let definitions = match (draft.as_ref(), stored.as_ref()) {
+        (Some(draft), _) => draft.parameters.clone(),
+        (None, Some(stored)) => crate::parameters::from_row(&stored.parameters)?,
+        (None, None) => Vec::new(),
+    };
+    let plan_values = match profile_id {
+        Some(profile_id) => {
+            let plan = planned_plan(&mut tx, profile_id, agent_id, repository.as_ref()).await?;
+            match plan {
+                Some(plan) => restichub_db::parameters::plan_values(&mut tx, plan.id).await?,
+                None => Vec::new(),
+            }
+        }
         None => Vec::new(),
     };
     let host_values = restichub_db::parameters::agent_values(&mut tx, agent_id).await?;
-    let (compiler_profile, definitions) = match (draft, stored) {
+    let parameters = crate::parameters::resolve(&definitions, &plan_values, &host_values);
+    let compiler_profile = match (draft.as_ref(), stored.as_ref()) {
         (Some(draft), _) => {
             let mut compiler_profile = draft.to_compiler_profile();
             // The retention of a stored profile filters on its own tag, so the commands show it.
             if let Some(profile_id) = profile_id {
                 compiler_profile.profile_tag = Some(profile_tag(profile_id));
             }
-            (compiler_profile, draft.parameters)
+            compiler_profile
         }
-        (None, Some(stored)) => (
-            compiler_profile_from_row(&stored)?,
-            parameters::from_row(&stored.parameters)?,
-        ),
+        (None, Some(stored)) => compiler_profile_from_row(stored)?,
         (None, None) => return Err(ApiError::invalid_field("profile_id", Reason::Empty)),
     };
     tx.commit().await?;
 
-    let parameters = parameters::resolve(&definitions, &plan_values, &host_values);
     let target = target_facts_with(&agent, state.auth().clock.now(), parameters)?;
     let repository_id = repository
         .as_ref()
@@ -282,38 +288,6 @@ async fn named_repository(
     Ok(repository)
 }
 
-/// The plan whose values the preview shows (FR-PF-10).
-///
-/// The preview names an agent and, when the caller gives one, a repository. The plan of this
-/// profile that runs on the agent with that repository supplies the overrides; without such a plan
-/// the host values and the defaults apply.
-async fn planned_plan(
-    tx: &mut restichub_db::TenantTx<'_>,
-    profile_id: Option<ProfileId>,
-    agent_id: AgentId,
-    repository: Option<&Repository>,
-) -> Result<Option<plans_repo::Plan>, ApiError> {
-    let Some(profile_id) = profile_id else {
-        return Ok(None);
-    };
-    let plans = plans_repo::list_by_profile(tx, profile_id).await?;
-    let chosen = plans
-        .iter()
-        .find(|plan| {
-            plan.agent_id == agent_id
-                && repository.is_none_or(|repository| plan.repository_id == repository.id)
-        })
-        .or_else(|| plans.iter().find(|plan| plan.agent_id == agent_id))
-        .or_else(|| {
-            repository.and_then(|repository| {
-                plans
-                    .iter()
-                    .find(|plan| plan.repository_id == repository.id)
-            })
-        });
-    Ok(chosen.cloned())
-}
-
 /// The repository of a preview that names none (ADR-0047).
 ///
 /// A profile has no repository of its own. The first plan of the stored profile on the previewed
@@ -344,24 +318,33 @@ async fn planned_repository(
     Ok(Some(repository))
 }
 
-/// Validates a preview draft and returns the normalized settings (FR-PF-04).
+/// The plan whose values and repository the preview shows (FR-PF-10).
 ///
-/// A new profile has no name until the first save, so an empty name is not a draft error.
-fn validate_draft(body: CreateProfileRequest) -> Result<ValidatedProfile, ApiError> {
-    reject_hooks(body.hooks.as_deref())?;
-    let name = (!body.name.trim().is_empty()).then_some(body.name);
-    validate_profile(
-        name,
-        body.paths,
-        body.excludes,
-        body.exclude_files,
-        body.tags,
-        body.options,
-        body.scripts,
-        body.retention,
-        body.check,
-        body.parameters,
-    )
+/// The preview names an agent and, when the caller gives one, a repository. The plan of this
+/// profile that runs on the agent with that repository supplies the overrides; without such a plan
+/// the host values and the defaults apply.
+async fn planned_plan(
+    tx: &mut restichub_db::TenantTx<'_>,
+    profile_id: ProfileId,
+    agent_id: AgentId,
+    repository: Option<&Repository>,
+) -> Result<Option<plans_repo::Plan>, ApiError> {
+    let plans = plans_repo::list_by_profile(tx, profile_id).await?;
+    let chosen = plans
+        .iter()
+        .find(|plan| {
+            plan.agent_id == agent_id
+                && repository.is_none_or(|repository| plan.repository_id == repository.id)
+        })
+        .or_else(|| plans.iter().find(|plan| plan.agent_id == agent_id))
+        .or_else(|| {
+            repository.and_then(|repository| {
+                plans
+                    .iter()
+                    .find(|plan| plan.repository_id == repository.id)
+            })
+        });
+    Ok(chosen.cloned())
 }
 
 /// The scripts of the stored profile of the draft, or none when the draft has no stored profile

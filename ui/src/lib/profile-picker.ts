@@ -74,13 +74,21 @@ export function profileDescription(profile: ProfileRef): RecordPart[] {
 }
 
 export function profileOptions(profiles: readonly ProfileRef[]): RecordOption[] {
-	return profiles.map((profile) => ({
-		value: profile.id,
-		label: profile.name,
-		description: profileDescription(profile),
-		// The line shows the first path only, but the search finds each of them and each name.
-		search: [...profilePathList(profile), ...profileParameterNames(profile)]
-	}));
+	return profiles.map((profile) => {
+		const chip = parameterChip(profile.parameters ?? []);
+		return {
+			value: profile.id,
+			label: profile.name,
+			description: profileDescription(profile),
+			// The closed field shows the first path and the count of the parameters (ADR-0047).
+			detail: [
+				...(profilePathText(profile) ? [profilePathText(profile)] : []),
+				...(chip ? [{ tag: chip, icon: 'braces' as const }] : [])
+			],
+			// The line shows the first path only, but the search finds each of them and each name.
+			search: [...profilePathList(profile), ...profileParameterNames(profile)]
+		};
+	});
 }
 
 /** Gives profile facet values the profile name and its secondary line. */

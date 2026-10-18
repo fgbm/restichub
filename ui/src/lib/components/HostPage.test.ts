@@ -408,7 +408,7 @@ describe('the parameter values of a host (FR-PF-10 to FR-PF-12, ADR-0047)', () =
 		await screen.findByRole('heading', { level: 1, name: 'srv-db-01' });
 
 		await openSection(user);
-		await user.type(screen.getAllByLabelText('Value')[0], '/srv/db');
+		await user.type(screen.getByLabelText('Value of pg_dir'), '/srv/db');
 		await user.click(screen.getByRole('button', { name: 'Save the values' }));
 
 		await waitFor(() =>
@@ -461,7 +461,7 @@ describe('the parameter values of a host (FR-PF-10 to FR-PF-12, ADR-0047)', () =
 		await screen.findByRole('heading', { level: 1, name: 'srv-db-01' });
 
 		await openSection(user);
-		await user.type(screen.getAllByLabelText('Value')[0], '/srv/db');
+		await user.type(screen.getByLabelText('Value of pg_dir'), '/srv/db');
 		await user.click(screen.getByRole('button', { name: 'Save the values' }));
 
 		expect(
