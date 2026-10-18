@@ -317,8 +317,9 @@ async fn db_the_right_migration_skips_a_revoked_membership_and_revokes_the_token
 /// ADR-0047: the migration 0056 moves the repository from the profile to the plan.
 ///
 /// Each plan keeps the repository of its former profile in every tenant, the profile loses the
-/// column, and the new key refuses a repository of another tenant. The migration runs as the owner
-/// login of the installation, which owns the tables and has no BYPASSRLS (ADR-0023).
+/// column, and the new key refuses a repository of another tenant. A plan whose creator lost the
+/// membership of the tenant keeps its repository too. The migration runs as the owner login of the
+/// installation, which owns the tables and has no BYPASSRLS (ADR-0023).
 #[tokio::test]
 async fn db_the_plan_repository_migration_keeps_the_repository_of_each_plan() -> TestResult {
     let Some(db) = test_database().await else {
@@ -369,11 +370,21 @@ async fn db_the_plan_repository_migration_keeps_the_repository_of_each_plan() ->
     let first_plan = uuid::Uuid::now_v7();
     let second_plan = uuid::Uuid::now_v7();
     let other_plan = uuid::Uuid::now_v7();
+    let orphan_plan = uuid::Uuid::now_v7();
+    let gone_creator = uuid::Uuid::now_v7();
     sqlx::query(
         "INSERT INTO tenants (id, tenant_id, name) VALUES ($1, $1, 'plans'), ($2, $2, 'other')",
     )
     .bind(tenant)
     .bind(other_tenant)
+    .execute(&pool)
+    .await?;
+    // A Platform Admin removes the membership of this account after it created the plan (ADR-0023).
+    sqlx::query(
+        "INSERT INTO users (id, tenant_id, username, password_hash, display_name) \
+         VALUES ($1, '00000000-0000-7000-8000-000000000000', 'gone', 'phc', 'Gone')",
+    )
+    .bind(gone_creator)
     .execute(&pool)
     .await?;
     sqlx::query("SET session_replication_role = replica")
@@ -409,10 +420,12 @@ async fn db_the_plan_repository_migration_keeps_the_repository_of_each_plan() ->
     .await?;
     sqlx::query(
         "INSERT INTO plans \
-         (id, tenant_id, name, profile_id, agent_id, cron, time_zone, missed_run_policy) \
-         VALUES ($1, $4, 'a-first', $6, $9, '0 2 * * *', 'UTC', 'run_all'), \
-                ($2, $4, 'b-second', $7, $9, '0 3 * * *', 'UTC', 'run_all'), \
-                ($3, $5, 'c-other', $8, $9, '0 4 * * *', 'UTC', 'run_all')",
+         (id, tenant_id, name, profile_id, agent_id, cron, time_zone, missed_run_policy, \
+          created_by) \
+         VALUES ($1, $4, 'a-first', $6, $9, '0 2 * * *', 'UTC', 'run_all', NULL), \
+                ($2, $4, 'b-second', $7, $9, '0 3 * * *', 'UTC', 'run_all', NULL), \
+                ($3, $5, 'c-other', $8, $9, '0 4 * * *', 'UTC', 'run_all', NULL), \
+                ($10, $4, 'd-orphan', $6, $9, '0 5 * * *', 'UTC', 'run_all', $11)",
     )
     .bind(first_plan)
     .bind(second_plan)
@@ -423,6 +436,8 @@ async fn db_the_plan_repository_migration_keeps_the_repository_of_each_plan() ->
     .bind(second_profile)
     .bind(other_profile)
     .bind(uuid::Uuid::now_v7())
+    .bind(orphan_plan)
+    .bind(gone_creator)
     .execute(&pool)
     .await?;
     sqlx::query("SET session_replication_role = DEFAULT")
@@ -448,8 +463,9 @@ async fn db_the_plan_repository_migration_keeps_the_repository_of_each_plan() ->
             (first_plan, first_repository),
             (second_plan, second_repository),
             (other_plan, other_repository),
+            (orphan_plan, first_repository),
         ],
-        "each plan keeps the repository of its former profile"
+        "each plan keeps the repository of its former profile, also when its creator left"
     );
 
     let column: Option<(String,)> = sqlx::query_as(
