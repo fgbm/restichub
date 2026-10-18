@@ -444,10 +444,13 @@ pub fn audit_definitions(definitions: &[ParameterDef], previous: Option<&[Parame
     )
 }
 
-/// The values of a record for an audit diff: the names, the kinds, the identifiers of the secrets
+/// The values of a record for an audit diff: the names, the kinds, the reference of a secret value
 /// and a marker for a text value (FR-PF-12).
 ///
 /// `previous` is the side of the diff that the write replaces. See [`audit_definitions`].
+///
+/// The reference is a key name without `secret` in it: the diff of the audit log redacts every
+/// field whose name holds that word, and an identifier is no secret.
 #[must_use]
 pub fn audit_values(values: &[ParameterValue], previous: Option<&[ParameterValue]>) -> Value {
     Value::Array(
@@ -466,7 +469,7 @@ pub fn audit_values(values: &[ParameterValue], previous: Option<&[ParameterValue
                         .value
                         .as_ref()
                         .map(|text| marker(before.and_then(|value| value.value.as_deref()), text)),
-                    "secret_id": value.secret_id.map(|id| id.to_string()),
+                    "reference": value.secret_id.map(|id| id.to_string()),
                 })
             })
             .collect(),

@@ -349,7 +349,7 @@ async fn ac_id_09_replace_moves_plans_and_maintenance_references_and_revokes_the
 
 /// FR-ID-11: a replace moves the parameter values of the host with its plans (FR-PF-10).
 #[tokio::test]
-async fn ac_pf_10_a_replace_moves_the_parameter_values_of_the_host() {
+async fn fr_id_11_a_replace_moves_the_parameter_values_of_the_host() {
     let Some(db) = common::test_db().await else {
         return;
     };
@@ -419,6 +419,113 @@ async fn ac_pf_10_a_replace_moves_the_parameter_values_of_the_host() {
         0,
         "{old_table}"
     );
+
+    db.cleanup().await;
+}
+
+/// FR-ID-11: a value of the successor with another kind keeps its row, so a plan that moves loses a
+/// required value and the replace is refused (FR-PF-11, ADR-0047).
+#[tokio::test]
+async fn fr_id_11_a_replace_refuses_a_kind_conflict_that_leaves_a_plan_empty() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = env(&db, "replace-kind").await;
+    let old = enroll_new(&db, &env, "MINDCORE", Some(MACHINE)).await;
+    let new = enroll_new(&db, &env, "MINDCORE", Some(MACHINE)).await;
+    let secret = seed_secret(db.database(), env.tenant, "plan.password").await;
+    let repository = seed_repository(db.database(), env.tenant, "repo", secret).await;
+    let profile = seed_profile(db.database(), env.tenant, "profile").await;
+    let plan = seed_plan(db.database(), env.tenant, "plan", profile, old, repository).await;
+    let (status, _, hook_secret) = send(
+        &env.api,
+        request(
+            "POST",
+            "/api/v1/secrets",
+            Some(&env.cookie),
+            Some(
+                json!({"name": "pg-password", "purpose": "hook_secret", "value": "CANARY-hook-1"}),
+            ),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{hook_secret}");
+    let hook_secret = hook_secret["id"]
+        .as_str()
+        .expect("the identifier")
+        .to_owned();
+    let (status, _, _) = send(
+        &env.api,
+        request(
+            "PUT",
+            &format!("/api/v1/agents/{old}/parameters"),
+            Some(&env.cookie),
+            Some(json!({
+                "parameters": [
+                    {"name": "pg_password", "kind": "secret", "secret_id": hook_secret},
+                ],
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    // The profile now requires a secret value that the old record already holds.
+    let (status, _, body) = send(
+        &env.api,
+        request(
+            "PATCH",
+            &format!("/api/v1/profiles/{profile}"),
+            Some(&env.cookie),
+            Some(json!({
+                "paths": {"all": ["/srv"]},
+                "parameters": [{"name": "pg_password", "kind": "secret", "required": true}],
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    // The new record holds a value of the other kind, so the moved value cannot replace it.
+    let (status, _, _) = send(
+        &env.api,
+        request(
+            "PUT",
+            &format!("/api/v1/agents/{new}/parameters"),
+            Some(&env.cookie),
+            Some(json!({
+                "parameters": [{"name": "pg_password", "kind": "text", "value": "/srv/pg"}],
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, _, body) = send(
+        &env.api,
+        request(
+            "POST",
+            &format!("/api/v1/agents/{new}/replace"),
+            Some(&env.cookie),
+            Some(json!({"old_agent_id": old.to_string()})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["reason"], "parameter_missing_in_plans");
+    assert_eq!(body["parameters"], json!(["pg_password"]));
+
+    // Nothing moved: the plan still runs on the old record.
+    let (status, _, view) = send(
+        &env.api,
+        request(
+            "GET",
+            &format!("/api/v1/plans/{plan}"),
+            Some(&env.cookie),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{view}");
+    assert_eq!(view["agent_id"], old.to_string());
 
     db.cleanup().await;
 }

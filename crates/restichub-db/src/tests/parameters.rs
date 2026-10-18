@@ -42,8 +42,6 @@ async fn db_a_value_holds_exactly_one_of_the_value_and_the_secret() -> TestResul
 
     // Each negative write runs in its own transaction, so an aborted transaction does not hide the
     // result of the next one.
-    // Each negative write runs in its own transaction, so an aborted transaction does not hide the
-    // result of the next one.
     let database = db.database().clone();
     let bad = |sql: &'static str, database: crate::Database| async move {
         let mut tx = database

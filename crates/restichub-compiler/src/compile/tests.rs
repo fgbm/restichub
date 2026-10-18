@@ -215,7 +215,7 @@ fn adr_0047_a_parameter_does_not_expand_in_the_retention_or_the_check() {
 }
 
 #[test]
-fn ac_pf_10_a_parameter_without_a_value_is_missing() {
+fn fr_pf_11_a_parameter_without_a_value_is_missing() {
     let mut profile = profile();
     profile.paths.all = vec!["{{param.pg_data_dir}}".to_owned()];
     let error = compile(&profile, Some(REPOSITORY_ID), &parameter_target())
@@ -230,7 +230,7 @@ fn ac_pf_10_a_parameter_without_a_value_is_missing() {
 }
 
 #[test]
-fn ac_pf_09_a_text_parameter_of_a_script_variable_is_a_masked_value() {
+fn ac_pf_10_a_text_parameter_of_a_script_variable_is_a_masked_value() {
     let mut profile = profile();
     let mut dump = script("dump", HookPhase::Before);
     dump.env = vec![
@@ -265,6 +265,37 @@ fn ac_pf_09_a_text_parameter_of_a_script_variable_is_a_masked_value() {
         &env[1].value,
         Some(restichub_proto::agent::v1::script_env::Value::SecretValue(value))
             if value == "0192a1e0-0000-7000-8000-000000000001"
+    ));
+}
+
+#[test]
+fn adr_0047_an_optional_secret_parameter_without_a_value_is_empty() {
+    // The target carries no value for `pg_password`: the resolve step of the control plane gives an
+    // optional parameter of either kind the empty string (owner decision, ADR-0047).
+    let mut profile = profile();
+    let mut dump = script("dump", HookPhase::Before);
+    dump.env = vec![crate::script::ScriptEnvRef {
+        name: "PGPASSWORD".to_owned(),
+        value: crate::script::ScriptEnvValue::Parameter("pg_password".to_owned()),
+    }];
+    profile.scripts = vec![dump];
+    let mut target = parameter_target();
+    target.parameters.insert(
+        "pg_password".to_owned(),
+        crate::target::ParameterValue::Text(String::new()),
+    );
+    target.server_scripts = crate::script::ServerScripts {
+        enabled: true,
+        interpreters: vec![crate::script::ScriptInterpreter::Bash],
+    };
+    let plan = plan(&profile, &target);
+    let env = match &plan.steps[0].step.kind {
+        Some(step::Kind::Script(script)) => script.env.clone(),
+        other => panic!("unexpected step {other:?}"),
+    };
+    assert!(matches!(
+        &env[0].value,
+        Some(restichub_proto::agent::v1::script_env::Value::MaskedValue(value)) if value.is_empty()
     ));
 }
 
