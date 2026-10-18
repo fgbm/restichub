@@ -137,6 +137,13 @@ impl Jobs {
         {
             if line.pipe == Pipe::Stderr {
                 log_stderr(&line, &scrubber, log, step_id);
+            } else if stopped_at.is_none()
+                && !line.truncated
+                && document.len() + line.bytes.len() < MAX_DOCUMENT
+            {
+                // A restic that exits fast leaves its object in the pipe after the exit.
+                document.extend_from_slice(&line.bytes);
+                document.push(b'\n');
             }
         }
         (code == 0 && stopped_at.is_none() && !document.is_empty()).then_some(document)
