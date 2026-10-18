@@ -155,11 +155,6 @@
 			'bar .';
 	}
 
-	/* The bar ends at the bottom edge of the page, so the page padding below it goes. */
-	.record--save {
-		margin-bottom: calc(-1 * var(--rh-page-padding-bottom, 0px));
-	}
-
 	.record__main {
 		grid-area: main;
 		display: flex;
@@ -200,7 +195,8 @@
 		gap: var(--rh-space-3);
 		min-height: var(--record-bar-height);
 		padding: var(--rh-space-2) var(--rh-space-4);
-		border-top: var(--rh-border-width) solid var(--rh-color-border);
+		border: var(--rh-border-width) solid var(--rh-color-border);
+		border-radius: var(--rh-radius-md);
 		background-color: var(--rh-color-surface-muted);
 	}
 
