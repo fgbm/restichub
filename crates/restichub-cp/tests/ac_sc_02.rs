@@ -27,7 +27,7 @@ async fn ac_sc_02_two_instances_create_one_job_for_each_plan_and_fire_time() {
     let tenant = create_tenant_with_key(database, "sched-two").await;
     let secret = seed_secret(database, tenant, "s").await;
     let repository = seed_repository(database, tenant, "r", secret).await;
-    let profile = seed_profile(database, tenant, "p", repository).await;
+    let profile = seed_profile(database, tenant, "p").await;
     let agent = seed_agent(database, tenant, "h").await;
 
     let start = utc(2025, Month::January, 1, 0, 0);
@@ -44,6 +44,7 @@ async fn ac_sc_02_two_instances_create_one_job_for_each_plan_and_fire_time() {
                 "UTC",
                 MissedRunPolicy::RunAll,
                 Some(start),
+                repository,
             )
             .await,
         );

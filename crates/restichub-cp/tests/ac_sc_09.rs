@@ -50,8 +50,8 @@ async fn ac_sc_09_the_manual_run_reaches_restic_within_three_seconds_at_p95() {
         )
         .await;
     let repository = env.create_repository(emulator.id, "pw").await;
-    let profile = env.create_profile(repository, json!({})).await;
-    let plan = env.create_plan(profile, emulator.id).await;
+    let profile = env.create_profile(json!({})).await;
+    let plan = env.create_plan(profile, emulator.id, repository).await;
     let dispatcher = restichub_cp::queue::spawn(env.state.clone(), env.state.auth().clock.clone());
 
     let mut latencies = Vec::new();

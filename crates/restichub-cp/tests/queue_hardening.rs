@@ -94,8 +94,8 @@ async fn world(
     let env = Env::start(db, queue).await;
     let agent = env.connect_agent("hardening-host").await;
     let repository = env.create_repository(agent.id, "pw").await;
-    let profile = env.create_profile(repository, json!({})).await;
-    let plan = env.create_plan(profile, agent.id).await;
+    let profile = env.create_profile(json!({})).await;
+    let plan = env.create_plan(profile, agent.id, repository).await;
     World {
         env,
         agent,
@@ -203,7 +203,6 @@ async fn ac_pr_04_a_redelivery_sends_the_same_signed_bytes_after_a_profile_edit(
             &format!("/api/v1/profiles/{}", w.profile),
             Some(json!({
                 "name": "edited",
-                "repository_id": w.repository.to_string(),
                 "paths": {"all": ["/changed"]},
             })),
         )
@@ -314,8 +313,8 @@ async fn fr_sc_04_a_backlog_of_one_agent_never_blocks_another_agent() {
             .await;
     }
     let repository = env.create_repository(other.id, "pw").await;
-    let profile = env.create_profile(repository, json!({})).await;
-    let plan = env.create_plan(profile, other.id).await;
+    let profile = env.create_profile(json!({})).await;
+    let plan = env.create_plan(profile, other.id, repository).await;
     let job = env.run_plan(plan).await;
 
     env.pass().await;

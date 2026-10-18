@@ -19,9 +19,9 @@ async fn ac_ag_13_a_maintenance_job_carries_a_maximum_duration() {
     let mut agent = env.connect_agent("ceiling-host").await;
     let repository = env.create_repository(agent.id, "pw").await;
     let profile = env
-        .create_profile(repository, json!({"retention": {"keep_daily": 7}}))
+        .create_profile(json!({"retention": {"keep_daily": 7}}))
         .await;
-    let plan = env.create_plan(profile, agent.id).await;
+    let plan = env.create_plan(profile, agent.id, repository).await;
     let prune = env
         .enqueue(JobKind::Prune, agent.id, repository, Some(plan))
         .await;
@@ -44,9 +44,9 @@ async fn ac_sc_10_a_job_without_a_maximum_duration_still_ends_at_the_hard_ceilin
     let mut agent = env.connect_agent("ceiling-host").await;
     let repository = env.create_repository(agent.id, "pw").await;
     let profile = env
-        .create_profile(repository, json!({"options": {"max_duration_minutes": 0}}))
+        .create_profile(json!({"options": {"max_duration_minutes": 0}}))
         .await;
-    let plan = env.create_plan(profile, agent.id).await;
+    let plan = env.create_plan(profile, agent.id, repository).await;
     let job = env.run_plan(plan).await;
     env.pass().await;
     let id = decode_job_id(&agent.job().await);

@@ -1,12 +1,11 @@
 /*
- * The model of the profile editor: tags, summaries, the retention preview, the request and the
- * command preview (FR-PF-01, FR-PF-04, ADR-0039).
+ * The model of the profile editor: tags, summaries, the retention preview and the request
+ * (FR-PF-01, FR-PF-04, ADR-0039).
  */
 import { describe, expect, it } from 'vitest';
 import type { Profile } from '#lib/api/index.ts';
 import {
 	PRESETS,
-	buildSteps,
 	draftFromProfile,
 	emptyDraft,
 	enabledCount,
@@ -21,7 +20,6 @@ function stored(overrides: Partial<Profile> = {}): Profile {
 	return {
 		id: 'p_1',
 		name: 'web',
-		repository_id: 'r_1',
 		paths: { all: ['/etc'], windows: ['C:\\Data'], linux: ['/srv'], macos: [] },
 		excludes: ['*.tmp'],
 		exclude_files: [],
@@ -44,7 +42,7 @@ function stored(overrides: Partial<Profile> = {}): Profile {
 
 function withRules(rules: Partial<ReturnType<typeof emptyDraft>>) {
 	return {
-		...emptyDraft('r_1'),
+		...emptyDraft(),
 		keepLast: '0',
 		keepDaily: '0',
 		keepWeekly: '0',
@@ -122,14 +120,14 @@ describe('summarize', () => {
 	const none = { before: 0, after: 0 };
 
 	it('describes a new profile with its warnings', () => {
-		const sums = summarize(emptyDraft(), '', none);
+		const sums = summarize(emptyDraft(), none);
 		expect(sums.basics.state).toBe('warn');
 		expect(sums.paths).toEqual({ state: 'warn', text: 'No paths set' });
 		expect(sums.excludes).toEqual({ state: 'off', text: 'Off' });
 		expect(sums.limits.text).toBe('no progress: server default · longest time: server default');
 		expect(
-			summarize(emptyDraft(), '', none, { stall_timeout_minutes: 30, max_duration_minutes: 90 })
-				.limits.text
+			summarize(emptyDraft(), none, { stall_timeout_minutes: 30, max_duration_minutes: 90 }).limits
+				.text
 		).toBe('no progress 30m (default) · at most 1h 30m (default)');
 	});
 
@@ -140,8 +138,8 @@ describe('summarize', () => {
 				check: { read_data_subset: '5%' }
 			})
 		);
-		const sums = summarize(draft, 'offsite', { before: 1, after: 2 });
-		expect(sums.basics.text).toBe('web · offsite');
+		const sums = summarize(draft, { before: 1, after: 2 });
+		expect(sums.basics.text).toBe('web');
 		expect(sums.paths.text).toBe('all systems: 1 · Windows: 1 · Linux: 1');
 		expect(sums.excludes.text).toBe('1 pattern');
 		expect(sums.tags.text).toBe('web · nightly');
@@ -153,7 +151,7 @@ describe('summarize', () => {
 
 	it('warns when retention is on without a rule', () => {
 		const draft = withRules({});
-		expect(summarize(draft, 'r', none).retention).toEqual({
+		expect(summarize(draft, none).retention).toEqual({
 			state: 'warn',
 			text: 'No rules: nothing is deleted'
 		});
@@ -161,7 +159,7 @@ describe('summarize', () => {
 
 	it('counts the sections that are on', () => {
 		const draft = draftFromProfile(stored());
-		expect(enabledCount(summarize(draft, 'r', none))).toEqual({ on: 6, total: 9 });
+		expect(enabledCount(summarize(draft, none))).toEqual({ on: 6, total: 9 });
 	});
 });
 
@@ -179,7 +177,7 @@ describe('settingsOf', () => {
 	});
 
 	it('omits an empty limit field and sends the entered minutes', () => {
-		const draft = emptyDraft('r_1');
+		const draft = emptyDraft();
 		const empty = settingsOf(draft, context).options;
 		expect(empty.stall_timeout_minutes).toBeUndefined();
 		expect(empty.max_duration_minutes).toBeUndefined();
@@ -229,10 +227,10 @@ describe('settingsOf', () => {
 
 	it('fills a new draft with the server defaults and shows the stored limits', () => {
 		const defaults = { stall_timeout_minutes: 60, max_duration_minutes: 2880 };
-		const fresh = emptyDraft('r_1', defaults);
+		const fresh = emptyDraft(defaults);
 		expect(fresh.stallMinutes).toBe('60');
 		expect(fresh.maxDurationHours).toBe('48');
-		expect(emptyDraft('r_1').stallMinutes).toBe('');
+		expect(emptyDraft().stallMinutes).toBe('');
 		const draft = draftFromProfile(
 			stored({
 				options: { stall_timeout_minutes: 30, max_duration_minutes: 0 } as Profile['options']
@@ -240,41 +238,5 @@ describe('settingsOf', () => {
 		);
 		expect(draft.stallMinutes).toBe('30');
 		expect(draft.maxDurationHours).toBe('0');
-	});
-});
-
-describe('buildSteps', () => {
-	const scripts = [
-		{ name: 'Stop db', phase: 'before' as const },
-		{ name: 'Start db', phase: 'after' as const }
-	];
-
-	it('takes the paths of the chosen system', () => {
-		const draft = draftFromProfile(stored());
-		const linux = buildSteps(draft, 'linux', []).find((step) => step.kind === 'backup');
-		const windows = buildSteps(draft, 'windows', []).find((step) => step.kind === 'backup');
-		expect(linux?.command).toContain('/srv');
-		expect(linux?.command).not.toContain('C:\\Data');
-		expect(linux?.command).not.toContain('--use-fs-snapshot');
-		expect(windows?.command).toContain('C:\\Data');
-		expect(windows?.command).toContain('--use-fs-snapshot');
-	});
-
-	it('adds forget only when a rule is set and orders the script steps', () => {
-		const withRetention = draftFromProfile(
-			stored({ retention: { keep_daily: 7 }, scripts: [{ name: 'x' } as never] })
-		);
-		withRetention.enabled.scripts = true;
-		const kinds = buildSteps(withRetention, 'linux', scripts).map((step) => step.kind);
-		expect(kinds).toEqual(['script', 'backup', 'script', 'forget']);
-		const noRule = draftFromProfile(stored({ retention: { keep_daily: 0 } }));
-		expect(buildSteps(noRule, 'linux', []).map((step) => step.kind)).toEqual(['backup']);
-	});
-
-	it('quotes a value that holds a space or a star', () => {
-		const draft = draftFromProfile(stored({ excludes: ['*.tmp', 'my dir'] }));
-		const command = buildSteps(draft, 'linux', [])[0].command;
-		expect(command).toContain("--exclude '*.tmp'");
-		expect(command).toContain("--exclude 'my dir'");
 	});
 });

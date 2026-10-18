@@ -163,18 +163,21 @@ pub fn write_body(
         })),
         ("POST", "/api/v1/profiles") => Some(json!({
             "name": format!("matrix-profile-{index}"),
-            "repository_id": repository_id,
             "paths": {"all": ["/srv"]},
         })),
         ("PATCH", "/api/v1/profiles/{id}") => Some(json!({
-            "repository_id": repository_id,
             "paths": {"all": ["/srv"]},
         })),
-        ("POST", "/api/v1/profiles/{id}/preview") => Some(json!({"agent_id": repository_id})),
+        ("POST", "/api/v1/profiles/preview") => Some(json!({
+            "name": format!("matrix-profile-{index}"),
+            "paths": {"all": ["/srv"]},
+            "agent_id": repository_id,
+        })),
         ("POST", "/api/v1/plans") => Some(json!({
             "name": format!("matrix-plan-{index}"),
             "profile_id": profile_id,
             "agent_id": agent_id,
+            "repository_id": repository_id,
             "cron": "0 2 * * *",
             "time_zone": "UTC",
             "missed_run_policy": "run_all",
@@ -183,6 +186,7 @@ pub fn write_body(
             "name": format!("matrix-plan-{index}"),
             "profile_id": profile_id,
             "agent_id": agent_id,
+            "repository_id": repository_id,
             "cron": "0 2 * * *",
             "time_zone": "UTC",
             "missed_run_policy": "run_all",
@@ -553,15 +557,8 @@ pub async fn seed_repository(
     id
 }
 
-/// Inserts a profile row of a tenant and returns its identifier.
-///
-/// A test uses it only for a route fixture. The repository must already exist in the tenant.
-pub async fn seed_profile(
-    db: &Database,
-    tenant: TenantId,
-    name: &str,
-    repository: restichub_db::RepositoryId,
-) -> restichub_db::ProfileId {
+/// Inserts a profile row of a tenant and returns its identifier, for a route fixture.
+pub async fn seed_profile(db: &Database, tenant: TenantId, name: &str) -> restichub_db::ProfileId {
     use restichub_db::profiles::{NewProfile, create};
     let mut tx = db
         .begin_tenant(tenant)
@@ -573,7 +570,6 @@ pub async fn seed_profile(
         &NewProfile {
             id,
             name,
-            repository_id: repository,
             paths_all: &["/srv".to_owned()],
             paths_windows: &[],
             paths_linux: &[],
@@ -597,6 +593,43 @@ pub async fn seed_profile(
     .await
     .expect("cannot create the profile");
     tx.commit().await.expect("cannot commit the profile");
+    id
+}
+
+/// Inserts an active agent row of a tenant with explicit facts and returns its identifier.
+pub async fn seed_agent_full(
+    db: &Database,
+    tenant: TenantId,
+    hostname: &str,
+    os: &str,
+    restic_version: &str,
+    labels: &[String],
+) -> restichub_db::AgentId {
+    let mut serial = vec![0_u8; 16];
+    getrandom::fill(&mut serial).expect("cannot read random bytes");
+    let mut tx = db
+        .begin_tenant(tenant)
+        .await
+        .expect("cannot begin the transaction");
+    let id = restichub_db::agents::create(
+        &mut tx,
+        &restichub_db::agents::NewAgent {
+            id: restichub_db::AgentId::new(),
+            hostname,
+            os,
+            arch: "amd64",
+            agent_version: "0.1.0",
+            restic_version,
+            labels,
+            certificate_serial: &serial,
+            certificate_expires_at: OffsetDateTime::now_utc() + time::Duration::days(30),
+            last_seen_at: None,
+            machine_id_hash: None,
+        },
+    )
+    .await
+    .expect("cannot create the agent");
+    tx.commit().await.expect("cannot commit the agent");
     id
 }
 
@@ -740,14 +773,15 @@ pub async fn seed_scheduled_job(
 
 /// Inserts a plan row of a tenant and returns its identifier.
 ///
-/// A test uses it only for a route fixture. The profile and the agent must already exist in the
-/// tenant.
+/// A test uses it only for a route fixture. The profile, the agent and the repository must already
+/// exist in the tenant.
 pub async fn seed_plan(
     db: &Database,
     tenant: TenantId,
     name: &str,
     profile: restichub_db::ProfileId,
     agent: restichub_db::AgentId,
+    repository: restichub_db::RepositoryId,
 ) -> restichub_db::PlanId {
     seed_scheduled_plan(
         db,
@@ -759,6 +793,7 @@ pub async fn seed_plan(
         "UTC",
         restichub_db::MissedRunPolicy::RunAll,
         None,
+        repository,
     )
     .await
 }
@@ -777,6 +812,7 @@ pub async fn seed_scheduled_plan(
     time_zone: &str,
     missed_run_policy: restichub_db::MissedRunPolicy,
     next_run_at: Option<OffsetDateTime>,
+    repository: restichub_db::RepositoryId,
 ) -> restichub_db::PlanId {
     use restichub_db::plans::{NewPlan, create};
     let mut tx = db
@@ -791,6 +827,7 @@ pub async fn seed_scheduled_plan(
             name,
             profile_id: profile,
             agent_id: agent,
+            repository_id: repository,
             cron,
             time_zone,
             missed_run_policy,

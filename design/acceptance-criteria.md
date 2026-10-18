@@ -128,7 +128,7 @@ Each automated test refers to its criterion ID in its name or in a comment.
 
 | ID | Requirement | Criterion | Method |
 |---|---|---|---|
-| AC-PF-01 | FR-PF-04 | Open the preview of a plan. **Expected:** the steps and the command line agree with the command that the agent ran (compare with the job log). Secrets and parameter values are masked. | A |
+| AC-PF-01 | FR-PF-04 | Open the preview of a plan. **Expected:** the steps and the command line agree with the command that the agent ran (compare with the job log). Secrets and parameter values are masked. A Viewer sees the commands of the stored profile, with the script bodies and the string values hidden. | A |
 | AC-PF-02 | FR-PF-05 | Save a profile with one error. Test each error: incorrect cron, a script without the trust mode, VSS for a Linux agent, option not available in the installed restic. **Expected:** the UI does not save the profile. The error points to the field. | A |
 | AC-PF-03 | FR-PF-03 | A profile uses `{{hostname}}`, `{{os}}`, `{{agent.label.env}}` and the date on 3 agents. **Expected:** each agent gets its own values. | A |
 | AC-PF-04 | FR-PF-02 (1.0) | A chain of `extends` with three levels. **Expected:** the result agrees with the documented merge rules (table-driven test). The CP rejects the cycle A→B→A and shows the chain. | A |
@@ -211,7 +211,7 @@ Each automated test refers to its criterion ID in its name or in a comment.
 | AC-UI-08 | FR-UI-05 | Sign in as a second user, or in a second tenant, in the same browser. **Expected:** the second person does not see the kept view of the first person. | A |
 | AC-UI-09 | FR-UI-05 | On the Restore page, choose a repository, open another page, then return. Reload the page. **Expected:** the same repository is selected each time. This includes a repository that the page chose by itself on the first visit. | A |
 | AC-UI-10 | FR-UI-05 | Close a section of the profile, plan, repository or host editor. Open another record of the same kind. **Expected:** the section is closed there too. The state is kept for each kind of editor and not for each record. | A |
-| AC-UI-11 | FR-UI-05 | Choose an operating system in the restic commands panel of the profile editor, then open the editor again. **Expected:** the panel shows the same operating system. The choice is kept for the browser. | A |
+| AC-UI-11 | FR-UI-05 | Choose a host in the restic commands panel of the profile editor, then open the editor again. **Expected:** the panel shows the same host. The choice is kept for the browser. | A |
 | AC-UI-12 | FR-UI-05 | Fill the search field and go to page 2. Set the restore target, the overwrite mode, the dry run flag, the verify flag and a form field. Open the page again. **Expected:** none of these values is kept. The browser storage holds no secret. | A |
 | AC-UI-13 | FR-UI-05 | Open the UI in a browser with no storage (private mode or disabled storage). **Expected:** the UI works and shows the default view. | A |
 | AC-AU-01 | FR-AU-01 | Do each operation from the list in FR-AU-01. **Expected:** the audit log has a record with user, time, IP address and diff. The API has no endpoint that changes or deletes audit records. | A |

@@ -341,12 +341,13 @@ The sign-in screen asks for the username and the password only. The account is i
   3. In the section "What to back up", enter the paths for each operating system. Enter the excludes, the tags and the backup options in their sections.
   4. In the section "Parameters", declare the parameters. Give the name, the kind "Text" or "Secret", the required flag and the default value of a text parameter.
   5. Set the retention and the scripts when they are needed. The panel "The result" on the right side shows a summary.
-  6. Click "Preview", select a plan and read the steps.
+  6. Open the panel "Restic commands", select a host and a repository, and read the steps.
   7. Click "Save".
-- **Expected result:** the preview shows the steps and the equivalent restic command line of the plan. The secrets and the parameter values are masked. The profile appears in the list. The audit log holds `profile_create`.
+- **Expected result:** the preview shows the steps and the equivalent restic command line of the profile on the selected host. The secrets and the parameter values are masked. The commands of a profile that is not saved show the tag `restichub-profile-new`. The profile appears in the list. The audit log holds `profile_create`.
 - **Alternative flows:**
   - An incorrect value or an option that the installed restic lacks stops the save. The error points to the field.
   - A profile that fits the host with a warning is saved. The screen shows "The profile is saved with warnings.".
+  - A Viewer opens the panel "Restic commands" of a saved profile. The panel shows the commands of the stored profile. The script bodies and the string values stay hidden.
 - **Requirements:** FR-PF-01, FR-PF-03, FR-PF-04, FR-PF-05, FR-PF-09.
 - **Acceptance criteria:** AC-PF-01, AC-PF-02, AC-PF-09.
 - **Note:** the profile holds no repository. The plan selects the repository (UC-PL-01).

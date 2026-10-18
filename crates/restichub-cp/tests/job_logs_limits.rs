@@ -39,8 +39,8 @@ async fn send_chunk(agent: &FakeAgent, chunk: LogChunk) {
 
 async fn running_job(env: &Env, agent: &mut FakeAgent) -> (Uuid, String) {
     let repository = env.create_repository(agent.id, "pw").await;
-    let profile = env.create_profile(repository, serde_json::json!({})).await;
-    let plan = env.create_plan(profile, agent.id).await;
+    let profile = env.create_profile(serde_json::json!({})).await;
+    let plan = env.create_plan(profile, agent.id, repository).await;
     let job = env.run_plan(plan).await;
     env.pass().await;
     let signed = agent.job().await;

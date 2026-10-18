@@ -23,9 +23,9 @@ async fn ac_sc_03_a_prune_waits_for_three_backups_and_holds_the_later_backups() 
     let mut agent = env.connect_agent("barrier-host").await;
     let repository = env.create_repository(agent.id, "pw").await;
     let profile = env
-        .create_profile(repository, json!({"retention": {"keep_daily": 7}}))
+        .create_profile(json!({"retention": {"keep_daily": 7}}))
         .await;
-    let plan = env.create_plan(profile, agent.id).await;
+    let plan = env.create_plan(profile, agent.id, repository).await;
 
     // Three backups run on the repository.
     let mut running = Vec::new();

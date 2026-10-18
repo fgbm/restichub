@@ -15,6 +15,7 @@
 //!
 //! The schedule is not a profile field: it belongs to the plan (FR-SC-01).
 
+mod preview;
 pub(crate) mod script_secrets;
 mod settings;
 
@@ -24,13 +25,13 @@ use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use restichub_compiler::{
-    Architecture, CompileError, OperatingSystem, Plan, ResticVersion, TargetFacts, compile, preview,
+    Architecture, CompileError, OperatingSystem, Plan, ResticVersion, TargetFacts, compile,
 };
 use restichub_db::agents::{self as agents_repo, Agent};
 use restichub_db::audit::{AuditAction, diff};
 use restichub_db::plans as plans_repo;
 use restichub_db::profiles::{self as repo, ProfileCursor, ProfilePage};
-use restichub_db::repositories::{self as repositories_repo, Repository};
+use restichub_db::repositories::Repository;
 use restichub_db::{AgentId, BackendKind, ProfileId};
 use restichub_proto::agent::v1::{
     RepositoryAccess, RestCredentials, S3Credentials, repository_access::BackendCredentials,
@@ -46,12 +47,13 @@ use crate::secrets::actor_user;
 use crate::server::AppState;
 use crate::validation::Reason;
 
+pub use preview::*;
 pub(crate) use settings::compiler_profile_from_row;
 pub use settings::{
     BackupOptions, CheckOptions, CreateProfileRequest, GroupBy, HookPhase, JobLimitDefaults,
-    MAX_EXCLUDE_FILES, MAX_EXCLUDES, MAX_PATHS, MAX_TAGS, PlanWarning, PreviewEnvView,
-    PreviewRequest, PreviewResponse, PreviewStepView, ProfileListResponse, ProfilePaths,
-    ProfileResponse, ProfileView, ProfileWarning, Retention, SnapshotFilter, UpdateProfileRequest,
+    MAX_EXCLUDE_FILES, MAX_EXCLUDES, MAX_PATHS, MAX_TAGS, PlanWarning, ProfileListResponse,
+    ProfilePaths, ProfileResponse, ProfileView, ProfileWarning, Retention, SnapshotFilter,
+    UpdateProfileRequest,
 };
 use settings::{
     parse_profile_id, profile_value, save_warnings, stored_value, validate_create, validate_update,
@@ -199,7 +201,6 @@ pub async fn create_profile(
     let warnings = save_warnings(&validated)?;
     let profile_id = ProfileId::new();
     let mut tx = state.db().begin_tenant(context.tenant_id).await?;
-    ensure_repository(&mut tx, validated.repository_id).await?;
     script_secrets::check_script_secrets(&mut tx, &validated.scripts).await?;
     repo::create(
         &mut tx,
@@ -265,10 +266,6 @@ pub async fn update_profile(
         context.authorize(Operation::ScriptsWrite)?;
     }
     let warnings = save_warnings(&validated)?;
-    ensure_repository(&mut tx, validated.repository_id).await?;
-    if validated.repository_id != current.repository_id {
-        ensure_plans_on_repository_host(&mut tx, profile_id, validated.repository_id).await?;
-    }
     script_secrets::check_script_secrets(&mut tx, &validated.scripts).await?;
     repo::update(&mut tx, profile_id, &validated.update())
         .await
@@ -367,114 +364,6 @@ pub async fn delete_profile(
     restichub_db::audit::insert(&mut tx, &event).await?;
     tx.commit().await?;
     Ok(StatusCode::NO_CONTENT)
-}
-
-/// Previews a profile for one target agent (FR-PF-04, AC-PF-01).
-///
-/// The endpoint compiles the profile with the facts of the registered agent and renders the steps
-/// and the command lines with masked secrets. A compile error points to the profile field
-/// (AC-PF-02).
-#[utoipa::path(
-    post,
-    path = "/api/v1/profiles/{id}/preview",
-    summary = "Previews a profile for one target agent.",
-    description = "The steps and the command lines agree with the command that the agent runs. Secrets are masked (AC-PF-01).",
-    security(("cookie" = []), ("bearer" = [])),
-    params(("id" = String, Path, description = "The identifier of the profile.")),
-    request_body = PreviewRequest,
-    responses(
-        (status = 200, description = "The previewed steps.", body = PreviewResponse),
-        (status = 400, description = "The profile or the agent is not valid.", body = crate::error::ProblemBody),
-        crate::error::ProtectedResponses,
-        (status = 404, description = "The profile is not found.", body = crate::error::ProblemBody)
-    )
-)]
-pub async fn preview_profile(
-    State(state): State<AppState>,
-    context: RequestContext,
-    Path(id): Path<String>,
-    ApiJson(body): ApiJson<PreviewRequest>,
-) -> Result<Json<PreviewResponse>, ApiError> {
-    context.authorize(Operation::ProfilesRead)?;
-    let profile_id = parse_profile_id(&id)?;
-    let agent_id = parse_agent_id(&body.agent_id)?;
-
-    let mut tx = state.db().begin_tenant(context.tenant_id).await?;
-    let Some(profile) = repo::get(&mut tx, profile_id).await? else {
-        return Err(ApiError::not_found());
-    };
-    let Some(agent) = agents_repo::get(&mut tx, agent_id).await? else {
-        return Err(ApiError::invalid_field("agent_id", Reason::Unknown));
-    };
-    let Some(repository) = repositories_repo::get(&mut tx, profile.repository_id).await? else {
-        return Err(ApiError::internal(
-            "the repository of the profile is not found in the tenant",
-        ));
-    };
-    tx.commit().await?;
-
-    let target = target_facts(&agent, state.auth().clock.now())?;
-    let compiler_profile = compiler_profile_from_row(&profile)?;
-    let plan = compile(&compiler_profile, &target).map_err(compile_error_to_api)?;
-    let access = repository_access(&repository);
-    let steps = preview(&plan, &access, target.os).map_err(preview_error_to_api)?;
-
-    Ok(Json(PreviewResponse {
-        profile_id: profile_id.to_string(),
-        repository_id: profile.repository_id.to_string(),
-        steps: steps
-            .iter()
-            .map(|step| PreviewStepView {
-                kind: step.step.step_id.clone(),
-                maintenance: step.maintenance,
-                command: step.command.clone(),
-                environment: step
-                    .environment
-                    .iter()
-                    .map(|(name, value)| PreviewEnvView {
-                        name: name.clone(),
-                        value: value.clone(),
-                    })
-                    .collect(),
-            })
-            .collect(),
-    }))
-}
-
-/// Refuses a repository that is not in the tenant (FR-TN-01).
-async fn ensure_repository(
-    tx: &mut restichub_db::TenantTx<'_>,
-    repository: restichub_db::RepositoryId,
-) -> Result<(), ApiError> {
-    if repositories_repo::get(tx, repository).await?.is_none() {
-        return Err(ApiError::invalid_field("repository_id", Reason::Unknown));
-    }
-    Ok(())
-}
-
-async fn ensure_plans_on_repository_host(
-    tx: &mut restichub_db::TenantTx<'_>,
-    profile_id: ProfileId,
-    repository_id: restichub_db::RepositoryId,
-) -> Result<(), ApiError> {
-    // The lock orders this save after a concurrent change of the repository host.
-    let Some(repository) = repositories_repo::get_for_update(tx, repository_id).await? else {
-        return Err(ApiError::invalid_field("repository_id", Reason::Unknown));
-    };
-    if repository.backend != BackendKind::Local {
-        return Ok(());
-    }
-    let plans = plans_repo::list_by_profile(tx, profile_id).await?;
-    if plans
-        .iter()
-        .any(|plan| repository.maintenance_agent_id != Some(plan.agent_id))
-    {
-        return Err(ApiError::invalid_field(
-            "repository_id",
-            Reason::PlanOnOtherHost,
-        ));
-    }
-    Ok(())
 }
 
 fn parse_agent_id(value: &str) -> Result<AgentId, ApiError> {
@@ -601,20 +490,23 @@ fn repository_location(repository: &Repository) -> String {
     }
 }
 
-/// Compiles a stored profile for one agent and returns a rejection as a field error (FR-PF-05).
+/// Compiles a stored profile for one agent and one repository and returns a rejection as a field
+/// error (FR-PF-05).
 ///
-/// A plan binds a profile to an agent. The control plane compiles the stored profile with the facts
-/// of that agent before a write, so a plan never points at a profile that the compiler rejects for
-/// the target operating system (AC-SC-01). The compile refuses a missing path for the operating
-/// system of the agent.
+/// A plan binds a profile to an agent and a repository. The control plane compiles the stored
+/// profile with the facts of that agent before a write, so a plan never points at a profile that
+/// the compiler rejects for the target operating system (AC-SC-01). The compile refuses a missing
+/// path for the operating system of the agent.
 pub(crate) fn compile_for_agent(
     profile: &repo::Profile,
+    repository_id: restichub_db::RepositoryId,
     agent: &restichub_db::agents::Agent,
     now: time::OffsetDateTime,
 ) -> Result<Plan, ApiError> {
     let target = target_facts(agent, now)?;
     let compiler_profile = compiler_profile_from_row(profile)?;
-    compile(&compiler_profile, &target).map_err(compile_error_to_api)
+    compile(&compiler_profile, Some(&repository_id.to_string()), &target)
+        .map_err(compile_error_to_api)
 }
 
 /// The plans of the profile that no longer compile for the facts of their agent (FR-SC-11).
@@ -635,7 +527,11 @@ async fn plan_compile_warnings(
         let Ok(target) = target_facts(&agent, now) else {
             continue;
         };
-        if let Err(error) = compile(&compiler_profile, &target) {
+        if let Err(error) = compile(
+            &compiler_profile,
+            Some(&plan.repository_id.to_string()),
+            &target,
+        ) {
             let (field, reason) = compile_error_parts(&error);
             warnings.push(PlanWarning {
                 plan_id: plan.id.to_string(),

@@ -85,9 +85,10 @@ async fn ac_sc_03_a_prune_waits_for_three_backups_and_the_later_backups_wait_for
         .expect("cannot mark the repository initialized");
     tx.commit().await.expect("cannot commit the mark");
     let retention_profile = env
-        .create_profile(repository, json!({"retention": {"keep_last": 2}}))
+        .create_profile(json!({"retention": {"keep_last": 2}}))
         .await;
-    env.create_plan(retention_profile, emulator.id).await;
+    env.create_plan(retention_profile, emulator.id, repository)
+        .await;
     let dispatcher = restichub_cp::queue::spawn(env.state.clone(), env.state.auth().clock.clone());
 
     for _ in 0..3 {

@@ -22,6 +22,8 @@ export interface RecordOption extends SelectOption {
 	disabled?: boolean;
 	/** Why the option cannot be selected; it shows below the option. */
 	reason?: string;
+	/** Extra texts that the search finds, which the option does not show. */
+	search?: string[];
 }
 
 export type RecordDot = 'success' | 'warning' | 'neutral';
@@ -95,6 +97,23 @@ export interface RowAction {
 	danger?: boolean;
 	hidden?: boolean;
 	disabled?: boolean;
+}
+
+/** One action of the section "Dangerous actions" of a record page (UI principles 1.7). */
+export interface DangerAction {
+	/** Key of the action in the section. */
+	key: string;
+	/** One sentence on what the action does to the record. */
+	text: string;
+	label: string;
+	icon: IconName;
+	/** `danger` for an action that removes data or blocks the record. Default: `secondary`. */
+	tone?: 'secondary' | 'danger';
+	/** Why the action is not available now. The button shows it as its tooltip. */
+	hint?: string;
+	disabled?: boolean;
+	loading?: boolean;
+	onclick: () => void;
 }
 
 /** The tones that color a list item; the usual state has no tone. */

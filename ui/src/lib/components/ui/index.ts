@@ -6,6 +6,7 @@ export { default as Checkbox } from './Checkbox.svelte';
 export { default as Combobox } from './Combobox.svelte';
 export { default as ConfirmDialog } from './ConfirmDialog.svelte';
 export { default as CopyField } from './CopyField.svelte';
+export { default as DangerZone } from './DangerZone.svelte';
 export { default as DataTable } from './DataTable.svelte';
 export { default as Disclosure } from './Disclosure.svelte';
 export { default as Dialog } from './Dialog.svelte';
@@ -40,6 +41,7 @@ export { default as Tooltip } from './Tooltip.svelte';
 export type { IconName } from './icons';
 export type {
 	BadgeTone,
+	DangerAction,
 	FilterFacet,
 	FilterOption,
 	FilterSearch,

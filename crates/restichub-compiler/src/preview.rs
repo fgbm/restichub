@@ -35,7 +35,8 @@ pub struct PreviewStep {
 /// Renders a plan as step command lines for one repository (AC-PF-01).
 ///
 /// The text is the argv that the agent runs, including `--json`. The quoting follows the operating
-/// system of the target.
+/// system of the target. A `None` repository renders the commands without the repository
+/// environment, for a profile that no plan binds yet (ADR-0047).
 ///
 /// # Errors
 ///
@@ -43,14 +44,21 @@ pub struct PreviewStep {
 /// become a restic command.
 pub fn preview(
     plan: &Plan,
-    repository: &RepositoryAccess,
+    repository: Option<&RepositoryAccess>,
     os: OperatingSystem,
 ) -> Result<Vec<PreviewStep>, PreviewError> {
+    // The steps name the repository, so the job needs an access record even when the caller has
+    // no repository: the placeholder never leaves the preview.
+    let access = repository.cloned().unwrap_or_else(|| RepositoryAccess {
+        repository_id: crate::compile::UNBOUND_REPOSITORY_ID.to_owned(),
+        location: "/".to_owned(),
+        ..RepositoryAccess::default()
+    });
     let job = Job {
         job_id: "preview".to_owned(),
         tenant_id: "preview".to_owned(),
         agent_id: "preview".to_owned(),
-        repositories: vec![repository.clone()],
+        repositories: vec![access],
         steps: plan
             .steps
             .iter()
@@ -62,7 +70,7 @@ pub fn preview(
 
     plan.steps
         .iter()
-        .map(|planned| preview_step(planned, &validated, os))
+        .map(|planned| preview_step(planned, &validated, os, repository.is_some()))
         .collect()
 }
 
@@ -70,6 +78,7 @@ fn preview_step(
     planned: &PlannedStep,
     validated: &ValidatedJob,
     os: OperatingSystem,
+    bound: bool,
 ) -> Result<PreviewStep, PreviewError> {
     if let Some(step::Kind::Script(script)) = &planned.step.kind {
         return Ok(PreviewStep {
@@ -87,7 +96,11 @@ fn preview_step(
         step: planned.step.clone(),
         maintenance: planned.maintenance,
         command,
-        environment: line.env().to_vec(),
+        environment: if bound {
+            line.env().to_vec()
+        } else {
+            Vec::new()
+        },
     })
 }
 

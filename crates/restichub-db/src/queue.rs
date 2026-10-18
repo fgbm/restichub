@@ -535,8 +535,8 @@ pub async fn unlock_fallback_agent(
          WHERE a.status = 'active' \
            AND NOT EXISTS (SELECT 1 FROM repositories r WHERE r.id = $1 AND r.backend = 'local') \
          ORDER BY EXISTS (SELECT 1 FROM plans p \
-                          JOIN profiles pr ON pr.tenant_id = p.tenant_id AND pr.id = p.profile_id \
-                          WHERE p.agent_id = a.id AND pr.repository_id = $1) DESC, \
+                          WHERE p.tenant_id = a.tenant_id AND p.agent_id = a.id \
+                            AND p.repository_id = $1) DESC, \
                   a.last_seen_at DESC NULLS LAST, a.id \
          LIMIT 1",
     )

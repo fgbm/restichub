@@ -52,6 +52,10 @@ The save bar is a strip below the sections column. It is at the bottom edge of t
 
 `SummaryPanel` is a panel of the side panel. It shows `items` (`KeyValueItem[]`) with the label above the value. An item can have a `render` snippet instead of a text value. The panel does not appear when it has no items and no content.
 
+## DangerZone
+
+`DangerZone` (`$lib/components/ui`) is the body of the section `danger` of a record page (UI principles 1.7). It shows `actions` (`DangerAction[]`). Each action has a stable `key`, the `text` of one sentence on what the action does, the `label` and the `icon` of the button, and the `onclick`. It can have `tone` (`danger` for an action that removes data or blocks the record), `hint` and `disabled`. Put the component in a `ProfileSection` with the id `danger`, the title `danger.title` and a short summary of the actions. Show the section for a stored record and for a role that may run the action, and nowhere else. The delete of a record has this section as its only place. Do not put the same action in the page header or in a header menu.
+
 ## ListView
 
 `ListView` (`$lib/components/ui`) is the list of the entities: hosts, jobs, plans, repositories, profiles, snapshots, alerts, audit events, channels, users, tokens, secrets, templates and organizations. Each item has two lines. Use `DataTable` only for tabular data.
@@ -158,7 +162,7 @@ To keep the filters in the query string, use `queryFilters(keys)` from `$lib/sto
 
 ## RecordPicker
 
-`RecordPicker` (`$lib/components/ui`) is the field that selects one record when the name of the record is not sufficient, for example a profile and its repository. Each option has two lines: the label, and a muted secondary line with texts and small tag chips. The closed field shows the label and the first part of the secondary line, for example "user-profiles · test-s3-yandex". The open list has a search field at the top. The search finds the label and each part of the secondary line, and it ignores the case of the letters.
+`RecordPicker` (`$lib/components/ui`) is the field that selects one record when the name of the record is not sufficient, for example a profile and its repository. Each option has two lines: the label, and a muted secondary line with texts and small tag chips. The closed field shows the label and the first part of the secondary line, for example "user-profiles · test-s3-yandex". The open list has a search field at the top. The search finds the label, each part of the secondary line and each `search` text, and it ignores the case of the letters.
 
 | Property                                   | Function                                                                                                       |
 | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
@@ -178,6 +182,7 @@ An option can also have these properties:
 - `dot`: a status dot before the label, `success`, `warning` or `neutral`. Set `state` too, because a color is never the only sign.
 - `state`: the state in words at the right of the option. The selected option shows a check mark in its place.
 - `detail`: the text after the label in the closed field. By default, it is the first part of the secondary line.
+- `search`: extra texts for the search, which the option does not show, for example each path of a profile.
 - `disabled` and `reason`: an option that the person cannot select. It stays in the list, dimmed, and the reason shows below it, for example "Repository local-fs is on fs-01". Do not hide an option that the person expects to find.
 
 - A click, Enter, Space, the arrow keys or a typed character opens the list. A typed character starts the search. The focus goes to the search field.
@@ -187,7 +192,9 @@ An option can also have these properties:
 
 `SelectOption` does not have a secondary line, because a native `<select>` cannot show one. A facet of `FilterBar` takes the same secondary line in `FilterOption.description`. Set `search: true` on the facet to show the search field when the facet has fewer than seven values.
 
-`ProfilePicker` (`$lib/components`) is a `RecordPicker` for a profile. It makes the options from the profiles, the repositories and the hosts. An option shows the profile name, the repository name and a chip with the backend kind. For a local repository, it also shows the repository host. `profileDescription` in `$lib/profile-picker.ts` gives the same secondary line for a facet.
+`ProfilePicker` (`$lib/components`) is a `RecordPicker` for a profile. It makes the options from the profiles. An option shows the profile name, the first path with the count of the other paths and the retention, for example "7 d · 2 wk". The search finds the name and each path. A profile has no repository (ADR-0047). `profileDescription` in `$lib/profile-picker.ts` gives the same secondary line for a facet.
+
+`RepositoryPicker` (`$lib/components`) is a `RecordPicker` for a repository. An option shows the name, a chip with the backend kind and the location: the endpoint and the bucket of an S3 storage, the endpoint of a REST server or the path of a local directory. A local directory also shows its host. The search finds the name and the location. A repository without an init step stays in the list, dimmed, with the reason. The closed field shows the name, the kind and the location. `repositoryOptions` and `withRepositories` in `$lib/repository-picker.ts` give the same secondary line for a field and a facet.
 
 `HostPicker` (`$lib/components`) is a `RecordPicker` for a host. Use it for each field that selects a host, for example the plan host, the repository host and the target host of a restore. An option shows the status dot, the host name and the state in words, for example "Offline · 3 h ago". The secondary line shows the OS, the architecture and the labels as chips. It does not show the agent version. The search finds the host name, the OS and the labels. The closed field shows the host name, the OS family and the state. The `reason(host)` property gives the reason why a host cannot be selected. For example, a plan of a local repository runs only on the repository host. Revoked hosts are at the end of the list.
 

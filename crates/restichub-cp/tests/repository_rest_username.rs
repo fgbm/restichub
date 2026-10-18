@@ -346,13 +346,31 @@ async fn ac_pf_01_the_preview_shows_the_rest_username_and_masks_the_password() {
         &cookie,
         Some(json!({
             "name": "web-daily",
-            "repository_id": repository_id,
             "paths": {"all": ["/srv"]},
         })),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{profile}");
-    let preview_path = format!("/api/v1/profiles/{}/preview", id_of(&profile["profile"]));
+    let profile_id = id_of(&profile["profile"]);
+    // The preview takes the repository of the plan of the profile on the agent (ADR-0047).
+    let (status, plan) = call(
+        &app,
+        "POST",
+        "/api/v1/plans",
+        &cookie,
+        Some(json!({
+            "name": "web-daily",
+            "profile_id": profile_id,
+            "agent_id": agent.to_string(),
+            "repository_id": repository_id,
+            "cron": "0 2 * * *",
+            "time_zone": "UTC",
+            "missed_run_policy": "run_all",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{plan}");
+    let preview_path = "/api/v1/profiles/preview";
     let backup_env = |preview: &Value| -> Vec<(String, String)> {
         let steps = preview["steps"].as_array().expect("the steps");
         let backup = steps
@@ -371,9 +389,14 @@ async fn ac_pf_01_the_preview_shows_the_rest_username_and_masks_the_password() {
             })
             .collect()
     };
-    let agent_body = Some(json!({"agent_id": agent.to_string()}));
+    let agent_body = Some(json!({
+        "agent_id": agent.to_string(),
+        "profile_id": profile_id,
+        "name": "web-daily",
+        "paths": {"all": ["/srv"]},
+    }));
 
-    let (status, preview) = call(&app, "POST", &preview_path, &cookie, agent_body.clone()).await;
+    let (status, preview) = call(&app, "POST", preview_path, &cookie, agent_body.clone()).await;
     assert_eq!(status, StatusCode::OK, "{preview}");
     let env = backup_env(&preview);
     assert!(env.contains(&("RESTIC_REST_USERNAME".to_owned(), "backup".to_owned())));
@@ -389,7 +412,7 @@ async fn ac_pf_01_the_preview_shows_the_rest_username_and_masks_the_password() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let (status, preview) = call(&app, "POST", &preview_path, &cookie, agent_body).await;
+    let (status, preview) = call(&app, "POST", preview_path, &cookie, agent_body).await;
     assert_eq!(status, StatusCode::OK, "{preview}");
     let env = backup_env(&preview);
     assert!(

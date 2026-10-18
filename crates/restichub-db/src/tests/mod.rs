@@ -328,23 +328,24 @@ async fn seed_tenant(db: &Database, tenant: TenantId) -> Result<Seed, Box<dyn st
     .await?;
 
     sqlx::query(
-        "INSERT INTO profiles (id, tenant_id, name, repository_id, paths_all, tags) \
-         VALUES ($1, $2, 'profile', $3, ARRAY['/srv'], ARRAY['daily'])",
+        "INSERT INTO profiles (id, tenant_id, name, paths_all, tags) \
+         VALUES ($1, $2, 'profile', ARRAY['/srv'], ARRAY['daily'])",
     )
     .bind(crate::ProfileId::new())
     .bind(tenant)
-    .bind(repository_id)
     .execute(tx.as_conn())
     .await?;
 
     sqlx::query(
         "INSERT INTO plans \
-         (id, tenant_id, name, profile_id, agent_id, cron, time_zone, missed_run_policy) \
+         (id, tenant_id, name, profile_id, agent_id, repository_id, cron, time_zone, \
+          missed_run_policy) \
          VALUES ($1, $2, 'plan', (SELECT id FROM profiles WHERE tenant_id = $2), \
-                 (SELECT id FROM agents WHERE tenant_id = $2), '0 2 * * *', 'UTC', 'run_all')",
+                 (SELECT id FROM agents WHERE tenant_id = $2), $3, '0 2 * * *', 'UTC', 'run_all')",
     )
     .bind(crate::PlanId::new())
     .bind(tenant)
+    .bind(repository_id)
     .execute(tx.as_conn())
     .await?;
 

@@ -12,7 +12,8 @@
 	import { getLocale, t, tErrorCode } from '#lib/i18n/index.ts';
 	import { withHosts } from '#lib/host-picker.ts';
 	import { ago } from '#lib/list-format.ts';
-	import { profileDescription } from '#lib/profile-picker.ts';
+	import { withProfiles } from '#lib/profile-picker.ts';
+	import { withRepositories } from '#lib/repository-picker.ts';
 	import { describeCron } from '#lib/schedule.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
@@ -27,7 +28,17 @@
 
 	const canWrite = $derived(['admin', 'operator'].includes(getSession()?.role ?? ''));
 
-	const filters = queryFilters(['q', 'host', 'profile', 'state', 'sort', 'order'] as const);
+	const filters = queryFilters([
+		'q',
+		'host',
+		'profile',
+		'repository',
+		'state',
+		'sort',
+		'order'
+	] as const);
+
+	const repositoryNames = $derived(new Map(repositories.map((item) => [item.id, item.name])));
 
 	const facets = $derived<FilterFacet[]>([
 		{
@@ -46,25 +57,39 @@
 			label: t('plans.profile'),
 			exact: !loading && !error,
 			search: true,
-			options: facetCounts(plans, (plan) => [plan.profile_name]).map((option) => ({
-				...option,
-				description: describeProfile(option.value)
-			}))
+			options: withProfiles(
+				facetCounts(plans, (plan) => [plan.profile_id]),
+				profiles
+			)
+		},
+		{
+			key: 'repository',
+			label: t('plans.repository'),
+			exact: !loading && !error,
+			search: true,
+			options: withRepositories(
+				facetCounts(plans, (plan) => [plan.repository_id]),
+				repositories,
+				agents
+			)
 		}
 	]);
 
-	function describeProfile(name: string) {
-		const id = plans.find((plan) => plan.profile_name === name)?.profile_id;
-		const profile = profiles.find((item) => item.id === id);
-		return profile ? profileDescription(profile, repositories, agents) : undefined;
+	function repositoryName(plan: Plan): string {
+		return repositoryNames.get(plan.repository_id) ?? plan.repository_id;
 	}
 
 	const matching = $derived(
 		plans.filter((plan) => {
-			const { q, host, profile } = filters.value;
-			if (!matchesSearch(q, [plan.name, plan.agent_hostname, plan.profile_name])) return false;
+			const { q, host, profile, repository } = filters.value;
+			if (
+				!matchesSearch(q, [plan.name, plan.agent_hostname, plan.profile_name, repositoryName(plan)])
+			) {
+				return false;
+			}
 			if (host && !splitList(host).includes(plan.agent_hostname)) return false;
-			if (profile && !splitList(profile).includes(plan.profile_name)) return false;
+			if (profile && !splitList(profile).includes(plan.profile_id)) return false;
+			if (repository && !splitList(repository).includes(plan.repository_id)) return false;
 			return true;
 		})
 	);
@@ -116,7 +141,13 @@
 
 	const filtered = $derived(
 		plans.length > 0 &&
-			Boolean(filters.value.q || filters.value.host || filters.value.profile || filters.value.state)
+			Boolean(
+				filters.value.q ||
+				filters.value.host ||
+				filters.value.profile ||
+				filters.value.repository ||
+				filters.value.state
+			)
 	);
 
 	// A field in the middle of line 2 starts with a lower-case letter.
@@ -125,13 +156,14 @@
 	}
 
 	function resetFilters(): void {
-		filters.update({ q: '', host: '', profile: '', state: '' });
+		filters.update({ q: '', host: '', profile: '', repository: '', state: '' });
 	}
 
 	function meta(plan: Plan): ListMeta[] {
 		return [
 			plan.agent_hostname,
 			plan.profile_name,
+			repositoryName(plan),
 			{ text: lowerFirst(describeCron(plan.cron, t)), title: `${plan.cron} · ${plan.time_zone}` },
 			plan.last_success_at
 				? {
@@ -199,6 +231,7 @@
 				name: plan.name,
 				agent_id: plan.agent_id,
 				profile_id: plan.profile_id,
+				repository_id: plan.repository_id,
 				cron: plan.cron,
 				time_zone: plan.time_zone,
 				missed_run_policy: plan.missed_run_policy,

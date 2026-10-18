@@ -65,7 +65,7 @@
 	);
 	const selected = $derived(all.find((option) => option.value === value));
 	const shown = $derived(
-		all.filter((option) => matchesRecord(option.label, option.description, query))
+		all.filter((option) => matchesRecord(option.label, option.description, query, option.search))
 	);
 	const first = $derived(selected?.description?.[0]);
 	const detail = $derived(

@@ -99,8 +99,8 @@ async fn run_backup_of_profile(env: &Env, agent: &mut queue_support::FakeAgent) 
             location.to_str().expect("the path is UTF-8"),
         )
         .await;
-    let profile = env.create_profile(repository, json!({})).await;
-    let plan = env.create_plan(profile, agent.id).await;
+    let profile = env.create_profile(json!({})).await;
+    let plan = env.create_plan(profile, agent.id, repository).await;
     let backup = env.run_plan(plan).await;
     env.pass().await;
     let signed = agent.job().await;
@@ -243,12 +243,18 @@ async fn ac_pf_01_the_step_log_holds_the_masked_command_line_of_the_preview() {
     let (backup, profile) = run_backup_of_profile(&env, &mut agent).await;
     eventually(|| async { env.job_status(backup).await == "succeeded" }).await;
 
+    // The draft repeats the stored profile, so the command line holds its own profile tag.
     let (status, preview) = env
         .call(
             &env.admin,
             "POST",
-            &format!("/api/v1/profiles/{profile}/preview"),
-            Some(json!({"agent_id": agent.id.to_string()})),
+            "/api/v1/profiles/preview",
+            Some(json!({
+                "agent_id": agent.id.to_string(),
+                "profile_id": profile.to_string(),
+                "name": "preview",
+                "paths": {"all": ["/srv"]},
+            })),
         )
         .await;
     assert_eq!(status, axum::http::StatusCode::OK, "{preview}");

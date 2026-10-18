@@ -1,8 +1,8 @@
 //! The steps of a maintenance job: `forget`, `prune` and `check` (FR-RP-08, FR-PF-01, ADR-0034).
 //!
-//! The row of a maintenance job stores no command. The builder reads the profiles that use the
-//! repository and the plans that run them, and it compiles each profile against the facts of the
-//! agent of the plan.
+//! The row of a maintenance job stores no command. The builder reads the plans that back up into
+//! the repository and their profiles, and it compiles each profile for the repository against the
+//! facts of the agent of the plan.
 //!
 //! The retention of a profile may remove only the snapshots of that profile. Each profile therefore
 //! gives one `forget` step. It filters on the profile tag, joined with the filter of the profile,
@@ -56,9 +56,9 @@ pub(super) async fn steps(
 
 /// Gives the retention of every profile that has one, as a single step for each profile.
 ///
-/// The step takes the facts of the first active agent that runs the profile and that the
-/// `retention.filter.hosts` list of the profile allows. The host name of the agent compares with the
-/// host name that restic records in its snapshots.
+/// The step takes the facts of the first active agent that runs the profile into this repository
+/// and that the `retention.filter.hosts` list of the profile allows. The host name of the agent
+/// compares with the host name that restic records in its snapshots.
 async fn forget_steps(
     tx: &mut TenantTx<'_>,
     job: &Job,
@@ -66,7 +66,10 @@ async fn forget_steps(
     now: OffsetDateTime,
 ) -> Result<Vec<Step>, BuildError> {
     let mut steps = Vec::new();
-    for profile in profiles_repo::list_for_repository(tx, repository_id).await? {
+    for profile_id in plans_repo::profiles_of_repository(tx, repository_id).await? {
+        let Some(profile) = profiles_repo::get(tx, profile_id).await? else {
+            continue;
+        };
         let compiler_profile = compiler_profile_from_row(&profile).map_err(|error| {
             tracing::warn!(job = %job.id, profile = %profile.id, cause = ?error, "the stored profile does not convert");
             BuildError::Refused(Refusal::CompileFailed)
@@ -76,7 +79,9 @@ async fn forget_steps(
         }
 
         let mut seen: HashSet<AgentId> = HashSet::new();
-        for plan in plans_repo::list_by_profile(tx, profile.id).await? {
+        for plan in
+            plans_repo::list_by_profile_and_repository(tx, profile.id, repository_id).await?
+        {
             if !seen.insert(plan.agent_id) {
                 continue;
             }
@@ -93,7 +98,11 @@ async fn forget_steps(
                     continue;
                 }
             };
-            let compiled = match compile(&compiler_profile, &target) {
+            let compiled = match compile(
+                &compiler_profile,
+                Some(&repository_id.to_string()),
+                &target,
+            ) {
                 Ok(compiled) => compiled,
                 Err(error) => {
                     tracing::warn!(job = %job.id, profile = %profile.id, cause = ?error, "the profile does not compile for the agent");
@@ -153,16 +162,19 @@ fn prune_step(repository_id: RepositoryId) -> Step {
     )
 }
 
-/// The `check` step reads the largest subset that a profile of the repository sets (FR-PF-01). A
-/// repository without such a profile gets the check of the structure only. A tie goes to the oldest
-/// profile.
+/// The `check` step reads the largest subset that a profile of the plans of the repository sets
+/// (FR-PF-01). A repository without such a profile gets the check of the structure only. A tie goes
+/// to the oldest profile.
 async fn check_step(
     tx: &mut TenantTx<'_>,
     job: &Job,
     repository_id: RepositoryId,
 ) -> Result<Step, BuildError> {
     let mut read_data_subset = String::new();
-    for profile in profiles_repo::list_for_repository(tx, repository_id).await? {
+    for profile_id in plans_repo::profiles_of_repository(tx, repository_id).await? {
+        let Some(profile) = profiles_repo::get(tx, profile_id).await? else {
+            continue;
+        };
         let compiler_profile = compiler_profile_from_row(&profile).map_err(|error| {
             tracing::warn!(job = %job.id, profile = %profile.id, cause = ?error, "the stored profile does not convert");
             BuildError::Refused(Refusal::CompileFailed)

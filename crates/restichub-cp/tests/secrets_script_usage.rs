@@ -53,18 +53,13 @@ async fn fr_rp_05_a_profile_script_blocks_the_delete_of_its_secret_only() {
         return;
     };
     let env = Env::start(db, test_queue()).await;
-    let agent = env.connect_agent_trusting("host-a", true, vec![]).await;
-    let repository = env.create_repository(agent.id, "pw").await;
     let used = create_secret(&env, "used").await;
     let mentioned = create_secret(&env, "mentioned").await;
     let profile = env
-        .create_profile(
-            repository,
-            json!({"scripts": [script(
-                &format!("echo {mentioned}"),
-                secret_ref(&used.to_uppercase()),
-            )]}),
-        )
+        .create_profile(json!({"scripts": [script(
+            &format!("echo {mentioned}"),
+            secret_ref(&used.to_uppercase()),
+        )]}))
         .await;
 
     let (status, saved) = env

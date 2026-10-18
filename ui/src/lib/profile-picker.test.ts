@@ -1,47 +1,80 @@
 import { describe, expect, it } from 'vitest';
-import { profileOptions } from './profile-picker';
+import {
+	profileDescription,
+	profileOptions,
+	profilePathText,
+	profileRetention,
+	withProfiles
+} from './profile-picker';
 
-const repositories = [
-	{ id: 'r1', name: 'test-s3-yandex', backend: { kind: 's3', bucket: 'b' } },
-	{ id: 'r2', name: 'rest-main', backend: { kind: 'rest', endpoint: 'https://rest.example.net' } },
-	{
-		id: 'r3',
-		name: 'nas-local',
-		backend: { kind: 'local', path: '/srv/restic' },
-		maintenance_agent_id: 'a1'
-	},
-	{ id: 'r4', name: 'usb-local', backend: { kind: 'local', path: '/mnt/usb' } }
-] as Parameters<typeof profileOptions>[1];
-const agents = [{ id: 'a1', hostname: 'MINDCORE' }];
+const retention = {
+	keep_last: 0,
+	keep_hourly: 0,
+	keep_daily: 7,
+	keep_weekly: 2,
+	keep_monthly: 0,
+	keep_yearly: 0,
+	keep_within: '',
+	keep_tags: [],
+	group_by: [],
+	filter: { hosts: [], tags: [], paths: [] }
+};
 
-describe('profileOptions', () => {
-	it('gives each profile its repository, the backend tag and the host of a local path', () => {
-		const options = profileOptions(
-			[
-				{ id: 'p1', name: 'user-profiles', repository_id: 'r1' },
-				{ id: 'p2', name: 'db-hourly', repository_id: 'r2' },
-				{ id: 'p3', name: 'nas-files', repository_id: 'r3' },
-				{ id: 'p4', name: 'usb-files', repository_id: 'r4' }
-			],
-			repositories,
-			agents
-		);
+const profile = (overrides: Record<string, unknown> = {}) => ({
+	id: 'p1',
+	name: 'pg-dump',
+	paths: { all: ['/var/backups/pg'], windows: [], linux: [], macos: [] },
+	retention,
+	...overrides
+});
 
-		expect(options).toEqual([
-			{ value: 'p1', label: 'user-profiles', description: ['test-s3-yandex', { tag: 'S3' }] },
-			{ value: 'p2', label: 'db-hourly', description: ['rest-main', { tag: 'REST' }] },
+describe('the profile picker options', () => {
+	it('gives each profile its path and its retention', () => {
+		expect(profileOptions([profile()])).toEqual([
 			{
-				value: 'p3',
-				label: 'nas-files',
-				description: ['nas-local', { tag: 'Local' }, 'host MINDCORE']
-			},
-			{ value: 'p4', label: 'usb-files', description: ['usb-local', { tag: 'Local' }, 'no host'] }
+				value: 'p1',
+				label: 'pg-dump',
+				description: ['/var/backups/pg', '7 d · 2 wk'],
+				search: ['/var/backups/pg']
+			}
 		]);
 	});
 
-	it('leaves the secondary line empty when the repository is unknown', () => {
+	it('counts the other paths of the profile and finds each of them', () => {
+		const paths = { all: ['/srv'], windows: [], linux: ['/etc'], macos: [] };
+		const option = profileOptions([profile({ paths })])[0];
+		expect(profilePathText(profile({ paths }))).toBe('/srv +1');
+		expect(option.description?.[0]).toBe('/srv +1');
+		expect(option.search).toEqual(['/srv', '/etc']);
+	});
+
+	it('leaves a part that the profile does not hold out of the line', () => {
+		expect(profileDescription(profile({ retention: null, paths: { all: [] } }))).toEqual([]);
+		expect(profileDescription(profile({ retention: null }))).toEqual(['/var/backups/pg']);
+		expect(profileDescription(profile({ paths: { all: [] } }))).toEqual(['7 d · 2 wk']);
+	});
+
+	it('shows the retention without a rule as an empty text', () => {
+		const noRule = { ...retention, keep_daily: 0, keep_weekly: 0 };
+		expect(profileRetention(profile({ retention: noRule }))).toBe('');
+		expect(profileRetention(profile({ retention: null }))).toBe('');
+		expect(profileRetention(profile({ retention: { ...retention, keep_within: '30d' } }))).toBe(
+			'7 d · 2 wk · within 30d'
+		);
+	});
+
+	it('names the profile in the facet and gives it the same secondary line', () => {
 		expect(
-			profileOptions([{ id: 'p1', name: 'orphan', repository_id: 'r9' }], repositories, agents)
-		).toEqual([{ value: 'p1', label: 'orphan', description: [] }]);
+			withProfiles(
+				[
+					{ value: 'p1', count: 2 },
+					{ value: 'p9', count: 1 }
+				],
+				[profile()]
+			)
+		).toEqual([
+			{ value: 'p1', count: 2, label: 'pg-dump', description: ['/var/backups/pg', '7 d · 2 wk'] },
+			{ value: 'p9', count: 1 }
+		]);
 	});
 });

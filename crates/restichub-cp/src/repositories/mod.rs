@@ -472,7 +472,7 @@ pub async fn repository_usage(
         (status = 204, description = "The repository is removed."),
         crate::error::ProtectedResponses,
         (status = 404, description = "The repository is not found.", body = crate::error::ProblemBody),
-        (status = 409, description = "A profile holds the repository (`repository_in_use`), or an active job does (`repository_has_active_job`). The body lists the records.", body = crate::error::ProblemBody)
+        (status = 409, description = "A plan backs up into the repository (`repository_in_use`), or an active job holds it (`repository_has_active_job`). The body lists the records.", body = crate::error::ProblemBody)
     )
 )]
 pub async fn delete_repository(
@@ -486,8 +486,8 @@ pub async fn delete_repository(
     let Some(current) = repo::get_for_update(&mut tx, repository_id).await? else {
         return Err(ApiError::not_found());
     };
-    // A profile binds the repository, and an active job holds it so the agent never loses it in
-    // the middle of a job. The check also keeps the foreign key from blocking the delete with an
+    // A plan binds the repository, and an active job holds it so the agent never loses it in the
+    // middle of a job. The check also keeps the foreign key from blocking the delete with an
     // internal error.
     if let Some(block) = delete_check::repository_block(&mut tx, repository_id).await? {
         return Err(block.into_error());

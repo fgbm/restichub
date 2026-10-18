@@ -66,9 +66,9 @@ export const endpoints = {
 		list: '/profiles',
 		defaults: '/profiles/defaults',
 		create: '/profiles',
+		preview: '/profiles/preview',
 		byId: (id: string) => `/profiles/${encodeURIComponent(id)}`,
-		usage: (id: string) => `/profiles/${encodeURIComponent(id)}/usage`,
-		preview: (id: string) => `/profiles/${encodeURIComponent(id)}/preview`
+		usage: (id: string) => `/profiles/${encodeURIComponent(id)}/usage`
 	},
 	plans: {
 		list: '/plans',

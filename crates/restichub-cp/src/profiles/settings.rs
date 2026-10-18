@@ -17,7 +17,7 @@ use restichub_compiler::{
     Retention as CompilerRetention, SnapshotFilter as CompilerSnapshotFilter, TargetFacts, compile,
 };
 use restichub_db::profiles::{NewProfile, Profile, ProfileUpdate};
-use restichub_db::{ProfileId, RepositoryId, UserId};
+use restichub_db::{ProfileId, UserId};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use utoipa::ToSchema;
@@ -262,8 +262,6 @@ pub struct CreateProfileRequest {
     /// Free text of 1 to 100 characters. Unique in the tenant, ignoring the letter case. Holds no control or format character.
     #[schema(max_length = 100)]
     pub name: String,
-    /// The identifier of the repository that the profile uses.
-    pub repository_id: String,
     #[serde(default)]
     pub paths: ProfilePaths,
     #[serde(default)]
@@ -299,7 +297,6 @@ pub struct UpdateProfileRequest {
     #[schema(max_length = 100)]
     #[serde(default)]
     pub name: Option<String>,
-    pub repository_id: String,
     #[serde(default)]
     pub paths: ProfilePaths,
     #[serde(default)]
@@ -329,7 +326,6 @@ pub struct UpdateProfileRequest {
 pub struct ProfileView {
     pub id: String,
     pub name: String,
-    pub repository_id: String,
     pub paths: ProfilePaths,
     pub excludes: Vec<String>,
     pub exclude_files: Vec<String>,
@@ -434,7 +430,7 @@ pub fn save_warnings(profile: &ValidatedProfile) -> Result<Vec<ProfileWarning>, 
         OperatingSystem::Macos,
     ] {
         let target = synthetic_target(os);
-        if let Err(error) = compile(&compiler_profile, &target) {
+        if let Err(error) = compile(&compiler_profile, None, &target) {
             match classify_save_error(error) {
                 SaveOutcome::Refusal(api) => return Err(api),
                 SaveOutcome::Warning(warning) => {
@@ -509,43 +505,6 @@ fn classify_save_error(error: CompileError) -> SaveOutcome {
     }
 }
 
-/// The agent identifier of the request (FR-PF-04).
-#[derive(Debug, Deserialize, ToSchema)]
-#[serde(deny_unknown_fields)]
-pub struct PreviewRequest {
-    /// The identifier of the registered agent that supplies the target facts.
-    pub agent_id: String,
-}
-
-/// One environment variable of a previewed step. A secret value is masked (AC-PF-01).
-#[derive(Debug, Serialize, ToSchema)]
-pub struct PreviewEnvView {
-    pub name: String,
-    pub value: String,
-}
-
-/// One previewed step: the kind, the maintenance flag, the command line and the environment
-/// (FR-PF-04, AC-PF-01).
-#[derive(Debug, Serialize, ToSchema)]
-pub struct PreviewStepView {
-    /// The step kind, for example `backup`, `forget`, `prune`, `check` or `script`.
-    pub kind: String,
-    /// True for `forget`, `prune` and `check` (FR-RP-08).
-    pub maintenance: bool,
-    /// Rendered argv with masked secrets.
-    pub command: String,
-    /// Process variables with masked secrets.
-    pub environment: Vec<PreviewEnvView>,
-}
-
-/// The preview of a profile for one target agent (FR-PF-04).
-#[derive(Debug, Serialize, ToSchema)]
-pub struct PreviewResponse {
-    pub profile_id: String,
-    pub repository_id: String,
-    pub steps: Vec<PreviewStepView>,
-}
-
 impl TryFrom<&Profile> for ProfileView {
     type Error = ApiError;
 
@@ -553,7 +512,6 @@ impl TryFrom<&Profile> for ProfileView {
         Ok(Self {
             id: profile.id.to_string(),
             name: profile.name.clone(),
-            repository_id: profile.repository_id.to_string(),
             paths: paths_from_row(profile),
             excludes: profile.excludes.clone(),
             exclude_files: profile.exclude_files.clone(),
@@ -617,7 +575,6 @@ fn check_from_row(profile: &Profile) -> Result<Option<CheckOptions>, ApiError> {
 #[derive(Debug, Clone)]
 pub struct ValidatedProfile {
     pub name: String,
-    pub repository_id: RepositoryId,
     pub paths: ProfilePaths,
     pub excludes: Vec<String>,
     pub exclude_files: Vec<String>,
@@ -633,7 +590,6 @@ impl ValidatedProfile {
         NewProfile {
             id,
             name: &self.name,
-            repository_id: self.repository_id,
             paths_all: &self.paths.all,
             paths_windows: &self.paths.windows,
             paths_linux: &self.paths.linux,
@@ -658,7 +614,6 @@ impl ValidatedProfile {
     pub fn update<'a>(&'a self) -> ProfileUpdate<'a> {
         ProfileUpdate {
             name: &self.name,
-            repository_id: self.repository_id,
             paths_all: &self.paths.all,
             paths_windows: &self.paths.windows,
             paths_linux: &self.paths.linux,
@@ -714,7 +669,6 @@ impl ValidatedProfile {
             by_os.insert(OperatingSystem::Macos, self.paths.macos.clone());
         }
         CompilerProfile {
-            repository_id: self.repository_id.to_string(),
             paths: CompilerProfilePaths {
                 all: self.paths.all.clone(),
                 by_os,
@@ -722,9 +676,9 @@ impl ValidatedProfile {
             excludes: self.excludes.clone(),
             exclude_files: self.exclude_files.clone(),
             tags: self.tags.clone(),
-            // The profile has no identifier before the first save, so this tag only satisfies the
-            // compile check. The stored profile gets its own tag in `compiler_profile_from_row`.
-            profile_tag: Some(format!("{RESERVED_TAG_PREFIX}profile-validation")),
+            // An unsaved profile has no identifier, so the preview shows a tag that no stored
+            // profile can hold. The reserved prefix keeps it out of the tags of a user.
+            profile_tag: Some(UNSAVED_PROFILE_TAG.to_owned()),
             options: CompilerBackupOptions {
                 use_fs_snapshot: self.options.use_fs_snapshot,
                 one_file_system: self.options.one_file_system,
@@ -761,11 +715,16 @@ pub fn profile_tag(id: restichub_db::ProfileId) -> String {
 /// The prefix of the tags that only the control plane sets. A user tag may not start with it.
 pub const RESERVED_TAG_PREFIX: &str = "restichub-";
 
+/// The tag that the preview of an unsaved profile shows (FR-PF-04, FR-RP-08).
+///
+/// The reserved prefix keeps the value out of the tags of a user, and no stored profile can hold
+/// it, because [`profile_tag`] always ends with an identifier.
+pub const UNSAVED_PROFILE_TAG: &str = "restichub-profile-new";
+
 /// The stored profile as the compiler input (FR-PF-04).
 pub fn compiler_profile_from_row(profile: &Profile) -> Result<CompilerProfile, ApiError> {
     let validated = ValidatedProfile {
         name: profile.name.clone(),
-        repository_id: profile.repository_id,
         paths: paths_from_row(profile),
         excludes: profile.excludes.clone(),
         exclude_files: profile.exclude_files.clone(),
@@ -823,7 +782,6 @@ pub fn validate_create(body: CreateProfileRequest) -> Result<ValidatedProfile, A
     reject_hooks(body.hooks.as_deref())?;
     validate_profile(
         Some(body.name),
-        body.repository_id,
         body.paths,
         body.excludes,
         body.exclude_files,
@@ -844,7 +802,6 @@ pub fn validate_update(
     let name = body.name.unwrap_or_else(|| current_name.to_owned());
     validate_profile(
         Some(name),
-        body.repository_id,
         body.paths,
         body.excludes,
         body.exclude_files,
@@ -856,7 +813,7 @@ pub fn validate_update(
     )
 }
 
-fn reject_hooks(hooks: Option<&[serde_json::Value]>) -> Result<(), ApiError> {
+pub(super) fn reject_hooks(hooks: Option<&[serde_json::Value]>) -> Result<(), ApiError> {
     match hooks {
         Some([_, ..]) => Err(ApiError::invalid_field("hooks", Reason::Removed)),
         _ => Ok(()),
@@ -864,9 +821,9 @@ fn reject_hooks(hooks: Option<&[serde_json::Value]>) -> Result<(), ApiError> {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn validate_profile(
+pub(super) fn validate_profile(
+    // `None` skips the name check: a preview of a new profile has no name yet (FR-PF-04).
     name: Option<String>,
-    repository_id: String,
     paths: ProfilePaths,
     excludes: Vec<String>,
     exclude_files: Vec<String>,
@@ -876,8 +833,10 @@ fn validate_profile(
     retention: Option<Retention>,
     check: Option<CheckOptions>,
 ) -> Result<ValidatedProfile, ApiError> {
-    let name = crate::validation::validate_record_name("name", &name.unwrap_or_default())?;
-    let repository_id = parse_repository_id("repository_id", &repository_id)?;
+    let name = match name {
+        Some(name) => crate::validation::validate_record_name("name", &name)?,
+        None => String::new(),
+    };
     let paths = validate_paths(paths)?;
     let excludes = validate_patterns("excludes", excludes)?;
     ensure_count("excludes", excludes.len(), MAX_EXCLUDES)?;
@@ -897,7 +856,6 @@ fn validate_profile(
     };
     Ok(ValidatedProfile {
         name,
-        repository_id,
         paths,
         excludes,
         exclude_files,
@@ -1104,20 +1062,10 @@ pub fn parse_profile_id(value: &str) -> Result<ProfileId, ApiError> {
         })
 }
 
-/// The identifier of a repository from a request field.
-pub fn parse_repository_id(field: &'static str, value: &str) -> Result<RepositoryId, ApiError> {
-    Uuid::parse_str(value)
-        .map(RepositoryId::from_uuid)
-        .map_err(|error| {
-            ApiError::invalid_field_cause(field, Reason::InvalidFormat, error.to_string())
-        })
-}
-
 /// The settings of a validated profile for an audit diff. It holds no secret (FR-PF-01).
 pub fn profile_value(profile: &ValidatedProfile) -> Value {
     json!({
         "name": profile.name,
-        "repository_id": profile.repository_id.to_string(),
         "paths": {
             "all": profile.paths.all,
             "windows": profile.paths.windows,
@@ -1146,7 +1094,6 @@ pub fn profile_value(profile: &ValidatedProfile) -> Value {
 pub fn stored_value(profile: &Profile) -> Value {
     json!({
         "name": profile.name,
-        "repository_id": profile.repository_id.to_string(),
         "paths": {
             "all": profile.paths_all,
             "windows": profile.paths_windows,

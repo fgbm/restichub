@@ -98,19 +98,13 @@ async fn fr_rp_08_the_retention_of_a_profile_removes_only_its_own_snapshots() {
     let (mut maintenance, mut backup) = two_agents(&env).await;
     let repository = initialized_repository(&env, maintenance.id).await;
     let profile_a = env
-        .create_profile(
-            repository,
-            json!({"paths": {"all": ["/srv/a"]}, "retention": {"keep_last": 3}}),
-        )
+        .create_profile(json!({"paths": {"all": ["/srv/a"]}, "retention": {"keep_last": 3}}))
         .await;
     let profile_b = env
-        .create_profile(
-            repository,
-            json!({"paths": {"all": ["/srv/b"]}, "retention": {"keep_daily": 7}}),
-        )
+        .create_profile(json!({"paths": {"all": ["/srv/b"]}, "retention": {"keep_daily": 7}}))
         .await;
-    env.create_plan(profile_a, maintenance.id).await;
-    env.create_plan(profile_b, backup.id).await;
+    env.create_plan(profile_a, maintenance.id, repository).await;
+    env.create_plan(profile_b, backup.id, repository).await;
 
     let (status, queued) = run(&env, &env.operator, repository, "retention").await;
     assert_eq!(status, StatusCode::ACCEPTED, "{queued}");
@@ -167,10 +161,8 @@ async fn fr_pf_01_a_backup_carries_the_profile_tag() {
     let env = Env::start(db, test_queue()).await;
     let mut agent = env.connect_agent("tag-host").await;
     let repository = env.create_repository(agent.id, "pw").await;
-    let profile = env
-        .create_profile(repository, json!({"tags": ["daily"]}))
-        .await;
-    let plan = env.create_plan(profile, agent.id).await;
+    let profile = env.create_profile(json!({"tags": ["daily"]})).await;
+    let plan = env.create_plan(profile, agent.id, repository).await;
     env.run_plan(plan).await;
     env.pass().await;
 
@@ -200,9 +192,9 @@ async fn ac_rp_04_only_the_maintenance_agent_gets_forget_prune_and_check() {
     let (maintenance, mut backup) = two_agents(&env).await;
     let repository = initialized_repository(&env, maintenance.id).await;
     let profile = env
-        .create_profile(repository, json!({"retention": {"keep_last": 1}}))
+        .create_profile(json!({"retention": {"keep_last": 1}}))
         .await;
-    env.create_plan(profile, backup.id).await;
+    env.create_plan(profile, backup.id, repository).await;
 
     for kind in [JobKind::Forget, JobKind::Prune, JobKind::Check] {
         let job = env.enqueue(kind, backup.id, repository, None).await;
@@ -267,9 +259,9 @@ async fn ac_sc_02_two_instances_create_one_maintenance_job_for_a_fire_time() {
     let agent = env.connect_agent("sched-host").await;
     let repository = initialized_repository(&env, agent.id).await;
     let profile = env
-        .create_profile(repository, json!({"retention": {"keep_last": 2}}))
+        .create_profile(json!({"retention": {"keep_last": 2}}))
         .await;
-    env.create_plan(profile, agent.id).await;
+    env.create_plan(profile, agent.id, repository).await;
     let (status, view) = env
         .call(
             &env.admin,
@@ -311,9 +303,9 @@ async fn fr_sc_04_a_repository_with_an_exclusive_job_waits_for_the_schedule() {
     let agent = env.connect_agent("wait-host").await;
     let repository = initialized_repository(&env, agent.id).await;
     let profile = env
-        .create_profile(repository, json!({"retention": {"keep_last": 2}}))
+        .create_profile(json!({"retention": {"keep_last": 2}}))
         .await;
-    env.create_plan(profile, agent.id).await;
+    env.create_plan(profile, agent.id, repository).await;
     let (status, queued) = run(&env, &env.operator, repository, "check").await;
     assert_eq!(status, StatusCode::ACCEPTED, "{queued}");
     let (status, again) = run(&env, &env.operator, repository, "retention").await;

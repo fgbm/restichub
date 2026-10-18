@@ -221,8 +221,8 @@ async fn ac_nfr_02_a_sigkill_of_the_control_plane_loses_and_repeats_no_job() {
         let repository = env.create_repository(emulator.id, "pw").await;
         // The queue allows one waiting run for each plan, so each job has its own plan.
         for _ in 0..JOBS_PER_AGENT {
-            let profile = env.create_profile(repository, serde_json::json!({})).await;
-            let plan = env.create_plan(profile, emulator.id).await;
+            let profile = env.create_profile(serde_json::json!({})).await;
+            let plan = env.create_plan(profile, emulator.id, repository).await;
             jobs.push(env.run_plan(plan).await);
         }
         emulators.push(emulator);

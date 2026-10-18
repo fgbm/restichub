@@ -67,8 +67,8 @@ async fn marks(env: &Env, repository: Uuid) -> i64 {
 
 /// A running backup on `agent` that a revoke ends, with the clock moved past the wait.
 async fn revoke_during_backup(env: &Env, repository: Uuid, agent: &mut queue_support::FakeAgent) {
-    let profile = env.create_profile(repository, json!({})).await;
-    let plan = env.create_plan(profile, agent.id).await;
+    let profile = env.create_profile(json!({})).await;
+    let plan = env.create_plan(profile, agent.id, repository).await;
     env.run_plan(plan).await;
     env.pass().await;
     let id = decode_job_id(&agent.job().await);

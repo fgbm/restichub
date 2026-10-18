@@ -69,7 +69,7 @@ for (const [labels, locale] of [
 		await page.getByRole('listbox').getByRole('option').first().waitFor();
 		await page.screenshot({ path: `${out}/1-plan-picker-open-${locale}.png` });
 
-		await page.getByRole('combobox', { name: labels.find }).fill('offsite');
+		await page.getByRole('combobox', { name: labels.find }).fill('/etc');
 		await expect(page.getByRole('listbox').getByRole('option')).toHaveCount(1);
 		await page.screenshot({ path: `${out}/2-plan-picker-search-${locale}.png` });
 
@@ -80,7 +80,7 @@ for (const [labels, locale] of [
 		await page
 			.getByRole('button', { name: new RegExp(`^${locale === 'ru' ? 'Профиль' : 'Profile'}`) })
 			.click();
-		await page.getByText('nas-local').first().waitFor();
+		await page.getByText('nas-files').first().waitFor();
 		await page.screenshot({ path: `${out}/3-plans-filter-${locale}.png` });
 	});
 }

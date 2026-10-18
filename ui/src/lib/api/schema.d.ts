@@ -1000,6 +1000,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/profiles/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Previews a profile draft for one target agent.
+         * @description The steps and the command lines agree with the command that the agent runs. The draft is not stored. Secrets are masked (AC-PF-01). A caller without the profile write right receives the preview of the stored profile that `profile_id` names, and its draft fields are ignored. A caller without the script write right receives the stored scripts and its draft scripts are ignored.
+         */
+        post: operations["preview_profile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/profiles/{id}": {
         parameters: {
             query?: never;
@@ -1017,26 +1037,6 @@ export interface paths {
         head?: never;
         /** Updates a profile. The body replaces the settings; an absent name keeps the name. */
         patch: operations["update_profile"];
-        trace?: never;
-    };
-    "/api/v1/profiles/{id}/preview": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Previews a profile for one target agent.
-         * @description The steps and the command lines agree with the command that the agent runs. Secrets are masked (AC-PF-01).
-         */
-        post: operations["preview_profile"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
         trace?: never;
     };
     "/api/v1/profiles/{id}/usage": {
@@ -2084,6 +2084,8 @@ export interface components {
             /** @description Free text of 1 to 100 characters. Unique in the tenant, ignoring the letter case. Holds no control or format character. */
             name: string;
             profile_id: string;
+            /** @description The repository that the plan backs up into (ADR-0047). */
+            repository_id: string;
             /**
              * Format: int32
              * @description The recovery point objective in seconds, from 900 to 34560000. Absent or null uses the
@@ -2102,8 +2104,6 @@ export interface components {
             name: string;
             options?: components["schemas"]["BackupOptions"];
             paths?: components["schemas"]["ProfilePaths"];
-            /** @description The identifier of the repository that the profile uses. */
-            repository_id: string;
             retention?: components["schemas"]["Retention"] | null;
             /**
              * @description Scripts from the control plane, in the order they run in their phase (FR-HK-09). Only an
@@ -2917,15 +2917,53 @@ export interface components {
             name: string;
             value: string;
         };
-        /** @description The agent identifier of the request (FR-PF-04). */
+        /**
+         * @description The body of the draft preview (FR-PF-04, AC-PF-01).
+         *
+         *     The profile fields describe a draft: the server validates them as a create request, stores
+         *     nothing and checks no name uniqueness. A caller without the profile write right sends the
+         *     identifiers only, and the server compiles the stored profile.
+         */
         PreviewRequest: {
             /** @description The identifier of the registered agent that supplies the target facts. */
             agent_id: string;
+            check?: components["schemas"]["CheckOptions"] | null;
+            exclude_files?: string[];
+            excludes?: string[];
+            /**
+             * @description Free text of 0 to 100 characters. An unsaved profile has no name, so the preview accepts an
+             *     empty value and checks no uniqueness. Holds no control or format character.
+             */
+            name?: string;
+            options?: components["schemas"]["BackupOptions"];
+            paths?: components["schemas"]["ProfilePaths"];
+            /**
+             * @description The stored profile that the draft edits. Required for a caller without the profile write
+             *     right: the preview then compiles the stored profile.
+             */
+            profile_id?: string | null;
+            /**
+             * @description The repository of the commands. Absent uses the repository of the first plan of
+             *     `profile_id` on this agent, then of the first plan of `profile_id`, and no repository when
+             *     the draft holds no stored profile or plan (ADR-0047).
+             */
+            repository_id?: string | null;
+            retention?: components["schemas"]["Retention"] | null;
+            /**
+             * @description Scripts from the control plane, in the order they run in their phase (FR-HK-09). The
+             *     preview accepts them from a caller with the script write right only; another caller gets
+             *     the stored scripts (FR-HK-12).
+             */
+            scripts?: components["schemas"]["ScriptDef"][];
+            tags?: string[];
         };
-        /** @description The preview of a profile for one target agent (FR-PF-04). */
+        /** @description The preview of a profile draft for one target agent (FR-PF-04). */
         PreviewResponse: {
-            profile_id: string;
-            repository_id: string;
+            /**
+             * @description Null when the draft names no repository and its stored profile has no plan, so the steps
+             *     carry no repository.
+             */
+            repository_id?: string | null;
             steps: components["schemas"]["PreviewStepView"][];
         };
         /** @description The request body of the schedule preview (FR-SC-01). */
@@ -3007,7 +3045,6 @@ export interface components {
             name: string;
             options: components["schemas"]["BackupOptions"];
             paths: components["schemas"]["ProfilePaths"];
-            repository_id: string;
             retention?: components["schemas"]["Retention"] | null;
             scripts: components["schemas"]["ScriptDef"][];
             tags: string[];
@@ -3623,6 +3660,8 @@ export interface components {
             /** @description Free text of 1 to 100 characters. Unique in the tenant, ignoring the letter case. Holds no control or format character. */
             name?: string | null;
             profile_id: string;
+            /** @description The repository that the plan backs up into (ADR-0047). An absent value is refused. */
+            repository_id: string;
             /**
              * Format: int32
              * @description The recovery point objective in seconds. Null restores the default of the schedule.
@@ -3639,7 +3678,6 @@ export interface components {
             name?: string | null;
             options?: components["schemas"]["BackupOptions"];
             paths?: components["schemas"]["ProfilePaths"];
-            repository_id: string;
             retention?: components["schemas"]["Retention"] | null;
             /** @description Replaces the whole list. Only an Admin can change it (FR-HK-12). */
             scripts?: components["schemas"]["ScriptDef"][];
@@ -7547,6 +7585,66 @@ export interface operations {
             };
         };
     };
+    preview_profile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description The previewed steps. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PreviewResponse"];
+                };
+            };
+            /** @description The draft or the agent is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The stored profile of the draft is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
     get_profile: {
         parameters: {
             query?: never;
@@ -7680,69 +7778,6 @@ export interface operations {
                 };
             };
             /** @description A field is not valid. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemBody"];
-                };
-            };
-            /** @description The request is not authenticated. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemBody"];
-                };
-            };
-            /** @description The role is not sufficient. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemBody"];
-                };
-            };
-            /** @description The profile is not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemBody"];
-                };
-            };
-        };
-    };
-    preview_profile: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description The identifier of the profile. */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PreviewRequest"];
-            };
-        };
-        responses: {
-            /** @description The previewed steps. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PreviewResponse"];
-                };
-            };
-            /** @description The profile or the agent is not valid. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -8024,7 +8059,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemBody"];
                 };
             };
-            /** @description A profile holds the repository (`repository_in_use`), or an active job does (`repository_has_active_job`). The body lists the records. */
+            /** @description A plan backs up into the repository (`repository_in_use`), or an active job holds it (`repository_has_active_job`). The body lists the records. */
             409: {
                 headers: {
                     [name: string]: unknown;

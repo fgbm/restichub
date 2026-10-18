@@ -58,15 +58,18 @@ fn names(body: &Value) -> Vec<&str> {
         .collect()
 }
 
-/// A profile holds the repository. The body names the profiles and counts all of them.
+/// A plan holds the repository. The body names the plans and counts all of them (AC-RP-12).
 #[tokio::test]
-async fn a_repository_in_use_names_its_profiles() {
+async fn ac_rp_12_plans_block_repository_delete() {
     let Some(f) = fixture().await else {
         return;
     };
     let repository = f.repository("main").await;
-    seed_profile(f.db.database(), f.tenant, "zeta", repository).await;
-    seed_profile(f.db.database(), f.tenant, "Alpha", repository).await;
+    let profile = seed_profile(f.db.database(), f.tenant, "daily").await;
+    let agent = seed_agent(f.db.database(), f.tenant, "host-1").await;
+    for name in ["zeta", "Alpha"] {
+        seed_plan(f.db.database(), f.tenant, name, profile, agent, repository).await;
+    }
 
     let (status, body) = f
         .call("DELETE", &format!("/api/v1/repositories/{repository}"))
@@ -75,7 +78,7 @@ async fn a_repository_in_use_names_its_profiles() {
     assert_eq!(body["code"], "repository_in_use");
     assert_eq!(names(&body), ["Alpha", "zeta"]);
     assert_eq!(body["blockers"]["total"], 2);
-    assert_eq!(body["blockers"]["items"][0]["kind"], "profile");
+    assert_eq!(body["blockers"]["items"][0]["kind"], "plan");
 
     let (status, usage) = f
         .call("GET", &format!("/api/v1/repositories/{repository}/usage"))
@@ -93,11 +96,15 @@ async fn the_blocker_list_is_bounded() {
         return;
     };
     let repository = f.repository("main").await;
+    let profile = seed_profile(f.db.database(), f.tenant, "daily").await;
+    let agent = seed_agent(f.db.database(), f.tenant, "host-1").await;
     for index in 0..12 {
-        seed_profile(
+        seed_plan(
             f.db.database(),
             f.tenant,
             &format!("p{index:02}"),
+            profile,
+            agent,
             repository,
         )
         .await;
@@ -168,9 +175,17 @@ async fn a_profile_in_use_names_its_plans() {
         return;
     };
     let repository = f.repository("main").await;
-    let profile = seed_profile(f.db.database(), f.tenant, "daily", repository).await;
+    let profile = seed_profile(f.db.database(), f.tenant, "daily").await;
     let agent = seed_agent(f.db.database(), f.tenant, "host-1").await;
-    seed_plan(f.db.database(), f.tenant, "nightly", profile, agent).await;
+    seed_plan(
+        f.db.database(),
+        f.tenant,
+        "nightly",
+        profile,
+        agent,
+        repository,
+    )
+    .await;
 
     let (status, body) = f
         .call("DELETE", &format!("/api/v1/profiles/{profile}"))
@@ -214,7 +229,7 @@ async fn a_viewer_sees_no_channel_or_template_in_a_usage_route() {
     };
     let secret = seed_secret(f.db.database(), f.tenant, "shared").await;
     let repository = seed_repository(f.db.database(), f.tenant, "main", secret).await;
-    let profile = seed_profile(f.db.database(), f.tenant, "daily", repository).await;
+    let profile = seed_profile(f.db.database(), f.tenant, "daily").await;
     let viewer = seed_session(f.db.database(), f.tenant, "viewer", "viewer").await;
 
     for path in [

@@ -3,13 +3,15 @@
 	import { ApiError, assignableRoles, service } from '#lib/api/index.ts';
 	import type { Role, User } from '#lib/api/index.ts';
 	import OrgUserDialogs from './OrgUserDialogs.svelte';
+	import ProfileSection from './ProfileSection.svelte';
 	import { RecordPage, SummaryPanel } from './layout/index.ts';
-	import { Button, DropdownMenu, Panel, Select, StatusPill } from './ui/index.ts';
-	import type { KeyValueItem, MenuItem, SelectOption } from './ui/index.ts';
+	import { Button, DangerZone, Panel, Select, StatusPill } from './ui/index.ts';
+	import type { DangerAction, KeyValueItem, SelectOption } from './ui/index.ts';
 	import { formatTime, relativeTime } from '#lib/format.ts';
 	import { t, tErrorCode, type MessageKey } from '#lib/i18n/index.ts';
 	import { getSession, hasRole } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
+	import { rememberSections } from '#lib/section-state.svelte.ts';
 	import { orgChangeLock, orgResetLock } from '#lib/user-locks.ts';
 	import { userState } from '#lib/vocabulary.ts';
 
@@ -32,7 +34,9 @@
 	let roleBusy = $state(false);
 
 	const selfId = $derived(getSession()?.user?.id ?? null);
+	const tenantName = $derived(getSession()?.tenant?.name ?? '');
 	const name = $derived(user?.display_name ?? '');
+	const open = rememberSections('org-member', ['danger'], { danger: true });
 
 	// An Admin changes the role, the password and the state of a member (ADR-0023, operation
 	// `users_write`).
@@ -73,17 +77,20 @@
 	const resetLock = $derived(user ? orgResetLock(user, selfId) : null);
 	const changeLock = $derived(user ? orgChangeLock(user, selfId) : null);
 
-	const menuItems = $derived.by<MenuItem[]>(() => {
+	// The state of the account is a dangerous action, so it lives in its own section (UI principles 1.7).
+	const dangerActions = $derived.by<DangerAction[]>(() => {
 		const member = user;
-		if (!member) return [];
+		if (!member || !canWrite) return [];
 		return [
 			{
-				label: member.disabled ? t('users.enableUser') : t('users.disableUser'),
+				key: 'state',
+				text: t(member.disabled ? 'users.danger.enable' : 'users.danger.disable'),
+				label: t(member.disabled ? 'users.enableUser' : 'users.disableUser'),
 				icon: 'power',
-				tone: member.disabled ? 'default' : 'danger',
+				tone: member.disabled ? 'secondary' : 'danger',
 				disabled: Boolean(changeLock),
 				hint: changeLock ?? undefined,
-				onSelect: () => void dialogs?.toggleDisabled(member)
+				onclick: () => void dialogs?.toggleDisabled(member)
 			}
 		];
 	});
@@ -134,7 +141,12 @@
 	{/if}
 {/snippet}
 
-<RecordPage title={name} {loading} error={loadError}>
+<RecordPage
+	title={name}
+	description={t('users.description', { name: tenantName })}
+	{loading}
+	error={loadError}
+>
 	{#snippet status()}
 		{#if user?.disabled}
 			<StatusPill tone="neutral">{userState(user).label}</StatusPill>
@@ -151,12 +163,6 @@
 			>
 				{t('users.resetPassword')}
 			</Button>
-			<DropdownMenu
-				icon="more"
-				align="end"
-				label={t('users.moreActions', { name })}
-				items={menuItems}
-			/>
 		{/if}
 	{/snippet}
 	{#snippet side()}
@@ -183,6 +189,18 @@
 				{/if}
 			</div>
 		</Panel>
+	{/if}
+
+	{#if dangerActions.length > 0}
+		<ProfileSection
+			id="danger"
+			title={t('danger.title')}
+			summary={t(user?.disabled ? 'users.enableUser' : 'users.disableUser')}
+			state="off"
+			bind:open={open.danger}
+		>
+			<DangerZone actions={dangerActions} />
+		</ProfileSection>
 	{/if}
 </RecordPage>
 

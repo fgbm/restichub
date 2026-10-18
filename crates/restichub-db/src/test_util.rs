@@ -40,6 +40,7 @@ pub struct TestDatabase {
     database: Database,
     owner: PgPool,
     admin: PgConnectOptions,
+    owner_options: PgConnectOptions,
     runtime_options: PgConnectOptions,
     owner_role: String,
     runtime_role: String,
@@ -76,6 +77,12 @@ impl TestDatabase {
     /// A test uses the options to create a scratch role or a scratch database.
     pub fn admin_options(&self) -> PgConnectOptions {
         self.admin.clone()
+    }
+
+    /// A test uses the options to open a pool to another database as the owner login, which has
+    /// no BYPASSRLS.
+    pub fn owner_options(&self) -> PgConnectOptions {
+        self.owner_options.clone()
     }
 
     /// A test uses the options to open a pool that points to another database.
@@ -156,7 +163,6 @@ pub async fn test_database() -> Option<TestDatabase> {
 
     let owner_options = admin
         .clone()
-        .database(&name)
         .username(template.owner_role.as_str())
         .password(template.owner_password.as_str());
     let runtime_options = admin
@@ -170,7 +176,7 @@ pub async fn test_database() -> Option<TestDatabase> {
         .expect("cannot open the runtime pool");
     let owner_pool = PgPoolOptions::new()
         .max_connections(2)
-        .connect_with(owner_options)
+        .connect_with(owner_options.clone().database(&name))
         .await
         .expect("cannot open the owner pool");
 
@@ -178,6 +184,7 @@ pub async fn test_database() -> Option<TestDatabase> {
         database: Database { pool: runtime_pool },
         owner: owner_pool,
         admin,
+        owner_options,
         runtime_options,
         owner_role: template.owner_role.clone(),
         runtime_role,

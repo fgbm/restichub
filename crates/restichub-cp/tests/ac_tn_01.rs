@@ -22,7 +22,7 @@ use restichub_cp::context::{Access, Operation, minimum_role};
 use restichub_cp::routes::ROUTES;
 use restichub_db::test_util::TestDatabase;
 use restichub_db::{Role, TenantId, audit};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use common::{
     app_single, app_with_kek, body_json, count, create_tenant_with_key, create_user, list_tokens,
@@ -68,6 +68,9 @@ enum Object {
 enum Fixture {
     /// The path holds the identifier of a tenant B object (the `{id}` family).
     Object(Object),
+    /// The identifiers of tenant B objects arrive in the request body (AC-TN-01). The endpoint
+    /// refuses each of them, shows no tenant B data and writes nothing.
+    BodyIds,
     /// The endpoint returns a collection. The response must hold no tenant B data.
     Collection,
     /// A platform operation (ADR-0023). It is platform-scoped by design, so it is no cross-tenant
@@ -188,10 +191,8 @@ const FIXTURES: &[(&str, Fixture)] = &[
     ("/api/v1/profiles", Fixture::Collection),
     ("/api/v1/profiles/defaults", Fixture::Collection),
     ("/api/v1/profiles/{id}", Fixture::Object(Object::Profile)),
-    (
-        "/api/v1/profiles/{id}/preview",
-        Fixture::Object(Object::Profile),
-    ),
+    // The draft preview names the agent, the stored profile and the repository in the body.
+    ("/api/v1/profiles/preview", Fixture::BodyIds),
     (
         "/api/v1/profiles/{id}/usage",
         Fixture::Object(Object::Profile),
@@ -313,6 +314,31 @@ fn assert_cross_tenant(
     }
 }
 
+/// Asserts that a tenant A call with a tenant B identifier in the body refuses the request and
+/// shows no tenant B data.
+fn assert_body_ids_refused(
+    role: Role,
+    method: &str,
+    path: &str,
+    status: StatusCode,
+    problem: &Value,
+    ids: &[String],
+) {
+    assert!(
+        status == StatusCode::BAD_REQUEST || status == StatusCode::NOT_FOUND,
+        "{method} {path} as {} with an identifier of tenant B in the body gave {status}",
+        role.as_str()
+    );
+    let text = problem.to_string();
+    for id in ids {
+        assert!(
+            !text.contains(id),
+            "{method} {path} as {} shows the tenant B identifier {id}",
+            role.as_str()
+        );
+    }
+}
+
 /// Asserts that a tenant A Admin cannot reach a platform operation.
 fn assert_platform_refused(method: &str, uri: &str, status: StatusCode) {
     assert!(
@@ -336,12 +362,19 @@ async fn ac_tn_01_a_cross_tenant_identifier_returns_404_and_changes_nothing() {
     let secret_b = seed_secret(db.database(), tenant_b, CANARY_SECRET).await;
     let repository_b =
         common::seed_repository(db.database(), tenant_b, CANARY_REPOSITORY, secret_b).await;
-    let profile_b =
-        common::seed_profile(db.database(), tenant_b, CANARY_PROFILE, repository_b).await;
+    let profile_b = common::seed_profile(db.database(), tenant_b, CANARY_PROFILE).await;
     let agent_b = common::seed_agent(db.database(), tenant_b, "canary-host").await;
     let enrollment_token_b = common::seed_enrollment_token(db.database(), tenant_b, user_b).await;
     let job_b = common::seed_job(db.database(), tenant_b, agent_b, repository_b).await;
-    let plan_b = common::seed_plan(db.database(), tenant_b, CANARY_PLAN, profile_b, agent_b).await;
+    let plan_b = common::seed_plan(
+        db.database(),
+        tenant_b,
+        CANARY_PLAN,
+        profile_b,
+        agent_b,
+        repository_b,
+    )
+    .await;
     let channel_b = seed_channel(&db, tenant_b, CANARY_CHANNEL).await;
     let (script_template_b, job_template_b) = seed_templates(&db, tenant_b).await;
     seed_api_token(db.database(), tenant_b, "viewer").await;
@@ -392,8 +425,7 @@ async fn ac_tn_01_a_cross_tenant_identifier_returns_404_and_changes_nothing() {
     let secret_a = seed_secret(db.database(), tenant_a, "cross-a-secret").await;
     let repository_a =
         common::seed_repository(db.database(), tenant_a, "cross-a-repo", secret_a).await;
-    let profile_a =
-        common::seed_profile(db.database(), tenant_a, "cross-a-profile", repository_a).await;
+    let profile_a = common::seed_profile(db.database(), tenant_a, "cross-a-profile").await;
     let agent_a = common::seed_agent(db.database(), tenant_a, "cross-a-host").await;
 
     let (status, _, document) =
@@ -513,6 +545,77 @@ async fn ac_tn_01_a_cross_tenant_identifier_returns_404_and_changes_nothing() {
                         &problem,
                     );
                 }
+            }
+            Fixture::BodyIds => {
+                let audit_before_body = count(db.database(), tenant_a, "audit_log").await;
+                let mut bodies = Vec::new();
+                let body_with = |agent: String, profile: String, repository: Option<String>| {
+                    let mut body = json!({
+                        "agent_id": agent,
+                        "profile_id": profile,
+                        "name": "matrix-preview",
+                        "paths": {"all": ["/srv"]},
+                    });
+                    if let Some(repository) = repository {
+                        body["repository_id"] = json!(repository);
+                    }
+                    body
+                };
+                // Each identifier of tenant B travels in its own request, so each one is checked.
+                bodies.push(body_with(agent_b.to_string(), profile_a.to_string(), None));
+                bodies.push(body_with(agent_a.to_string(), profile_b.to_string(), None));
+                bodies.push(body_with(
+                    agent_a.to_string(),
+                    profile_a.to_string(),
+                    Some(repository_b.to_string()),
+                ));
+                for body in bodies {
+                    for (role, cookie) in &sessions {
+                        let (status, _, problem) = call(
+                            &app,
+                            request(
+                                &http_method,
+                                &path,
+                                Some(cookie.as_str()),
+                                Some(body.clone()),
+                            ),
+                        )
+                        .await;
+                        assert_body_ids_refused(
+                            *role,
+                            &http_method,
+                            &path,
+                            status,
+                            &problem,
+                            &b_ids,
+                        );
+                    }
+                    for (role, token) in &bearer {
+                        let (status, _, problem) = call(
+                            &app,
+                            common::bearer_request(
+                                &http_method,
+                                &path,
+                                token.as_str(),
+                                Some(body.clone()),
+                            ),
+                        )
+                        .await;
+                        assert_body_ids_refused(
+                            *role,
+                            &http_method,
+                            &path,
+                            status,
+                            &problem,
+                            &b_ids,
+                        );
+                    }
+                }
+                assert_eq!(
+                    count(db.database(), tenant_a, "audit_log").await,
+                    audit_before_body,
+                    "{http_method} {path} with an identifier of tenant B in the body wrote an audit record"
+                );
             }
             Fixture::Collection => {
                 // A collection endpoint holds no object identifier. The response of tenant A must

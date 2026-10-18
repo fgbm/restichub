@@ -37,8 +37,8 @@ async fn revoke(env: &Env, agent: AgentId) {
 /// A queued backup that the agent acknowledged, so it runs. Returns the job identifier.
 async fn running_job(env: &Env, agent: &mut FakeAgent) -> String {
     let repository = env.create_repository(agent.id, "pw").await;
-    let profile = env.create_profile(repository, json!({})).await;
-    let plan = env.create_plan(profile, agent.id).await;
+    let profile = env.create_profile(json!({})).await;
+    let plan = env.create_plan(profile, agent.id, repository).await;
     env.run_plan(plan).await;
     env.pass().await;
     let signed = agent.job().await;
@@ -120,8 +120,8 @@ async fn ac_id_04_a_revoke_on_another_instance_closes_the_stream_within_five_sec
     let mut agent = env.connect_to(&other, enrolled).await;
     // The second instance dispatches the job; its registry holds the stream.
     let repository = env.create_repository(agent.id, "pw").await;
-    let profile = env.create_profile(repository, json!({})).await;
-    let plan = env.create_plan(profile, agent.id).await;
+    let profile = env.create_profile(json!({})).await;
+    let plan = env.create_plan(profile, agent.id, repository).await;
     env.run_plan(plan).await;
     restichub_cp::queue::run_once(&other.state, env.now())
         .await

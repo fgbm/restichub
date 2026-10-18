@@ -156,7 +156,6 @@ export function docsProfiles(): Profile[] {
 	const profile = (
 		id: string,
 		name: string,
-		repository: string,
 		paths: Profile['paths'],
 		excludes: string[],
 		tags: string[],
@@ -164,7 +163,6 @@ export function docsProfiles(): Profile[] {
 	): Profile => ({
 		id,
 		name,
-		repository_id: repository,
 		paths,
 		excludes,
 		exclude_files: [],
@@ -181,7 +179,6 @@ export function docsProfiles(): Profile[] {
 		profile(
 			'p_1',
 			'file-shares',
-			'r_1',
 			{ all: [], windows: ['C:\\Data', 'D:\\Shares'], linux: [], macos: [] },
 			['*.tmp', '~$*'],
 			['files'],
@@ -190,7 +187,6 @@ export function docsProfiles(): Profile[] {
 		profile(
 			'p_2',
 			'postgres-dumps',
-			'r_1',
 			{ all: ['/var/backups/postgres'], windows: [], linux: ['/etc/postgresql'], macos: [] },
 			[],
 			['database']
@@ -198,7 +194,6 @@ export function docsProfiles(): Profile[] {
 		profile(
 			'p_3',
 			'web-content',
-			'r_2',
 			{ all: ['/srv/www'], windows: [], linux: ['/etc/nginx'], macos: [] },
 			['cache/', '*.log'],
 			['web']

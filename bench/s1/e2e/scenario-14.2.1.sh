@@ -28,12 +28,12 @@ result="$(wait_job "$init_job" 120 || true)"
 case "$result" in succeeded*) v=PASS ;; *) v=FAIL ;; esac
 step 4 "Initialize the repository" "$v" "init job $init_job: $result"
 
-profile="$(api POST /api/v1/profiles "$(jq -nc --arg r "$repo" \
-	'{name:"data",repository_id:$r,paths:{all:["/data"]},retention:{keep_last:6}}')" | jq -r '.profile.id')"
+profile="$(api POST /api/v1/profiles "$(jq -nc \
+	'{name:"data",paths:{all:["/data"]},retention:{keep_last:6}}')" | jq -r '.profile.id')"
 step 5 "Create the profile for /data" PASS "profile $profile"
 
-plan="$(api POST /api/v1/plans "$(jq -nc --arg p "$profile" --arg a "$agent" \
-	'{name:"daily",profile_id:$p,agent_id:$a,cron:"0 3 * * *",time_zone:"UTC",missed_run_policy:"skip"}')" | jq -r '.plan.id')"
+plan="$(api POST /api/v1/plans "$(jq -nc --arg p "$profile" --arg a "$agent" --arg r "$repo" \
+	'{name:"daily",profile_id:$p,agent_id:$a,repository_id:$r,cron:"0 3 * * *",time_zone:"UTC",missed_run_policy:"skip"}')" | jq -r '.plan.id')"
 step 6 "Create the plan" PASS "plan $plan"
 
 backup="$(api POST "/api/v1/plans/$plan/run" | jq -r .id)"

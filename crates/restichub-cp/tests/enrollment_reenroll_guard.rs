@@ -140,8 +140,8 @@ async fn ac_id_10_the_replacement_moves_queued_jobs_and_audits_the_revoke() {
     let new = enroll_new(&db, &env, "MINDCORE", Some(MACHINE)).await;
     let secret = seed_secret(db.database(), env.tenant, "plan.password").await;
     let repository = seed_repository(db.database(), env.tenant, "repo", secret).await;
-    let profile = seed_profile(db.database(), env.tenant, "profile", repository).await;
-    seed_plan(db.database(), env.tenant, "plan", profile, old).await;
+    let profile = seed_profile(db.database(), env.tenant, "profile").await;
+    seed_plan(db.database(), env.tenant, "plan", profile, old, repository).await;
     let queued = seed_job(db.database(), env.tenant, old, repository).await;
 
     let (status, body) = replace(&env, new, old).await;

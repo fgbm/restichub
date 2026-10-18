@@ -25,8 +25,8 @@ async fn adr_0030_a_redelivery_after_a_compromise_never_sends_the_old_blob() {
     let env = Env::start(db, test_queue()).await;
     let mut agent = env.connect_agent("compromise-queue-host").await;
     let repository = env.create_repository(agent.id, "pw").await;
-    let profile = env.create_profile(repository, serde_json::json!({})).await;
-    let plan = env.create_plan(profile, agent.id).await;
+    let profile = env.create_profile(serde_json::json!({})).await;
+    let plan = env.create_plan(profile, agent.id, repository).await;
     let job = env.run_plan(plan).await;
     env.pass().await;
     let first = agent.job().await;

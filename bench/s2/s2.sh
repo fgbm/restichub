@@ -262,8 +262,8 @@ create_plan_for() {
 	[ "${LOAD_BURST:-0}" = 1 ] && minute=0
 	cron="$(awk -v m="$minute" -v i="$INTERVAL_MIN" 'BEGIN{s=""; for(x=m;x<60;x+=i){s=s (s==""?"":",") x}; print s " * * * *"}')"
 	repo="$(api POST /api/v1/repositories -d "{\"name\":\"bench-repo-$index\",\"backend\":{\"kind\":\"local\",\"path\":\"/srv/bench/$index\"},\"password\":\"bench-repo-password\",\"maintenance_agent_id\":\"$agent\"}" | jq -r .id)"
-	profile="$(api POST /api/v1/profiles -d "{\"name\":\"bench-profile-$index\",\"repository_id\":\"$repo\",\"paths\":{\"all\":[\"/srv/data\"]}}" | jq -r .profile.id)"
-	api POST /api/v1/plans -d "{\"name\":\"bench-plan-$index\",\"profile_id\":\"$profile\",\"agent_id\":\"$agent\",\"cron\":\"$cron\",\"time_zone\":\"UTC\",\"missed_run_policy\":\"skip\"}" >/dev/null
+	profile="$(api POST /api/v1/profiles -d "{\"name\":\"bench-profile-$index\",\"paths\":{\"all\":[\"/srv/data\"]}}" | jq -r .profile.id)"
+	api POST /api/v1/plans -d "{\"name\":\"bench-plan-$index\",\"profile_id\":\"$profile\",\"agent_id\":\"$agent\",\"repository_id\":\"$repo\",\"cron\":\"$cron\",\"time_zone\":\"UTC\",\"missed_run_policy\":\"skip\"}" >/dev/null
 }
 
 load() {

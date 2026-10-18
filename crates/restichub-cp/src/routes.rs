@@ -708,11 +708,11 @@ pub const ROUTES: &[Route] = &[
     },
     Route {
         method: "post",
-        path: "/api/v1/profiles/{id}/preview",
+        path: "/api/v1/profiles/preview",
         access: Access::Protected(Operation::ProfilesRead),
         handler: || {
             routes!(crate::profiles::preview_profile)
-                .layer(axum::extract::DefaultBodyLimit::max(BODY_LIMIT))
+                .layer(axum::extract::DefaultBodyLimit::max(SCRIPT_BODY_LIMIT))
         },
     },
     Route {

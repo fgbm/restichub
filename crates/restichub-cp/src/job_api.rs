@@ -406,7 +406,7 @@ pub async fn run_plan(
         return Err(ApiError::not_repository_host());
     }
     // The job builder compiles again at send time. The early check gives the user the field error.
-    crate::profiles::compile_for_agent(&profile, &agent, now)?;
+    crate::profiles::compile_for_agent(&profile, plan.repository_id, &agent, now)?;
     if queue_repo::has_queued_manual_run(&mut tx, plan_id).await? {
         return Err(ApiError::already_queued());
     }

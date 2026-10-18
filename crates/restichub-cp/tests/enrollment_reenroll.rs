@@ -82,8 +82,8 @@ async fn ac_id_07_a_bound_token_keeps_the_agent_and_replaces_the_identity() {
     let id = enroll_new(&db, &env, "MINDCORE", Some(MACHINE)).await;
     let secret = seed_secret(db.database(), env.tenant, "plan.password").await;
     let repository = seed_repository(db.database(), env.tenant, "repo", secret).await;
-    let profile = seed_profile(db.database(), env.tenant, "profile", repository).await;
-    let plan = seed_plan(db.database(), env.tenant, "plan", profile, id).await;
+    let profile = seed_profile(db.database(), env.tenant, "profile").await;
+    let plan = seed_plan(db.database(), env.tenant, "plan", profile, id, repository).await;
     let (old_serial, old_hex) = serial_of(&db, &env, id).await;
 
     let (status, issued) = issue_reenroll_token(&env, id).await;
@@ -245,8 +245,8 @@ async fn ac_id_09_replace_moves_plans_and_maintenance_references_and_revokes_the
 
     let secret = seed_secret(db.database(), env.tenant, "plan.password").await;
     let repository = seed_repository(db.database(), env.tenant, "repo", secret).await;
-    let profile = seed_profile(db.database(), env.tenant, "profile", repository).await;
-    let plan = seed_plan(db.database(), env.tenant, "plan", profile, old).await;
+    let profile = seed_profile(db.database(), env.tenant, "profile").await;
+    let plan = seed_plan(db.database(), env.tenant, "plan", profile, old, repository).await;
     let maintenance_repository = {
         use restichub_db::repositories::{NewRepository, RepositorySecrets, RepositorySettings};
         let id = restichub_db::RepositoryId::new();

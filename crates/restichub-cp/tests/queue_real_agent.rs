@@ -86,8 +86,8 @@ async fn run_backup(
             location.to_str().expect("the path is UTF-8"),
         )
         .await;
-    let profile = env.create_profile(repository, json!({})).await;
-    let plan = env.create_plan(profile, agent.id).await;
+    let profile = env.create_profile(json!({})).await;
+    let plan = env.create_plan(profile, agent.id, repository).await;
     let backup = env.run_plan(plan).await;
     env.pass().await;
     let signed = agent.job().await;

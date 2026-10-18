@@ -260,6 +260,18 @@ describe('the host page', () => {
 		await waitFor(() => expect(mocks.getAgent.mock.calls.length).toBeGreaterThan(1));
 	});
 
+	it('keeps the re-register and the revoke actions in the dangerous section only', async () => {
+		render(HostPage, { hostId: 'a_01' });
+
+		await screen.findByRole('heading', { level: 1, name: 'srv-db-01' });
+		expect(screen.queryByRole('button', { name: /More actions/ })).not.toBeInTheDocument();
+		const danger = screen
+			.getByRole('button', { name: /Dangerous actions/ })
+			.closest('section') as HTMLElement;
+		expect(within(danger).getByRole('button', { name: 'Re-register' })).toBeInTheDocument();
+		expect(within(danger).getByRole('button', { name: 'Revoke agent' })).toBeInTheDocument();
+	});
+
 	it('hides the write actions from a viewer', async () => {
 		session.role = 'viewer';
 		render(HostPage, { hostId: 'a_01' });

@@ -238,12 +238,12 @@ backup() {
 	agent="$(agent_json | jq -r '.items[0].id')"
 	repository="$(create_local_repository local-test "$root/local-test" "$agent")"
 	run_job "$repository" init
-	profile="$(jq -nc --arg repository "$repository" --arg path "$source" --arg os "$os" \
-		'{name: "local-test", repository_id: $repository, paths: {($os): [$path]}}' |
+	profile="$(jq -nc --arg path "$source" --arg os "$os" \
+		'{name: "local-test", paths: {($os): [$path]}}' |
 		curl -fsS "${csrf[@]}" -b "$jar" -H 'content-type: application/json' \
 			"$web/api/v1/profiles" --data-binary @- | jq -r .profile.id)"
-	plan="$(jq -nc --arg profile "$profile" --arg agent "$agent" \
-		'{name: "local-test", profile_id: $profile, agent_id: $agent, cron: "0 3 1 1 *", time_zone: "UTC", missed_run_policy: "skip"}' |
+	plan="$(jq -nc --arg profile "$profile" --arg agent "$agent" --arg repository "$repository" \
+		'{name: "local-test", profile_id: $profile, agent_id: $agent, repository_id: $repository, cron: "0 3 1 1 *", time_zone: "UTC", missed_run_policy: "skip"}' |
 		curl -fsS "${csrf[@]}" -b "$jar" -H 'content-type: application/json' \
 			"$web/api/v1/plans" --data-binary @- | jq -r .plan.id)"
 	id="$(curl -fsS "${csrf[@]}" -b "$jar" -X POST "$web/api/v1/plans/$plan/run" | jq -r .id)"

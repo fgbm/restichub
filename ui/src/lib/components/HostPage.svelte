@@ -7,16 +7,8 @@
 	import HostActions from './HostActions.svelte';
 	import ProfileSection from './ProfileSection.svelte';
 	import { RecordPage, SummaryPanel } from './layout/index.ts';
-	import {
-		Alert,
-		Badge,
-		Button,
-		CopyField,
-		DropdownMenu,
-		ListView,
-		StatusPill
-	} from './ui/index.ts';
-	import type { KeyValueItem, MenuItem, StatusTone } from './ui/index.ts';
+	import { Alert, Badge, Button, CopyField, DangerZone, ListView, StatusPill } from './ui/index.ts';
+	import type { DangerAction, KeyValueItem, StatusTone } from './ui/index.ts';
 	import { isTimed, jobDuration, jobMeta, jobTitle } from '#lib/job-item.ts';
 	import { iconOf, jobState, pillOf } from '#lib/vocabulary.ts';
 	import { formatTime, relativeTime } from '#lib/format.ts';
@@ -217,6 +209,41 @@
 		};
 	});
 
+	// The record keeps each destructive action here and nowhere else (UI principles 1.7).
+	const dangerActions = $derived.by<DangerAction[]>(() => {
+		const item = agent;
+		if (!item) return [];
+		return [
+			{
+				key: 'reregister',
+				text: t('hp.danger.reregister'),
+				label: t('hosts.reregister'),
+				icon: 'key',
+				onclick: () => hostActions.openReregister(item)
+			},
+			...(olderDuplicate
+				? [
+						{
+							key: 'replace',
+							text: t('hp.danger.replace', { old: olderDuplicate.hostname }),
+							label: t('hosts.replaceOld'),
+							icon: 'host' as const,
+							tone: 'danger' as const,
+							onclick: () => hostActions.openReplace(item)
+						}
+					]
+				: []),
+			{
+				key: 'revoke',
+				text: t('hp.danger.revoke'),
+				label: t('hosts.revokeAgent'),
+				icon: 'octagon',
+				tone: 'danger',
+				onclick: () => hostActions.openRevoke(item)
+			}
+		];
+	});
+
 	const stateItems = $derived.by<KeyValueItem[]>(() => {
 		const item = agent;
 		if (!item) return [];
@@ -246,25 +273,6 @@
 			{ key: 'scripts', label: t('hosts.serverScripts'), value: summaries.scripts.text }
 		];
 	});
-
-	const menuItems = $derived.by<MenuItem[]>(() => {
-		const item = agent;
-		if (!item) return [];
-		return [
-			{
-				label: t('hosts.reregister'),
-				icon: 'key',
-				onSelect: () => hostActions.openReregister(item)
-			},
-			{
-				label: t('hosts.revokeAgent'),
-				icon: 'octagon',
-				tone: 'danger',
-				separatorBefore: true,
-				onSelect: () => hostActions.openRevoke(item)
-			}
-		];
-	});
 </script>
 
 {#snippet time(value: string | null | undefined)}
@@ -288,7 +296,7 @@
 
 <RecordPage
 	title={agent?.hostname ?? ''}
-	description={t('hp.description')}
+	description={t('hosts.description')}
 	{loading}
 	error={loadError ?? (!loading && !agent ? t('table.error') : null)}
 >
@@ -302,12 +310,6 @@
 			<Button size="sm" icon="tag" onclick={() => hostActions.openRename(agent!)}>
 				{t('hosts.rename')}
 			</Button>
-			<DropdownMenu
-				icon="more"
-				align="end"
-				label={t('hosts.moreActions', { name: agent.hostname })}
-				items={menuItems}
-			/>
 		{/if}
 	{/snippet}
 	{#snippet banners()}
@@ -549,33 +551,12 @@
 		{#if canWrite && active}
 			<ProfileSection
 				id="danger"
-				title={t('hp.section.danger')}
+				title={t('danger.title')}
 				summary={summaries.danger.text}
 				state={summaries.danger.state}
 				bind:open={open.danger}
 			>
-				<ul class="danger">
-					<li>
-						<p class="lead">{t('hp.danger.reregister')}</p>
-						<Button icon="key" onclick={() => hostActions.openReregister(agent!)}>
-							{t('hosts.reregister')}
-						</Button>
-					</li>
-					{#if olderDuplicate}
-						<li>
-							<p class="lead">{t('hp.danger.replace', { old: olderDuplicate.hostname })}</p>
-							<Button variant="danger" icon="host" onclick={() => hostActions.openReplace(agent!)}>
-								{t('hosts.replaceOld')}
-							</Button>
-						</li>
-					{/if}
-					<li>
-						<p class="lead">{t('hp.danger.revoke')}</p>
-						<Button variant="danger" icon="octagon" onclick={() => hostActions.openRevoke(agent!)}>
-							{t('hosts.revokeAgent')}
-						</Button>
-					</li>
-				</ul>
+				<DangerZone actions={dangerActions} />
 			</ProfileSection>
 		{/if}
 	{/if}
@@ -685,27 +666,6 @@
 		flex: 1;
 		min-width: 0;
 		overflow-wrap: anywhere;
-	}
-
-	.danger {
-		display: flex;
-		flex-direction: column;
-		gap: var(--rh-space-4);
-		margin: 0;
-		padding: 0;
-		list-style: none;
-	}
-
-	.danger li {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: center;
-		justify-content: space-between;
-		gap: var(--rh-space-3);
-	}
-
-	.danger .lead {
-		flex: 1 1 260px;
 	}
 
 	@media (max-width: 720px) {

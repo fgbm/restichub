@@ -15,8 +15,17 @@
 	import CodeEditor from './CodeEditor.svelte';
 	import ProfileSection from './ProfileSection.svelte';
 	import { RecordPage, SummaryPanel } from './layout/index.ts';
-	import { Alert, Button, ConfirmDialog, DataTable, Icon, Select, TextField } from './ui/index.ts';
-	import type { KeyValueItem, SelectOption, TableColumn } from './ui/index.ts';
+	import {
+		Alert,
+		Button,
+		ConfirmDialog,
+		DangerZone,
+		DataTable,
+		Icon,
+		Select,
+		TextField
+	} from './ui/index.ts';
+	import type { DangerAction, KeyValueItem, SelectOption, TableColumn } from './ui/index.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
 	import { changedAt, plural } from '#lib/list-format.ts';
@@ -41,7 +50,7 @@
 		defaultValue: string;
 	}
 
-	type SectionKey = 'basics' | 'run' | 'parameters' | 'body';
+	type SectionKey = 'basics' | 'run' | 'parameters' | 'body' | 'danger';
 
 	let loading = $state(true);
 	let loadError = $state<string | null>(null);
@@ -55,7 +64,8 @@
 		basics: true,
 		run: true,
 		parameters: true,
-		body: true
+		body: true,
+		danger: true
 	});
 
 	let name = $state('');
@@ -256,6 +266,21 @@
 		}
 	}
 
+	// A built-in template has no dangerous action, so the section appears for an own template only.
+	const dangerActions = $derived.by<DangerAction[]>(() => {
+		if (!existing || existing.builtin || !canWrite) return [];
+		return [
+			{
+				key: 'delete',
+				text: t('scriptTemplates.danger.delete'),
+				label: t('scriptTemplates.delete'),
+				icon: 'trash',
+				tone: 'danger',
+				onclick: () => (deleteOpen = true)
+			}
+		];
+	});
+
 	function addParameter(): void {
 		parameters = [...parameters, draftParameter()];
 	}
@@ -391,7 +416,7 @@
 	title={templateId
 		? name || (existing ? templateName(existing) : '')
 		: t('scriptTemplates.newTitle')}
-	description={t('scriptTemplates.formDescription')}
+	description={t('scriptTemplates.description')}
 	{loading}
 	error={loadError}
 	onsubmit={() => void save()}
@@ -402,16 +427,6 @@
 			<Button variant={existing.builtin ? 'primary' : 'secondary'} icon="copy" onclick={openCopy}>
 				{t('scriptTemplates.copy')}
 			</Button>
-			{#if !existing.builtin}
-				<Button
-					variant="ghost"
-					icon="trash"
-					class="btn--quiet-danger"
-					title={t('scriptTemplates.delete')}
-					aria-label={t('scriptTemplates.delete')}
-					onclick={() => (deleteOpen = true)}
-				/>
-			{/if}
 		{/if}
 	{/snippet}
 	{#snippet banners()}
@@ -551,6 +566,17 @@
 			required
 		/>
 	</ProfileSection>
+	{#if dangerActions.length > 0}
+		<ProfileSection
+			id="danger"
+			title={t('danger.title')}
+			summary={t('scriptTemplates.danger.summary')}
+			state="off"
+			bind:open={open.danger}
+		>
+			<DangerZone actions={dangerActions} />
+		</ProfileSection>
+	{/if}
 </RecordPage>
 
 <ConfirmDialog

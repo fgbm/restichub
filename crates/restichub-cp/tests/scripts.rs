@@ -341,12 +341,9 @@ async fn ac_hk_12_only_an_admin_changes_the_scripts_of_a_profile_and_a_viewer_re
         return;
     };
     let env = Env::start(db, test_queue()).await;
-    let agent = env.connect_agent_trusting("host-a", true, bash()).await;
-    let repository = env.create_repository(agent.id, "pw").await;
     let body = |scripts: Value, name: &str| {
         json!({
             "name": name,
-            "repository_id": repository.to_string(),
             "paths": {"all": ["/srv"]},
             "scripts": scripts,
         })
@@ -473,8 +470,6 @@ async fn adr_0017_a_script_variable_takes_a_hook_secret_only() {
         return;
     };
     let env = Env::start(db, test_queue()).await;
-    let agent = env.connect_agent_trusting("host-a", true, bash()).await;
-    let repository = env.create_repository(agent.id, "pw").await;
     let other = create_secret(&env, "repo.key", "repository_password").await;
     let missing = uuid::Uuid::new_v4().to_string();
     for value in [other, missing] {
@@ -485,7 +480,6 @@ async fn adr_0017_a_script_variable_takes_a_hook_secret_only() {
                 "/api/v1/profiles",
                 Some(json!({
                     "name": "bad",
-                    "repository_id": repository.to_string(),
                     "paths": {"all": ["/srv"]},
                     "scripts": [script("dump", "before", json!([
                         {"name": "PGPASSWORD", "kind": "secret_ref", "value": value}
@@ -506,8 +500,6 @@ async fn fr_hk_09_a_broken_script_is_refused_with_its_field() {
         return;
     };
     let env = Env::start(db, test_queue()).await;
-    let agent = env.connect_agent_trusting("host-a", true, bash()).await;
-    let repository = env.create_repository(agent.id, "pw").await;
     let cases = [
         (json!({"body": "  "}), "scripts[0].body"),
         (json!({"body": "x".repeat(65 * 1024)}), "scripts[0].body"),
@@ -537,7 +529,6 @@ async fn fr_hk_09_a_broken_script_is_refused_with_its_field() {
                 "/api/v1/profiles",
                 Some(json!({
                     "name": "bad",
-                    "repository_id": repository.to_string(),
                     "paths": {"all": ["/srv"]},
                     "scripts": [broken],
                 })),
@@ -587,16 +578,14 @@ async fn ac_hk_07_a_plan_for_a_host_without_the_trust_mode_is_refused() {
     // A remote backend, so the plan of either host passes the repository host rule.
     let repository = env.create_rest_repository(trusting.id, "user", "pw").await;
     let profile = env
-        .create_profile(
-            repository,
-            json!({"scripts": [script("dump", "before", json!([]))]}),
-        )
+        .create_profile(json!({"scripts": [script("dump", "before", json!([]))]}))
         .await;
     let plan = |agent: &queue_support::FakeAgent, name: &str| {
         json!({
             "name": name,
             "profile_id": profile.to_string(),
             "agent_id": agent.id.to_string(),
+            "repository_id": repository.to_string(),
             "cron": "0 2 1 1 *",
             "time_zone": "UTC",
             "missed_run_policy": "skip",
@@ -635,12 +624,9 @@ async fn ac_hk_07_the_builder_refuses_a_job_for_a_host_that_turned_the_mode_off(
     let agent = env.connect_agent_trusting("host-a", true, bash()).await;
     let repository = env.create_repository(agent.id, "pw").await;
     let profile = env
-        .create_profile(
-            repository,
-            json!({"scripts": [script("dump", "before", json!([]))]}),
-        )
+        .create_profile(json!({"scripts": [script("dump", "before", json!([]))]}))
         .await;
-    let plan = env.create_plan(profile, agent.id).await;
+    let plan = env.create_plan(profile, agent.id, repository).await;
     // The host administrator turned the mode off and the agent restarted.
     let capabilities = restichub_proto::AgentCapability::ALL
         .iter()
@@ -697,12 +683,9 @@ async fn fr_pr_09_an_agent_without_scripts_v1_never_gets_a_script_step() {
     let agent = env.connect_agent_trusting("host-a", true, bash()).await;
     let repository = env.create_repository(agent.id, "pw").await;
     let profile = env
-        .create_profile(
-            repository,
-            json!({"scripts": [script("dump", "before", json!([]))]}),
-        )
+        .create_profile(json!({"scripts": [script("dump", "before", json!([]))]}))
         .await;
-    let plan = env.create_plan(profile, agent.id).await;
+    let plan = env.create_plan(profile, agent.id, repository).await;
     let mut agent = env
         .reconnect_agent(&agent, vec!["restore-v1".to_owned()])
         .await;
@@ -752,10 +735,8 @@ async fn ac_hk_11_the_signed_job_carries_the_resolved_secret_and_the_planned_ste
         script("cleanup", "finally", json!([])),
         script("check", "before", json!([])),
     ]);
-    let profile = env
-        .create_profile(repository, json!({"scripts": scripts}))
-        .await;
-    let plan = env.create_plan(profile, agent.id).await;
+    let profile = env.create_profile(json!({"scripts": scripts})).await;
+    let plan = env.create_plan(profile, agent.id, repository).await;
     let job_id = env.run_plan(plan).await;
     env.pass().await;
     let signed = agent.job().await;
@@ -859,15 +840,12 @@ async fn ac_hk_11_the_log_api_returns_the_lines_of_one_step() {
     let mut agent = env.connect_agent_trusting("host-a", true, bash()).await;
     let repository = env.create_repository(agent.id, "pw").await;
     let profile = env
-        .create_profile(
-            repository,
-            json!({"scripts": [
-                script("dump", "before", json!([])),
-                script("cleanup", "finally", json!([])),
-            ]}),
-        )
+        .create_profile(json!({"scripts": [
+            script("dump", "before", json!([])),
+            script("cleanup", "finally", json!([])),
+        ]}))
         .await;
-    let plan = env.create_plan(profile, agent.id).await;
+    let plan = env.create_plan(profile, agent.id, repository).await;
     let job = env.run_plan(plan).await;
     env.pass().await;
     let signed = agent.job().await;

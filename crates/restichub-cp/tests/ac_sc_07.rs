@@ -27,7 +27,7 @@ async fn ac_sc_07_the_missed_run_policy_decides_the_job_count() {
     let tenant = create_tenant_with_key(database, "missed").await;
     let secret = seed_secret(database, tenant, "s").await;
     let repository = seed_repository(database, tenant, "r", secret).await;
-    let profile = seed_profile(database, tenant, "p", repository).await;
+    let profile = seed_profile(database, tenant, "p").await;
     let agent = seed_agent(database, tenant, "h").await;
 
     let start = utc(2025, Month::January, 1, 0, 0);
@@ -43,6 +43,7 @@ async fn ac_sc_07_the_missed_run_policy_decides_the_job_count() {
         "UTC",
         MissedRunPolicy::RunAll,
         Some(start),
+        repository,
     )
     .await;
     let latest = seed_scheduled_plan(
@@ -55,6 +56,7 @@ async fn ac_sc_07_the_missed_run_policy_decides_the_job_count() {
         "UTC",
         MissedRunPolicy::LatestOnly,
         Some(start),
+        repository,
     )
     .await;
     let skip = seed_scheduled_plan(
@@ -67,6 +69,7 @@ async fn ac_sc_07_the_missed_run_policy_decides_the_job_count() {
         "UTC",
         MissedRunPolicy::Skip,
         Some(start),
+        repository,
     )
     .await;
 
@@ -120,7 +123,7 @@ async fn ac_sc_07_a_suspended_tenant_creates_no_jobs() {
     let tenant = create_tenant_with_key(database, "suspended").await;
     let secret = seed_secret(database, tenant, "s").await;
     let repository = seed_repository(database, tenant, "r", secret).await;
-    let profile = seed_profile(database, tenant, "p", repository).await;
+    let profile = seed_profile(database, tenant, "p").await;
     let agent = seed_agent(database, tenant, "h").await;
 
     let start = utc(2025, Month::January, 1, 0, 0);
@@ -134,6 +137,7 @@ async fn ac_sc_07_a_suspended_tenant_creates_no_jobs() {
         "UTC",
         MissedRunPolicy::RunAll,
         Some(start),
+        repository,
     )
     .await;
     // The tenant is suspended before the fire time.
@@ -159,7 +163,7 @@ async fn ac_sc_07_a_revoked_agent_creates_no_jobs() {
     let tenant = create_tenant_with_key(database, "revoked").await;
     let secret = seed_secret(database, tenant, "s").await;
     let repository = seed_repository(database, tenant, "r", secret).await;
-    let profile = seed_profile(database, tenant, "p", repository).await;
+    let profile = seed_profile(database, tenant, "p").await;
     let agent = seed_agent(database, tenant, "h").await;
 
     let start = utc(2025, Month::January, 1, 0, 0);
@@ -173,6 +177,7 @@ async fn ac_sc_07_a_revoked_agent_creates_no_jobs() {
         "UTC",
         MissedRunPolicy::RunAll,
         Some(start),
+        repository,
     )
     .await;
 
@@ -226,7 +231,7 @@ async fn ac_sc_07_an_on_time_run_creates_one_job_for_every_policy() {
     let tenant = create_tenant_with_key(database, "on-time").await;
     let secret = seed_secret(database, tenant, "s").await;
     let repository = seed_repository(database, tenant, "r", secret).await;
-    let profile = seed_profile(database, tenant, "p", repository).await;
+    let profile = seed_profile(database, tenant, "p").await;
     let agent = seed_agent(database, tenant, "h").await;
 
     let start = utc(2025, Month::January, 1, 0, 0);
@@ -247,6 +252,7 @@ async fn ac_sc_07_an_on_time_run_creates_one_job_for_every_policy() {
                 "UTC",
                 policy,
                 Some(start),
+                repository,
             )
             .await,
         );
@@ -281,7 +287,7 @@ async fn ac_sc_07_run_all_keeps_the_latest_unexpired_fire_times() {
     let tenant = create_tenant_with_key(database, "downtime").await;
     let secret = seed_secret(database, tenant, "s").await;
     let repository = seed_repository(database, tenant, "r", secret).await;
-    let profile = seed_profile(database, tenant, "p", repository).await;
+    let profile = seed_profile(database, tenant, "p").await;
     let agent = seed_agent(database, tenant, "h").await;
 
     let start = utc(2025, Month::January, 1, 0, 0);
@@ -295,6 +301,7 @@ async fn ac_sc_07_run_all_keeps_the_latest_unexpired_fire_times() {
         "UTC",
         MissedRunPolicy::RunAll,
         Some(start),
+        repository,
     )
     .await;
 
@@ -335,7 +342,7 @@ async fn ac_sc_02_a_failing_plan_does_not_roll_back_the_tenant_pass() {
     let tenant = create_tenant_with_key(database, "isolation").await;
     let secret = seed_secret(database, tenant, "s").await;
     let repository = seed_repository(database, tenant, "r", secret).await;
-    let profile = seed_profile(database, tenant, "p", repository).await;
+    let profile = seed_profile(database, tenant, "p").await;
     let agent = seed_agent(database, tenant, "h").await;
 
     let start = utc(2025, Month::January, 1, 0, 0);
@@ -351,6 +358,7 @@ async fn ac_sc_02_a_failing_plan_does_not_roll_back_the_tenant_pass() {
         "UTC",
         MissedRunPolicy::RunAll,
         Some(start),
+        repository,
     )
     .await;
     let good = seed_scheduled_plan(
@@ -363,6 +371,7 @@ async fn ac_sc_02_a_failing_plan_does_not_roll_back_the_tenant_pass() {
         "UTC",
         MissedRunPolicy::RunAll,
         Some(start),
+        repository,
     )
     .await;
 

@@ -4,7 +4,7 @@ use sqlx::AssertSqlSafe;
 use sqlx::migrate::Migrator;
 use sqlx::postgres::PgPoolOptions;
 
-use super::{TestResult, admin_pool, admin_query};
+use super::{TestResult, admin_pool, admin_query, assert_code};
 use crate::MIGRATOR;
 use crate::test_util::test_database;
 
@@ -314,6 +314,188 @@ async fn db_the_right_migration_skips_a_revoked_membership_and_revokes_the_token
     Ok(())
 }
 
+/// ADR-0047: the migration 0056 moves the repository from the profile to the plan.
+///
+/// Each plan keeps the repository of its former profile in every tenant, the profile loses the
+/// column, and the new key refuses a repository of another tenant. A plan whose creator lost the
+/// membership of the tenant keeps its repository too. The migration runs as the owner login of the
+/// installation, which owns the tables and has no BYPASSRLS (ADR-0023).
+#[tokio::test]
+async fn db_the_plan_repository_migration_keeps_the_repository_of_each_plan() -> TestResult {
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let admin = admin_pool(&db).await?;
+    let name = format!("restichub_mig_{}", uuid::Uuid::now_v7().simple());
+    admin_query(
+        &admin,
+        &format!("CREATE DATABASE \"{name}\" OWNER \"{}\"", db.owner_role()),
+    )
+    .await?;
+
+    // The tables belong to the owner login, so the migrations run as that login, as `migrate` does.
+    let owner = PgPoolOptions::new()
+        .max_connections(1)
+        .connect_with(db.owner_options().database(name.as_str()))
+        .await?;
+
+    let before: Vec<_> = MIGRATOR
+        .iter()
+        .filter(|migration| migration.version <= 55)
+        .cloned()
+        .collect();
+    let up_to_55 = Migrator {
+        migrations: Cow::Owned(before),
+        ignore_missing: false,
+        locking: true,
+        no_tx: false,
+        table_name: Cow::Borrowed("_sqlx_migrations"),
+        create_schemas: Cow::Owned(Vec::new()),
+    };
+    up_to_55.run(&owner).await?;
+
+    // The seeded rows hold only the columns of this check, so the foreign keys stay off.
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect_with(db.admin_options().database(name.as_str()))
+        .await?;
+    let tenant = uuid::Uuid::now_v7();
+    let other_tenant = uuid::Uuid::now_v7();
+    let first_repository = uuid::Uuid::now_v7();
+    let second_repository = uuid::Uuid::now_v7();
+    let other_repository = uuid::Uuid::now_v7();
+    let first_profile = uuid::Uuid::now_v7();
+    let second_profile = uuid::Uuid::now_v7();
+    let other_profile = uuid::Uuid::now_v7();
+    let first_plan = uuid::Uuid::now_v7();
+    let second_plan = uuid::Uuid::now_v7();
+    let other_plan = uuid::Uuid::now_v7();
+    let orphan_plan = uuid::Uuid::now_v7();
+    let gone_creator = uuid::Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO tenants (id, tenant_id, name) VALUES ($1, $1, 'plans'), ($2, $2, 'other')",
+    )
+    .bind(tenant)
+    .bind(other_tenant)
+    .execute(&pool)
+    .await?;
+    // A Platform Admin removes the membership of this account after it created the plan (ADR-0023).
+    sqlx::query(
+        "INSERT INTO users (id, tenant_id, username, password_hash, display_name) \
+         VALUES ($1, '00000000-0000-7000-8000-000000000000', 'gone', 'phc', 'Gone')",
+    )
+    .bind(gone_creator)
+    .execute(&pool)
+    .await?;
+    sqlx::query("SET session_replication_role = replica")
+        .execute(&pool)
+        .await?;
+    sqlx::query(
+        "INSERT INTO repositories (id, tenant_id, name, backend, local_path, password_secret_id) \
+         VALUES ($1, $4, 'first', 'local', '/srv/first', $6), \
+                ($2, $4, 'second', 'local', '/srv/second', $6), \
+                ($3, $5, 'other', 'local', '/srv/other', $6)",
+    )
+    .bind(first_repository)
+    .bind(second_repository)
+    .bind(other_repository)
+    .bind(tenant)
+    .bind(other_tenant)
+    .bind(uuid::Uuid::now_v7())
+    .execute(&pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO profiles (id, tenant_id, name, repository_id) \
+         VALUES ($1, $4, 'first', $6), ($2, $4, 'second', $7), ($3, $5, 'other', $8)",
+    )
+    .bind(first_profile)
+    .bind(second_profile)
+    .bind(other_profile)
+    .bind(tenant)
+    .bind(other_tenant)
+    .bind(first_repository)
+    .bind(second_repository)
+    .bind(other_repository)
+    .execute(&pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO plans \
+         (id, tenant_id, name, profile_id, agent_id, cron, time_zone, missed_run_policy, \
+          created_by) \
+         VALUES ($1, $4, 'a-first', $6, $9, '0 2 * * *', 'UTC', 'run_all', NULL), \
+                ($2, $4, 'b-second', $7, $9, '0 3 * * *', 'UTC', 'run_all', NULL), \
+                ($3, $5, 'c-other', $8, $9, '0 4 * * *', 'UTC', 'run_all', NULL), \
+                ($10, $4, 'd-orphan', $6, $9, '0 5 * * *', 'UTC', 'run_all', $11)",
+    )
+    .bind(first_plan)
+    .bind(second_plan)
+    .bind(other_plan)
+    .bind(tenant)
+    .bind(other_tenant)
+    .bind(first_profile)
+    .bind(second_profile)
+    .bind(other_profile)
+    .bind(uuid::Uuid::now_v7())
+    .bind(orphan_plan)
+    .bind(gone_creator)
+    .execute(&pool)
+    .await?;
+    sqlx::query("SET session_replication_role = DEFAULT")
+        .execute(&pool)
+        .await?;
+
+    let sql = MIGRATOR
+        .iter()
+        .find(|migration| migration.version == 56)
+        .expect("the plan repository migration is present")
+        .sql
+        .as_str()
+        .to_owned();
+    sqlx::raw_sql(AssertSqlSafe(sql)).execute(&owner).await?;
+
+    let rows: Vec<(uuid::Uuid, uuid::Uuid)> =
+        sqlx::query_as("SELECT id, repository_id FROM plans ORDER BY name")
+            .fetch_all(&pool)
+            .await?;
+    assert_eq!(
+        rows,
+        vec![
+            (first_plan, first_repository),
+            (second_plan, second_repository),
+            (other_plan, other_repository),
+            (orphan_plan, first_repository),
+        ],
+        "each plan keeps the repository of its former profile, also when its creator left"
+    );
+
+    let column: Option<(String,)> = sqlx::query_as(
+        "SELECT column_name FROM information_schema.columns \
+         WHERE table_name = 'profiles' AND column_name = 'repository_id'",
+    )
+    .fetch_optional(&pool)
+    .await?;
+    assert!(column.is_none(), "the profile keeps no repository");
+
+    // The new key refuses a repository of another tenant.
+    let foreign = sqlx::query("UPDATE plans SET repository_id = $2 WHERE id = $1")
+        .bind(first_plan)
+        .bind(other_repository)
+        .execute(&pool)
+        .await;
+    assert_code(foreign, "23503");
+
+    pool.close().await;
+    owner.close().await;
+    admin_query(
+        &admin,
+        &format!("DROP DATABASE IF EXISTS \"{name}\" WITH (FORCE)"),
+    )
+    .await?;
+    admin.close().await;
+    db.cleanup().await;
+    Ok(())
+}
+
 /// ADR-0040: the migration writes one audit record for each profile that held a hook, before it
 /// drops the column.
 #[tokio::test]
@@ -352,7 +534,8 @@ async fn db_the_hook_removal_migration_audits_each_profile_with_hooks() -> TestR
         .bind(tenant)
         .execute(&pool)
         .await?;
-    // The repository is not part of this check, so the foreign keys stay off for the inserts.
+    // The repository and the tenant are not part of this check, so the foreign keys stay off for
+    // the inserts. The profile of this version still holds its repository (ADR-0047).
     sqlx::query("SET session_replication_role = replica")
         .execute(&pool)
         .await?;

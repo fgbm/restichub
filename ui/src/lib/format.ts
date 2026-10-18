@@ -100,6 +100,12 @@ export function formatMinutes(minutes: number): string {
 	return formatSeconds(minutes * 60);
 }
 
+/** A number of hours with the unit of the locale, such as "26 h". A fraction keeps one decimal. */
+export function formatHours(seconds: number): string {
+	const hours = seconds / 3600;
+	return t('duration.h', { h: Number.isInteger(hours) ? hours : hours.toFixed(1) });
+}
+
 /** Seconds as hours, minutes and seconds, such as "2 min 41 s". */
 export function formatSeconds(seconds: number): string {
 	const base = new Date(0).toISOString();
