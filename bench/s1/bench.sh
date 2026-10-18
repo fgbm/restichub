@@ -143,10 +143,10 @@ setup() {
 		offset=$((i * period / count))
 		minutes="$(for k in $(seq 0 $((60 / period - 1))); do printf '%s,' $((offset + k * period)); done)"
 		minutes="${minutes%,}"
-		profile="$(api POST /api/v1/profiles "$(jq -nc --arg r "$repo_id" --arg n "p$(printf '%02d' "$i")" \
-			'{name:$n,repository_id:$r,paths:{all:["/data"]},retention:{keep_last:6,keep_hourly:24,keep_daily:7}}')" | jq -r '.profile.id')"
-		plan="$(api POST /api/v1/plans "$(jq -nc --arg p "$profile" --arg a "$agent" --arg n "b$(printf '%02d' "$i")" --arg c "$minutes * * * *" \
-			'{name:$n,profile_id:$p,agent_id:$a,cron:$c,time_zone:"UTC",missed_run_policy:"skip"}')" | jq -r '.plan.id')"
+		profile="$(api POST /api/v1/profiles "$(jq -nc --arg n "p$(printf '%02d' "$i")" \
+			'{name:$n,paths:{all:["/data"]},retention:{keep_last:6,keep_hourly:24,keep_daily:7}}')" | jq -r '.profile.id')"
+		plan="$(api POST /api/v1/plans "$(jq -nc --arg p "$profile" --arg a "$agent" --arg r "$repo_id" --arg n "b$(printf '%02d' "$i")" --arg c "$minutes * * * *" \
+			'{name:$n,profile_id:$p,agent_id:$a,repository_id:$r,cron:$c,time_zone:"UTC",missed_run_policy:"skip"}')" | jq -r '.plan.id')"
 		echo "$agent $profile $plan" >>"$state_dir/plans.txt"
 		i=$((i + 1))
 	done

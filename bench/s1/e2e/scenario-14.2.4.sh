@@ -23,10 +23,10 @@ repo="$(api POST /api/v1/repositories "$(jq -nc --arg a "$agent" \
 	'{name:"revoke",backend:{kind:"rest",endpoint:"http://rest-server:8000/bench"},password:"bench-repository-password",maintenance_agent_id:$a}')" | jq -r '.id // .repository.id')"
 init_job="$(api POST "/api/v1/repositories/$repo/init" '{}' | jq -r .id)"
 wait_job "$init_job" 120 >/dev/null || true
-profile="$(api POST /api/v1/profiles "$(jq -nc --arg r "$repo" \
-	'{name:"data",repository_id:$r,paths:{all:["/data"]},retention:{keep_last:6}}')" | jq -r '.profile.id')"
-plan="$(api POST /api/v1/plans "$(jq -nc --arg p "$profile" --arg a "$agent" \
-	'{name:"revoke",profile_id:$p,agent_id:$a,cron:"0 3 * * *",time_zone:"UTC",missed_run_policy:"skip"}')" | jq -r '.plan.id')"
+profile="$(api POST /api/v1/profiles "$(jq -nc \
+	'{name:"data",paths:{all:["/data"]},retention:{keep_last:6}}')" | jq -r '.profile.id')"
+plan="$(api POST /api/v1/plans "$(jq -nc --arg p "$profile" --arg a "$agent" --arg r "$repo" \
+	'{name:"revoke",profile_id:$p,agent_id:$a,repository_id:$r,cron:"0 3 * * *",time_zone:"UTC",missed_run_policy:"skip"}')" | jq -r '.plan.id')"
 step 2 "Create the repository, the profile and the plan" PASS "repository $repo, plan $plan"
 
 # The data set must keep the backup running while the revocation runs. The agent holds one TCP
