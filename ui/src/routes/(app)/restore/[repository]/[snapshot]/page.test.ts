@@ -243,9 +243,10 @@ describe('Snapshot page', () => {
 		await user.click(reset()!);
 		expect(field).toHaveValue('/var/lib/restichub-restore/a1b2c3d4');
 		expect(reset()).toBeNull();
+		expect(within(dialog).getByText(/^Restore root:/)).toBeVisible();
 		expect(
 			within(dialog).getByText(
-				'A host restores only inside its restore roots. It does not replace the files of the agent itself.'
+				'A host restores only inside its restore root. It does not replace the files of the agent itself.'
 			)
 		).toBeVisible();
 	});
@@ -258,6 +259,12 @@ describe('Snapshot page', () => {
 		]);
 		render(Snapshot);
 		const dialog = await openDialog(user);
+		expect(within(dialog).getByText(/^Restore roots:/)).toBeVisible();
+		expect(
+			within(dialog).getByText(
+				'A host restores only inside its restore roots. It does not replace the files of the agent itself.'
+			)
+		).toBeVisible();
 		await user.click(within(dialog).getByRole('button', { name: 'Use /mnt/restore' }));
 		expect(within(dialog).getByLabelText(/Target path/)).toHaveValue('/mnt/restore/a1b2c3d4');
 	});
