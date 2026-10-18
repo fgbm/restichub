@@ -580,7 +580,6 @@ async fn ac_pf_02_the_draft_preview_points_to_the_field() {
     let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
     let agent = seed_agent_full(db.database(), tenant, "draft-1", "linux", "0.19.0", &[]).await;
 
-    // A relative path is refused with its field.
     let (status, _, problem) = send(
         &app,
         request(
@@ -599,7 +598,7 @@ async fn ac_pf_02_the_draft_preview_points_to_the_field() {
     assert_eq!(problem["field"], "paths.all");
     assert_eq!(problem["reason"], "invalid_format");
 
-    // The name keeps the rule of a create request.
+    // The draft keeps the validation of a create request (FR-PF-05).
     let (status, _, problem) = send(
         &app,
         request(

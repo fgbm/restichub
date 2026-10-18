@@ -5,7 +5,7 @@
  */
 import { render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '#lib/api/index.ts';
 import ProfileEditor from './ProfileEditor.svelte';
 
@@ -167,6 +167,12 @@ beforeEach(() => {
 			}
 		]
 	});
+});
+
+// A side panel that a test leaves open keeps `pointer-events: none` on the body, which stops the
+// next test from a click.
+afterEach(() => {
+	document.body.style.pointerEvents = '';
 });
 
 function user() {
