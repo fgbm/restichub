@@ -432,12 +432,14 @@
 {/snippet}
 
 {#snippet parameterKindCell(row: ProfileParameterDraft)}
-	<Select
-		value={row.kind}
-		options={kindOptions}
-		onchange={(event) => changeParameterKind(row, event.currentTarget.value)}
-		aria-label={t('parameters.kind')}
-	/>
+	<span class="param-kind">
+		<Select
+			value={row.kind}
+			options={kindOptions}
+			onchange={(event) => changeParameterKind(row, event.currentTarget.value)}
+			aria-label={t('parameters.kind')}
+		/>
+	</span>
 {/snippet}
 
 {#snippet parameterRequiredCell(row: ProfileParameterDraft)}
@@ -989,6 +991,13 @@
 		margin: 0;
 		color: var(--rh-color-text-muted);
 		font-size: var(--rh-font-size-sm);
+	}
+
+	/* A table cell cuts the select to its narrowest width, which hides the end of the longest
+	   option, "Секрет" or "Secret". The cell keeps the width of that option instead. */
+	.param-kind {
+		display: block;
+		min-width: max-content;
 	}
 
 	.grid2 {

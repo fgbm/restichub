@@ -79,3 +79,61 @@ test('ac_pf_07_a_new_required_parameter_names_the_plans_that_it_blocks', async (
 	await expect(page.getByRole('link', { name: 'nightly-db' })).toBeVisible();
 	await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeEnabled();
 });
+
+test('the closed pickers of a plan keep the label and the parts on one row', async ({ page }) => {
+	await sample(page);
+	await signIn(page);
+
+	await nav(page).getByRole('link', { name: 'Plans', exact: true }).click();
+	await page.getByRole('button', { name: 'Add plan' }).click();
+	await expect(page.getByRole('heading', { level: 1, name: 'New plan' })).toBeVisible();
+
+	// The parts of the detail are a chip and a text, and both stay on the line of the label.
+	for (const id of ['#plan-profile', '#plan-repository', '#plan-agent']) {
+		const row = await page.locator(id).evaluate((field) => {
+			const value = field.querySelector('.rh-record__value') as HTMLElement;
+			const line = field.querySelector('.record-line') as HTMLElement;
+			const a = value.getBoundingClientRect();
+			const b = line.getBoundingClientRect();
+			return {
+				directChild: line.parentElement === field,
+				centres: Math.abs(a.top + a.height / 2 - (b.top + b.height / 2))
+			};
+		});
+		expect(row.directChild, `${id} keeps the parts in the row of the field`).toBe(true);
+		expect(row.centres, `${id} puts the parts on the line of the label`).toBeLessThan(1.5);
+	}
+});
+
+for (const width of [1440, 1280]) {
+	test(`the kind of a parameter shows its longest option at ${width} px`, async ({ page }) => {
+		await page.setViewportSize({ width, height: 900 });
+		await sample(page);
+		await signIn(page);
+
+		await nav(page).getByRole('link', { name: 'Profiles', exact: true }).click();
+		await page.getByRole('link', { name: 'db-nightly' }).click();
+		const section = page.getByRole('button', { name: /^Parameters/ });
+		if ((await section.getAttribute('aria-expanded')) !== 'true') await section.click();
+
+		// The cell keeps the width of the longest option, "Secret" or "Секрет", so no letter is cut.
+		const kind = page.locator('[data-section="parameters"] select').first();
+		await expect(kind).toBeVisible();
+		const sizes = await kind.evaluate((select) => {
+			const style = getComputedStyle(select);
+			const context = document.createElement('canvas').getContext('2d') as CanvasRenderingContext2D;
+			context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+			const longest = Math.max(
+				...[...select.options].map((option) => context.measureText(option.text).width)
+			);
+			const room =
+				select.getBoundingClientRect().width -
+				parseFloat(style.paddingLeft) -
+				parseFloat(style.paddingRight) -
+				parseFloat(style.borderLeftWidth) -
+				parseFloat(style.borderRightWidth);
+			return { longest, room };
+		});
+		expect(sizes.room).toBeGreaterThanOrEqual(sizes.longest);
+	});
+}
