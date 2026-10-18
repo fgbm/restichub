@@ -252,6 +252,25 @@ The sign-in screen asks for the username and the password only. The account is i
 - **Note:** the update is a manual step in the MVP. The automatic self-update (FR-AG-13) is planned for 1.0. No criterion covers the in-place update of the package as a whole. The listed criteria cover the package content and the checksum of the trust mode file.
 - **Status:** Ready on the stage.
 
+### UC-AGT-04: Set the parameter values of a host
+
+- **Actor:** an Admin or an Operator.
+- **Preconditions:** the person signs in. The host is enrolled. A profile with a parameter has a plan on the host.
+- **Main flow:**
+  1. Open "Hosts" and open the host. The section "Parameters" lists the parameters of the profiles of the host.
+  2. Enter the value of a text parameter, for example the mount point of the backup path.
+  3. Select a secret of the purpose `hook_secret` as the value of a secret parameter.
+  4. Click "Save".
+- **Expected result:** the section shows the parameters with the marker "Set". The plans of the host use the values. The audit log holds the names of the parameters and the identifiers of the secrets only. The plan save of this host needs no value for a parameter that the host holds.
+- **Alternative flows:**
+  - A new value that leaves a plan without a required value is refused with `parameter_missing_in_plans` and the list of the plans.
+  - A value of the wrong kind is refused with `parameter_kind_mismatch`.
+  - A Viewer sees the names of the parameters without the values.
+  - A secret that a value references cannot be deleted.
+- **Requirements:** FR-PF-10, FR-PF-11, FR-PF-12.
+- **Acceptance criteria:** AC-PF-07, AC-PF-10.
+- **Status:** Blocked by #283.
+
 ## 9. Repository and secret configuration
 
 ### UC-RP-01: Store a repository secret
@@ -315,39 +334,44 @@ The sign-in screen asks for the username and the password only. The account is i
 ### UC-PF-01: Create a backup profile
 
 - **Actor:** an Admin or an Operator.
-- **Preconditions:** the person signs in. An initialized repository exists.
+- **Preconditions:** the person signs in.
 - **Main flow:**
   1. Open "Profiles" and click "Add profile". The profile page opens.
-  2. In the section "Main", enter the name and select the repository.
+  2. In the section "Main", enter the name and the description.
   3. In the section "What to back up", enter the paths for each operating system. Enter the excludes, the tags and the backup options in their sections.
-  4. Set the retention and the scripts when they are needed. The panel "The result" on the right side shows a summary.
-  5. Click "Preview", select a host and read the steps.
-  6. Click "Save".
-- **Expected result:** the preview shows the steps and the equivalent restic command line for the host. The secrets are masked. The profile appears in the list. The audit log holds `profile_create`.
+  4. In the section "Parameters", declare the parameters. Give the name, the kind "Text" or "Secret", the required flag and the default value of a text parameter.
+  5. Set the retention and the scripts when they are needed. The panel "The result" on the right side shows a summary.
+  6. Click "Preview", select a plan and read the steps.
+  7. Click "Save".
+- **Expected result:** the preview shows the steps and the equivalent restic command line of the plan. The secrets and the parameter values are masked. The profile appears in the list. The audit log holds `profile_create`.
 - **Alternative flows:**
   - An incorrect value or an option that the installed restic lacks stops the save. The error points to the field.
   - A profile that fits the host with a warning is saved. The screen shows "The profile is saved with warnings.".
-- **Requirements:** FR-PF-01, FR-PF-04, FR-PF-05.
-- **Acceptance criteria:** AC-PF-01, AC-PF-02.
-- **Status:** Ready on the stage.
+- **Requirements:** FR-PF-01, FR-PF-03, FR-PF-04, FR-PF-05, FR-PF-09.
+- **Acceptance criteria:** AC-PF-01, AC-PF-02, AC-PF-09.
+- **Note:** the profile holds no repository. The plan selects the repository (UC-PL-01).
+- **Status:** Blocked by #283.
 
 ### UC-PL-01: Assign a plan with a schedule
 
 - **Actor:** an Admin or an Operator.
-- **Preconditions:** the person signs in. A profile exists. An agent is enrolled.
+- **Preconditions:** the person signs in. A profile exists. An agent is enrolled. A repository exists.
 - **Main flow:**
   1. Open "Plans" and click "Add plan". The plan page opens.
-  2. In the section "What to back up", select the profile and the host.
-  3. In the section "Schedule", enter the cron expression, or select a preset. Enter the time zone, for example `Europe/Berlin`.
-  4. Select the policy for "Missed runs": "Run every missed run", "Run the latest missed run" or "Skip the missed runs".
-  5. Read the "Next 5 runs" and click "Save".
-- **Expected result:** the plan appears in the list. The panel on the plan page shows the "Next run". The control plane creates a job at each fire time. The audit log holds `plan_create`.
+  2. In the section "What to back up", select the profile, the host and the repository.
+  3. In the section "Parameters", read the required parameters. Enter the value of a parameter that the plan overrides. Leave the other values to the host or to the default.
+  4. In the section "Schedule", enter the cron expression, or select a preset. Enter the time zone, for example `Europe/Berlin`.
+  5. Select the policy for "Missed runs": "Run every missed run", "Run the latest missed run" or "Skip the missed runs".
+  6. Read the "Next 5 runs" and click "Save".
+- **Expected result:** the plan appears in the list. The panel on the plan page shows the "Next run" and the repository. The control plane creates a job at each fire time. The audit log holds `plan_create`.
 - **Alternative flows:**
+  - A required parameter without a value on the plan and on the host stops the save with `parameter_missing` and the names of the parameters.
+  - A local repository whose host differs from the host of the plan stops the save with `not_repository_host`.
   - An incorrect cron expression or time zone stops the save. The error points to the field.
   - A plan that is disabled creates no job.
-- **Requirements:** FR-SC-01, FR-SC-11.
-- **Acceptance criteria:** AC-SC-01.
-- **Status:** Ready on the stage.
+- **Requirements:** FR-SC-01, FR-SC-11, FR-PF-10, FR-PF-11.
+- **Acceptance criteria:** AC-SC-01, AC-PF-06, AC-PF-08, AC-RP-07.
+- **Status:** Blocked by #283.
 
 ## 11. Scheduled and manual backup job
 
@@ -616,11 +640,12 @@ The sign-in screen asks for the username and the password only. The account is i
 | UC-AGT-01 | FR-ID-01, FR-ID-02, FR-ID-05, FR-IN-01, FR-IN-07, FR-IN-08 | AC-ID-01, AC-ID-05, AC-IN-02, AC-IN-03 | Ready on the stage |
 | UC-AGT-02 | FR-ID-04 | AC-ID-04 | Ready on the stage |
 | UC-AGT-03 | FR-IN-07, FR-IN-08, FR-HK-01 | AC-IN-01, AC-HK-02 | Ready on the stage |
+| UC-AGT-04 | FR-PF-10, FR-PF-11, FR-PF-12 | AC-PF-07, AC-PF-10 | Blocked by #283 |
 | UC-RP-01 | FR-RP-03, FR-RP-05 | AC-RP-02 | Ready on the stage |
 | UC-RP-02 | FR-RP-01, FR-RP-02 | AC-RP-01 | Ready on the stage |
 | UC-RP-03 | FR-SC-06, FR-PR-02 | AC-SC-06 | Ready on the stage |
-| UC-PF-01 | FR-PF-01, FR-PF-04, FR-PF-05 | AC-PF-01, AC-PF-02 | Ready on the stage |
-| UC-PL-01 | FR-SC-01, FR-SC-11 | AC-SC-01 | Ready on the stage |
+| UC-PF-01 | FR-PF-01, FR-PF-03, FR-PF-04, FR-PF-05, FR-PF-09 | AC-PF-01, AC-PF-02, AC-PF-09 | Blocked by #283 |
+| UC-PL-01 | FR-SC-01, FR-SC-11, FR-PF-10, FR-PF-11 | AC-SC-01, AC-PF-06, AC-PF-08, AC-RP-07 | Blocked by #283 |
 | UC-JOB-01 | FR-SC-01, FR-SC-02, FR-AG-05 | AC-SC-01, AC-SC-02 | Ready on the stage; blocked by #9 for the log, the summary and the dashboard |
 | UC-JOB-02 | FR-SC-09, FR-AG-10 | AC-SC-09, AC-AG-06 | Ready on the stage; blocked by #9 for the live log |
 | UC-JOB-04 | FR-SC-05, FR-AG-09 | AC-SC-05, AC-AG-05 | Ready on the stage |

@@ -1,6 +1,6 @@
 # ADR-0046: A local repository is bound to its host
 
-- Status: accepted
+- Status: accepted. See [ADR-0047](0047-repository-in-the-plan-and-profile-parameters.md): the plan holds the repository, and the check of this record runs when a plan is saved.
 - Date: 2026-10-17
 - Requirements: FR-RP-01, FR-RP-08, FR-RP-10, AC-RP-05, AC-RP-06, AC-RP-07, AC-RP-08, AC-RP-09
 - Related: ADR-0035, ADR-0041

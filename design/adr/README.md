@@ -39,7 +39,7 @@ To write a new record, copy [0000-template.md](0000-template.md) and use the nex
 | [0031](0031-bundled-restic-in-agent-package.md) | Agent package with a bundled restic | accepted, bundling superseded by ADR-0038 |
 | [0032](0032-manual-agent-registration-and-service-install.md) | Manual agent registration and service install | accepted |
 | [0033](0033-enrollment-transport-and-agent-trust-bootstrap.md) | Enrollment transport and agent trust bootstrap | accepted |
-| [0034](0034-repository-maintenance-schedule.md) | Repository maintenance schedule and retention isolation | accepted |
+| [0034](0034-repository-maintenance-schedule.md) | Repository maintenance schedule and retention isolation | accepted, partly amended by ADR-0047 (the plans of the repository) |
 | [0035](0035-restore-and-snapshot-browsing.md) | Restore and snapshot browsing | accepted |
 | [0036](0036-alerts-and-notification-channels.md) | Alerts, notification channels and the recovery point objective | accepted |
 | [0037](0037-server-scripts-on-trusted-hosts.md) | Server scripts on trusted hosts | accepted |
@@ -51,4 +51,5 @@ To write a new record, copy [0000-template.md](0000-template.md) and use the nex
 | [0043](0043-no-grace-for-unlisted-running-jobs.md) | No grace for a running job that the hello omits | accepted |
 | [0044](0044-host-online-state.md) | The host online state is an open stream recorded in the database | accepted |
 | [0045](0045-repository-roots-for-local-repositories.md) | Repository roots for local repositories | accepted |
-| [0046](0046-local-repository-bound-to-its-host.md) | A local repository is bound to its host | accepted |
+| [0046](0046-local-repository-bound-to-its-host.md) | A local repository is bound to its host | accepted, partly amended by ADR-0047 (the plan holds the repository) |
+| [0047](0047-repository-in-the-plan-and-profile-parameters.md) | The repository in the plan, and profile parameters | accepted |
