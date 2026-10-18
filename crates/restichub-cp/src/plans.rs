@@ -67,6 +67,7 @@ pub struct CreatePlanRequest {
     pub profile_id: String,
     pub agent_id: String,
     /// The repository that the plan backs up into (ADR-0047).
+    #[schema(required)]
     #[serde(default)]
     pub repository_id: Option<String>,
     pub cron: String,
@@ -96,6 +97,7 @@ pub struct UpdatePlanRequest {
     pub profile_id: String,
     pub agent_id: String,
     /// The repository that the plan backs up into (ADR-0047). An absent value is refused.
+    #[schema(required)]
     #[serde(default)]
     pub repository_id: Option<String>,
     pub cron: String,
@@ -856,10 +858,9 @@ async fn check_references(
     plan_values: &[restichub_db::parameters::ParameterValue],
     now: time::OffsetDateTime,
 ) -> Result<(), ApiError> {
-    // Lock order plan -> profile -> agent -> repository. The repository update locks repository ->
-    // plans, so the repository row here cannot change its host between the check and the write. A
-    // replace locks agent -> plans -> repositories, so the agent that the write binds is locked
-    // before the repository.
+    // The repository row is locked for update, so its host cannot change between this check and the
+    // write: the repository update takes the same lock first. The locks of a plan write come in the
+    // order plan, profile, agent, repository.
     let profile = match profiles_repo::get_for_share(tx, profile_id).await? {
         Some(profile) => profile,
         None => return Err(ApiError::invalid_field("profile_id", Reason::Unknown)),

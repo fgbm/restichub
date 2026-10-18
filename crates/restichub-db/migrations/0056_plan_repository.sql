@@ -10,13 +10,29 @@
 --
 -- The maintenance job reads the plans of one repository, and the delete of a repository asks which
 -- plans hold it, so the new key has an index (FR-RP-08).
+--
+-- The owner login runs this migration, and FORCE ROW LEVEL SECURITY applies to the owner (ADR-0023),
+-- so one plain UPDATE sees no plans and no profiles. The copy therefore runs in the tenant scope of
+-- each tenant: the platform scope reads the tenants, and the tenant setting shows their rows to the
+-- policies.
 
 ALTER TABLE plans ADD COLUMN repository_id uuid;
 
-UPDATE plans p
-SET repository_id = pr.repository_id
-FROM profiles pr
-WHERE pr.tenant_id = p.tenant_id AND pr.id = p.profile_id;
+DO $$
+DECLARE
+    owner uuid;
+BEGIN
+    PERFORM set_config('restichub.scope', 'platform', true);
+    FOR owner IN SELECT id FROM tenants LOOP
+        PERFORM set_config('restichub.tenant_id', owner::text, true);
+        UPDATE plans p
+        SET repository_id = pr.repository_id
+        FROM profiles pr
+        WHERE pr.tenant_id = p.tenant_id AND pr.id = p.profile_id;
+    END LOOP;
+    PERFORM set_config('restichub.tenant_id', '', true);
+    PERFORM set_config('restichub.scope', '', true);
+END $$;
 
 ALTER TABLE plans ALTER COLUMN repository_id SET NOT NULL;
 

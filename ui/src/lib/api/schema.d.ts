@@ -2109,7 +2109,7 @@ export interface components {
             parameter_values?: components["schemas"]["ParameterValueDef"][];
             profile_id: string;
             /** @description The repository that the plan backs up into (ADR-0047). */
-            repository_id?: string | null;
+            repository_id: string | null;
             /**
              * Format: int32
              * @description The recovery point objective in seconds, from 900 to 34560000. Absent or null uses the
@@ -3767,7 +3767,7 @@ export interface components {
             parameter_values?: components["schemas"]["ParameterValueDef"][];
             profile_id: string;
             /** @description The repository that the plan backs up into (ADR-0047). An absent value is refused. */
-            repository_id?: string | null;
+            repository_id: string | null;
             /**
              * Format: int32
              * @description The recovery point objective in seconds. Null restores the default of the schedule.
@@ -8283,7 +8283,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemBody"];
                 };
             };
-            /** @description A profile holds the repository (`repository_in_use`), or an active job does (`repository_has_active_job`). The body lists the records. */
+            /** @description A plan backs up into the repository (`repository_in_use`), or an active job holds it (`repository_has_active_job`). The body lists the records. */
             409: {
                 headers: {
                     [name: string]: unknown;

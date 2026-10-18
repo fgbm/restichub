@@ -401,8 +401,10 @@ async fn fr_rp_08_a_forget_that_selects_nothing_gives_a_warning() {
     env.db.cleanup().await;
 }
 
+/// The check step reads the largest subset among the profiles of the plans of this repository only
+/// (FR-PF-01, AC-RP-13).
 #[tokio::test]
-async fn fr_pf_01_the_check_step_reads_the_largest_subset() {
+async fn ac_rp_13_the_check_step_reads_the_largest_subset_of_this_repository() {
     let Some(db) = common::test_db().await else {
         return;
     };
@@ -415,6 +417,12 @@ async fn fr_pf_01_the_check_step_reads_the_largest_subset() {
             .await;
         env.create_plan(profile, maintenance.id, repository).await;
     }
+    // A profile with plans in another repository only takes no part in this check.
+    let elsewhere = initialized_local_repository(&env, maintenance.id).await;
+    let foreign = env
+        .create_profile(json!({"check": {"read_data_subset": "5/5"}}))
+        .await;
+    env.create_plan(foreign, maintenance.id, elsewhere).await;
 
     let (status, queued) = env
         .call(
