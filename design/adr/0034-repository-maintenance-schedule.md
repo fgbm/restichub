@@ -1,6 +1,6 @@
 # ADR-0034: Repository maintenance schedule and retention isolation
 
-- Status: accepted
+- Status: accepted. See [ADR-0047](0047-repository-in-the-plan-and-profile-parameters.md) for the profiles of the plans of a repository.
 - Date: 2026-10-14
 - Requirements: FR-RP-08, FR-SC-02, FR-SC-04, FR-PF-01, FR-PF-04, AC-RP-04, AC-SC-03
 

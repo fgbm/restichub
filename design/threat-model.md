@@ -12,6 +12,7 @@ Status: draft. Date: 2026-10-12. The maintainers review this document before eac
 | Job signing keys (current and next) | Control plane database, wrapped by the KEK (ADR-0026) |
 | CA private keys (root and issuing) | Control plane database, wrapped by the KEK (ADR-0026) |
 | Agent private keys | Each agent host |
+| Parameter values of hosts and plans | Control plane database. A secret value is a reference to a secret of the purpose `hook_secret`, never the text. A text value is masked (FR-PF-12). |
 | Trust mode file | Each agent host |
 | Audit log | Control plane database |
 

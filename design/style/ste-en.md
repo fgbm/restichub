@@ -87,8 +87,10 @@ Vale enforces the limit of each sentence. The average and the reading ease descr
 | host | A computer with an agent | machine, box |
 | tenant | An organization: the isolation unit that owns hosts, repositories, plans, profiles, secrets and memberships (ADR-0006, ADR-0024, ADR-0025) | customer, organization (for this concept) |
 | repository | A restic repository | repo, storage |
-| profile | A backup definition | config, preset |
-| plan | A profile assigned to agents, with a schedule | task, schedule (for this concept) |
+| profile | A backup definition: what to back up and how | config, preset |
+| plan | A profile assigned to a host, with a repository and a schedule | task, schedule (for this concept) |
+| profile parameter | A value that a profile declares for its plans; a host or a plan sets the value | variable, argument, setting (for this concept) |
+| parameter value | The value of a profile parameter on a host or on a plan | variable value, argument value, setting (for this concept) |
 | job | One run of a plan or a manual operation | task, run (as a noun) |
 | step | One command in a job | action, stage |
 | script | A command text that runs before or after restic on a host with the trust mode | hook, trigger |
