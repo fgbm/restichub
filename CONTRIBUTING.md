@@ -8,6 +8,8 @@ Thank you for your help. This document tells you how to make a change.
 2. For a large change, open an issue first. Describe the problem and your proposal.
 3. If your change alters an accepted decision, write a new ADR. Use the [template](design/adr/0000-template.md).
 
+The [milestones](https://github.com/fgbm/restichub/milestones) hold the public roadmap.
+
 ## Developer Certificate of Origin
 
 All commits must have a `Signed-off-by` line. This line tells that you have the right to submit the change under the project license. Use `git commit -s`. The project does not use a Contributor License Agreement.
