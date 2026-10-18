@@ -482,3 +482,70 @@ async fn ac_tn_01_the_host_rule_stays_in_the_tenant() {
     assert!(!off_host, "another tenant does not see the plans");
     env.db.cleanup().await;
 }
+
+async fn set_os(env: &Env, agent: AgentId, os: &str) {
+    let mut tx = env.scoped().await;
+    sqlx::query("UPDATE agents SET os = $2 WHERE id = $1")
+        .bind(agent)
+        .bind(os)
+        .execute(&mut *tx)
+        .await
+        .expect("cannot set the system");
+    tx.commit().await.expect("cannot commit the system");
+}
+
+#[tokio::test]
+async fn ac_rp_05_the_path_format_fits_the_host_system() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let linux = env.connect_agent("lo-linux").await;
+    let windows = env.connect_agent("lo-windows").await;
+    set_os(&env, windows.id, "windows").await;
+
+    // A drive path on a Linux host and a path from `/` on a Windows host are refused.
+    for (path, host) in [("C:\\backup\\a", linux.id), ("/srv/backup/a", windows.id)] {
+        let (status, body) = env
+            .call(
+                &env.admin,
+                "POST",
+                "/api/v1/repositories",
+                Some(local_body(path, Some(host))),
+            )
+            .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{path}: {body}");
+        assert_field(&body, "backend.path", "path_on_other_os");
+    }
+
+    let matching = [("/srv/backup/a", linux.id), ("C:\\backup\\a", windows.id)];
+    for (path, host) in matching {
+        let (status, body) = env
+            .call(
+                &env.admin,
+                "POST",
+                "/api/v1/repositories",
+                Some(local_body(path, Some(host))),
+            )
+            .await;
+        assert_eq!(status, StatusCode::CREATED, "{path}: {body}");
+    }
+
+    // An update to a path of the other format is refused, and so is a move to a host of the other
+    // system.
+    let repository = env.create_repository(linux.id, "pw").await;
+    let (status, body) = env
+        .call(
+            &env.admin,
+            "PATCH",
+            &format!("/api/v1/repositories/{repository}"),
+            Some(json!({"backend": {"kind": "local", "path": "D:\\other"}})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_field(&body, "backend.path", "path_on_other_os");
+    let (status, body) = set_host(&env, repository, &windows.id.to_string()).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_field(&body, "backend.path", "path_on_other_os");
+    env.db.cleanup().await;
+}

@@ -86,6 +86,7 @@ pub struct SnapshotsQuery {
 
 /// Query of a snapshot list read.
 #[derive(Debug, Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 #[serde(deny_unknown_fields)]
 pub struct SnapshotsParams {
     /// Identifier that an earlier POST returned. Without it the call returns the newest stored list.
@@ -142,6 +143,7 @@ pub struct LsQueryRequest {
 
 /// Query of a tree page read.
 #[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 #[serde(deny_unknown_fields)]
 pub struct LsParams {
     /// Identifier that the POST of the page returned. The call needs it.

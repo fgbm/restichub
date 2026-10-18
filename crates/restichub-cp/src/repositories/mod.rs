@@ -41,9 +41,9 @@ pub use settings::{
     RepositoryListResponse, RepositoryView, UpdateRepositoryRequest,
 };
 use settings::{
-    bind_new_credentials, created_diff, current_diff, ensure_agent, parse_optional_agent_id,
-    replace_credentials, repository_location, updated_diff, validate_backend, validate_credentials,
-    validate_secret_value, validated_from_row,
+    bind_new_credentials, created_diff, current_diff, ensure_agent, ensure_path_fits_host,
+    parse_optional_agent_id, replace_credentials, repository_location, updated_diff,
+    validate_backend, validate_credentials, validate_secret_value, validated_from_row,
 };
 
 pub(crate) use settings::{parse_repository_id, stored_location};
@@ -168,6 +168,7 @@ pub async fn create_repository(
     let owner = repository_id.to_string();
     let mut tx = state.db().begin_tenant(context.tenant_id).await?;
     ensure_agent(&mut tx, maintenance_agent_id).await?;
+    ensure_path_fits_host(&mut tx, backend.local_path.as_deref(), maintenance_agent_id).await?;
     location::ensure_location_free(
         &mut tx,
         &location::key_of_backend(&backend, maintenance_agent_id),
@@ -332,6 +333,7 @@ pub async fn update_repository(
         }
     }
     if location_changed {
+        ensure_path_fits_host(&mut tx, backend.local_path.as_deref(), agent).await?;
         location::ensure_location_free(
             &mut tx,
             &location::key_of_backend(&backend, agent),

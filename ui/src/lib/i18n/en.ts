@@ -1570,6 +1570,8 @@ export const en = {
 	'reason.out_of_range': 'The value is out of range.',
 	'reason.not_repository_host':
 		'The repository is local. Select the repository host: its path is on that host only.',
+	'reason.path_on_other_os':
+		'The path format does not fit the system of the host. Use a path from "/" on Linux and macOS, and a drive path such as C:\\backup on Windows.',
 	'reason.plan_on_other_host':
 		'A plan of the repository runs on another host. A local repository works on its own host only.',
 	'scripts.title': 'Scripts',

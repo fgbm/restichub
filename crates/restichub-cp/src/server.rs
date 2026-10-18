@@ -561,8 +561,9 @@ fn base_openapi() -> OpenApiDocument {
 /// Adds the request ID to every problem response and logs the internal cause once.
 ///
 /// The extractors and the handlers build an [`ApiError`] with no request ID. The mapper reads the
-/// request ID from the request extension and writes it into the body. It logs the cause of an
-/// internal error with the same request ID, so the cause is not lost.
+/// request ID from the request extension and writes it into the body. It logs the cause of a
+/// server error with the same request ID, so the cause is not lost. The cause of a client error goes
+/// to the debug level.
 async fn finalize_problem(request: Request, next: Next) -> Response {
     let request_id = request
         .extensions()
@@ -572,7 +573,11 @@ async fn finalize_problem(request: Request, next: Next) -> Response {
         .to_owned();
     let mut response = next.run(request).await;
     if let Some(cause) = response.extensions_mut().remove::<InternalCause>() {
-        tracing::error!(request_id = %request_id, error = %cause.0, "internal error");
+        if response.status().is_server_error() {
+            tracing::error!(request_id = %request_id, error = %cause.0, "internal error");
+        } else {
+            tracing::debug!(request_id = %request_id, error = %cause.0, "rejected request input");
+        }
     }
     if is_problem(&response) {
         inject_request_id(response, &request_id).await

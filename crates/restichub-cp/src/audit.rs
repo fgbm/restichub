@@ -112,6 +112,7 @@ pub struct AuditPageResponse {
 }
 
 #[derive(Debug, Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 #[serde(deny_unknown_fields)]
 pub struct AuditQuery {
     /// Start of the time range in RFC 3339.
@@ -134,6 +135,32 @@ pub struct AuditQuery {
     /// Skipped records, in `0..=10000`. Not with `cursor`.
     pub offset: Option<i64>,
     pub limit: Option<i64>,
+}
+
+/// The query parameters that the tenant audit route documents. The route reads rows of the caller's
+/// tenant only (ADR-0006), so the documentation omits `tenant_id`.
+#[derive(IntoParams)]
+#[into_params(parameter_in = Query)]
+#[allow(dead_code)]
+pub struct TenantAuditParams {
+    /// Start of the time range in RFC 3339.
+    from: Option<String>,
+    /// End of the time range in RFC 3339.
+    to: Option<String>,
+    action: Option<String>,
+    actor_type: Option<String>,
+    /// Needs `actor_type`.
+    actor_id: Option<String>,
+    object_type: Option<String>,
+    object_id: Option<String>,
+    /// A part of the action code, the object name or the actor name, in any case; at most 200
+    /// characters.
+    q: Option<String>,
+    /// Not with `offset`.
+    cursor: Option<String>,
+    /// Skipped records, in `0..=10000`. Not with `cursor`.
+    offset: Option<i64>,
+    limit: Option<i64>,
 }
 
 impl AuditQuery {
@@ -274,7 +301,7 @@ fn decode_cursor(value: &str) -> Result<repo::AuditCursor, String> {
     get,
     path = "/api/v1/audit",
     security(("cookie" = []), ("bearer" = [])),
-    params(AuditQuery),
+    params(TenantAuditParams),
     responses(
         (status = 200, description = "The audit records of the tenant.", body = AuditPageResponse),
         (status = 400, description = "A query parameter is not valid."),

@@ -37,6 +37,7 @@ pub struct CreateTenantRequest {
 }
 
 #[derive(Debug, Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct TenantListQuery {
     /// `active`, `suspended` or `deleted`.
     pub status: Option<String>,
