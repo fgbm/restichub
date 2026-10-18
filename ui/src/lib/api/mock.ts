@@ -603,7 +603,8 @@ function sampleScripts(): ScriptDef[] {
 				{ name: 'PGUSER', kind: 'string', value: 'postgres' },
 				{ name: 'PGPASSWORD', kind: 'secret_ref', value: 's_db' },
 				{ name: 'PGDATABASE', kind: 'string', value: 'app' },
-				{ name: 'DUMP_DIR', kind: 'string', value: '/var/backups/postgres' }
+				// The dump directory is a parameter of the profile, not a text in the script.
+				{ name: 'DUMP_DIR', kind: 'parameter', value: 'pg_dir' }
 			],
 			template_id: 'builtin:postgres-dump-bash'
 		},

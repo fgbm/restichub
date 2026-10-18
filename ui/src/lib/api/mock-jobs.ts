@@ -140,6 +140,8 @@ const SCRIPTED_LINES: [string, Draft][] = [
 	['script-0', ['info', 'free: 214 GB, needed: 10 GB', 'stdout']],
 	['script-0', ['info', 'script Check free disk space finished with code 0', 'agent']],
 	['script-1', ['info', 'script Dump the PostgreSQL database started', 'agent']],
+	// The agent masks the value that came from the parameter, as it masks a secret (FR-PF-12).
+	['script-1', ['info', 'PGPASSWORD=•••••• pg_dump -h db.local -U backup appdb', 'stdout']],
 	['script-1', ['info', 'dump written: /var/backups/postgres/app.dump', 'stdout']],
 	['script-1', ['info', 'script Dump the PostgreSQL database finished with code 0', 'agent']],
 	['backup', ['info', 'using parent snapshot 7f3c9a10', 'stdout']],
