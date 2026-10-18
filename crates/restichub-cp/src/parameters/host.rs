@@ -6,7 +6,8 @@
 //!
 //! A Viewer reads the names, the kinds, the required flags, the names of the secrets and the
 //! profiles that need each parameter, and the server hides every text value (FR-PF-12). An Admin
-//! and an Operator change the values (owner decision, ADR-0047).
+//! and an Operator change the text values; only an Admin changes a value of the kind `secret`
+//! (ADR-0047).
 
 use std::collections::{BTreeMap, BTreeSet};
 
