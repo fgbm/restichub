@@ -67,13 +67,9 @@
 	let profileFilter = $state('');
 
 	const profileOptions: RecordOption[] = [
-		{ value: 'p1', label: 'user-profiles', description: ['test-s3-yandex', { tag: 'S3' }] },
-		{ value: 'p2', label: 'db-hourly', description: ['rest-main', { tag: 'REST' }] },
-		{
-			value: 'p3',
-			label: 'nas-files',
-			description: ['nas-local', { tag: 'Local' }, 'host MINDCORE']
-		}
+		{ value: 'p1', label: 'user-profiles', description: ['/home', '7 d · 4 wk'] },
+		{ value: 'p2', label: 'db-hourly', description: ['/var/backups/pg +2', '3 d'] },
+		{ value: 'p3', label: 'nas-files', description: ['/srv/files'] }
 	];
 
 	const menuItems: MenuItem[] = [

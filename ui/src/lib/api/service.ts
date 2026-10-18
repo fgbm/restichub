@@ -197,7 +197,7 @@ export interface ApiService {
 	/** What blocks the delete of the profile now. */
 	profileUsage(id: string): Promise<UsageView>;
 	/** The compiled steps of a profile for one agent, with masked secrets (FR-PF-04). */
-	previewProfile(id: string, agentId: string): Promise<PreviewResponse>;
+	previewProfile(id: string, agentId: string, repositoryId?: string): Promise<PreviewResponse>;
 
 	/** The plans of the tenant (FR-SC-01). */
 	listPlans(): Promise<Plan[]>;
@@ -394,9 +394,10 @@ const httpService: ApiService = {
 	updateProfile: (id, request) => api.patch<ProfileResponse>(endpoints.profiles.byId(id), request),
 	deleteProfile: (id) => api.delete<void>(endpoints.profiles.byId(id)),
 	profileUsage: (id) => api.get<UsageView>(endpoints.profiles.usage(id)),
-	previewProfile: (id, agentId) =>
+	previewProfile: (id, agentId, repositoryId) =>
 		api.post<PreviewResponse>(endpoints.profiles.preview(id), {
-			agent_id: agentId
+			agent_id: agentId,
+			repository_id: repositoryId ?? null
 		} satisfies PreviewRequest),
 
 	listPlans: () => allPages<Plan>(endpoints.plans.list),

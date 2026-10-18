@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Agent, Profile, Repository } from '#lib/api/index.ts';
+	import type { Profile } from '#lib/api/index.ts';
 	import { t } from '#lib/i18n/index.ts';
 	import { plural } from '#lib/list-format.ts';
 	import { profileOptions } from '#lib/profile-picker.ts';
@@ -8,15 +8,11 @@
 	let {
 		value = $bindable(''),
 		profiles,
-		repositories,
-		agents,
 		label = t('plans.profile'),
 		...rest
 	}: {
 		value?: string;
-		profiles: readonly Pick<Profile, 'id' | 'name' | 'repository_id'>[];
-		repositories: readonly Pick<Repository, 'id' | 'name' | 'backend' | 'maintenance_agent_id'>[];
-		agents: readonly Pick<Agent, 'id' | 'hostname'>[];
+		profiles: readonly Pick<Profile, 'id' | 'name' | 'paths' | 'retention'>[];
 		label?: string;
 		id?: string;
 		help?: string;
@@ -32,7 +28,7 @@
 <RecordPicker
 	bind:value
 	{label}
-	options={profileOptions(profiles, repositories, agents)}
+	options={profileOptions(profiles)}
 	searchPlaceholder={t('profilePicker.search')}
 	emptyLabel={profiles.length === 0 ? t('profilePicker.none') : undefined}
 	countLabel={(count) => plural('profilePicker.count', count)}

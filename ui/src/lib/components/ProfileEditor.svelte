@@ -14,11 +14,14 @@
 		PreviewResponse,
 		Profile,
 		ProfileWarning,
+		Repository,
 		ScriptTemplate,
 		Secret,
 		UpdateProfileRequest
 	} from '#lib/api/index.ts';
+	import HostPicker from './HostPicker.svelte';
 	import ProfileSection from './ProfileSection.svelte';
+	import RepositoryPicker from './RepositoryPicker.svelte';
 	import RetentionEditor from './RetentionEditor.svelte';
 	import RichText from './RichText.svelte';
 	import ScriptsEditor from './ScriptsEditor.svelte';
@@ -51,7 +54,7 @@
 		MAX_TAGS
 	} from '#lib/profile-form.ts';
 	import type { Os, ProfileDraft, SummaryKey } from '#lib/profile-form.ts';
-	import { loadPreference, savePreference } from '#lib/stores/ui-preferences.svelte.ts';
+	import { repositoryAddress } from '#lib/repository-picker.ts';
 	import { rememberSections } from '#lib/section-state.svelte.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
@@ -67,12 +70,11 @@
 	} = $props();
 
 	const SECTIONS = SUMMARY_ORDER;
-	const OS_VALUES: readonly string[] = ['linux', 'windows', 'macos'];
 
 	let loading = $state(true);
 	let loadError = $state<string | null>(null);
 	let existing = $state<Profile | null>(null);
-	let repositories = $state<{ id: string; name: string }[]>([]);
+	let repositories = $state<Repository[]>([]);
 	let agents = $state<Agent[]>([]);
 	let plans = $state<Plan[]>([]);
 	let scriptTemplates = $state<ScriptTemplate[]>([]);
@@ -86,14 +88,6 @@
 	let formError = $state<string | null>(null);
 	let formProblem = $state<ApiProblem | null>(null);
 	let warnings = $state<ProfileWarning[]>([]);
-	let os = $state(
-		loadPreference(
-			'browser',
-			'commands.os',
-			(value): value is string => typeof value === 'string' && OS_VALUES.includes(value),
-			'linux'
-		)
-	);
 	let copied = $state(false);
 	const open = rememberSections(
 		'profile',
@@ -116,34 +110,33 @@
 		);
 		return agents.filter((agent) => ids.has(agent.id));
 	});
-	const repositoryOptions = $derived<SelectOption[]>(
-		repositories.map((item) => ({ value: item.id, label: item.name }))
-	);
-	const repositoryName = $derived(
-		repositories.find((item) => item.id === draft.repositoryId)?.name ?? ''
-	);
 	const scriptCounts = $derived({
 		before: draft.scripts.filter((script) => script.phase === 'before').length,
 		after: draft.scripts.filter((script) => script.phase !== 'before').length
 	});
-	const summaries = $derived(summarize(draft, repositoryName, scriptCounts, limitDefaults));
+	const summaries = $derived(summarize(draft, scriptCounts, limitDefaults));
 	const counts = $derived(enabledCount(summaries));
+	const activeHosts = $derived(agents.filter((agent) => agent.status === 'active'));
+	const commandHost = $derived(activeHosts.find((agent) => agent.id === commandHostId));
+	const commandRepository = $derived(repositories.find((item) => item.id === commandRepositoryId));
+	// The OS of the chosen host decides the paths and the flags of the commands; the person does
+	// not guess Windows or Linux (FR-PF-04).
+	const commandOs = $derived<Os>(
+		commandHost?.os === 'windows' ? 'windows' : commandHost?.os === 'darwin' ? 'macos' : 'linux'
+	);
 	const steps = $derived(
 		buildSteps(
 			draft,
-			os as Os,
+			commandOs,
 			draft.scripts.map((script) => ({
 				name: script.name,
 				phase: script.phase === 'before' ? ('before' as const) : ('after' as const)
-			}))
+			})),
+			commandRepository ? repositoryAddress(commandRepository) : null
 		)
 	);
 	const stateKey = $derived(
-		JSON.stringify([
-			draft.name,
-			draft.repositoryId,
-			settingsOf(draft, { canEditScripts: true, existing })
-		])
+		JSON.stringify([draft.name, settingsOf(draft, { canEditScripts: true, existing })])
 	);
 	const dirty = $derived(!loading && stateKey !== baseline);
 	// A copy is a record that is not saved yet, even before the first change.
@@ -189,6 +182,10 @@
 			repositories = repositoryList;
 			agents = agentList;
 			plans = planList;
+			// The commands panel opens with a host and a repository, which the person changes.
+			commandHostId = agentList.find((agent) => agent.status === 'active')?.id ?? '';
+			commandRepositoryId =
+				repositoryList.find((item) => item.initialized)?.id ?? repositoryList[0]?.id ?? '';
 			if (profileId) {
 				const found = profileList.find((item) => item.id === profileId);
 				if (!found) {
@@ -203,7 +200,7 @@
 					draft = draftFromProfile(source);
 					draft.name = t('profiles.copyName', { name: source.name });
 				} else {
-					draft = emptyDraft(repositoryList[0]?.id ?? '', defaults);
+					draft = emptyDraft(defaults);
 				}
 			}
 			// The templates and the secrets serve the script editor only. A failure leaves the
@@ -218,7 +215,6 @@
 			secrets = secretList.status === 'fulfilled' ? secretList.value : [];
 			baseline = JSON.stringify([
 				draft.name,
-				draft.repositoryId,
 				settingsOf(draft, { canEditScripts: true, existing })
 			]);
 		} catch (problem) {
@@ -248,7 +244,6 @@
 		const field = formProblem?.field ?? '';
 		const target: [string, string][] = [
 			['name', 'basics'],
-			['repository_id', 'basics'],
 			['paths', 'paths'],
 			['excludes', 'excludes'],
 			['exclude_files', 'excludes'],
@@ -274,11 +269,7 @@
 		formProblem = null;
 		try {
 			const shared = settingsOf(draft, { canEditScripts, existing });
-			const request = {
-				name: draft.name,
-				repository_id: draft.repositoryId,
-				...shared
-			};
+			const request = { name: draft.name, ...shared };
 			const response = existing
 				? await service.updateProfile(existing.id, request as UpdateProfileRequest)
 				: await service.createProfile(request as CreateProfileRequest);
@@ -323,13 +314,26 @@
 		previewOpen = true;
 	}
 
+	// A profile has no repository (ADR-0047), so the preview takes the repository of a plan of this
+	// profile on the chosen host. Without such a plan the answer carries none.
+	function previewRepositoryFor(agentId: string): string | undefined {
+		const plan =
+			plans.find((item) => item.profile_id === existing?.id && item.agent_id === agentId) ??
+			plans.find((item) => item.profile_id === existing?.id);
+		return plan?.repository_id;
+	}
+
 	async function runPreview(): Promise<void> {
 		if (!existing || !previewAgentId) return;
 		previewLoading = true;
 		previewProblem = null;
 		previewResult = null;
 		try {
-			previewResult = await service.previewProfile(existing.id, previewAgentId);
+			previewResult = await service.previewProfile(
+				existing.id,
+				previewAgentId,
+				previewRepositoryFor(previewAgentId)
+			);
 		} catch (problem) {
 			previewProblem = problemOf(problem);
 		} finally {
@@ -338,6 +342,8 @@
 	}
 
 	let commandsOpen = $state(false);
+	let commandHostId = $state('');
+	let commandRepositoryId = $state('');
 	const hasPaths = $derived(
 		[draft.pathsAll, draft.pathsWindows, draft.pathsLinux, draft.pathsMacos].some(
 			(text) => text.trim() !== ''
@@ -410,24 +416,14 @@
 		required
 		bind:open={open.basics}
 	>
-		<div class="grid2">
-			<TextField
-				id="profile-name"
-				label={t('profiles.profile')}
-				help={t('names.help')}
-				error={nameError(draft.name) ?? fieldError(formProblem, 'name')}
-				bind:value={draft.name}
-				required
-			/>
-			<Select
-				id="profile-repository"
-				label={t('profiles.repository')}
-				options={repositoryOptions}
-				error={fieldError(formProblem, 'repository_id')}
-				bind:value={draft.repositoryId}
-				required
-			/>
-		</div>
+		<TextField
+			id="profile-name"
+			label={t('profiles.profile')}
+			help={t('names.help')}
+			error={nameError(draft.name) ?? fieldError(formProblem, 'name')}
+			bind:value={draft.name}
+			required
+		/>
 	</ProfileSection>
 
 	<ProfileSection
@@ -705,19 +701,18 @@
 		subtitle={t('pe.commands.description')}
 	>
 		<div class="commands">
-			<div class="os">
-				<label for="preview-os">{t('pe.side.os')}</label>
-				<Select
-					id="preview-os"
-					options={[
-						{ value: 'linux', label: 'Linux' },
-						{ value: 'windows', label: 'Windows' },
-						{ value: 'macos', label: 'macOS' }
-					]}
-					bind:value={os}
-					onchange={() => savePreference('browser', 'commands.os', os)}
+			<div class="grid2">
+				<HostPicker id="commands-host" hosts={activeHosts} bind:value={commandHostId} />
+				<RepositoryPicker
+					id="commands-repository"
+					{repositories}
+					{agents}
+					bind:value={commandRepositoryId}
 				/>
 			</div>
+			{#if !commandRepository}
+				<p class="muted">{t('pe.commands.noRepository')}</p>
+			{/if}
 			{#each steps as step, index (step.kind + index)}
 				<div class="step">
 					<div class="step__title">{step.title}</div>
@@ -759,6 +754,9 @@
 			{#if previewLoading}
 				<p class="preview__hint">{t('common.loading')}</p>
 			{:else if previewResult}
+				{#if !previewResult.repository_id}
+					<p class="preview__hint">{t('profiles.previewNoRepository')}</p>
+				{/if}
 				{#each previewResult.steps as step (step.kind + step.command)}
 					<div class="step">
 						<div class="step__head">
@@ -787,13 +785,6 @@
 </RecordPage>
 
 <style>
-	.os {
-		display: flex;
-		align-items: center;
-		gap: var(--rh-space-2);
-		font-size: var(--rh-font-size-sm);
-	}
-
 	.step__title {
 		margin-bottom: var(--rh-space-1);
 		color: var(--rh-color-text-muted);

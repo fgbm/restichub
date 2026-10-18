@@ -17,7 +17,6 @@ export type RuleKey =
 
 export interface ProfileDraft {
 	name: string;
-	repositoryId: string;
 	pathsAll: string;
 	pathsWindows: string;
 	pathsLinux: string;
@@ -133,10 +132,9 @@ function joinLines(values: string[] | undefined): string {
 	return (values ?? []).join('\n');
 }
 
-export function emptyDraft(repositoryId = '', defaults?: JobLimitDefaults): ProfileDraft {
+export function emptyDraft(defaults?: JobLimitDefaults): ProfileDraft {
 	return {
 		name: '',
-		repositoryId,
 		pathsAll: '',
 		pathsWindows: '',
 		pathsLinux: '',
@@ -174,7 +172,7 @@ export function emptyDraft(repositoryId = '', defaults?: JobLimitDefaults): Prof
 }
 
 export function draftFromProfile(profile: Profile): ProfileDraft {
-	const draft = emptyDraft(profile.repository_id);
+	const draft = emptyDraft();
 	const options = profile.options;
 	draft.name = profile.name;
 	draft.pathsAll = joinLines(profile.paths?.all);
@@ -522,7 +520,6 @@ function limitText(
 
 export function summarize(
 	draft: ProfileDraft,
-	repositoryName: string,
 	scriptCounts: { before: number; after: number },
 	defaults?: JobLimitDefaults
 ): Record<SummaryKey, Summary> {
@@ -578,7 +575,7 @@ export function summarize(
 	return {
 		basics: {
 			state: draft.name.trim() ? 'on' : 'warn',
-			text: `${draft.name.trim() || t('pe.sum.noName')} · ${repositoryName || t('pe.sum.noRepository')}`
+			text: draft.name.trim() || t('pe.sum.noName')
 		},
 		paths:
 			pathCounts.length > 0
@@ -624,10 +621,15 @@ function quote(value: string): string {
 export function buildSteps(
 	draft: ProfileDraft,
 	os: Os,
-	scripts: { name: string; phase: 'before' | 'after' }[]
+	scripts: { name: string; phase: 'before' | 'after' }[],
+	/** The repository as restic names it in `-r`; absent leaves the commands without one. */
+	repository: string | null = null
 ): PreviewStep[] {
 	const on = draft.enabled;
 	const steps: PreviewStep[] = [];
+	// The prefix of a restic command: the binary and the repository, when the person chose one.
+	const restic = (command: string[]): string =>
+		['restic', ...(repository === null ? [] : ['-r', quote(repository)]), ...command].join(' ');
 	const own =
 		os === 'windows' ? draft.pathsWindows : os === 'macos' ? draft.pathsMacos : draft.pathsLinux;
 	const paths = [...splitLines(draft.pathsAll), ...splitLines(own)];
@@ -642,7 +644,7 @@ export function buildSteps(
 		}
 	};
 	scriptSteps('before');
-	const backup = ['restic backup'];
+	const backup = [restic(['backup'])];
 	if (on.tags) for (const tag of draft.tags) backup.push(`--tag ${quote(tag)}`);
 	if (on.excludes) {
 		for (const item of splitLines(draft.excludes)) backup.push(`--exclude ${quote(item)}`);
@@ -664,7 +666,7 @@ export function buildSteps(
 	steps.push({ kind: 'backup', title: t('pe.cmd.backup'), command: backup.join(' \\\n  ') });
 	scriptSteps('after');
 	if (on.retention && hasRetentionRules(draft)) {
-		const forget = ['restic forget'];
+		const forget = [restic(['forget'])];
 		const group = groupByOf(draft);
 		if (group.length > 0) forget.push(`--group-by ${group.join(',')}`);
 		for (const rule of RULES) {
@@ -683,7 +685,9 @@ export function buildSteps(
 		steps.push({
 			kind: 'check',
 			title: t('pe.cmd.check'),
-			command: `restic check${subset ? ` --read-data-subset ${quote(subset)}` : ''}`
+			command: [restic(['check']), ...(subset ? ['--read-data-subset', quote(subset)] : [])].join(
+				' \\\n  '
+			)
 		});
 	}
 	return steps;

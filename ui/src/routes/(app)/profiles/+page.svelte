@@ -10,15 +10,14 @@
 	import { facetCounts, matchesSearch, splitList } from '#lib/filters.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
-	import type { MessageKey } from '#lib/i18n/index.ts';
 	import { plural } from '#lib/list-format.ts';
+	import { profilePathText, profileRetention } from '#lib/profile-picker.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 	import { fromRefusal, fromUsage, type BlockedView } from '#lib/delete-check.ts';
 	import { ENTITY_ICONS } from '#lib/vocabulary.ts';
 
 	let profiles = $state<Profile[]>([]);
-	let repositories = $state<{ id: string; name: string }[]>([]);
 	let plans = $state<Plan[]>([]);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
@@ -30,33 +29,19 @@
 	let deleting = $state(false);
 
 	const canWrite = $derived(['admin', 'operator'].includes(getSession()?.role ?? ''));
-	const repositoryNames = $derived(new Map(repositories.map((item) => [item.id, item.name])));
 	const planCounts = $derived.by(() => {
 		const counts: Record<string, number> = {};
 		for (const plan of plans) counts[plan.profile_id] = (counts[plan.profile_id] ?? 0) + 1;
 		return counts;
 	});
 
-	function repositoryName(profile: Profile): string {
-		return repositoryNames.get(profile.repository_id) ?? profile.repository_id;
-	}
-
 	function planCount(profile: Profile): number {
 		return planCounts[profile.id] ?? 0;
 	}
 
-	const filters = queryFilters(['q', 'repository', 'tag', 'state', 'sort', 'order'] as const);
+	const filters = queryFilters(['q', 'tag', 'state', 'sort', 'order'] as const);
 
 	const facets = $derived<FilterFacet[]>([
-		{
-			key: 'repository',
-			label: t('profiles.repository'),
-			exact: !loading && !error,
-			options: facetCounts(profiles, (profile) => [profile.repository_id]).map((option) => ({
-				...option,
-				label: repositoryNames.get(option.value) ?? option.value
-			}))
-		},
 		{
 			key: 'tag',
 			label: t('profiles.tags'),
@@ -66,9 +51,9 @@
 
 	const matching = $derived(
 		profiles.filter((profile) => {
-			const { q, repository, tag } = filters.value;
-			if (!matchesSearch(q, [profile.name, repositoryName(profile), ...profile.tags])) return false;
-			if (repository && !splitList(repository).includes(profile.repository_id)) return false;
+			const { q, tag } = filters.value;
+			if (!matchesSearch(q, [profile.name, profilePathText(profile), ...profile.tags]))
+				return false;
 			if (tag && !splitList(tag).some((item) => profile.tags.includes(item))) return false;
 			return true;
 		})
@@ -106,60 +91,18 @@
 	});
 
 	const filtered = $derived(
-		profiles.length > 0 &&
-			Boolean(
-				filters.value.q || filters.value.repository || filters.value.tag || filters.value.state
-			)
+		profiles.length > 0 && Boolean(filters.value.q || filters.value.tag || filters.value.state)
 	);
 
 	function resetFilters(): void {
-		filters.update({ q: '', repository: '', tag: '', state: '' });
-	}
-
-	function firstPath(profile: Profile): { first: string; total: number } | null {
-		const paths = profile.paths;
-		const all = [
-			...(paths.all ?? []),
-			...(paths.windows ?? []),
-			...(paths.linux ?? []),
-			...(paths.macos ?? [])
-		];
-		return all.length > 0 ? { first: all[0], total: all.length } : null;
-	}
-
-	const RETENTION: [keyof NonNullable<Profile['retention']>, MessageKey][] = [
-		['keep_last', 'profiles.short.last'],
-		['keep_hourly', 'profiles.short.hourly'],
-		['keep_daily', 'profiles.short.daily'],
-		['keep_weekly', 'profiles.short.weekly'],
-		['keep_monthly', 'profiles.short.monthly'],
-		['keep_yearly', 'profiles.short.yearly']
-	];
-
-	function retentionShort(profile: Profile): string {
-		const retention = profile.retention;
-		if (!retention) return '';
-		const parts = RETENTION.filter(([key]) => Number(retention[key] ?? 0) > 0).map(
-			([key, message]) => t(message, { count: Number(retention[key]) })
-		);
-		if (retention.keep_within) {
-			parts.push(t('profiles.short.within', { value: retention.keep_within }));
-		}
-		return parts.join(' · ');
+		filters.update({ q: '', tag: '', state: '' });
 	}
 
 	function meta(profile: Profile): ListMeta[] {
-		const path = firstPath(profile);
 		const count = planCount(profile);
 		return [
-			repositoryName(profile),
-			path
-				? {
-						text: path.total > 1 ? `${path.first} +${path.total - 1}` : path.first,
-						mono: true
-					}
-				: null,
-			retentionShort(profile),
+			{ text: profilePathText(profile), mono: true },
+			profileRetention(profile),
 			count > 0 ? plural('profiles.plans', count) : t('profiles.noPlans')
 		];
 	}
@@ -194,13 +137,11 @@
 		loading = true;
 		error = null;
 		try {
-			const [profileList, repositoryList, planList] = await Promise.all([
+			const [profileList, planList] = await Promise.all([
 				service.listProfiles(),
-				service.listRepositories(),
 				service.listPlans()
 			]);
 			profiles = profileList;
-			repositories = repositoryList;
 			plans = planList;
 		} catch (problem) {
 			error = messageOf(problem);
