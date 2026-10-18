@@ -1374,7 +1374,10 @@ export class MockApiService {
 		const broken = this.plans
 			.filter((plan) => plan.agent_id === id)
 			.filter((plan) => this.missingValues(plan).length > 0);
-		if (broken.length > 0) throw this.plansRefusal(broken);
+		if (broken.length > 0) {
+			const names = [...new Set(broken.flatMap((plan) => this.missingValues(plan)))];
+			throw this.plansRefusal(broken, names);
+		}
 		return { agent_id: id, parameters: this.parameterTable(id) };
 	}
 
@@ -1486,12 +1489,13 @@ export class MockApiService {
 	}
 
 	/// The refusal that names the plans without a required value (FR-PF-11).
-	private plansRefusal(plans: Plan[]): ApiError {
+	private plansRefusal(plans: Plan[], names: string[] = []): ApiError {
 		return new ApiError({
 			status: 400,
 			code: 'parameter_missing_in_plans',
 			title: 'Bad Request',
 			field: 'parameters',
+			parameters: names,
 			blockers: {
 				items: plans.map((plan) => ({ kind: 'plan', id: plan.id, name: plan.name })),
 				total: plans.length
@@ -2272,7 +2276,10 @@ export class MockApiService {
 		const broken = this.plans
 			.filter((plan) => plan.profile_id === id)
 			.filter((plan) => this.missingValues(plan, updated).length > 0);
-		if (broken.length > 0) throw this.plansRefusal(broken);
+		if (broken.length > 0) {
+			const names = [...new Set(broken.flatMap((plan) => this.missingValues(plan, updated)))];
+			throw this.plansRefusal(broken, names);
+		}
 		this.profiles = this.profiles.map((item) => (item.id === id ? updated : item));
 		return { profile: updated, warnings: warningsFor(updated), plan_warnings: [] };
 	}

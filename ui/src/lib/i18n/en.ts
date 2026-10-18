@@ -1837,6 +1837,7 @@ export const en = {
 	'hp.param.hint':
 		'The values are shared by every profile on this host. The server refuses a change that leaves a plan without a required value, and lists the plans.',
 	'hp.param.value': 'Value',
+	'hp.param.valueOf': 'Value of {name}',
 	'hp.param.neededBy': 'Needed by',
 	'hp.param.unused': 'No profile needs it',
 	'hp.param.fromDefault': 'default: {value}',
