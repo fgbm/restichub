@@ -860,7 +860,7 @@ export const en = {
 	'jobs.reason.forget_selected_nothing': 'Forget selected no snapshots',
 	'jobs.reason.agent_capability_missing': 'The agent is too old for this job. Update the agent.',
 	'jobs.reason.restore_target_denied':
-		'The host refused the target path. It lies outside the restore roots or holds a file of the agent.',
+		'The host refused the target path. It lies outside the restore directories or holds a file of the agent.',
 	'jobs.reason.repository_path_denied':
 		'The host refused the local repository path. Add its root to /etc/restichub-agent-repository-roots.txt on the host and run install-service.',
 	'jobs.reason.repository_read_only':
@@ -1199,7 +1199,7 @@ export const en = {
 	'error.agent_capability_missing':
 		'The host runs an older agent that cannot do this. Update the agent package and try again.',
 	'error.restore_target_denied':
-		'The host does not restore to this path. Use a restore root of the host. An administrator adds a root on the host.',
+		'The host does not restore to this path. Use a restore directory of the host. An administrator adds a directory on the host.',
 	'error.repository_location_taken':
 		'The repository "{name}" already uses this location. Use another location or the existing repository.',
 	'error.repository_host_locked':
@@ -1304,10 +1304,10 @@ export const en = {
 	'restore.dialog.targetPlaceholder': 'e.g. /srv/restore',
 	'restore.dialog.targetRelative': 'Enter an absolute path.',
 	'restore.dialog.targetOutside':
-		'This path is outside the restore roots. Choose a restore root or a folder inside it.',
-	'restore.dialog.rootsNone': 'The host reports no restore root',
+		'This path is outside the restore directories. Choose a restore directory or a folder inside it.',
+	'restore.dialog.rootsNone': 'The host reports no restore directory',
 	'restore.dialog.rootsNoneBody':
-		'The host cannot restore until an administrator configures a restore root on it. Update the agent package or add a root and install the service again.',
+		'The host cannot restore until an administrator configures a restore directory on it. Update the agent package or add a directory and install the service again.',
 	'restore.dialog.verifyDryRun': 'A dry run writes no file, so there is nothing to verify.',
 	'restore.dialog.overwrite': 'Existing files',
 	'restore.dialog.dryRun': 'Dry run',
@@ -1355,12 +1355,12 @@ export const en = {
 	'restore.dialog.excludes': 'Exclude paths',
 	'restore.dialog.excludesHelp':
 		'Optional. restic patterns such as *.tmp or /var/cache, one for each line. The restore skips the paths that match.',
-	'restore.dialog.rootLabel': 'Restore root',
-	'restore.dialog.rootsLabel': 'Restore roots',
+	'restore.dialog.rootLabel': 'Restore directory',
+	'restore.dialog.rootsLabel': 'Restore directories',
 	'restore.dialog.rootRule':
-		'A host restores only inside its restore root. It does not replace the files of the agent itself.',
+		'A host restores only inside its restore directory. It does not replace the files of the agent itself.',
 	'restore.dialog.rootsRule':
-		'A host restores only inside its restore roots. It does not replace the files of the agent itself.',
+		'A host restores only inside its restore directories. It does not replace the files of the agent itself.',
 	'restore.dialog.rootUse': 'Use {root}',
 	'restore.dialog.targetReset': 'Reset to the default path',
 	'restore.dialog.hostsLink': 'Open hosts',
@@ -1725,9 +1725,9 @@ export const en = {
 	'hp.section.jobs': 'Jobs and plans',
 	'hp.section.danger': 'Dangerous actions',
 	'hp.summary.general': '{os} · {arch} · agent {version}',
-	'hp.summary.noRoots': 'No restore root reported',
-	'hp.summary.root': 'One restore root',
-	'hp.summary.roots': 'Restore roots: {count}',
+	'hp.summary.noRoots': 'No restore directory reported',
+	'hp.summary.root': 'One restore directory',
+	'hp.summary.roots': 'Restore directories: {count}',
 	'hp.summary.jobs': 'Recent jobs: {count}',
 	'hp.summary.danger': 'Re-register, replace or revoke',
 	'hp.f.restic': 'restic version',
@@ -1740,16 +1740,16 @@ export const en = {
 	'hp.f.rotation': 'Last renewal',
 	'hp.cert.superseded':
 		'An old certificate connected {time}. Re-register the host if you did not expect it.',
-	'hp.restore.root': 'Restore root',
-	'hp.restore.roots': 'Restore roots',
+	'hp.restore.root': 'Restore directory',
+	'hp.restore.roots': 'Restore directories',
 	'hp.restore.ruleOne':
 		'The host restores files only into this directory. It denies a target outside it and never replaces the files of the agent itself.',
 	'hp.restore.rule':
 		'The host restores files only into these directories. It denies a target outside them and never replaces the files of the agent itself.',
 	'hp.restore.none':
-		'The host reported no restore root, so a restore to this host is not possible.',
+		'The host reported no restore directory, so a restore to this host is not possible.',
 	'hp.restore.noneHint':
-		'Set a restore root on the host: update the agent package and install the service again.',
+		'Set a restore directory on the host: update the agent package and install the service again.',
 	'hp.restore.link': 'Restore to this host',
 	'hp.jobs.recent': 'Recent jobs',
 	'hp.jobs.none': 'This host has no jobs yet.',

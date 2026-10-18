@@ -222,7 +222,7 @@ describe('Snapshot page', () => {
 		await user.type(field, '/etc');
 		expect(
 			within(dialog).getByText(
-				'This path is outside the restore roots. Choose a restore root or a folder inside it.'
+				'This path is outside the restore directories. Choose a restore directory or a folder inside it.'
 			)
 		).toBeVisible();
 		expect(within(dialog).queryByText('System path')).toBeNull();
@@ -243,10 +243,10 @@ describe('Snapshot page', () => {
 		await user.click(reset()!);
 		expect(field).toHaveValue('/var/lib/restichub-restore/a1b2c3d4');
 		expect(reset()).toBeNull();
-		expect(within(dialog).getByText(/^Restore root:/)).toBeVisible();
+		expect(within(dialog).getByText(/^Restore directory:/)).toBeVisible();
 		expect(
 			within(dialog).getByText(
-				'A host restores only inside its restore root. It does not replace the files of the agent itself.'
+				'A host restores only inside its restore directory. It does not replace the files of the agent itself.'
 			)
 		).toBeVisible();
 	});
@@ -259,10 +259,10 @@ describe('Snapshot page', () => {
 		]);
 		render(Snapshot);
 		const dialog = await openDialog(user);
-		expect(within(dialog).getByText(/^Restore roots:/)).toBeVisible();
+		expect(within(dialog).getByText(/^Restore directories:/)).toBeVisible();
 		expect(
 			within(dialog).getByText(
-				'A host restores only inside its restore roots. It does not replace the files of the agent itself.'
+				'A host restores only inside its restore directories. It does not replace the files of the agent itself.'
 			)
 		).toBeVisible();
 		await user.click(within(dialog).getByRole('button', { name: 'Use /mnt/restore' }));

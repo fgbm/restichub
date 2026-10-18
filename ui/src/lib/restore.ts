@@ -79,7 +79,7 @@ function normalize(path: string, windows: boolean): string {
 }
 
 /**
- * True when `target` is a restore root or lies inside one. The agent checks the path again and
+ * True when `target` is a restore directory or lies inside one. The agent checks the path again and
  * resolves links, so this is the early answer. A Windows path ignores case.
  */
 export function isWithinRoots(target: string, roots: readonly string[], windows: boolean): boolean {
@@ -100,7 +100,7 @@ export function suggestTarget(root: string | undefined, name: string, windows: b
 }
 
 /**
- * True when the screen warns about the target. A target inside a narrow restore root is the
+ * True when the screen warns about the target. A target inside a narrow restore directory is the
  * choice of the administrator, even when the root lies below a system directory. A root that is a
  * whole file system or drive keeps the warning.
  */

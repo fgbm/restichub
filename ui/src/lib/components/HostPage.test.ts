@@ -106,7 +106,7 @@ describe('the host page', () => {
 		mocks.listAlerts.mockResolvedValue({ items: [], next_cursor: null });
 	});
 
-	it('shows the properties, the restore roots and the rule for the targets', async () => {
+	it('shows the properties, the restore directories and the rule for the targets', async () => {
 		render(HostPage, { hostId: 'a_01' });
 
 		expect(await screen.findByRole('heading', { level: 1, name: 'srv-db-01' })).toBeVisible();
@@ -116,7 +116,7 @@ describe('the host page', () => {
 		expect(screen.getByText('prod')).toBeInTheDocument();
 		expect(screen.getByDisplayValue('/var/lib/restichub-restore')).toBeInTheDocument();
 		expect(screen.getByText(/never replaces the files of the agent itself/)).toBeInTheDocument();
-		expect(screen.getByText('Restore root')).toBeInTheDocument();
+		expect(screen.getByText('Restore directory')).toBeInTheDocument();
 		expect(screen.getByText(/only into this directory/)).toBeInTheDocument();
 		expect(screen.getByText('Linux')).toBeInTheDocument();
 		expect(screen.queryByText('linux')).not.toBeInTheDocument();
@@ -124,20 +124,20 @@ describe('the host page', () => {
 		expect(screen.getByDisplayValue('0f01')).toBeInTheDocument();
 	});
 
-	it('names several restore roots in the plural', async () => {
+	it('names several restore directories in the plural', async () => {
 		mocks.getAgent.mockResolvedValue(
 			agent({ restore_roots: ['/var/lib/restichub-restore', '/mnt/restore'] })
 		);
 		render(HostPage, { hostId: 'a_01' });
-		expect(await screen.findByText('Restore roots')).toBeInTheDocument();
+		expect(await screen.findByText('Restore directories')).toBeInTheDocument();
 		expect(screen.getByText(/only into these directories/)).toBeInTheDocument();
 	});
 
-	it('ac_rs_05 explains a host without restore roots', async () => {
+	it('ac_rs_05 explains a host without restore directories', async () => {
 		mocks.getAgent.mockResolvedValue(agent({ restore_roots: [] }));
 		render(HostPage, { hostId: 'a_01' });
 
-		expect(await screen.findByText(/reported no restore root/)).toBeInTheDocument();
+		expect(await screen.findByText(/reported no restore directory/)).toBeInTheDocument();
 		expect(screen.getByText(/update the agent package/)).toBeInTheDocument();
 	});
 
@@ -286,7 +286,7 @@ describe('the host page', () => {
 		const side = screen.getByRole('complementary');
 		const state = within(side).getByText('Connection').closest('.key-value__row') as HTMLElement;
 		expect(within(state).getByText('Online')).toBeInTheDocument();
-		expect(within(side).queryByText('Restore roots')).not.toBeInTheDocument();
+		expect(within(side).queryByText('Restore directories')).not.toBeInTheDocument();
 		expect(within(side).queryByText('Last seen')).not.toBeInTheDocument();
 	});
 
