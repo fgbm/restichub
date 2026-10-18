@@ -221,6 +221,9 @@ pub async fn build(
         .map_err(delivery_error)?,
     );
 
+    // An agent without `script-masked-value` rejects `masked_value`, so it gets the same text as a
+    // secret value, which it masks in the step log (FR-PF-12, ADR-0047).
+    super::compat::fit_masked_values(&mut steps, &capabilities);
     record_script_run(tx, job, &steps).await?;
 
     let mut expires_at = now + MAX_SIGNED_LIFETIME;

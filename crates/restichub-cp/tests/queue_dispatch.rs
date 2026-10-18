@@ -8,8 +8,9 @@ mod queue_support;
 
 use std::time::Duration;
 
+use axum::http::StatusCode;
 use restichub_proto::agent::v1::repository_access::BackendCredentials;
-use restichub_proto::agent::v1::step;
+use restichub_proto::agent::v1::{script_env, step};
 use serde_json::json;
 
 use queue_support::{Env, decode_job_id, test_queue};
@@ -422,7 +423,7 @@ async fn a_profile_that_no_longer_compiles_fails_the_job_with_a_typed_reason() {
 
 /// FR-PF-11: the job builder checks the values again and ends the job with `config_error`.
 #[tokio::test]
-async fn ac_pf_06_a_job_without_a_required_parameter_ends_with_config_error() {
+async fn fr_pf_11_a_job_without_a_required_parameter_ends_with_config_error() {
     let Some(db) = common::test_db().await else {
         return;
     };
@@ -456,5 +457,95 @@ async fn ac_pf_06_a_job_without_a_required_parameter_ends_with_config_error() {
     assert_eq!(body["result_code"], "config_error");
     assert_eq!(body["result_message"], "parameter_missing");
     assert!(agent.try_job(Duration::from_millis(300)).await.is_none());
+    env.db.cleanup().await;
+}
+
+/// The value of one variable of the first script step of a job.
+fn script_value(job: &restichub_proto::agent::v1::Job, name: &str) -> script_env::Value {
+    let Some(step::Kind::Script(script)) = &job.steps[0].kind else {
+        panic!("the first step is a script");
+    };
+    script
+        .env
+        .iter()
+        .find(|variable| variable.name == name)
+        .and_then(|variable| variable.value.clone())
+        .expect("the variable")
+}
+
+/// FR-PF-12: a text parameter reaches an old agent as a secret value, because that agent rejects
+/// `masked_value` and masks a secret value the same way (ADR-0047).
+#[tokio::test]
+async fn fr_pf_12_an_old_agent_receives_a_parameter_value_as_a_secret_value() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let interpreters = vec![
+        restichub_proto::agent::v1::ScriptInterpreter::Bash,
+        restichub_proto::agent::v1::ScriptInterpreter::Sh,
+    ];
+    let agent = env
+        .connect_agent_trusting("masked-host", true, interpreters.clone())
+        .await;
+    let repository = env.create_repository(agent.id, "pw").await;
+    let profile = env
+        .create_profile(json!({
+            "paths": {"all": ["/data/{{param.pg_dir}}"]},
+            "parameters": [{"name": "pg_dir", "kind": "text", "required": true}],
+            "scripts": [{
+                "name": "dump",
+                "interpreter": "bash",
+                "phase": "before",
+                "body": "echo dump",
+                "timeout_seconds": 60,
+                "failure_policy": "abort_backup",
+                "env": [{"name": "PGDIR", "kind": "parameter", "value": "pg_dir"}],
+            }],
+        }))
+        .await;
+    let (status, body) = env
+        .call(
+            &env.admin,
+            "PUT",
+            &format!("/api/v1/agents/{}/parameters", agent.id),
+            Some(json!({"parameters": [{"name": "pg_dir", "kind": "text", "value": "/srv/pg"}]})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let plan = env.create_plan(profile, agent.id, repository).await;
+
+    // The agent that announces `script-masked-value` keeps the marking of the text value.
+    let mut current = agent;
+    env.run_plan(plan).await;
+    env.pass().await;
+    let signed = current.job().await;
+    let job = env.verify(&signed, &current).await;
+    assert_eq!(
+        script_value(&job, "PGDIR"),
+        script_env::Value::MaskedValue("/srv/pg".to_owned())
+    );
+
+    // The agent comes back from a package that knows no `masked_value`.
+    let old: Vec<String> = restichub_proto::AgentCapability::ALL
+        .iter()
+        .filter(|capability| **capability != restichub_proto::AgentCapability::ScriptMaskedValue)
+        .map(|capability| capability.as_str().to_owned())
+        .collect();
+    let mut current = env
+        .reconnect_agent_reporting(
+            &current,
+            old,
+            queue_support::scripts_report(true, interpreters),
+        )
+        .await;
+    env.run_plan(plan).await;
+    env.pass().await;
+    let signed = current.job().await;
+    let job = env.verify(&signed, &current).await;
+    assert_eq!(
+        script_value(&job, "PGDIR"),
+        script_env::Value::SecretValue("/srv/pg".to_owned())
+    );
     env.db.cleanup().await;
 }
