@@ -417,20 +417,6 @@ pub fn audit_values(values: &[ParameterValue]) -> Value {
 /// The marker of a value that the diff names but does not show.
 pub const CHANGED: &str = "<changed>";
 
-/// The wire form of the stored values (FR-PF-10).
-#[must_use]
-pub fn to_wire(values: &[ParameterValue]) -> Vec<ParameterValueDef> {
-    values
-        .iter()
-        .map(|value| ParameterValueDef {
-            name: value.name.clone(),
-            kind: value.kind,
-            value: value.value.clone(),
-            secret_id: value.secret_id.map(|id| id.to_string()),
-        })
-        .collect()
-}
-
 /// Resolves the value of each declared parameter for one plan (FR-PF-10).
 ///
 /// The order is the plan, the host, then the default. A value of another kind than the declaration

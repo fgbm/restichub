@@ -2127,7 +2127,7 @@ export interface components {
             /** @description Free text of 1 to 100 characters. Unique in the tenant, ignoring the letter case. Holds no control or format character. */
             name: string;
             options?: components["schemas"]["BackupOptions"];
-            /** @description The parameters that the profile declares (FR-PF-09). At most 64. */
+            /** @description What the profile offers to its hosts (FR-PF-09). At most 64. */
             parameters?: components["schemas"]["ParameterDef"][];
             paths?: components["schemas"]["ProfilePaths"];
             retention?: components["schemas"]["Retention"] | null;
@@ -2419,7 +2419,7 @@ export interface components {
         /** @description One row of the parameter table of a host (FR-PF-10, FR-PF-12). */
         HostParameterView: {
             /**
-             * @description The default value of a text parameter. Null for a secret, when no profile declares a default
+             * @description What a text parameter falls back to. Null for a secret, when no profile declares a value
              *     and when the reader may not see it.
              */
             default_value?: string | null;
@@ -2436,7 +2436,10 @@ export interface components {
             unused: boolean;
             value?: components["schemas"]["ParameterValueView"] | null;
         };
-        /** @description The parameter table of a host (FR-PF-10). */
+        /**
+         * @description What the page of a host shows: the values that it holds and the parameters of the profiles of
+         *     its plans (FR-PF-10).
+         */
         HostParametersResponse: {
             agent_id: string;
             parameters: components["schemas"]["HostParameterView"][];
@@ -2834,7 +2837,7 @@ export interface components {
          *     The type is separate from [`ParameterDef`] because it holds the marker of a hidden value.
          */
         ParameterDefView: {
-            /** @description The default value of a text parameter. For a Viewer it is empty with the flag `hidden`. */
+            /** @description What a text parameter falls back to. Empty with the flag `hidden` for a Viewer. */
             default_value?: string | null;
             description?: string | null;
             /** @description True when the server hid the default value from this reader (FR-PF-12). */
@@ -2860,7 +2863,7 @@ export interface components {
             name: string;
             /** @description The identifier of a secret of the purpose `hook_secret`, for a `secret` parameter. */
             secret_id?: string | null;
-            /** @description The value of a `text` parameter, 1 to 4096 characters. */
+            /** @description A text of 1 to 4096 characters, for a `text` parameter. */
             value?: string | null;
         };
         /** @description The value of one parameter on a host (FR-PF-12). */
@@ -2868,9 +2871,9 @@ export interface components {
             kind: components["schemas"]["ParameterKind"];
             /** @description The identifier of the secret of a secret parameter. */
             secret_id?: string | null;
-            /** @description The name of that secret, which is not a secret. */
+            /** @description What the referenced secret is called; a name is not a secret. */
             secret_name?: string | null;
-            /** @description The text value. Null for a secret and for a reader without the right to see it. */
+            /** @description The text as the reader sees it; null for a secret and for a hidden text. */
             value?: string | null;
         };
         PlanListResponse: {
@@ -2886,7 +2889,7 @@ export interface components {
             /** @description The identifier of the secret of a secret parameter. */
             secret_id?: string | null;
             secret_name?: string | null;
-            /** @description The text value. Empty with the flag `hidden` for a Viewer. */
+            /** @description The text as the reader sees it: empty with the flag `hidden` for a Viewer (FR-PF-12). */
             value?: string | null;
         };
         PlanResponse: {
@@ -3087,7 +3090,7 @@ export interface components {
             /** @description Set by `invalid_argument`, `username_taken` and `email_taken`. */
             field?: string | null;
             /**
-             * @description The names of the parameters that the request lacks. Only `parameter_missing` and
+             * @description The names that a `parameter_missing` refusal lists. Only `parameter_missing` and
              *     `parameter_kind_mismatch` set it (FR-PF-11).
              */
             parameters?: string[] | null;
@@ -3139,7 +3142,7 @@ export interface components {
             name: string;
             options: components["schemas"]["BackupOptions"];
             /**
-             * @description The declared parameters (FR-PF-09). For a Viewer, a text default is empty with the flag
+             * @description What the profile declares (FR-PF-09). For a Viewer, a text default is empty with the flag
              *     `hidden` (FR-PF-12).
              */
             parameters: components["schemas"]["ParameterDefView"][];
