@@ -14,7 +14,7 @@ mod validate;
 
 pub use audit::{profile_value, stored_value};
 pub use save::save_warnings;
-pub use validate::{validate_create, validate_update};
+pub use validate::{validate_create, validate_draft, validate_update};
 
 use std::collections::BTreeMap;
 

@@ -59,6 +59,26 @@ pub fn validate_create(body: CreateProfileRequest) -> Result<ValidatedProfile, A
     )
 }
 
+/// Validates a preview draft and returns the normalized settings (FR-PF-04).
+///
+/// A new profile has no name until the first save, so an empty name is not a draft error.
+pub fn validate_draft(body: CreateProfileRequest) -> Result<ValidatedProfile, ApiError> {
+    reject_hooks(body.hooks.as_deref())?;
+    let name = (!body.name.trim().is_empty()).then_some(body.name);
+    validate_profile(
+        name,
+        body.paths,
+        body.excludes,
+        body.exclude_files,
+        body.tags,
+        body.options,
+        body.scripts,
+        body.retention,
+        body.check,
+        body.parameters,
+    )
+}
+
 /// Validates an update request. `current_name` is used when the body holds no name.
 pub fn validate_update(
     body: UpdateProfileRequest,
@@ -89,6 +109,7 @@ fn reject_hooks(hooks: Option<&[serde_json::Value]>) -> Result<(), ApiError> {
 
 #[allow(clippy::too_many_arguments)]
 fn validate_profile(
+    // `None` skips the name check: a preview of a new profile has no name yet (FR-PF-04).
     name: Option<String>,
     paths: ProfilePaths,
     excludes: Vec<String>,
@@ -100,7 +121,10 @@ fn validate_profile(
     check: Option<CheckOptions>,
     parameters: Vec<ParameterDefRequest>,
 ) -> Result<ValidatedProfile, ApiError> {
-    let name = crate::validation::validate_record_name("name", &name.unwrap_or_default())?;
+    let name = match name {
+        Some(name) => crate::validation::validate_record_name("name", &name)?,
+        None => String::new(),
+    };
     let paths = validate_paths(paths)?;
     let excludes = validate_patterns("excludes", excludes)?;
     ensure_count("excludes", excludes.len(), MAX_EXCLUDES)?;

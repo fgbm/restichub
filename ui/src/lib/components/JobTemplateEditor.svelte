@@ -13,8 +13,8 @@
 	import ProfileSection from './ProfileSection.svelte';
 	import ScriptsEditor from './ScriptsEditor.svelte';
 	import { RecordPage, SummaryPanel } from './layout/index.ts';
-	import { Alert, Button, ConfirmDialog, Icon, TextField } from './ui/index.ts';
-	import type { KeyValueItem } from './ui/index.ts';
+	import { Alert, Button, ConfirmDialog, DangerZone, Icon, TextField } from './ui/index.ts';
+	import type { DangerAction, KeyValueItem } from './ui/index.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import { changedAt, plural } from '#lib/list-format.ts';
 	import { draftOf, scriptOf, templateDescription, templateName } from '#lib/scripts.ts';
@@ -32,7 +32,7 @@
 		copyFrom?: string | null;
 	} = $props();
 
-	type SectionKey = 'basics' | 'scripts';
+	type SectionKey = 'basics' | 'scripts' | 'danger';
 
 	let loading = $state(true);
 	let loadError = $state<string | null>(null);
@@ -44,7 +44,7 @@
 	let formError = $state<string | null>(null);
 	let formProblem = $state<ApiProblem | null>(null);
 	let baseline = $state('');
-	let open = $state<Record<SectionKey, boolean>>({ basics: true, scripts: true });
+	let open = $state<Record<SectionKey, boolean>>({ basics: true, scripts: true, danger: true });
 
 	let name = $state('');
 	let description = $state('');
@@ -174,6 +174,21 @@
 		}
 	}
 
+	// A built-in template has no dangerous action, so the section appears for an own template only.
+	const dangerActions = $derived.by<DangerAction[]>(() => {
+		if (!existing || existing.builtin || !canWrite) return [];
+		return [
+			{
+				key: 'delete',
+				text: t('jobTemplates.danger.delete'),
+				label: t('scriptTemplates.delete'),
+				icon: 'trash',
+				tone: 'danger',
+				onclick: () => (deleteOpen = true)
+			}
+		];
+	});
+
 	// The run order of the phases around the backup (FR-HK-12).
 	const BEFORE: HookPhase[] = ['before'];
 	const AFTER: HookPhase[] = ['after', 'on_success', 'on_error', 'finally'];
@@ -269,16 +284,6 @@
 			<Button variant={existing.builtin ? 'primary' : 'secondary'} icon="copy" onclick={openCopy}>
 				{t('jobTemplates.copy')}
 			</Button>
-			{#if !existing.builtin}
-				<Button
-					variant="ghost"
-					icon="trash"
-					class="btn--quiet-danger"
-					title={t('scriptTemplates.delete')}
-					aria-label={t('scriptTemplates.delete')}
-					onclick={() => (deleteOpen = true)}
-				/>
-			{/if}
 		{/if}
 	{/snippet}
 	{#snippet banners()}
@@ -354,6 +359,17 @@
 			framed={false}
 		/>
 	</ProfileSection>
+	{#if dangerActions.length > 0}
+		<ProfileSection
+			id="danger"
+			title={t('danger.title')}
+			summary={t('jobTemplates.danger.summary')}
+			state="off"
+			bind:open={open.danger}
+		>
+			<DangerZone actions={dangerActions} />
+		</ProfileSection>
+	{/if}
 </RecordPage>
 
 <ConfirmDialog

@@ -60,14 +60,14 @@ test('the own platform account disables the actions that the API refuses', async
 	await expect(
 		page.getByRole('button', { name: 'Remove from the organization acme' })
 	).toBeDisabled();
-	await page.getByRole('button', { name: 'More actions for Anna Petrova' }).click();
-	await expect(page.getByRole('menuitem', { name: /Disable user/ })).toContainText(
-		'You cannot disable your own account'
-	);
-	await expect(
-		page.getByRole('menuitem', { name: /Remove the Platform Admin right/ })
-	).toContainText('You cannot remove your own Platform Admin right');
-	await page.keyboard.press('Escape');
+	// The right and the state of the account are in the dangerous section only.
+	const danger = page.locator('[data-section="danger"]');
+	const revoke = danger.getByRole('button', { name: 'Remove the Platform Admin right' });
+	await expect(revoke).toBeDisabled();
+	await expect(revoke).toHaveAttribute('title', 'You cannot remove your own Platform Admin right');
+	const disable = danger.getByRole('button', { name: 'Disable user' });
+	await expect(disable).toBeDisabled();
+	await expect(disable).toHaveAttribute('title', 'You cannot disable your own account');
 	// A lower own role is allowed after a confirmation.
 	await expect(page.getByLabel('Role in the organization acme')).toBeEnabled();
 });

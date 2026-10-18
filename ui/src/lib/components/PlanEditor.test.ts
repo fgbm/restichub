@@ -464,6 +464,34 @@ describe('the plan page', () => {
 		expect(order).toEqual(['source', 'basics', 'schedule', 'objective']);
 	});
 
+	it('keeps the delete of a stored plan in the dangerous section only', async () => {
+		render(PlanEditor, { planId: 'pl_1' });
+		await screen.findByRole('heading', { level: 1, name: 'nightly-web' });
+
+		const danger = screen
+			.getByRole('button', { name: /Dangerous actions/ })
+			.closest('section') as HTMLElement;
+		expect(danger).toHaveAttribute('data-section', 'danger');
+		expect(
+			within(danger).getByText(/The scheduler does not run the plan any more/)
+		).toBeInTheDocument();
+		expect(within(danger).getByRole('button', { name: 'Delete plan' })).toHaveClass('btn--danger');
+		const header = document.querySelector<HTMLElement>('.page-header__actions') as HTMLElement;
+		expect(within(header).queryByRole('button', { name: 'Delete plan' })).toBeNull();
+	});
+
+	it('shows no dangerous section for a new plan and for a viewer', async () => {
+		const created = render(PlanEditor);
+		await screen.findByRole('heading', { level: 1, name: 'New plan' });
+		expect(document.querySelector('[data-section="danger"]')).toBeNull();
+		created.unmount();
+
+		session.role = 'viewer';
+		render(PlanEditor, { planId: 'pl_1' });
+		await screen.findByRole('heading', { level: 1, name: 'nightly-web' });
+		expect(document.querySelector('[data-section="danger"]')).toBeNull();
+	});
+
 	it('deletes a stored plan after the confirmation and returns to the list', async () => {
 		const user = userEvent.setup();
 		mocks.deletePlan.mockResolvedValue(undefined);

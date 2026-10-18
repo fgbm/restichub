@@ -184,11 +184,13 @@ describe('Platform user page', () => {
 		);
 	});
 
-	it('asks before it disables the account', async () => {
+	it('asks before it disables the account in the dangerous section', async () => {
 		const user = userEvent.setup();
 		render(PlatformUserPage, { userId: 'u_02' });
-		await user.click(await screen.findByRole('button', { name: 'More actions for Ivan Egorkin' }));
-		await user.click(await screen.findByText('Disable user'));
+		const danger = (await screen.findByRole('button', { name: /Dangerous actions/ })).closest(
+			'section'
+		) as HTMLElement;
+		await user.click(within(danger).getByRole('button', { name: 'Disable user' }));
 		const dialog = await screen.findByRole('dialog', { name: 'Disable the user?' });
 		await user.click(within(dialog).getByRole('button', { name: 'Disable user' }));
 		await waitFor(() =>
@@ -211,7 +213,6 @@ describe('Platform user page', () => {
 	});
 
 	it('disables the changes of the own account that the API refuses, with the reason', async () => {
-		const user = userEvent.setup();
 		mocks.getPlatformUser.mockResolvedValue(self);
 		render(PlatformUserPage, { userId: 'self' });
 		const reset = await screen.findByRole('button', { name: 'Reset password' });
@@ -227,14 +228,15 @@ describe('Platform user page', () => {
 		expect(screen.getByText('self@example.com')).toBeInTheDocument();
 		expect(screen.getByText('not verified')).toBeInTheDocument();
 
-		await user.click(screen.getByRole('button', { name: 'More actions for Self' }));
-		const revoke = (await screen.findByText('Remove the Platform Admin right')).closest(
-			'[data-disabled]'
-		);
-		expect(revoke).toHaveTextContent('You cannot remove your own Platform Admin right');
-		expect(screen.getByText('Disable user').closest('[data-disabled]')).toHaveTextContent(
-			'You cannot disable your own account'
-		);
+		const danger = screen
+			.getByRole('button', { name: /Dangerous actions/ })
+			.closest('section') as HTMLElement;
+		const revoke = within(danger).getByRole('button', { name: 'Remove the Platform Admin right' });
+		expect(revoke).toBeDisabled();
+		expect(revoke).toHaveAttribute('title', 'You cannot remove your own Platform Admin right');
+		const disable = within(danger).getByRole('button', { name: 'Disable user' });
+		expect(disable).toBeDisabled();
+		expect(disable).toHaveAttribute('title', 'You cannot disable your own account');
 	});
 
 	it('asks before it lowers the own role and keeps the role when the person cancels', async () => {
@@ -298,16 +300,16 @@ describe('Platform user page', () => {
 	});
 
 	it('locks the right of the last Platform Admin from the count of the record', async () => {
-		const user = userEvent.setup();
 		mocks.getPlatformUser.mockResolvedValue(
 			account({ platform_admin: true, platform_admin_count: 1 })
 		);
 		render(PlatformUserPage, { userId: 'u_02' });
-		await user.click(await screen.findByRole('button', { name: 'More actions for Ivan Egorkin' }));
-		const revoke = (await screen.findByText('Remove the Platform Admin right')).closest(
-			'[data-disabled]'
-		);
-		expect(revoke).toHaveTextContent('This is the last Platform Admin');
+		const danger = (await screen.findByRole('button', { name: /Dangerous actions/ })).closest(
+			'section'
+		) as HTMLElement;
+		const revoke = within(danger).getByRole('button', { name: 'Remove the Platform Admin right' });
+		expect(revoke).toBeDisabled();
+		expect(revoke).toHaveAttribute('title', 'This is the last Platform Admin');
 		expect(mocks.listPlatformUsers).not.toHaveBeenCalled();
 	});
 
@@ -322,6 +324,31 @@ describe('Platform user page', () => {
 		).toBeVisible();
 	});
 
+	it('keeps the dangerous actions of the account in their section only', async () => {
+		render(PlatformUserPage, { userId: 'u_02' });
+		await screen.findByRole('heading', { level: 1, name: 'Ivan Egorkin' });
+		// The sentence of the platform user list is the subtitle of the record.
+		expect(
+			screen.getByText('Installation accounts and their memberships in the organizations.')
+		).toBeInTheDocument();
+		const header = document.querySelector<HTMLElement>('.page-header__actions') as HTMLElement;
+		expect(within(header).getByRole('button', { name: 'Reset password' })).toBeInTheDocument();
+		expect(within(header).queryByRole('button', { name: /More actions/ })).toBeNull();
+
+		const danger = screen
+			.getByRole('button', { name: /Dangerous actions/ })
+			.closest('section') as HTMLElement;
+		expect(
+			within(danger).getByText(
+				'The person manages the organizations and the users of the installation.'
+			)
+		).toBeInTheDocument();
+		expect(
+			within(danger).getByRole('button', { name: 'Grant the Platform Admin right' })
+		).toBeInTheDocument();
+		expect(within(danger).getByRole('button', { name: 'Disable user' })).toHaveClass('btn--danger');
+	});
+
 	// The UI hides what the API refuses: a platform operation needs the installation-wide right
 	// (ADR-0029, AC-AU-02).
 	it('ac_au_02_shows_the_account_to_a_caller_without_the_platform_admin_right', async () => {
@@ -330,7 +357,7 @@ describe('Platform user page', () => {
 
 		expect(await screen.findByRole('heading', { level: 1, name: 'Ivan Egorkin' })).toBeVisible();
 		expect(screen.queryByRole('button', { name: 'Reset password' })).toBeNull();
-		expect(screen.queryByRole('button', { name: 'More actions for Ivan Egorkin' })).toBeNull();
+		expect(document.querySelector('[data-section="danger"]')).toBeNull();
 		expect(screen.queryByRole('button', { name: 'Remove from the organization acme' })).toBeNull();
 		expect(screen.queryByRole('button', { name: 'Add an organization' })).toBeNull();
 		expect(screen.getByLabelText('Role in the organization acme')).toBeDisabled();

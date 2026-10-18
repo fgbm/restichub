@@ -308,6 +308,77 @@ async fn ac_pf_01_the_preview_takes_the_repository_of_the_body_or_none() {
     db.cleanup().await;
 }
 
+/// AC-PF-01: the preview accepts a draft that has no name yet, and keeps the other checks.
+#[tokio::test]
+async fn ac_pf_01_the_preview_accepts_a_draft_without_a_name() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant_with_key(db.database(), "acme").await;
+    let app = app_with_kek(db.database());
+    let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
+    let agent = seed_agent_full(db.database(), tenant, "draft-host", "linux", "0.19.0", &[]).await;
+
+    let draft = |name: Value| {
+        json!({
+            "agent_id": agent.to_string(),
+            "name": name,
+            "paths": {"all": ["/srv"]},
+        })
+    };
+
+    // A new profile shows its commands before the first save, when it has no name.
+    let (status, _, preview) = send(
+        &app,
+        request(
+            "POST",
+            "/api/v1/profiles/preview",
+            Some(&cookie),
+            Some(draft(json!(""))),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    assert!(
+        preview["steps"]
+            .as_array()
+            .is_some_and(|steps| !steps.is_empty()),
+        "{preview}"
+    );
+
+    // Every other check of the draft stays.
+    let mut no_name = draft(json!(""));
+    no_name["excludes"] = json!(["/var/lib/\u{0007}"]);
+    let (status, _, problem) = send(
+        &app,
+        request(
+            "POST",
+            "/api/v1/profiles/preview",
+            Some(&cookie),
+            Some(no_name),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
+    assert_eq!(problem["field"], "excludes");
+
+    // A name that the person typed is still checked.
+    let (status, _, problem) = send(
+        &app,
+        request(
+            "POST",
+            "/api/v1/profiles/preview",
+            Some(&cookie),
+            Some(draft(json!("x".repeat(101)))),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
+    assert_eq!(problem["field"], "name");
+
+    db.cleanup().await;
+}
+
 /// AC-PF-02: the preview refuses VSS for a Linux agent and an old restic.
 #[tokio::test]
 async fn ac_pf_02_the_preview_points_to_the_field() {
@@ -609,12 +680,13 @@ async fn ac_pf_02_the_draft_preview_points_to_the_field() {
                 "agent_id": agent.to_string(),
                 "name": "",
                 "paths": {"all": ["/srv"]},
+                "tags": ["daily,weekly"],
             })),
         ),
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
-    assert_eq!(problem["field"], "name");
+    assert_eq!(problem["field"], "tags");
 
     // The preview stores nothing, so the list is still empty.
     let (status, _, body) = send(

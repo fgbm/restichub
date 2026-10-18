@@ -19,8 +19,16 @@
 	import RepositoryPicker from './RepositoryPicker.svelte';
 	import ProfileSection from './ProfileSection.svelte';
 	import { RecordPage, SummaryPanel } from './layout/index.ts';
-	import { Alert, Button, ConfirmDialog, Select, StatusPill, TextField } from './ui/index.ts';
-	import type { KeyValueItem, SelectOption } from './ui/index.ts';
+	import {
+		Alert,
+		Button,
+		ConfirmDialog,
+		DangerZone,
+		Select,
+		StatusPill,
+		TextField
+	} from './ui/index.ts';
+	import type { DangerAction, KeyValueItem, SelectOption } from './ui/index.ts';
 	import { formatHours, formatLocalTime, formatTimeInZone } from '#lib/format.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
@@ -38,8 +46,8 @@
 
 	let { planId = null }: { planId?: string | null } = $props();
 
-	type SectionKey = 'basics' | 'source' | 'schedule' | 'objective';
-	const SECTIONS: SectionKey[] = ['source', 'basics', 'schedule', 'objective'];
+	type SectionKey = 'basics' | 'source' | 'schedule' | 'objective' | 'danger';
+	const SECTIONS: SectionKey[] = ['source', 'basics', 'schedule', 'objective', 'danger'];
 
 	const POLICIES: MissedRunPolicy[] = ['run_all', 'latest_only', 'skip'];
 	// The number of fire times that the preview requests (FR-SC-01).
@@ -157,14 +165,16 @@
 				: { text: t('pl.summary.noSchedule'), state: 'warn' },
 		objective: rpoHours.trim()
 			? { text: t('duration.h', { h: rpoHours.trim() }), state: 'on' }
-			: { text: t('pl.summary.rpoDefault'), state: 'off' }
+			: { text: t('pl.summary.rpoDefault'), state: 'off' },
+		danger: { text: t('pl.danger.summary'), state: 'off' }
 	});
 
 	const titles: Record<SectionKey, MessageKey> = {
 		basics: 'pl.section.basics',
 		source: 'pl.section.source',
 		schedule: 'plans.section.schedule',
-		objective: 'pl.section.objective'
+		objective: 'pl.section.objective',
+		danger: 'danger.title'
 	};
 
 	const resultItems = $derived<KeyValueItem[]>([
@@ -200,6 +210,21 @@
 					: t('common.none')
 		}
 	]);
+
+	// Delete is on the plan page only, so a list item keeps two actions.
+	const dangerActions = $derived.by<DangerAction[]>(() => {
+		if (!existing || !canWrite) return [];
+		return [
+			{
+				key: 'delete',
+				text: t('pl.danger.delete'),
+				label: t('plans.delete'),
+				icon: 'trash',
+				tone: 'danger',
+				onclick: () => (deleteOpen = true)
+			}
+		];
+	});
 
 	function messageOf(problem: unknown): string {
 		if (problem instanceof ApiError) return tErrorCode(problem.code) ?? problem.title;
@@ -366,7 +391,6 @@
 		}
 	}
 
-	// Delete is on the plan page only, so a list item keeps two actions.
 	async function confirmDelete(): Promise<void> {
 		if (!existing) return;
 		deleting = true;
@@ -404,17 +428,6 @@
 	{#snippet actions()}
 		<Button size="sm" onclick={() => setAll(true)} disabled={allOpen}>{t('pe.expandAll')}</Button>
 		<Button size="sm" onclick={() => setAll(false)}>{t('pe.collapseAll')}</Button>
-		{#if existing && canWrite}
-			<Button
-				size="sm"
-				variant="ghost"
-				icon="trash"
-				class="btn--quiet-danger"
-				title={t('plans.delete')}
-				aria-label={t('plans.delete')}
-				onclick={() => (deleteOpen = true)}
-			/>
-		{/if}
 	{/snippet}
 	{#snippet banners()}
 		{#if formError}
@@ -577,6 +590,18 @@
 			bind:value={rpoHours}
 		/>
 	</ProfileSection>
+
+	{#if dangerActions.length > 0}
+		<ProfileSection
+			id="danger"
+			title={t(titles.danger)}
+			summary={summaries.danger.text}
+			state={summaries.danger.state}
+			bind:open={open.danger}
+		>
+			<DangerZone actions={dangerActions} />
+		</ProfileSection>
+	{/if}
 
 	<ConfirmDialog
 		bind:open={deleteOpen}

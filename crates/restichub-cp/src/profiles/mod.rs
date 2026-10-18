@@ -55,7 +55,7 @@ pub use settings::{
 };
 use settings::{
     parse_profile_id, profile_tag, profile_value, save_warnings, stored_value, validate_create,
-    validate_update,
+    validate_draft, validate_update,
 };
 
 /// Query parameters of the list endpoint (FR-PF-01).
@@ -392,9 +392,10 @@ pub async fn delete_profile(
 
 /// Previews a profile draft for one target agent (FR-PF-04, AC-PF-01).
 ///
-/// The endpoint validates the draft as a create request and compiles it with the facts of the
-/// registered agent, then renders the steps and the command lines with masked secrets. A compile
-/// error points to the draft field (AC-PF-02).
+/// The endpoint validates the draft and compiles it with the facts of the registered agent, then
+/// renders the steps and the command lines with masked secrets. A compile error points to the
+/// draft field (AC-PF-02). A new profile has no name yet, so the preview accepts an empty name and
+/// keeps every other check.
 #[utoipa::path(
     post,
     path = "/api/v1/profiles/preview",
@@ -423,7 +424,7 @@ pub async fn preview_profile(
         .transpose()?;
     let repository_id = body.repository_id.clone();
     let draft: CreateProfileRequest = body.into();
-    let validated = validate_create(draft)?;
+    let validated = validate_draft(draft)?;
 
     let mut tx = state.db().begin_tenant(context.tenant_id).await?;
     let Some(agent) = agents_repo::get(&mut tx, agent_id).await? else {

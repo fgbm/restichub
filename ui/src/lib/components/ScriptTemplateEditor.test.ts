@@ -16,11 +16,13 @@ const mocks = vi.hoisted(() => ({
 	goto: vi.fn()
 }));
 
+const session = vi.hoisted(() => ({ role: 'admin' as string }));
+
 vi.mock('#lib/stores/session.svelte.ts', () => ({
 	getSession: () => ({
-		user: { id: 'u_01', username: 'admin', display_name: 'Anna', role: 'admin' },
+		user: { id: 'u_01', username: 'admin', display_name: 'Anna', role: session.role },
 		tenant: { id: 't_01', name: 'acme' },
-		role: 'admin'
+		role: session.role
 	})
 }));
 
@@ -75,6 +77,7 @@ const OWN = template({
 
 beforeEach(() => {
 	route.url = new URL('http://localhost/settings/scripts/templates');
+	session.role = 'admin';
 	for (const mock of Object.values(mocks)) mock.mockReset();
 	mocks.listScriptTemplates.mockResolvedValue([template(), OWN]);
 	mocks.createScriptTemplate.mockResolvedValue(OWN);
@@ -164,6 +167,39 @@ describe('Script template page', () => {
 		await user.click(screen.getByRole('button', { name: 'Save' }));
 		expect(await screen.findByRole('alert')).toBeInTheDocument();
 		expect(mocks.goto).not.toHaveBeenCalled();
+	});
+
+	it('keeps the delete of an own template in the dangerous section only', async () => {
+		render(ScriptTemplateEditor, { templateId: 'st_1' });
+		await screen.findByRole('heading', { level: 1, name: 'Remove old dumps' });
+
+		const danger = screen
+			.getByRole('button', { name: /Dangerous actions/ })
+			.closest('section') as HTMLElement;
+		expect(danger).toHaveAttribute('data-section', 'danger');
+		expect(
+			within(danger).getByText(/The profiles keep the scripts that they copied/)
+		).toBeInTheDocument();
+		expect(within(danger).getByRole('button', { name: 'Delete' })).toHaveClass('btn--danger');
+		const header = document.querySelector<HTMLElement>('.page-header__actions') as HTMLElement;
+		expect(within(header).queryByRole('button', { name: 'Delete' })).toBeNull();
+	});
+
+	it('shows no dangerous section for a built-in template, a new template and a viewer', async () => {
+		const builtin = render(ScriptTemplateEditor, { templateId: 'builtin:disk-space-check-bash' });
+		await screen.findByRole('heading', { level: 1, name: 'Free disk space check (Linux)' });
+		expect(document.querySelector('[data-section="danger"]')).toBeNull();
+		builtin.unmount();
+
+		const created = render(ScriptTemplateEditor);
+		await screen.findByRole('heading', { level: 1, name: 'New script template' });
+		expect(document.querySelector('[data-section="danger"]')).toBeNull();
+		created.unmount();
+
+		session.role = 'viewer';
+		render(ScriptTemplateEditor, { templateId: 'st_1' });
+		await screen.findByRole('heading', { level: 1, name: 'Remove old dumps' });
+		expect(document.querySelector('[data-section="danger"]')).toBeNull();
 	});
 
 	it('deletes an own template after a confirmation and returns to the list', async () => {
