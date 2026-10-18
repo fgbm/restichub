@@ -14,7 +14,7 @@ use serde_json::json;
 use common::{app_with_kek, create_tenant_with_key, request, seed_agent, seed_session, send};
 use parameters_support::{
     audit_diff, create_plan, create_profile, create_secret, put_host_values, repository_fixture,
-    update_plan,
+    update_plan, update_profile,
 };
 
 /// FR-PF-12: a change of a text value of a host shows its name and the marker of the change.
@@ -211,6 +211,92 @@ async fn fr_pf_12_the_audit_diff_of_a_deleted_plan_lists_the_values() {
     assert_eq!(named("pg_password")["reference"], secret_id.as_str());
     let text = diff.to_string();
     assert!(!text.contains("CANARY"), "the audit holds no text: {text}");
+
+    db.cleanup().await;
+}
+
+/// FR-PF-12: the same set of values in another order is no change, and a description of a parameter
+/// shows in the diff of the profile.
+#[tokio::test]
+async fn fr_pf_12_a_reorder_is_no_change_and_a_description_shows() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant_with_key(db.database(), "params").await;
+    let app = app_with_kek(db.database());
+    let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
+    let agent = seed_agent(db.database(), tenant, "web-1").await;
+    let profile = create_profile(
+        &app,
+        &cookie,
+        json!({
+            "name": "pg",
+            "paths": {"all": ["/data"]},
+            "parameters": [
+                {"name": "pg_dir", "kind": "text", "default_value": "/srv/pg"},
+                {"name": "pg_user", "kind": "text", "default_value": "postgres"},
+            ],
+        }),
+    )
+    .await;
+
+    let first = json!([
+        {"name": "pg_dir", "kind": "text", "value": "/srv/pg"},
+        {"name": "pg_user", "kind": "text", "value": "postgres"},
+    ]);
+    let (status, body) = put_host_values(&app, &cookie, agent, first).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = put_host_values(
+        &app,
+        &cookie,
+        agent,
+        json!([
+            {"name": "pg_user", "kind": "text", "value": "postgres"},
+            {"name": "pg_dir", "kind": "text", "value": "/srv/pg"},
+        ]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // The second record holds no diff of the values: the set is the same one.
+    let (status, _, records) =
+        send(&app, request("GET", "/api/v1/audit", Some(&cookie), None)).await;
+    assert_eq!(status, StatusCode::OK, "{records}");
+    let record = records["items"]
+        .as_array()
+        .expect("a list of records")
+        .iter()
+        .find(|record| record["action"] == "agent_parameters_update")
+        .expect("the newest record of the values");
+    assert!(
+        record["diff"].get("parameters").is_none(),
+        "the reorder is no change: {record}"
+    );
+
+    // A description of a declaration shows in the diff of the profile.
+    let (status, body) = update_profile(
+        &app,
+        &cookie,
+        &profile,
+        json!({
+            "paths": {"all": ["/data"]},
+            "parameters": [
+                {"name": "pg_dir", "kind": "text", "default_value": "/srv/pg", "description": "the data directory"},
+                {"name": "pg_user", "kind": "text", "default_value": "postgres"},
+            ],
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let diff = audit_diff(&app, &cookie, "profile_update", &profile).await;
+    let parameters = diff["parameters"]["new"]
+        .as_array()
+        .expect("the declarations of the new side");
+    let described = parameters
+        .iter()
+        .find(|parameter| parameter["name"] == "pg_dir")
+        .expect("the described parameter");
+    assert_eq!(described["description"], "<set>", "{diff}");
 
     db.cleanup().await;
 }

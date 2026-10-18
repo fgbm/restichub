@@ -424,6 +424,17 @@ pub async fn replace_agent(
     let actor = context.actor_user(&state).await?;
     let now = state.auth().clock.now();
     let mut tx = state.db().begin_tenant(context.tenant_id).await?;
+    // The advisory lock serializes the move with every write that can change what the plans of the
+    // tenant need (FR-PF-11, FR-ID-11).
+    tx.lock(crate::parameters::PARAMETERS_LOCK).await?;
+    // The values that the move takes to the successor. A name that the successor already holds
+    // keeps its own value, so the move drops the value of the old record of that name.
+    let before = restichub_db::parameters::agent_values(&mut tx, old_id).await?;
+    let held = restichub_db::parameters::agent_values(&mut tx, new_id).await?;
+    let moved_values: Vec<restichub_db::parameters::ParameterValue> = before
+        .into_iter()
+        .filter(|value| !held.iter().any(|other| other.name == value.name))
+        .collect();
     let moved = match repo::replace(
         &mut tx,
         new_id,
@@ -443,6 +454,9 @@ pub async fn replace_agent(
     if let Some(missing) = crate::parameters::missing_in_plans_of_host(&mut tx, new_id).await? {
         return Err(crate::parameters::refuse_missing(missing));
     }
+    // A name cannot have two kinds on one host, and the moved plans read the values of the
+    // successor (FR-PF-11).
+    crate::parameters::check_kinds_after_move(&mut tx, new_id).await?;
     let mut revoke_event = context.audit_event(AuditAction::AgentRevoke, "agent", old_id.as_uuid());
     revoke_event.diff = Some(diff(
         Some(&serde_json::json!({"status": AgentStatus::Active.as_str()})),
@@ -466,6 +480,7 @@ pub async fn replace_agent(
             "repositories_moved": moved.repositories,
             "queued_jobs_moved": moved.queued_jobs,
             "parameter_values_moved": moved.parameter_values,
+            "parameter_values": crate::parameters::audit_values(&moved_values, None),
         })),
         &[],
     ));

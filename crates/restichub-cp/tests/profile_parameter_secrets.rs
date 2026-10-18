@@ -11,8 +11,8 @@ use serde_json::json;
 
 use common::{app_with_kek, create_tenant_with_key, request, seed_agent, seed_session, send};
 use parameters_support::{
-    create_plan, create_profile, create_secret, host_values, list_plans, plan_view,
-    put_host_values, repository_fixture, row, update_plan,
+    audit_diff, create_plan, create_profile, create_secret, host_values, list_plans, plan_view,
+    put_host_values, repository_fixture, row, update_plan, update_profile,
 };
 
 /// AC-PF-09: a secret parameter cannot fill a template field.
@@ -366,6 +366,117 @@ async fn adr_0047_an_operator_changes_no_secret_value() {
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+
+    db.cleanup().await;
+}
+
+/// ADR-0047: a profile save that drops a secret override of a plan, and a plan save that gives the
+/// secret overrides of a plan to another host, are the choice of an Admin.
+#[tokio::test]
+async fn adr_0047_an_operator_keeps_no_secret_override_of_a_plan() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant_with_key(db.database(), "params").await;
+    let app = app_with_kek(db.database());
+    let admin = seed_session(db.database(), tenant, "admin", "admin").await;
+    let operator = seed_session(db.database(), tenant, "operator", "operator").await;
+    let agent = seed_agent(db.database(), tenant, "web-1").await;
+    let other = seed_agent(db.database(), tenant, "web-2").await;
+    let repository = repository_fixture(db.database(), tenant).await;
+    let secret = create_secret(&app, &admin, "pg-password", "CANARY-secret-1").await;
+    let profile = create_profile(
+        &app,
+        &admin,
+        json!({
+            "name": "pg",
+            "paths": {"all": ["/data"]},
+            "parameters": [
+                {"name": "pg_user", "kind": "text"},
+                {"name": "pg_password", "kind": "secret"},
+            ],
+        }),
+    )
+    .await;
+    let values = json!([
+        {"name": "pg_user", "kind": "text", "value": "postgres"},
+        {"name": "pg_password", "kind": "secret", "secret_id": secret},
+    ]);
+    let (status, body) = create_plan(
+        &app,
+        &admin,
+        "nightly",
+        &profile,
+        agent,
+        &repository,
+        values,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let plan = body["plan"]["id"]
+        .as_str()
+        .expect("the identifier")
+        .to_owned();
+
+    // The Operator removes the declaration, and the secret override of the plan would go with it.
+    let without_secret = json!({
+        "paths": {"all": ["/data"]},
+        "parameters": [{"name": "pg_user", "kind": "text"}],
+    });
+    let (status, body) = update_profile(&app, &operator, &profile, without_secret.clone()).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    // A kind change drops the override as a removal does.
+    let (status, body) = update_profile(
+        &app,
+        &operator,
+        &profile,
+        json!({
+            "paths": {"all": ["/data"]},
+            "parameters": [
+                {"name": "pg_user", "kind": "text"},
+                {"name": "pg_password", "kind": "text"},
+            ],
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    // A plan save that gives the secret override to another host is the choice of an Admin too.
+    let (status, _, body) = send(
+        &app,
+        request(
+            "PATCH",
+            &format!("/api/v1/plans/{plan}"),
+            Some(&operator),
+            Some(json!({
+                "name": "nightly",
+                "profile_id": profile,
+                "agent_id": other.to_string(),
+                "repository_id": repository,
+                "cron": "0 2 * * *",
+                "time_zone": "UTC",
+                "missed_run_policy": "run_all",
+                "parameter_values": [
+                    {"name": "pg_user", "kind": "text", "value": "postgres"},
+                    {"name": "pg_password", "kind": "secret", "secret_id": secret},
+                ],
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+
+    // The Admin removes the declaration, and the audit names the plan and the reference that went.
+    let (status, body) = update_profile(&app, &admin, &profile, without_secret).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let diff = audit_diff(&app, &admin, "profile_update", &profile).await;
+    let dropped = diff["parameter_overrides_dropped"]["new"]
+        .as_array()
+        .expect("the dropped overrides");
+    assert_eq!(dropped.len(), 1, "{diff}");
+    assert_eq!(dropped[0]["plan_id"], plan.as_str(), "{diff}");
+    assert_eq!(dropped[0]["name"], "pg_password", "{diff}");
+    assert_eq!(dropped[0]["reference"], secret.as_str(), "{diff}");
+    assert!(!diff.to_string().contains("CANARY"), "{diff}");
 
     db.cleanup().await;
 }

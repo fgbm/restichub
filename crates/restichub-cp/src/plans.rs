@@ -403,8 +403,10 @@ pub async fn create_plan(
     let created_by = crate::secrets::actor_user(&context.actor);
 
     let mut tx = state.db().begin_tenant(context.tenant_id).await?;
+    tx.lock(parameters::PARAMETERS_LOCK).await?;
     check_references(
         &mut tx,
+        None,
         input.profile_id,
         input.agent_id,
         input.repository_id,
@@ -492,7 +494,9 @@ pub async fn update_plan(
     let plan_id = parse_plan_id(&id)?;
     let now = state.auth().clock.now();
     let mut tx = state.db().begin_tenant(context.tenant_id).await?;
-    // The read locks the row: a concurrent delete cannot remove it between the read and the write.
+    // The advisory lock comes first: it serializes every write that can change the completeness of
+    // a plan of this tenant (FR-PF-11).
+    tx.lock(parameters::PARAMETERS_LOCK).await?;
     let Some(current) = repo::get_for_update(&mut tx, plan_id).await? else {
         return Err(ApiError::not_found());
     };
@@ -517,9 +521,19 @@ pub async fn update_plan(
     if parameters::changes_secret(&before_values, &input.parameter_values) {
         context.authorize(Operation::ParameterSecretWrite)?;
     }
+    // A move to another host gives the secret overrides of the plan to that host, and only an Admin
+    // chooses the credential that a script receives (ADR-0047).
+    if input.agent_id != current.agent_id
+        && before_values
+            .iter()
+            .any(|value| value.kind == restichub_db::ParameterKind::Secret)
+    {
+        context.authorize(Operation::ParameterSecretWrite)?;
+    }
     let schedule = parse_schedule(&input.cron, &input.time_zone)?;
     check_references(
         &mut tx,
+        Some(plan_id),
         input.profile_id,
         input.agent_id,
         input.repository_id,
@@ -616,6 +630,7 @@ pub async fn delete_plan(
     let plan_id = parse_plan_id(&id)?;
     let now = state.auth().clock.now();
     let mut tx = state.db().begin_tenant(context.tenant_id).await?;
+    tx.lock(parameters::PARAMETERS_LOCK).await?;
     let Some(current) = repo::get_for_update(&mut tx, plan_id).await? else {
         return Err(ApiError::not_found());
     };
@@ -863,23 +878,20 @@ pub(crate) fn next_run_at(
 /// and each required parameter must have a value from the plan, the host or the default.
 async fn check_references(
     tx: &mut restichub_db::TenantTx<'_>,
+    plan: Option<restichub_db::PlanId>,
     profile_id: ProfileId,
     agent_id: AgentId,
     repository_id: RepositoryId,
     plan_values: &[restichub_db::parameters::ParameterValue],
     now: time::OffsetDateTime,
 ) -> Result<(), ApiError> {
-    // The repository row is locked for update, so its host cannot change between this check and the
-    // write: the repository update takes the same lock first. The locks of a plan write come in the
-    // order plan, profile, agent, repository.
-    let profile = match profiles_repo::get_for_share(tx, profile_id).await? {
+    // The advisory lock of the parameter writes is already held, so the profile and the host do not
+    // change under this check (FR-PF-11).
+    let profile = match profiles_repo::get(tx, profile_id).await? {
         Some(profile) => profile,
         None => return Err(ApiError::invalid_field("profile_id", Reason::Unknown)),
     };
-    // The key share lock keeps the host for the check of the values and of the compile: a change of
-    // its values waits for this transaction (FR-PF-11).
-    let agent = agents_repo::get_for_key_share(tx, agent_id).await?;
-    let Some(agent) = agent else {
+    let Some(agent) = agents_repo::get(tx, agent_id).await? else {
         return Err(ApiError::invalid_field("agent_id", Reason::Unknown));
     };
     if agent.status != AgentStatus::Active {
@@ -889,8 +901,9 @@ async fn check_references(
     else {
         return Err(ApiError::invalid_field("repository_id", Reason::Unknown));
     };
-    // A local repository lives on the disk of its repository host, so a plan of it runs there only
-    // (ADR-0046, ADR-0047).
+    // A local repository lives on the disk of its repository host, so a plan of it runs there only.
+    // The update lock on the repository row is not part of the parameter invariant: the repository
+    // write takes it first, so its host cannot change between this check and the write (ADR-0046).
     crate::jobs::ensure_repository_host(&repository, agent_id)?;
     let definitions = parameters::from_row(&profile.parameters)?;
     // A name cannot have two kinds on one host, because the host holds one value for each name
@@ -899,6 +912,7 @@ async fn check_references(
         tx,
         agent_id,
         profile_id,
+        plan,
         "parameter_values",
         &definitions,
     )

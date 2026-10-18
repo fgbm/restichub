@@ -489,3 +489,153 @@ async fn fr_pf_10_a_value_that_breaks_a_plan_is_refused() {
 
     db.cleanup().await;
 }
+
+/// FR-PF-10: a plan that already fails to compile does not block a change of an unrelated value of
+/// its host; the change is refused only when a plan compiled before it and fails after it.
+#[tokio::test]
+async fn fr_pf_10_a_broken_plan_does_not_block_a_host_change() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant_with_key(db.database(), "params").await;
+    let app = app_with_kek(db.database());
+    let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
+    let agent = seed_agent(db.database(), tenant, "web-1").await;
+    let repository = repository_fixture(db.database(), tenant).await;
+    let profile = create_profile(
+        &app,
+        &cookie,
+        json!({
+            "name": "pg",
+            "paths": {"all": ["/data"]},
+            "tags": ["env-{{param.env}}"],
+            "parameters": [{"name": "env", "kind": "text", "default_value": "dev"}],
+        }),
+    )
+    .await;
+    let (status, body) = create_plan(
+        &app,
+        &cookie,
+        "nightly",
+        &profile,
+        agent,
+        &repository,
+        json!([]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+
+    // A script needs the trust mode of the host, which is off. The profile save reports the plan as
+    // a warning and keeps it, so the plan of the host no longer compiles (FR-SC-11).
+    let (status, body) = update_profile(
+        &app,
+        &cookie,
+        &profile,
+        json!({
+            "paths": {"all": ["/data"]},
+            "tags": ["env-{{param.env}}"],
+            "parameters": [{"name": "env", "kind": "text", "default_value": "dev"}],
+            "scripts": [{
+                "name": "dump",
+                "interpreter": "bash",
+                "phase": "before",
+                "body": "echo dump",
+                "timeout_seconds": 60,
+                "failure_policy": "abort_backup",
+                "env": [],
+            }],
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["plan_warnings"]
+            .as_array()
+            .expect("a list of warnings")
+            .len(),
+        1,
+        "{body}"
+    );
+
+    // The unrelated value does not break a plan that compiles, so the host takes it.
+    let (status, body) = put_host_values(
+        &app,
+        &cookie,
+        agent,
+        json!([{"name": "env", "kind": "text", "value": "prod"}]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        row(&host_values(&app, &cookie, agent).await, "env")["value"]["value"],
+        "prod"
+    );
+
+    db.cleanup().await;
+}
+
+/// FR-PF-11: the only plan of a host moves from a profile of one kind to a profile of another kind,
+/// because the check skips the stored row of the plan that the save writes.
+#[tokio::test]
+async fn fr_pf_11_the_only_plan_of_a_host_moves_to_another_profile() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant_with_key(db.database(), "params").await;
+    let app = app_with_kek(db.database());
+    let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
+    let agent = seed_agent(db.database(), tenant, "web-1").await;
+    let repository = repository_fixture(db.database(), tenant).await;
+    let text = create_profile(
+        &app,
+        &cookie,
+        json!({
+            "name": "text-kind",
+            "paths": {"all": ["/data"]},
+            "parameters": [{"name": "pg_dir", "kind": "text"}],
+        }),
+    )
+    .await;
+    let secret = create_profile(
+        &app,
+        &cookie,
+        json!({
+            "name": "secret-kind",
+            "paths": {"all": ["/data"]},
+            "parameters": [{"name": "pg_dir", "kind": "secret"}],
+        }),
+    )
+    .await;
+    let (status, body) = create_plan(
+        &app,
+        &cookie,
+        "nightly",
+        &text,
+        agent,
+        &repository,
+        json!([]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let plan = body["plan"]["id"]
+        .as_str()
+        .expect("the identifier")
+        .to_owned();
+
+    // The plan leaves the only profile that declares the name on this host, so the new kind is the
+    // kind of the host and the stored row of the plan is no other profile.
+    let (status, body) = parameters_support::update_plan(
+        &app,
+        &cookie,
+        &plan,
+        &secret,
+        agent,
+        &repository,
+        json!([]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["plan"]["profile_id"], secret.as_str());
+
+    db.cleanup().await;
+}

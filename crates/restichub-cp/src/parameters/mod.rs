@@ -18,8 +18,8 @@ mod host;
 use std::collections::BTreeMap;
 
 pub use checks::{
-    check_declared_values, check_kinds_of_host, check_secret_values, missing_in_plans_of_host,
-    missing_in_plans_of_profile, refuse_missing,
+    check_declared_values, check_kinds_after_move, check_kinds_of_host, check_secret_values,
+    missing_in_plans_of_host, missing_in_plans_of_profile, refuse_missing,
 };
 pub use host::*;
 
@@ -44,6 +44,17 @@ pub const MAX_PARAMETER_VALUE: usize = 4096;
 pub const MAX_PARAMETER_DESCRIPTION: usize = 200;
 /// The longest parameter name, without the leading letter.
 const MAX_PARAMETER_NAME_SUFFIX: usize = 63;
+
+/// The scope of the advisory lock that serializes the writes which change what the plans of a
+/// tenant need: the declarations of a profile, the values of a host, the profile and the host of a
+/// plan (FR-PF-11, ADR-0047).
+///
+/// [`restichub_db::TenantTx::lock`] derives the 64-bit key as `hashtextextended(scope || tenant, 0)`.
+/// The scope is the fixed namespace of this invariant, and the tenant identifier makes the key of
+/// one tenant distinct from the key of another. PostgreSQL compares the key across every
+/// connection, so the lock also serializes two control plane instances. A write takes it before any
+/// row lock, so a reader of the invariant cannot wait for a row that another writer holds.
+pub const PARAMETERS_LOCK: &str = "restichub.parameters:";
 
 /// The declaration of one parameter as the profile row stores it (FR-PF-09).
 ///
@@ -414,15 +425,19 @@ pub fn stored_value(value: &Value) -> Value {
     })
 }
 
-/// The declarations for an audit diff: the names, the kinds and no text default (FR-PF-12).
+/// The declarations for an audit diff: the names, the kinds, the descriptions and no text default
+/// (FR-PF-12).
 ///
 /// `previous` is the other side of the diff. The marker of a default value is [`CHANGED`] when the
 /// text of the previous declaration differs, so a change of a default shows in the diff and an
-/// unchanged one does not. The diff holds the marker only, never the text.
+/// unchanged one does not. The diff holds the marker only, never the text. The declarations are
+/// sorted by name, so a reorder of the same set is no change.
 #[must_use]
 pub fn audit_definitions(definitions: &[ParameterDef], previous: Option<&[ParameterDef]>) -> Value {
+    let mut sorted: Vec<&ParameterDef> = definitions.iter().collect();
+    sorted.sort_by(|left, right| left.name.cmp(&right.name));
     Value::Array(
-        definitions
+        sorted
             .iter()
             .map(|definition| {
                 let before = previous.and_then(|previous| {
@@ -438,6 +453,10 @@ pub fn audit_definitions(definitions: &[ParameterDef], previous: Option<&[Parame
                         .default_value
                         .as_ref()
                         .map(|text| marker(before.and_then(|definition| definition.default_value.as_deref()), text)),
+                    "description": definition
+                        .description
+                        .as_ref()
+                        .map(|text| marker(before.and_then(|definition| definition.description.as_deref()), text)),
                 })
             })
             .collect(),
@@ -447,14 +466,17 @@ pub fn audit_definitions(definitions: &[ParameterDef], previous: Option<&[Parame
 /// The values of a record for an audit diff: the names, the kinds, the reference of a secret value
 /// and a marker for a text value (FR-PF-12).
 ///
-/// `previous` is the side of the diff that the write replaces. See [`audit_definitions`].
+/// `previous` is the side of the diff that the write replaces. See [`audit_definitions`]. Both sides
+/// are sorted by name, so a set in another order is no change.
 ///
 /// The reference is a key name without `secret` in it: the diff of the audit log redacts every
 /// field whose name holds that word, and an identifier is no secret.
 #[must_use]
 pub fn audit_values(values: &[ParameterValue], previous: Option<&[ParameterValue]>) -> Value {
+    let mut sorted: Vec<&ParameterValue> = values.iter().collect();
+    sorted.sort_by(|left, right| left.name.cmp(&right.name));
     Value::Array(
-        values
+        sorted
             .iter()
             .map(|value| {
                 let before = previous.and_then(|previous| {
@@ -469,6 +491,27 @@ pub fn audit_values(values: &[ParameterValue], previous: Option<&[ParameterValue
                         .value
                         .as_ref()
                         .map(|text| marker(before.and_then(|value| value.value.as_deref()), text)),
+                    "reference": value.secret_id.map(|id| id.to_string()),
+                })
+            })
+            .collect(),
+    )
+}
+
+/// The overrides that a profile save removes, for an audit diff (FR-PF-12).
+///
+/// The diff names the plan, the parameter and the reference of a secret value; a text value shows as
+/// the marker of [`audit_values`] only.
+#[must_use]
+pub fn audit_dropped(dropped: &[(restichub_db::PlanId, ParameterValue)]) -> Value {
+    Value::Array(
+        dropped
+            .iter()
+            .map(|(plan_id, value)| {
+                json!({
+                    "plan_id": plan_id.to_string(),
+                    "name": value.name,
+                    "kind": value.kind.as_str(),
                     "reference": value.secret_id.map(|id| id.to_string()),
                 })
             })

@@ -233,16 +233,10 @@ fn fr_pf_11_a_parameter_without_a_value_is_missing() {
 fn ac_pf_10_a_text_parameter_of_a_script_variable_is_a_masked_value() {
     let mut profile = profile();
     let mut dump = script("dump", HookPhase::Before);
-    dump.env = vec![
-        crate::script::ScriptEnvRef {
-            name: "PGDIR".to_owned(),
-            value: crate::script::ScriptEnvValue::Parameter("pg_dir".to_owned()),
-        },
-        crate::script::ScriptEnvRef {
-            name: "PGPASSWORD".to_owned(),
-            value: crate::script::ScriptEnvValue::Parameter("pg_password".to_owned()),
-        },
-    ];
+    dump.env = vec![crate::script::ScriptEnvRef {
+        name: "PGDIR".to_owned(),
+        value: crate::script::ScriptEnvValue::Parameter("pg_dir".to_owned()),
+    }];
     profile.scripts = vec![dump];
     let mut target = parameter_target();
     target.server_scripts = crate::script::ServerScripts {
@@ -260,9 +254,30 @@ fn ac_pf_10_a_text_parameter_of_a_script_variable_is_a_masked_value() {
         Some(restichub_proto::agent::v1::script_env::Value::MaskedValue(value))
             if value == "/srv/pg"
     ));
+}
+
+#[test]
+fn ac_pf_09_a_secret_parameter_reaches_the_agent_as_a_secret_value() {
+    let mut profile = profile();
+    let mut dump = script("dump", HookPhase::Before);
+    dump.env = vec![crate::script::ScriptEnvRef {
+        name: "PGPASSWORD".to_owned(),
+        value: crate::script::ScriptEnvValue::Parameter("pg_password".to_owned()),
+    }];
+    profile.scripts = vec![dump];
+    let mut target = parameter_target();
+    target.server_scripts = crate::script::ServerScripts {
+        enabled: true,
+        interpreters: vec![crate::script::ScriptInterpreter::Bash],
+    };
+    let plan = plan(&profile, &target);
+    let env = match &plan.steps[0].step.kind {
+        Some(step::Kind::Script(script)) => script.env.clone(),
+        other => panic!("unexpected step {other:?}"),
+    };
     // A secret parameter keeps the reference, so the job builder resolves it (ADR-0017).
     assert!(matches!(
-        &env[1].value,
+        &env[0].value,
         Some(restichub_proto::agent::v1::script_env::Value::SecretValue(value))
             if value == "0192a1e0-0000-7000-8000-000000000001"
     ));

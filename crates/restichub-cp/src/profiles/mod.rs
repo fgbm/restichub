@@ -201,6 +201,7 @@ pub async fn create_profile(
     let warnings = save_warnings(&validated)?;
     let profile_id = ProfileId::new();
     let mut tx = state.db().begin_tenant(context.tenant_id).await?;
+    tx.lock(crate::parameters::PARAMETERS_LOCK).await?;
     script_secrets::check_script_secrets(&mut tx, &validated.scripts).await?;
     repo::create(
         &mut tx,
@@ -255,7 +256,9 @@ pub async fn update_profile(
     let profile_id = parse_profile_id(&id)?;
     let now = state.auth().clock.now();
     let mut tx = state.db().begin_tenant(context.tenant_id).await?;
-    // The read locks the row: a concurrent delete cannot remove it between the read and the write.
+    // The advisory lock comes first: it serializes every write that can change the completeness of
+    // a plan of this tenant (FR-PF-11).
+    tx.lock(crate::parameters::PARAMETERS_LOCK).await?;
     let Some(current) = repo::get_for_update(&mut tx, profile_id).await? else {
         return Err(ApiError::not_found());
     };
@@ -274,6 +277,7 @@ pub async fn update_profile(
             &mut tx,
             agent_id,
             profile_id,
+            None,
             "parameters",
             &validated.parameters,
         )
@@ -282,6 +286,22 @@ pub async fn update_profile(
     // A parameter that left the profile takes the overrides of its name with it; a rename is a new
     // parameter (owner decision, ADR-0047). The host values stay.
     let removed = removed_parameters(&current, &validated)?;
+    let overrides = restichub_db::parameters::values_of_profile_plans(&mut tx, profile_id).await?;
+    let dropped: Vec<(
+        restichub_db::PlanId,
+        restichub_db::parameters::ParameterValue,
+    )> = overrides
+        .into_iter()
+        .filter(|(_, value)| removed.contains(&value.name))
+        .collect();
+    // A dropped override of the kind `secret` is the credential that a script receives, so only an
+    // Admin removes it (ADR-0047).
+    if dropped
+        .iter()
+        .any(|(_, value)| value.kind == restichub_db::ParameterKind::Secret)
+    {
+        context.authorize(Operation::ParameterSecretWrite)?;
+    }
     for name in &removed {
         restichub_db::parameters::delete_profile_name(&mut tx, profile_id, name).await?;
     }
@@ -296,13 +316,18 @@ pub async fn update_profile(
     }
 
     let stored_definitions = crate::parameters::from_row(&current.parameters)?;
+    let mut after = profile_value(&validated, Some(&stored_definitions));
+    if !dropped.is_empty()
+        && let Some(object) = after.as_object_mut()
+    {
+        object.insert(
+            "parameter_overrides_dropped".to_owned(),
+            crate::parameters::audit_dropped(&dropped),
+        );
+    }
     let mut event =
         context.audit_event(AuditAction::ProfileUpdate, "profile", profile_id.as_uuid());
-    event.diff = Some(diff(
-        Some(&stored_value(&current)),
-        Some(&profile_value(&validated, Some(&stored_definitions))),
-        &[],
-    ));
+    event.diff = Some(diff(Some(&stored_value(&current)), Some(&after), &[]));
     restichub_db::audit::insert(&mut tx, &event).await?;
 
     let updated = repo::get(&mut tx, profile_id).await?;
@@ -372,6 +397,7 @@ pub async fn delete_profile(
     context.authorize(Operation::ProfilesWrite)?;
     let profile_id = parse_profile_id(&id)?;
     let mut tx = state.db().begin_tenant(context.tenant_id).await?;
+    tx.lock(crate::parameters::PARAMETERS_LOCK).await?;
     let Some(current) = repo::get_for_update(&mut tx, profile_id).await? else {
         return Err(ApiError::not_found());
     };

@@ -1,21 +1,23 @@
 //! The checks that keep a saved plan complete (FR-PF-11, AC-PF-06, AC-PF-07).
 //!
-//! Every write that can take a value away runs the check under a lock that a conflicting write
-//! waits for: a profile save holds the profile row for update, a change of the host values holds the
-//! host row for update and each profile of the host for share, and a plan save holds the plan row
-//! for update, the profile for share and the host for key share. Thus a plan never reaches the table
-//! without a value for each required parameter, and the scheduler has no incomplete plan to
-//! dispatch.
+//! Every write that can take a value away takes one transaction-level advisory lock of the tenant
+//! first: `pg_advisory_xact_lock` on the key of [`crate::parameters::PARAMETERS_LOCK`] and the
+//! tenant. The lock covers a profile create, update and delete, a plan create, update and delete, a
+//! change of the host values and the replace of a host record (FR-ID-11). A plan therefore never
+//! reaches the table without a value for each required parameter, and the scheduler has no
+//! incomplete plan to dispatch.
 //!
-//! The locks keep this order, and no path takes them in the other order:
+//! The advisory lock comes before every row lock, and it serializes the writers of the tenant, so
+//! the checks below read the rows of the other writers without a share lock. The order of the row
+//! locks after the advisory lock is this one, and no path takes them in the other order:
 //!
 //! - a plan save: plan, profile, host, repository;
 //! - a host values change: host, then the profiles of the plans of the host;
 //! - a profile save: the profile only.
 //!
-//! A host values change and a plan save meet on the host row, and a host values change and a profile
-//! save meet on the profile row. A share request is compatible with a share that another
-//! transaction already holds, so the two paths never wait for each other in a cycle.
+//! The repository row keeps its update lock, because ADR-0046 binds a local repository to its host
+//! and the repository write takes that lock first. Two writers of this invariant wait for the
+//! advisory lock, so no row lock of the invariant forms a cycle.
 
 use restichub_db::parameters as repo;
 use restichub_db::{AgentId, ParameterKind, ProfileId};
@@ -35,8 +37,8 @@ pub struct Missing {
 
 /// The plans of one host that a missing required value leaves without a value.
 ///
-/// The read takes a share lock on each profile, so a concurrent profile save waits for this
-/// transaction (FR-PF-11).
+/// The caller holds the advisory lock of the parameter writes, so a concurrent profile save waits
+/// for this transaction (FR-PF-11).
 pub async fn missing_in_plans_of_host(
     tx: &mut restichub_db::TenantTx<'_>,
     agent_id: AgentId,
@@ -49,7 +51,7 @@ pub async fn missing_in_plans_of_host(
         },
     };
     for plan in plans_repo::list_by_agent(tx, agent_id).await? {
-        let Some(profile) = profiles_repo::get_for_share(tx, plan.profile_id).await? else {
+        let Some(profile) = profiles_repo::get(tx, plan.profile_id).await? else {
             continue;
         };
         let definitions = parameters::from_row(&profile.parameters)?;
@@ -96,7 +98,8 @@ pub async fn missing_in_plans_of_profile(
 ///
 /// A host holds one value for each name, so two kinds for one name on one host cannot both have a
 /// value. `own` is the profile that the write saves, and the plans of the other profiles of the
-/// host give their declarations.
+/// host give their declarations. `skip_plan` is the plan that the write saves: its stored row still
+/// names its old profile, and that profile is not another profile of the host (FR-ID-11).
 ///
 /// # Errors
 ///
@@ -105,14 +108,15 @@ pub async fn check_kinds_of_host(
     tx: &mut restichub_db::TenantTx<'_>,
     agent_id: AgentId,
     own: ProfileId,
+    skip_plan: Option<restichub_db::PlanId>,
     field: &str,
     definitions: &[ParameterDef],
 ) -> Result<(), ApiError> {
     for plan in plans_repo::list_by_agent(tx, agent_id).await? {
-        if plan.profile_id == own {
+        if plan.profile_id == own || Some(plan.id) == skip_plan {
             continue;
         }
-        let Some(profile) = profiles_repo::get_for_share(tx, plan.profile_id).await? else {
+        let Some(profile) = profiles_repo::get(tx, plan.profile_id).await? else {
             continue;
         };
         for other in parameters::from_row(&profile.parameters)? {
@@ -136,6 +140,42 @@ fn kind_of(definitions: &[ParameterDef], name: &str) -> ParameterKind {
         .iter()
         .find(|definition| definition.name == name)
         .map_or(ParameterKind::Text, |definition| definition.kind)
+}
+
+/// Refuses a move of plans to a host that declares one name with another kind (FR-PF-11, FR-ID-11).
+///
+/// The move gives the plans of the old record the successor, and the values of the successor then
+/// serve their profiles too. The check runs after the move, so the plans of the successor supply
+/// the declarations of both records.
+///
+/// # Errors
+///
+/// Returns `400 parameter_kind_mismatch` with the name of the parameter.
+pub async fn check_kinds_after_move(
+    tx: &mut restichub_db::TenantTx<'_>,
+    agent_id: AgentId,
+) -> Result<(), ApiError> {
+    let mut checked: Vec<ProfileId> = Vec::new();
+    for plan in plans_repo::list_by_agent(tx, agent_id).await? {
+        if checked.contains(&plan.profile_id) {
+            continue;
+        }
+        checked.push(plan.profile_id);
+        let Some(profile) = profiles_repo::get(tx, plan.profile_id).await? else {
+            continue;
+        };
+        let definitions = parameters::from_row(&profile.parameters)?;
+        check_kinds_of_host(
+            tx,
+            agent_id,
+            plan.profile_id,
+            None,
+            "old_agent_id",
+            &definitions,
+        )
+        .await?;
+    }
+    Ok(())
 }
 
 fn add(missing: &mut Missing, names: Vec<String>, plan_id: restichub_db::PlanId, plan_name: &str) {

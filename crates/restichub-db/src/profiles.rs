@@ -247,27 +247,6 @@ pub async fn get_for_update(
     Ok(row.map(Profile::from))
 }
 
-/// Reads one profile with a share lock: a concurrent update or delete of the profile waits for the
-/// transaction, and other readers that take the same lock do not.
-pub async fn get_for_share(
-    tx: &mut TenantTx<'_>,
-    id: ProfileId,
-) -> Result<Option<Profile>, DbError> {
-    let row = sqlx::query_as::<_, ProfileRow>(
-        "SELECT id, name, paths_all, paths_windows, paths_linux, paths_macos, \
-                excludes, exclude_files, tags, use_fs_snapshot, one_file_system, exclude_caches, \
-                limit_upload_kib, limit_download_kib, stall_timeout_minutes, \
-                max_duration_minutes, retention, check_options, scripts, parameters, \
-                created_at, updated_at, created_by \
-         FROM profiles WHERE id = $1 FOR SHARE",
-    )
-    .bind(id)
-    .fetch_optional(tx.as_conn())
-    .await
-    .map_err(DbError::Query)?;
-    Ok(row.map(Profile::from))
-}
-
 /// Writes the mutable fields of a profile and sets `updated_at`. A missing profile returns `false`.
 pub async fn update(
     tx: &mut TenantTx<'_>,
