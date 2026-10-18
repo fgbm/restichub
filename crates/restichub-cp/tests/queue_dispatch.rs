@@ -351,6 +351,45 @@ async fn ac_ag_09_an_agent_with_an_older_restic_gets_no_job_and_the_status_is_in
     env.db.cleanup().await;
 }
 
+/// ADR-0047: a job keeps the repository that its plan named when the queue took it, so a plan that
+/// moves to another repository does not write there (AC-RP-07).
+#[tokio::test]
+async fn ac_rp_07_a_queued_backup_fails_when_its_plan_moves_to_another_repository() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let mut agent = env.connect_agent("repo-change-host").await;
+    let first = env.create_repository(agent.id, "first-password").await;
+    let second = env.create_repository(agent.id, "second-password").await;
+    let profile = env.create_profile(json!({})).await;
+    let plan = env.create_plan(profile, agent.id, first).await;
+    let job = env.run_plan(plan).await;
+
+    // The plan moves to another repository after the job was queued.
+    let mut tx = env.scoped().await;
+    sqlx::query("UPDATE plans SET repository_id = $2 WHERE id = $1")
+        .bind(plan)
+        .bind(second)
+        .execute(&mut *tx)
+        .await
+        .expect("cannot move the plan");
+    tx.commit().await.expect("cannot commit the move");
+    env.pass().await;
+
+    let body = env.job(job).await;
+    assert_eq!(body["status"], "failed");
+    assert_eq!(body["result_code"], "failed");
+    assert_eq!(body["result_message"], "repository_changed");
+    assert!(agent.try_job(Duration::from_millis(300)).await.is_none());
+    assert_eq!(
+        delivered_count(&env).await,
+        0,
+        "a refused job reads no secret"
+    );
+    env.db.cleanup().await;
+}
+
 #[tokio::test]
 async fn a_profile_that_no_longer_compiles_fails_the_job_with_a_typed_reason() {
     let Some(db) = common::test_db().await else {

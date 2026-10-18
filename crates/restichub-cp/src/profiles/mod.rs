@@ -444,7 +444,7 @@ async fn named_repository(
     tx: &mut restichub_db::TenantTx<'_>,
     value: &str,
 ) -> Result<Repository, ApiError> {
-    let id = uuid::Uuid::parse_str(value).map_err(|error| {
+    let id = uuid::Uuid::parse_str(value.trim()).map_err(|error| {
         ApiError::invalid_field_cause("repository_id", Reason::InvalidFormat, error.to_string())
     })?;
     let repository_id = restichub_db::RepositoryId::from_uuid(id);

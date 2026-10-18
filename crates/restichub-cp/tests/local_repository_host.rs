@@ -7,11 +7,11 @@ mod common;
 mod queue_support;
 
 use axum::http::StatusCode;
-use restichub_db::AgentId;
+use restichub_db::{AgentId, JobKind};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-use queue_support::{Env, test_queue};
+use queue_support::{Env, eventually, test_queue};
 
 fn local_body(path: &str, host: Option<AgentId>) -> Value {
     let mut body = json!({
@@ -269,6 +269,94 @@ async fn ac_rp_07_a_plan_save_waits_for_a_concurrent_repository_host_change() {
     let (status, body) = env.call(&env.admin, "GET", "/api/v1/plans", None).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["items"].as_array().map(Vec::len), Some(0), "{body}");
+    env.db.cleanup().await;
+}
+
+#[tokio::test]
+async fn ac_rp_07_the_dispatcher_refuses_a_job_on_another_host() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let host = env.connect_agent("lo-dispatch-host").await;
+    let mut other = env.connect_agent("lo-dispatch-other").await;
+    let repository = env.create_repository(host.id, "pw").await;
+    mark_initialized(&env, repository).await;
+    let profile = env.create_profile(json!({})).await;
+    let plan = env.create_plan(profile, host.id, repository).await;
+    move_plan(&env, plan, other.id).await;
+
+    let (status, body) = env
+        .call(
+            &env.operator,
+            "POST",
+            &format!("/api/v1/plans/{plan}/run"),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "not_repository_host", "{body}");
+    assert!(body.get("field").is_none_or(Value::is_null), "{body}");
+
+    for (kind, plan) in [
+        (JobKind::Backup, Some(plan)),
+        (JobKind::Unlock, None),
+        (JobKind::Check, None),
+    ] {
+        let job = env.enqueue(kind, other.id, repository, plan).await;
+        env.pass().await;
+        eventually(|| async { env.job_status(job).await == "failed" }).await;
+        let ended = env.job(job).await;
+        assert_eq!(ended["result_message"], "not_repository_host", "{ended}");
+        assert_eq!(ended["result_code"], "config_error", "{ended}");
+    }
+    assert!(
+        other
+            .try_job(std::time::Duration::from_millis(300))
+            .await
+            .is_none(),
+        "the other host receives no job of the local repository"
+    );
+    env.db.cleanup().await;
+}
+
+#[tokio::test]
+async fn ac_rp_07_a_local_repository_restores_and_lists_on_its_host_only() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let host = env.connect_agent("lo-restore-host").await;
+    let other = env.connect_agent("lo-restore-other").await;
+    let repository = env.create_repository(host.id, "pw").await;
+    mark_initialized(&env, repository).await;
+
+    let agent = json!(other.id.to_string());
+    for (path, body) in [
+        (
+            "restore",
+            json!({
+                "snapshot_id": "0123abcd",
+                "target": "/var/lib/restichub-restore/x",
+                "overwrite": "always",
+                "agent_id": agent,
+            }),
+        ),
+        ("snapshots", json!({"agent_id": agent})),
+        ("ls", json!({"snapshot_id": "0123abcd", "agent_id": agent})),
+        ("test-access", json!({"agent_id": agent})),
+    ] {
+        let (status, body) = env
+            .call(
+                &env.admin,
+                "POST",
+                &format!("/api/v1/repositories/{repository}/{path}"),
+                Some(body),
+            )
+            .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{path}: {body}");
+        assert_field(&body, "agent_id", "not_repository_host");
+    }
     env.db.cleanup().await;
 }
 

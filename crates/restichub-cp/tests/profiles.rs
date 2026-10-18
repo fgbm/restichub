@@ -218,6 +218,80 @@ async fn ac_pf_01_the_preview_masks_the_secrets() {
     db.cleanup().await;
 }
 
+/// ADR-0047: the preview takes the repository of the body, and a profile without a plan shows no
+/// repository (FR-PF-04, AC-PF-01).
+#[tokio::test]
+async fn ac_pf_01_the_preview_takes_the_repository_of_the_body_or_none() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant_with_key(db.database(), "acme").await;
+    let app = app_with_kek(db.database());
+    let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
+    let agent = seed_agent_full(
+        db.database(),
+        tenant,
+        "preview-host",
+        "linux",
+        "0.19.0",
+        &[],
+    )
+    .await;
+    let repository = repository_fixture(db.database(), tenant).await;
+    let profile =
+        create_profile(&app, &cookie, profile_body("preview-repo", json!(["/srv"]))).await;
+    let profile_id = profile["id"].as_str().expect("the identifier").to_owned();
+    let preview_body = |repository: Option<String>| {
+        let mut body = json!({"agent_id": agent.to_string()});
+        if let Some(repository) = repository {
+            body["repository_id"] = json!(repository);
+        }
+        body
+    };
+
+    // A profile without a plan names no repository, so its steps carry no repository environment.
+    let (status, _, preview) = send(
+        &app,
+        request(
+            "POST",
+            &format!("/api/v1/profiles/{profile_id}/preview"),
+            Some(&cookie),
+            Some(preview_body(None)),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    assert!(preview["repository_id"].is_null(), "{preview}");
+    assert!(
+        !preview.to_string().contains("RESTIC_REPOSITORY"),
+        "{preview}"
+    );
+    assert!(
+        !preview.to_string().contains("RESTIC_PASSWORD"),
+        "{preview}"
+    );
+
+    // The body names the repository, and the space around the identifier is ignored.
+    let (status, _, preview) = send(
+        &app,
+        request(
+            "POST",
+            &format!("/api/v1/profiles/{profile_id}/preview"),
+            Some(&cookie),
+            Some(preview_body(Some(format!("  {repository}  ")))),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    assert_eq!(preview["repository_id"], repository.as_str());
+    assert!(
+        preview.to_string().contains("RESTIC_REPOSITORY"),
+        "{preview}"
+    );
+
+    db.cleanup().await;
+}
+
 /// AC-PF-02: the preview refuses VSS for a Linux agent and an old restic.
 #[tokio::test]
 async fn ac_pf_02_the_preview_points_to_the_field() {
@@ -853,7 +927,7 @@ async fn the_item_limits_and_the_root_paths_are_enforced() {
 
 /// A foreign tenant identifier is refused for the agent and for the repository (AC-TN-01).
 #[tokio::test]
-async fn a_foreign_tenant_agent_and_repository_are_refused() {
+async fn ac_tn_01_a_foreign_tenant_agent_and_repository_are_refused() {
     let Some(db) = common::test_db().await else {
         return;
     };
@@ -909,6 +983,24 @@ async fn a_foreign_tenant_agent_and_repository_are_refused() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
     assert_eq!(problem["field"], "agent_id");
+
+    // A preview that names the repository of tenant B is refused.
+    let (status, _, problem) = send(
+        &app,
+        request(
+            "POST",
+            &format!("/api/v1/profiles/{profile_id}/preview"),
+            Some(&cookie_a),
+            Some(json!({
+                "agent_id": agent_a.to_string(),
+                "repository_id": repository_b,
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
+    assert_eq!(problem["field"], "repository_id");
+    assert_eq!(problem["reason"], "unknown");
 
     db.cleanup().await;
 }
