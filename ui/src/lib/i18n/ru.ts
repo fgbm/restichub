@@ -1706,7 +1706,7 @@ export const ru: Record<MessageKey, string> = {
 		'Профили сохраняют скрипты, которые они скопировали из шаблона «{name}».',
 	'scriptTemplates.danger.summary': 'Удалить шаблон',
 	'scriptTemplates.danger.delete':
-		'Шаблон удалён. Профили сохраняют скрипты, которые они скопировали из него.',
+		'Действие удаляет шаблон. Профили сохраняют скрипты, которые они скопировали из него.',
 	'scriptTemplates.parameter.label': 'Подпись',
 	'scriptTemplates.parameter.default': 'Значение по умолчанию',
 	'scriptTemplates.parameter.type.string': 'Текст',
@@ -1738,7 +1738,7 @@ export const ru: Record<MessageKey, string> = {
 		'Профили сохраняют скрипты, которые они скопировали из шаблона «{name}».',
 	'jobTemplates.danger.summary': 'Удалить шаблон',
 	'jobTemplates.danger.delete':
-		'Шаблон удалён. Профили сохраняют скрипты, которые они скопировали из него.',
+		'Действие удаляет шаблон. Профили сохраняют скрипты, которые они скопировали из него.',
 	'jobTemplates.copy': 'Сделать копию',
 	'hp.revokedNote': 'Хост отозван. Он больше не подключается.',
 	'hp.revokedBy': 'Отозван пользователем {name}',
