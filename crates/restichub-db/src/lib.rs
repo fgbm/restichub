@@ -35,6 +35,7 @@ pub mod kek;
 pub mod maintenance;
 pub mod memberships;
 pub mod metrics;
+pub mod parameters;
 pub mod plans;
 pub mod profiles;
 pub mod queue;
@@ -56,8 +57,9 @@ pub mod test_util;
 
 pub use enums::{
     ActorType, AdminState, AgentStatus, BackendKind, CaRole, JobKind, JobResultCode, JobStatus,
-    LogLevel, LogStream, MaintenanceTask, MissedRunPolicy, PlannedKind, PlannedPhase, Role,
-    SecretUsageKind, ServerScriptsState, SigningKeyRole, StepStatus, TenantStatus,
+    LogLevel, LogStream, MaintenanceTask, MissedRunPolicy, ParameterKind, PlannedKind,
+    PlannedPhase, Role, SecretUsageKind, ServerScriptsState, SigningKeyRole, StepStatus,
+    TenantStatus,
 };
 pub use ids::{
     AgentId, AlertId, ApiTokenId, AuditLogId, ChannelId, DeliveryId, EnrollmentTokenId, JobId,

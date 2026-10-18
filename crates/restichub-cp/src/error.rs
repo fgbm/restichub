@@ -127,7 +127,7 @@ pub struct ApiError {
     /// The `Retry-After` header value in seconds. Only `rate_limited` and `busy` set it.
     retry_after: Option<u64>,
     // Boxed so that `Result<_, ApiError>` stays below the `result_large_err` limit.
-    blockers: Option<Box<Blockers>>,
+    records: Option<Box<Records>>,
     /// The internal detail. The response body never holds it; the mapper logs it with the request
     /// ID. The value holds no secret: every constructor takes a message, never a value.
     cause: Option<String>,
@@ -143,7 +143,7 @@ impl ApiError {
             reason: None,
             existing_name: None,
             retry_after: None,
-            blockers: None,
+            records: None,
             cause: None,
         }
     }
@@ -444,7 +444,10 @@ impl ApiError {
     /// translates the code and links the records (NFR-DOC-04).
     pub fn blocked(code: ErrorCode, blockers: Blockers) -> Self {
         let mut error = Self::new(StatusCode::CONFLICT, code, "Conflict");
-        error.blockers = Some(Box::new(blockers));
+        error.records = Some(Box::new(Records {
+            blockers: Some(blockers),
+            parameters: Vec::new(),
+        }));
         error
     }
 
@@ -453,10 +456,37 @@ impl ApiError {
         Self::new(StatusCode::CONFLICT, code, "Conflict")
     }
 
+    /// Creates a `400` error with the names of the parameters that the request lacks (FR-PF-11).
+    pub fn parameters(field: impl Into<String>, reason: Reason, names: Vec<String>) -> Self {
+        let mut error = Self::invalid_field(field, reason);
+        error.records = Some(Box::new(Records {
+            blockers: None,
+            parameters: names,
+        }));
+        error
+    }
+
+    /// Creates a `400 parameter_missing_in_plans` error with the names of the parameters and the
+    /// plans that a change would leave without a required value (FR-PF-11).
+    pub fn parameters_in_plans(reason: Reason, names: Vec<String>, blockers: Blockers) -> Self {
+        let mut error = Self::parameters("parameters", reason, names);
+        if let Some(records) = error.records.as_mut() {
+            records.blockers = Some(blockers);
+        }
+        error
+    }
+
     /// Creates a `409 already_queued` error: the plan already holds a queued manual run.
     pub fn already_queued() -> Self {
         Self::new(StatusCode::CONFLICT, ErrorCode::AlreadyQueued, "Conflict")
     }
+}
+
+/// The records and the parameter names of a refusal, boxed together.
+#[derive(Debug)]
+struct Records {
+    blockers: Option<Blockers>,
+    parameters: Vec<String>,
 }
 
 /// In seconds.
@@ -554,7 +584,7 @@ pub fn map_write_error(error: DbError) -> ApiError {
 pub struct InternalCause(pub String);
 
 impl IntoResponse for ApiError {
-    fn into_response(self) -> Response {
+    fn into_response(mut self) -> Response {
         let body = ProblemBody {
             type_: "about:blank".to_owned(),
             title: self.title.to_owned(),
@@ -564,7 +594,12 @@ impl IntoResponse for ApiError {
             request_id: String::new(),
             field: self.field,
             reason: self.reason.map(|reason| reason.as_str().to_owned()),
-            blockers: self.blockers.map(|blockers| *blockers),
+            blockers: self.records.as_mut().and_then(|records| records.blockers.take()),
+            parameters: self
+                .records
+                .as_mut()
+                .filter(|records| !records.parameters.is_empty())
+                .map(|records| std::mem::take(&mut records.parameters)),
             existing_name: self.existing_name,
         };
         let mut response = (
@@ -600,10 +635,15 @@ pub struct ProblemBody {
     /// In snake_case; only `invalid_argument` sets it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
-    /// The records that block a delete. Only the `*_in_use` codes and `repository_has_active_job`
-    /// set it.
+    /// The records that block a delete, and the plans that a change would leave without a required
+    /// parameter. Only the `*_in_use` codes, `repository_has_active_job` and
+    /// `parameter_missing_in_plans` set it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub blockers: Option<Blockers>,
+    /// The names of the parameters that the request lacks. Only `parameter_missing` and
+    /// `parameter_kind_mismatch` set it (FR-PF-11).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parameters: Option<Vec<String>>,
     /// The name of the repository that holds the location; only `repository_location_taken` sets
     /// it.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -619,6 +659,8 @@ pub enum BlockerKind {
     JobTemplate,
     Plan,
     Job,
+    /// A host that holds a parameter value (FR-PF-10).
+    Host,
 }
 
 impl From<restichub_db::SecretUsageKind> for BlockerKind {
@@ -628,6 +670,8 @@ impl From<restichub_db::SecretUsageKind> for BlockerKind {
             restichub_db::SecretUsageKind::Channel => Self::Channel,
             restichub_db::SecretUsageKind::Profile => Self::Profile,
             restichub_db::SecretUsageKind::JobTemplate => Self::JobTemplate,
+            restichub_db::SecretUsageKind::Host => Self::Host,
+            restichub_db::SecretUsageKind::Plan => Self::Plan,
         }
     }
 }

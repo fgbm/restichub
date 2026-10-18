@@ -125,6 +125,8 @@ pub enum EnvKind {
     String,
     /// The value is the identifier of a secret of the purpose `hook_secret`.
     SecretRef,
+    /// The value is the name of a profile parameter (FR-PF-10, ADR-0047).
+    Parameter,
 }
 
 /// One environment variable of a script. The agent gives it to the script as an environment
@@ -188,6 +190,7 @@ pub fn audit_value(scripts: &[ScriptDef]) -> Value {
                         "kind": match variable.kind {
                             EnvKind::String => "string",
                             EnvKind::SecretRef => "secret_ref",
+                            EnvKind::Parameter => "parameter",
                         },
                     })).collect::<Vec<_>>(),
                 })
@@ -249,6 +252,7 @@ pub fn compiler_script(script: &ScriptDef) -> ScriptRef {
                 value: match variable.kind {
                     EnvKind::String => ScriptEnvValue::Plain(variable.value.clone()),
                     EnvKind::SecretRef => ScriptEnvValue::Secret(variable.value.clone()),
+                    EnvKind::Parameter => ScriptEnvValue::Parameter(variable.value.clone()),
                 },
             })
             .collect(),
@@ -343,6 +347,15 @@ pub fn validate_script(mut script: ScriptDef, prefix: &str) -> Result<ScriptDef,
                     format!("{field}.value"),
                     Reason::InvalidCharacter,
                 ));
+            }
+            // The name of a parameter of the profile; the profile checks that it declares it.
+            EnvKind::Parameter => {
+                if !crate::parameters::is_parameter_name(&variable.value) {
+                    return Err(ApiError::invalid_field(
+                        format!("{field}.value"),
+                        Reason::InvalidFormat,
+                    ));
+                }
             }
             // The usage search of a secret compares the canonical text (FR-RP-05).
             EnvKind::SecretRef => match uuid::Uuid::parse_str(&variable.value) {

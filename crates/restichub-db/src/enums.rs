@@ -911,6 +911,37 @@ pub enum PlannedPhase {
     Finally,
 }
 
+/// The kind of a parameter of a profile and of its value (FR-PF-09, ADR-0047).
+///
+/// The string value is the stored value of the `kind` column and of the profile JSON. It is stable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
+#[serde(rename_all = "snake_case")]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
+pub enum ParameterKind {
+    /// A value that a template field expands and that a person may read.
+    Text,
+    /// A reference to a secret of the purpose `hook_secret`.
+    Secret,
+}
+
+impl ParameterKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Text => "text",
+            Self::Secret => "secret",
+        }
+    }
+
+    /// `None` on an unknown string.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "text" => Some(Self::Text),
+            "secret" => Some(Self::Secret),
+            _ => None,
+        }
+    }
+}
+
 /// The kind of the object that references a secret.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
@@ -920,4 +951,8 @@ pub enum SecretUsageKind {
     Channel,
     Profile,
     JobTemplate,
+    /// A parameter value of a host (FR-PF-10).
+    Host,
+    /// A parameter value of a plan (FR-PF-10).
+    Plan,
 }

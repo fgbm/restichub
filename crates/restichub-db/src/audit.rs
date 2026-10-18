@@ -166,6 +166,8 @@ pub enum AuditAction {
     /// An agent sent a message for a job of another agent, for an unknown job or for a job that it
     /// cannot hold (AC-PR-05).
     AgentMessageRefused,
+    /// The parameter values of a host changed (FR-PF-10, FR-PF-12).
+    AgentParametersUpdate,
     /// An action from a newer version; the list keeps the row instead of failing.
     Unknown(String),
 }
@@ -239,6 +241,7 @@ impl AuditAction {
             Self::ProfileHooksRemoved => "profile_hooks_removed",
             Self::JobRejected => "job_rejected",
             Self::AgentMessageRefused => "agent_message_refused",
+            Self::AgentParametersUpdate => "agent_parameters_update",
             Self::Unknown(value) => value,
         }
     }
@@ -312,6 +315,7 @@ impl AuditAction {
             "profile_hooks_removed" => Self::ProfileHooksRemoved,
             "job_rejected" => Self::JobRejected,
             "agent_message_refused" => Self::AgentMessageRefused,
+            "agent_parameters_update" => Self::AgentParametersUpdate,
             _ => return None,
         };
         Some(action)
@@ -389,6 +393,7 @@ impl AuditAction {
             Self::ProfileHooksRemoved,
             Self::JobRejected,
             Self::AgentMessageRefused,
+            Self::AgentParametersUpdate,
         ]
     }
 }

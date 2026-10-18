@@ -1,4 +1,7 @@
 //! Converts a profile to typed steps (FR-PF-04, FR-PF-05).
+//!
+//! A parameter expands in the paths, the excludes, the exclude files, the tags and the script
+//! variables, and never in the retention or the check fields (FR-PF-10, ADR-0047).
 
 use restichub_proto::agent::v1::{
     BackupStep, CheckStep, ForgetGroupBy, ForgetStep, Job, PruneStep, RepositoryAccess,
@@ -196,7 +199,7 @@ fn build_steps(
 ) -> Result<Vec<PlannedStep>, CompileError> {
     let mut steps = Vec::new();
 
-    push_scripts(&mut steps, profile, HookPhase::Before);
+    push_scripts(&mut steps, profile, HookPhase::Before, target)?;
 
     steps.push(PlannedStep {
         step: backup_step(profile, repository_id, target)?,
@@ -211,7 +214,7 @@ fn build_steps(
         HookPhase::OnError,
         HookPhase::Finally,
     ] {
-        push_scripts(&mut steps, profile, phase);
+        push_scripts(&mut steps, profile, phase, target)?;
     }
 
     if let Some(retention) = &profile.retention {
@@ -236,15 +239,21 @@ fn build_steps(
 }
 
 /// Adds the scripts of one phase, in the order of the profile (FR-HK-09).
-fn push_scripts(steps: &mut Vec<PlannedStep>, profile: &Profile, phase: HookPhase) {
+fn push_scripts(
+    steps: &mut Vec<PlannedStep>,
+    profile: &Profile,
+    phase: HookPhase,
+    target: &TargetFacts,
+) -> Result<(), CompileError> {
     for (index, script) in profile.scripts.iter().enumerate() {
         if script.phase == phase {
             steps.push(PlannedStep {
-                step: crate::script::script_step(index, script),
+                step: crate::script::script_step(index, script, target)?,
                 maintenance: false,
             });
         }
     }
+    Ok(())
 }
 
 fn backup_step(
@@ -318,11 +327,12 @@ fn forget_step(
     retention: &Retention,
     target: &TargetFacts,
 ) -> Result<Step, CompileError> {
-    let keep_within = expand_field(&retention.keep_within, target, "retention.keep_within")?;
+    let keep_within =
+        expand_maintenance_field(&retention.keep_within, target, "retention.keep_within")?;
 
     let mut keep_tags = Vec::new();
     for (index, tag) in retention.keep_tags.iter().enumerate() {
-        keep_tags.push(expand_tag(
+        keep_tags.push(expand_maintenance_tag(
             tag,
             target,
             &format!("retention.keep_tags[{index}]"),
@@ -331,7 +341,7 @@ fn forget_step(
 
     let mut filter = SnapshotsFilter::default();
     for (index, host) in retention.filter.hosts.iter().enumerate() {
-        filter.hosts.push(expand_field(
+        filter.hosts.push(expand_maintenance_field(
             host,
             target,
             &format!("retention.filter.hosts[{index}]"),
@@ -340,14 +350,14 @@ fn forget_step(
     // The snapshot needs the profile tag and every tag of the filter (FR-RP-08, ADR-0034).
     filter.all_tags.extend(profile.profile_tag.iter().cloned());
     for (index, tag) in retention.filter.tags.iter().enumerate() {
-        filter.all_tags.push(expand_tag(
+        filter.all_tags.push(expand_maintenance_tag(
             tag,
             target,
             &format!("retention.filter.tags[{index}]"),
         )?);
     }
     for (index, path) in retention.filter.paths.iter().enumerate() {
-        filter.paths.push(expand_field(
+        filter.paths.push(expand_maintenance_field(
             path,
             target,
             &format!("retention.filter.paths[{index}]"),
@@ -404,7 +414,7 @@ fn check_step(
         timeout_seconds: 0,
         kind: Some(step::Kind::Check(CheckStep {
             repository_id: repository_id.to_owned(),
-            read_data_subset: expand_field(
+            read_data_subset: expand_maintenance_field(
                 &check.read_data_subset,
                 target,
                 "check.read_data_subset",
@@ -424,7 +434,26 @@ fn group_by_flag(group: GroupBy) -> i32 {
 }
 
 fn expand_field(value: &str, target: &TargetFacts, field: &str) -> Result<String, CompileError> {
-    let expanded = template::expand(value, target).map_err(|error| template_error(error, field))?;
+    expand_with(template::expand(value, target), field)
+}
+
+/// Expands a field of the retention or of the check (ADR-0034, ADR-0047).
+///
+/// One maintenance step serves every host of the plans of a repository, so a value that depends on
+/// one host has no single meaning there.
+fn expand_maintenance_field(
+    value: &str,
+    target: &TargetFacts,
+    field: &str,
+) -> Result<String, CompileError> {
+    expand_with(template::expand_without_parameters(value, target), field)
+}
+
+fn expand_with(
+    expanded: Result<String, TemplateError>,
+    field: &str,
+) -> Result<String, CompileError> {
+    let expanded = expanded.map_err(|error| template_error(error, field))?;
     if restichub_proto::validate::has_forbidden(&expanded) {
         return Err(CompileError::InvalidValue {
             field: FieldPath::new(field),
@@ -437,7 +466,19 @@ fn expand_field(value: &str, target: &TargetFacts, field: &str) -> Result<String
 /// tag, a comma and surrounding space (AC-PR-08). A template may expand to the
 /// reserved prefix, so the check runs after the expansion (FR-RP-08).
 fn expand_tag(value: &str, target: &TargetFacts, field: &str) -> Result<String, CompileError> {
-    let expanded = expand_field(value, target, field)?;
+    check_tag(expand_field(value, target, field)?, field)
+}
+
+/// Expands a tag of the retention without a parameter (ADR-0034, ADR-0047).
+fn expand_maintenance_tag(
+    value: &str,
+    target: &TargetFacts,
+    field: &str,
+) -> Result<String, CompileError> {
+    check_tag(expand_maintenance_field(value, target, field)?, field)
+}
+
+fn check_tag(expanded: String, field: &str) -> Result<String, CompileError> {
     if expanded.is_empty()
         || expanded.contains(',')
         || expanded.trim() != expanded
@@ -459,6 +500,13 @@ fn template_error(error: TemplateError, field: &str) -> CompileError {
         TemplateError::MissingLabel { key } => CompileError::MissingLabel { field, key },
         TemplateError::InvalidDate { format } => CompileError::InvalidDate { field, format },
         TemplateError::Unterminated => CompileError::UnterminatedTemplate { field },
+        TemplateError::MissingParameter { name } => CompileError::MissingParameter { field, name },
+        TemplateError::SecretParameter { name } => {
+            CompileError::SecretParameterInTemplate { field, name }
+        }
+        TemplateError::ParameterNotAllowed { name } => {
+            CompileError::ParameterNotAllowed { field, name }
+        }
     }
 }
 

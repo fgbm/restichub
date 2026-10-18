@@ -583,6 +583,7 @@ pub async fn seed_profile(db: &Database, tenant: TenantId, name: &str) -> restic
             retention: None,
             check_options: None,
             scripts: serde_json::json!([]),
+            parameters: serde_json::json!([]),
             created_by: None,
         },
     )

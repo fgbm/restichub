@@ -151,6 +151,9 @@ pub async fn list_secrets(
                 SecretUsageKind::Channel => Operation::ChannelsRead,
                 SecretUsageKind::Profile => Operation::ProfilesRead,
                 SecretUsageKind::JobTemplate => Operation::ScriptsRead,
+                // A host value and a plan value belong to the profiles that an Operator manages
+                // (FR-PF-10, FR-PF-12).
+                SecretUsageKind::Host | SecretUsageKind::Plan => Operation::ProfilesRead,
             })
             .is_ok()
     });

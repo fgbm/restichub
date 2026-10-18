@@ -38,6 +38,7 @@ fn target() -> TargetFacts {
         os: OperatingSystem::Linux,
         arch: Architecture::X86_64,
         labels,
+        parameters: BTreeMap::new(),
         restic_version: ResticVersion::MIN_SUPPORTED,
         now: date(2026, 10, 13),
         server_scripts: crate::script::ServerScripts::default(),

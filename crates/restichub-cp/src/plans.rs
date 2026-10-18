@@ -29,6 +29,7 @@ use crate::alerts::rpo::{self, RpoState};
 use crate::context::{Operation, RequestContext};
 use crate::error::{ApiError, map_write_error};
 use crate::json::ApiJson;
+use crate::parameters::{self, ParameterValueDef, PlanParameterValueView};
 use crate::schedule::{Schedule, ScheduleError};
 use crate::server::AppState;
 use crate::validation::Reason;
@@ -78,6 +79,10 @@ pub struct CreatePlanRequest {
     /// default of the schedule (ADR-0036).
     #[serde(default)]
     pub rpo_seconds: Option<i32>,
+    /// The values that the plan sets instead of the values of the host (FR-PF-10). At most 64.
+    #[serde(default)]
+    #[schema(max_items = 64)]
+    pub parameter_values: Vec<ParameterValueDef>,
 }
 
 /// The request body of a plan update. An absent name keeps the name.
@@ -101,6 +106,10 @@ pub struct UpdatePlanRequest {
     /// The recovery point objective in seconds. Null restores the default of the schedule.
     #[serde(default)]
     pub rpo_seconds: Option<i32>,
+    /// Replaces the whole list of the values of the plan (FR-PF-10).
+    #[serde(default)]
+    #[schema(max_items = 64)]
+    pub parameter_values: Vec<ParameterValueDef>,
 }
 
 fn default_enabled() -> bool {
@@ -134,6 +143,9 @@ pub struct PlanView {
     pub last_success_at: Option<String>,
     /// The state of the dashboard (ADR-0036). `unknown` when the host of the plan is revoked.
     pub rpo_state: PlanRpoState,
+    /// The values that the plan sets instead of the values of the host (FR-PF-10). For a Viewer, a
+    /// text value is empty with the flag `hidden` (FR-PF-12).
+    pub parameter_values: Vec<PlanParameterValueView>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -159,7 +171,12 @@ impl From<RpoState> for PlanRpoState {
 
 impl PlanView {
     /// `now` comes from the clock of the control plane, so the RPO state agrees with the dashboard.
-    fn of(plan: &Plan, now: time::OffsetDateTime) -> Self {
+    /// `parameter_values` are the overrides of the plan, which the caller reads with the row.
+    fn of(
+        plan: &Plan,
+        parameter_values: Vec<PlanParameterValueView>,
+        now: time::OffsetDateTime,
+    ) -> Self {
         let rpo = rpo::effective_rpo(&plan.cron, &plan.time_zone, plan.rpo_seconds, now);
         // The dashboard leaves out a plan whose host cannot run a backup any more.
         let rpo_state = if plan.agent_status == AgentStatus::Active {
@@ -186,6 +203,7 @@ impl PlanView {
             last_fire_time: plan.last_fire_time.map(format_time),
             last_success_at: plan.last_success_at.map(format_time),
             rpo_state,
+            parameter_values,
             created_at: format_time(plan.created_at),
             updated_at: format_time(plan.updated_at),
         }
@@ -242,9 +260,14 @@ pub async fn list_plans(
                 ApiError::invalid_field_cause("cursor", Reason::InvalidFormat, cause)
             })?,
     };
-    let result = context
-        .tenant_tx(&state, async |tx| Ok(repo::list(tx, &page).await?))
+    let (result, values) = context
+        .tenant_tx(&state, async |tx| {
+            let result = repo::list(tx, &page).await?;
+            let values = views(tx, &result.plans).await?;
+            Ok((result, values))
+        })
         .await?;
+    let may_read_text = parameters::may_read_text(&context);
     let next_cursor = if result.has_more {
         result.plans.last().map(|plan| {
             encode_cursor(PlanCursor {
@@ -259,7 +282,10 @@ pub async fn list_plans(
     let items = result
         .plans
         .iter()
-        .map(|plan| PlanView::of(plan, now))
+        .map(|plan| {
+            let overrides = views_of(&values, plan.id, may_read_text);
+            PlanView::of(plan, overrides, now)
+        })
         .collect();
     Ok(Json(PlanListResponse { items, next_cursor }))
 }
@@ -283,13 +309,51 @@ pub async fn get_plan(
 ) -> Result<Json<PlanView>, ApiError> {
     context.authorize(Operation::PlansRead)?;
     let plan_id = parse_plan_id(&id)?;
-    let plan = context
-        .tenant_tx(&state, async |tx| Ok(repo::get(tx, plan_id).await?))
+    let (plan, values) = context
+        .tenant_tx(&state, async |tx| {
+            let plan = repo::get(tx, plan_id).await?;
+            let values = match &plan {
+                Some(plan) => views(tx, std::slice::from_ref(plan)).await?,
+                None => Vec::new(),
+            };
+            Ok((plan, values))
+        })
         .await?;
-    match plan {
-        Some(plan) => Ok(Json(PlanView::of(&plan, state.auth().clock.now()))),
-        None => Err(ApiError::not_found()),
-    }
+    let Some(plan) = plan else {
+        return Err(ApiError::not_found());
+    };
+    let may_read_text = parameters::may_read_text(&context);
+    let overrides = values
+        .iter()
+        .map(|stored| PlanParameterValueView::of(stored, may_read_text))
+        .collect();
+    Ok(Json(PlanView::of(
+        &plan,
+        overrides,
+        state.auth().clock.now(),
+    )))
+}
+
+/// The stored overrides of a set of plans, in the order of the plan and of the name.
+async fn views(
+    tx: &mut restichub_db::TenantTx<'_>,
+    plans: &[Plan],
+) -> Result<Vec<restichub_db::parameters::PlanValue>, ApiError> {
+    let ids: Vec<PlanId> = plans.iter().map(|plan| plan.id).collect();
+    Ok(restichub_db::parameters::values_of_plans(tx, &ids).await?)
+}
+
+/// The overrides of one plan as the reader sees them.
+fn views_of(
+    values: &[restichub_db::parameters::PlanValue],
+    plan_id: PlanId,
+    may_read_text: bool,
+) -> Vec<PlanParameterValueView> {
+    values
+        .iter()
+        .filter(|stored| stored.plan_id == plan_id)
+        .map(|stored| PlanParameterValueView::of(stored, may_read_text))
+        .collect()
 }
 
 /// Creates a plan and validates its schedule (FR-SC-01, FR-PF-05).
@@ -324,6 +388,8 @@ pub async fn create_plan(
         enabled: body.enabled,
     })?;
     input.rpo_seconds = validate_rpo(body.rpo_seconds)?;
+    input.parameter_values =
+        parameters::validate_values("parameter_values", body.parameter_values)?;
     let now = state.auth().clock.now();
     let schedule = parse_schedule(&input.cron, &input.time_zone)?;
     let plan_id = PlanId::new();
@@ -336,6 +402,7 @@ pub async fn create_plan(
         input.agent_id,
         input.repository_id,
         None,
+        &input.parameter_values,
         now,
     )
     .await?;
@@ -359,22 +426,38 @@ pub async fn create_plan(
     )
     .await
     .map_err(map_write_error)?;
+    restichub_db::parameters::replace_plan_values(
+        &mut tx,
+        plan_id,
+        &input.parameter_values,
+        created_by,
+    )
+    .await?;
 
     let mut event = context.audit_event(AuditAction::PlanCreate, "plan", plan_id.as_uuid());
     event.diff = Some(diff(None, Some(&plan_value(&input)), &[]));
     restichub_db::audit::insert(&mut tx, &event).await?;
 
     let created = repo::get(&mut tx, plan_id).await?;
+    let values = match &created {
+        Some(plan) => views(&mut tx, std::slice::from_ref(plan)).await?,
+        None => Vec::new(),
+    };
     tx.commit().await?;
     let Some(created) = created else {
         return Err(ApiError::internal(
             "the created plan is not found after the read",
         ));
     };
+    let may_read_text = parameters::may_read_text(&context);
     Ok((
         StatusCode::CREATED,
         Json(PlanResponse {
-            plan: PlanView::of(&created, state.auth().clock.now()),
+            plan: PlanView::of(
+                &created,
+                views_of(&values, plan_id, may_read_text),
+                state.auth().clock.now(),
+            ),
         }),
     ))
 }
@@ -418,6 +501,8 @@ pub async fn update_plan(
         enabled: body.enabled,
     })?;
     input.rpo_seconds = validate_rpo(body.rpo_seconds)?;
+    input.parameter_values =
+        parameters::validate_values("parameter_values", body.parameter_values)?;
     let schedule = parse_schedule(&input.cron, &input.time_zone)?;
     check_references(
         &mut tx,
@@ -425,6 +510,7 @@ pub async fn update_plan(
         input.agent_id,
         input.repository_id,
         Some(current.agent_id),
+        &input.parameter_values,
         now,
     )
     .await?;
@@ -450,6 +536,13 @@ pub async fn update_plan(
     )
     .await
     .map_err(map_write_error)?;
+    restichub_db::parameters::replace_plan_values(
+        &mut tx,
+        plan_id,
+        &input.parameter_values,
+        crate::secrets::actor_user(&context.actor),
+    )
+    .await?;
     if schedule_changed {
         // The edited schedule starts from the next fire time after now.
         repo::set_next_run_at(
@@ -460,23 +553,33 @@ pub async fn update_plan(
         .await?;
     }
 
+    let before = restichub_db::parameters::plan_values(&mut tx, plan_id).await?;
     let mut event = context.audit_event(AuditAction::PlanUpdate, "plan", plan_id.as_uuid());
     event.diff = Some(diff(
-        Some(&stored_value(&current)),
+        Some(&stored_value(&current, &before)),
         Some(&plan_value(&input)),
         &[],
     ));
     restichub_db::audit::insert(&mut tx, &event).await?;
 
     let updated = repo::get(&mut tx, plan_id).await?;
+    let values = match &updated {
+        Some(plan) => views(&mut tx, std::slice::from_ref(plan)).await?,
+        None => Vec::new(),
+    };
     tx.commit().await?;
     let Some(updated) = updated else {
         return Err(ApiError::internal(
             "the updated plan is not found after the read",
         ));
     };
+    let may_read_text = parameters::may_read_text(&context);
     Ok(Json(PlanResponse {
-        plan: PlanView::of(&updated, state.auth().clock.now()),
+        plan: PlanView::of(
+            &updated,
+            views_of(&values, plan_id, may_read_text),
+            state.auth().clock.now(),
+        ),
     }))
 }
 
@@ -508,8 +611,9 @@ pub async fn delete_plan(
     // outlives its plan (FR-SC-07). A sent or running job keeps its lifecycle.
     restichub_db::jobs::cancel_for_plan(&mut tx, plan_id, now).await?;
     repo::delete(&mut tx, plan_id).await?;
+    let values = restichub_db::parameters::plan_values(&mut tx, plan_id).await?;
     let mut event = context.audit_event(AuditAction::PlanDelete, "plan", plan_id.as_uuid());
-    event.diff = Some(diff(Some(&stored_value(&current)), None, &[]));
+    event.diff = Some(diff(Some(&stored_value(&current, &values)), None, &[]));
     restichub_db::audit::insert(&mut tx, &event).await?;
     tx.commit().await?;
     Ok(StatusCode::NO_CONTENT)
@@ -634,6 +738,8 @@ struct PlanInput {
     missed_run_policy: MissedRunPolicy,
     enabled: bool,
     rpo_seconds: Option<i32>,
+    /// The overrides of the plan (FR-PF-10).
+    parameter_values: Vec<restichub_db::parameters::ParameterValue>,
 }
 
 /// The smallest and the largest recovery point objective, in seconds (ADR-0036).
@@ -692,6 +798,7 @@ fn validate_input(payload: PlanPayload<'_>) -> Result<PlanInput, ApiError> {
         missed_run_policy: payload.missed_run_policy,
         enabled: payload.enabled,
         rpo_seconds: None,
+        parameter_values: Vec::new(),
     })
 }
 
@@ -736,12 +843,17 @@ pub(crate) fn next_run_at(
 
 /// Refuses a profile, an agent or a repository that is not in the tenant, an agent that is revoked
 /// (FR-TN-01, FR-ID-04), and an agent other than the host of a local repository (ADR-0046).
+///
+/// The function also keeps the plan complete (FR-PF-11): every submitted value must name a declared
+/// parameter with the declared kind, a secret value must name a secret of the purpose `hook_secret`,
+/// and each required parameter must have a value from the plan, the host or the default.
 async fn check_references(
     tx: &mut restichub_db::TenantTx<'_>,
     profile_id: ProfileId,
     agent_id: AgentId,
     repository_id: RepositoryId,
     current_agent: Option<AgentId>,
+    plan_values: &[restichub_db::parameters::ParameterValue],
     now: time::OffsetDateTime,
 ) -> Result<(), ApiError> {
     // Lock order plan -> profile -> agent -> repository. The repository update locks repository ->
@@ -770,9 +882,23 @@ async fn check_references(
     // A local repository lives on the disk of its repository host, so a plan of it runs there only
     // (ADR-0046, ADR-0047).
     crate::jobs::ensure_repository_host(&repository, agent_id)?;
+    let definitions = parameters::from_row(&profile.parameters)?;
+    crate::parameters::check_declared_values(&definitions, plan_values, "parameter_values")?;
+    crate::parameters::check_secret_values(tx, plan_values, "parameter_values").await?;
+    let host_values = restichub_db::parameters::agent_values(tx, agent_id).await?;
+    let resolved = parameters::resolve(&definitions, plan_values, &host_values);
     // The stored profile must compile for the operating system of the agent (FR-PF-05). The compile
-    // refuses a missing path for that operating system with a field error.
-    crate::profiles::compile_for_agent(&profile, repository_id, &agent, now)?;
+    // refuses a missing path for that operating system and a parameter that has no value with a
+    // field error.
+    crate::profiles::compile_for_agent(&profile, repository_id, &agent, resolved, now)?;
+    let missing = parameters::missing_required(&definitions, plan_values, &host_values);
+    if !missing.is_empty() {
+        return Err(ApiError::parameters(
+            "parameter_values",
+            Reason::ParameterMissing,
+            missing,
+        ));
+    }
     Ok(())
 }
 
@@ -813,6 +939,7 @@ fn decode_cursor(value: &str) -> Result<PlanCursor, String> {
 
 fn plan_value(input: &PlanInput) -> serde_json::Value {
     json!({
+        "parameter_values": parameters::audit_values(&input.parameter_values),
         "name": input.name,
         "profile_id": input.profile_id.to_string(),
         "agent_id": input.agent_id.to_string(),
@@ -825,8 +952,12 @@ fn plan_value(input: &PlanInput) -> serde_json::Value {
     })
 }
 
-fn stored_value(plan: &Plan) -> serde_json::Value {
+fn stored_value(
+    plan: &Plan,
+    parameter_values: &[restichub_db::parameters::ParameterValue],
+) -> serde_json::Value {
     json!({
+        "parameter_values": parameters::audit_values(parameter_values),
         "name": plan.name,
         "profile_id": plan.profile_id.to_string(),
         "agent_id": plan.agent_id.to_string(),

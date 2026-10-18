@@ -311,6 +311,23 @@ pub async fn list_by_profile(
     Ok(rows.into_iter().map(Plan::from).collect())
 }
 
+/// Lists the plans of the tenant that run on one agent, oldest first (FR-PF-10).
+///
+/// A change of the parameter values of a host reads the plans of that host, because each of them
+/// needs a value for each required parameter.
+pub async fn list_by_agent(tx: &mut TenantTx<'_>, agent_id: AgentId) -> Result<Vec<Plan>, DbError> {
+    let rows = sqlx::query_as::<_, PlanRow>(concat!(
+        plan_select!(),
+        " WHERE p.agent_id = $1 \
+         ORDER BY p.created_at, p.id",
+    ))
+    .bind(agent_id)
+    .fetch_all(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(rows.into_iter().map(Plan::from).collect())
+}
+
 /// True when a plan of the repository runs on another agent than `host`.
 ///
 /// A local repository lives on the disk of one host, so each of its plans must run there.

@@ -460,6 +460,7 @@ pub async fn replace_agent(
             "plans_moved": moved.plans,
             "repositories_moved": moved.repositories,
             "queued_jobs_moved": moved.queued_jobs,
+            "parameter_values_moved": moved.parameter_values,
         })),
         &[],
     ));

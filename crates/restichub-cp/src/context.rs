@@ -49,6 +49,8 @@ pub enum Operation {
     ApiTokensWrite,
     AgentsRead,
     AgentsWrite,
+    /// The parameter values of a host (FR-PF-10).
+    AgentParametersWrite,
     EnrollmentTokensRead,
     EnrollmentTokensWrite,
     SecretsRead,
@@ -97,6 +99,7 @@ impl Operation {
                 | Self::SecretsWrite
                 | Self::AgentsRead
                 | Self::AgentsWrite
+                | Self::AgentParametersWrite
                 | Self::EnrollmentTokensRead
                 | Self::EnrollmentTokensWrite
                 | Self::RepositoriesRead
@@ -136,7 +139,7 @@ impl Operation {
 
     /// Every operation. A new variant stops the build in `the_platform_tenant_allow_list` and in
     /// [`crate::context::Operation::classify`].
-    pub const ALL: [Operation; 39] = [
+    pub const ALL: [Operation; 40] = [
         Operation::AuditRead,
         Operation::PlatformAuditRead,
         Operation::PlatformTenantsRead,
@@ -155,6 +158,7 @@ impl Operation {
         Operation::ApiTokensWrite,
         Operation::AgentsRead,
         Operation::AgentsWrite,
+        Operation::AgentParametersWrite,
         Operation::EnrollmentTokensRead,
         Operation::EnrollmentTokensWrite,
         Operation::SecretsRead,
@@ -200,6 +204,7 @@ impl Operation {
             | Operation::ApiTokensWrite
             | Operation::AgentsRead
             | Operation::AgentsWrite
+            | Operation::AgentParametersWrite
             | Operation::EnrollmentTokensRead
             | Operation::EnrollmentTokensWrite
             | Operation::SecretsRead
@@ -257,6 +262,9 @@ pub fn minimum_role(operation: Operation) -> Role {
         Operation::ApiTokensWrite => Role::Admin,
         Operation::AgentsRead => Role::Viewer,
         Operation::AgentsWrite => Role::Admin,
+        // The values of the host parameters belong to the profiles that an Operator manages
+        // (owner decision, ADR-0047).
+        Operation::AgentParametersWrite => Role::Operator,
         Operation::EnrollmentTokensRead => Role::Viewer,
         Operation::EnrollmentTokensWrite => Role::Admin,
         Operation::SecretsRead => Role::Viewer,

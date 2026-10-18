@@ -24,6 +24,7 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::error::ApiError;
+use crate::parameters::{self, ParameterDef, ParameterDefView};
 use crate::scripts::{EnvKind, ScriptDef};
 use crate::validation::{self, Reason};
 
@@ -282,6 +283,10 @@ pub struct CreateProfileRequest {
     /// Absent when the profile runs no verification step.
     #[serde(default)]
     pub check: Option<CheckOptions>,
+    /// The parameters that the profile declares (FR-PF-09). At most 64.
+    #[serde(default)]
+    #[schema(max_items = 64)]
+    pub parameters: Vec<ParameterDef>,
     /// Accepted only as an empty list, so an old client keeps working; use `scripts` instead
     /// (ADR-0040).
     #[serde(default)]
@@ -314,6 +319,10 @@ pub struct UpdateProfileRequest {
     pub retention: Option<Retention>,
     #[serde(default)]
     pub check: Option<CheckOptions>,
+    /// Replaces the whole list (FR-PF-09).
+    #[serde(default)]
+    #[schema(max_items = 64)]
+    pub parameters: Vec<ParameterDef>,
     /// Accepted only as an empty list, so an old client keeps working; use `scripts` instead
     /// (ADR-0040).
     #[serde(default)]
@@ -334,6 +343,9 @@ pub struct ProfileView {
     pub scripts: Vec<ScriptDef>,
     pub retention: Option<Retention>,
     pub check: Option<CheckOptions>,
+    /// The declared parameters (FR-PF-09). For a Viewer, a text default is empty with the flag
+    /// `hidden` (FR-PF-12).
+    pub parameters: Vec<ParameterDefView>,
     /// In RFC 3339.
     pub created_at: String,
     /// In RFC 3339.
@@ -344,7 +356,8 @@ pub struct ProfileView {
 
 impl ProfileView {
     /// A string value may hold a credential that was typed into the script, so it goes with the body
-    /// (FR-HK-12).
+    /// (FR-HK-12). A text parameter default is a value too, so a Viewer reads none of them
+    /// (FR-PF-12).
     pub fn hide_script_bodies(&mut self) {
         for script in &mut self.scripts {
             script.body.clear();
@@ -352,6 +365,14 @@ impl ProfileView {
                 if variable.kind == EnvKind::String {
                     variable.value.clear();
                 }
+            }
+        }
+        for definition in &mut self.parameters {
+            if definition.kind == restichub_db::ParameterKind::Text
+                && definition.default_value.is_some()
+            {
+                definition.default_value = Some(String::new());
+                definition.hidden = true;
             }
         }
     }
@@ -429,7 +450,7 @@ pub fn save_warnings(profile: &ValidatedProfile) -> Result<Vec<ProfileWarning>, 
         OperatingSystem::Windows,
         OperatingSystem::Macos,
     ] {
-        let target = synthetic_target(os);
+        let target = synthetic_target(os, &profile.parameters);
         if let Err(error) = compile(&compiler_profile, None, &target) {
             match classify_save_error(error) {
                 SaveOutcome::Refusal(api) => return Err(api),
@@ -449,7 +470,11 @@ pub fn save_warnings(profile: &ValidatedProfile) -> Result<Vec<ProfileWarning>, 
     Ok(warnings)
 }
 
-fn synthetic_target(os: OperatingSystem) -> TargetFacts {
+/// The target of the save-time compile, with a value for each declared parameter (FR-PF-05).
+///
+/// A text parameter takes its default or a placeholder; a placeholder path or tag satisfies the
+/// compile, and the owner rule for an optional parameter without a default runs before this check.
+fn synthetic_target(os: OperatingSystem, parameters: &[ParameterDef]) -> TargetFacts {
     TargetFacts {
         agent_id: "synthetic".to_owned(),
         agent_name: "agent".to_owned(),
@@ -457,6 +482,23 @@ fn synthetic_target(os: OperatingSystem) -> TargetFacts {
         os,
         arch: Architecture::X86_64,
         labels: BTreeMap::new(),
+        parameters: parameters
+            .iter()
+            .map(|definition| {
+                let value = match definition.kind {
+                    restichub_db::ParameterKind::Text => restichub_compiler::ParameterValue::Text(
+                        definition
+                            .default_value
+                            .clone()
+                            .unwrap_or_else(|| "value".to_owned()),
+                    ),
+                    restichub_db::ParameterKind::Secret => {
+                        restichub_compiler::ParameterValue::Secret("secret".to_owned())
+                    }
+                };
+                (definition.name.clone(), value)
+            })
+            .collect(),
         // The newest supported version: the option and version check runs in the preview against
         // the real agent (FR-PF-05, AC-AG-09).
         restic_version: ResticVersion {
@@ -492,6 +534,17 @@ fn classify_save_error(error: CompileError) -> SaveOutcome {
         CompileError::StepsRejected { .. } => {
             SaveOutcome::Refusal(ApiError::invalid_field("steps", Reason::InvalidFormat))
         }
+        CompileError::MissingParameter { field, .. } => SaveOutcome::Refusal(ApiError::parameters(
+            field.as_str(),
+            Reason::ParameterMissing,
+            Vec::new(),
+        )),
+        CompileError::SecretParameterInTemplate { field, .. } => SaveOutcome::Refusal(
+            ApiError::invalid_field(field.as_str(), Reason::ParameterSecretInTemplate),
+        ),
+        CompileError::ParameterNotAllowed { field, .. } => SaveOutcome::Refusal(
+            ApiError::invalid_field(field.as_str(), Reason::ParameterNotAllowed),
+        ),
         CompileError::MissingLabel { field, .. } => warning(field.as_str(), "unknown", None),
         CompileError::UnsupportedOs { field, os, .. } => {
             warning(field.as_str(), "unsupported", Some(os.as_str().to_owned()))
@@ -576,6 +629,10 @@ impl TryFrom<&Profile> for ProfileView {
             scripts: crate::scripts::from_row(&profile.scripts)?,
             retention: retention_from_row(profile)?,
             check: check_from_row(profile)?,
+            parameters: parameters::from_row(&profile.parameters)?
+                .iter()
+                .map(|definition| ParameterDefView::of(definition, true))
+                .collect(),
             created_at: format_time(profile.created_at),
             updated_at: format_time(profile.updated_at),
             created_by: profile.created_by.map(|id| id.to_string()),
@@ -626,6 +683,7 @@ pub struct ValidatedProfile {
     pub scripts: Vec<ScriptDef>,
     pub retention: Option<Retention>,
     pub check: Option<CheckOptions>,
+    pub parameters: Vec<ParameterDef>,
 }
 
 impl ValidatedProfile {
@@ -650,6 +708,7 @@ impl ValidatedProfile {
             retention: self.retention_value(),
             check_options: self.check_value(),
             scripts: self.scripts_value(),
+            parameters: self.parameters_value(),
             created_by,
         }
     }
@@ -680,6 +739,7 @@ impl ValidatedProfile {
             retention: self.retention_value(),
             check_options: self.check_value(),
             scripts: self.scripts_value(),
+            parameters: self.parameters_value(),
         }
     }
 
@@ -697,6 +757,10 @@ impl ValidatedProfile {
 
     fn scripts_value(&self) -> Value {
         serde_json::to_value(&self.scripts).unwrap_or_else(|_| json!([]))
+    }
+
+    fn parameters_value(&self) -> Value {
+        parameters::to_value(&self.parameters)
     }
 
     /// The profile as the compiler input (FR-PF-04).
@@ -781,6 +845,7 @@ pub fn compiler_profile_from_row(profile: &Profile) -> Result<CompilerProfile, A
         scripts: crate::scripts::from_row(&profile.scripts)?,
         retention: retention_from_row(profile)?,
         check: check_from_row(profile)?,
+        parameters: parameters::from_row(&profile.parameters)?,
     };
     let mut compiler_profile = validated.to_compiler_profile();
     compiler_profile.profile_tag = Some(profile_tag(profile.id));
@@ -827,6 +892,7 @@ pub fn validate_create(body: CreateProfileRequest) -> Result<ValidatedProfile, A
         body.scripts,
         body.retention,
         body.check,
+        body.parameters,
     )
 }
 
@@ -847,6 +913,7 @@ pub fn validate_update(
         body.scripts,
         body.retention,
         body.check,
+        body.parameters,
     )
 }
 
@@ -868,6 +935,7 @@ fn validate_profile(
     scripts: Vec<ScriptDef>,
     retention: Option<Retention>,
     check: Option<CheckOptions>,
+    parameters: Vec<ParameterDef>,
 ) -> Result<ValidatedProfile, ApiError> {
     let name = crate::validation::validate_record_name("name", &name.unwrap_or_default())?;
     let paths = validate_paths(paths)?;
@@ -878,7 +946,9 @@ fn validate_profile(
     let tags = validate_tags("tags", tags)?;
     ensure_count("tags", tags.len(), MAX_TAGS)?;
     validate_limits(&options)?;
+    let parameters = crate::parameters::validate_definitions("parameters", parameters)?;
     let scripts = crate::scripts::validate_scripts(scripts, "scripts")?;
+    crate::parameters::check_script_parameters(&parameters, &scripts)?;
     let retention = match retention {
         Some(retention) => Some(validate_retention(retention)?),
         None => None,
@@ -887,6 +957,7 @@ fn validate_profile(
         Some(check) => Some(validate_check(check)?),
         None => None,
     };
+    check_templates(&parameters, &paths, &excludes, &exclude_files, &tags)?;
     Ok(ValidatedProfile {
         name,
         paths,
@@ -897,7 +968,41 @@ fn validate_profile(
         scripts,
         retention,
         check,
+        parameters,
     })
+}
+
+/// Refuses a template of the profile that a parameter can never fill (FR-PF-05, FR-PF-10).
+///
+/// A secret parameter cannot expand in a path, an exclude, an exclude file or a tag (FR-PF-12). An
+/// optional text parameter without a default is the empty string, and an empty path or tag is
+/// invalid, so the profile does not save (owner decision, ADR-0047).
+fn check_templates(
+    parameters: &[ParameterDef],
+    paths: &ProfilePaths,
+    excludes: &[String],
+    exclude_files: &[String],
+    tags: &[String],
+) -> Result<(), ApiError> {
+    let mut fields: Vec<(String, &String)> = Vec::new();
+    let lists: [(&str, &[String]); 7] = [
+        ("paths.all", &paths.all),
+        ("paths.windows", &paths.windows),
+        ("paths.linux", &paths.linux),
+        ("paths.macos", &paths.macos),
+        ("excludes", excludes),
+        ("exclude_files", exclude_files),
+        ("tags", tags),
+    ];
+    for (field, values) in lists {
+        for (index, value) in values.iter().enumerate() {
+            fields.push((format!("{field}[{index}]"), value));
+        }
+    }
+    parameters::check_templates(
+        parameters,
+        fields.iter().map(|(field, value)| (field.as_str(), *value)),
+    )
 }
 
 fn validate_paths(paths: ProfilePaths) -> Result<ProfilePaths, ApiError> {
@@ -1120,6 +1225,7 @@ pub fn profile_value(profile: &ValidatedProfile) -> Value {
         "scripts": crate::scripts::audit_value(&profile.scripts),
         "retention": profile.retention,
         "check": profile.check,
+        "parameters": parameters::audit_definitions(&profile.parameters),
     })
 }
 
@@ -1148,6 +1254,7 @@ pub fn stored_value(profile: &Profile) -> Value {
         "scripts": stored_scripts_value(&profile.scripts),
         "retention": profile.retention,
         "check": profile.check_options,
+        "parameters": parameters::stored_value(&profile.parameters),
     })
 }
 

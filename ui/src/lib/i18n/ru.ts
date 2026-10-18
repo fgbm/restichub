@@ -777,6 +777,8 @@ export const ru: Record<MessageKey, string> = {
 	'jobs.reason.listing_missing': 'Хост не прислал результат этого запроса. Повторите.',
 	'jobs.reason.compile_failed':
 		'Профиль больше не подходит этому хосту. Исправьте профиль для системы хоста.',
+	'jobs.reason.parameter_missing':
+		'У обязательного параметра профиля нет значения. Задайте его на хосте или в плане.',
 	'jobs.reason.lock_retries_exhausted':
 		'Репозиторий оставался заблокированным после всех повторов.',
 	'jobs.reason.repository_locked':
@@ -808,6 +810,7 @@ export const ru: Record<MessageKey, string> = {
 	'jobs.errorCode.request_missing': 'у задания нет запроса',
 	'jobs.errorCode.listing_missing': 'хост не прислал результат',
 	'jobs.errorCode.compile_failed': 'профиль не компилируется',
+	'jobs.errorCode.parameter_missing': 'у обязательного параметра нет значения',
 	'jobs.errorCode.lock_retries_exhausted': 'репозиторий остался заблокирован',
 	'jobs.errorCode.lock_retry': 'заблокирован, новая попытка в очереди',
 	'jobs.errorCode.signed_job_unavailable': 'сохранённое задание нечитаемо',

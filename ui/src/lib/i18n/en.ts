@@ -771,6 +771,8 @@ export const en = {
 	'jobs.reason.listing_missing': 'The host sent no result for this request. Try again.',
 	'jobs.reason.compile_failed':
 		'The profile no longer fits the host. Edit the profile for the system of the host.',
+	'jobs.reason.parameter_missing':
+		'A required parameter of the profile has no value. Set it on the host or in the plan.',
 	'jobs.reason.lock_retries_exhausted': 'The repository stayed locked after every retry.',
 	'jobs.reason.repository_locked':
 		'Another process locks the repository. Wait for it to end and run the job again.',
@@ -801,6 +803,7 @@ export const en = {
 	'jobs.errorCode.request_missing': 'the job lost its request',
 	'jobs.errorCode.listing_missing': 'the host sent no result',
 	'jobs.errorCode.compile_failed': 'the profile does not compile',
+	'jobs.errorCode.parameter_missing': 'a required parameter has no value',
 	'jobs.errorCode.lock_retries_exhausted': 'the repository stayed locked',
 	'jobs.errorCode.lock_retry': 'locked, a new attempt is queued',
 	'jobs.errorCode.signed_job_unavailable': 'the stored job is not readable',

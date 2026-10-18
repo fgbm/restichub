@@ -414,6 +414,8 @@ pub struct Replaced {
     pub plans: u64,
     pub repositories: u64,
     pub queued_jobs: u64,
+    /// The parameter values of the old record (FR-PF-10).
+    pub parameter_values: u64,
 }
 
 /// How a replacement ended: done, or refused for a reason the caller maps to a status.
@@ -427,8 +429,8 @@ pub enum ReplaceOutcome {
     OldRecentlyOnline,
 }
 
-/// Moves the plans, the maintenance host references, the queued jobs and the labels of the old
-/// agent to the new one, then revokes the old agent (FR-ID-11).
+/// Moves the plans, the maintenance host references, the queued jobs, the labels and the parameter
+/// values of the old agent to the new one, then revokes the old agent (FR-ID-11, FR-PF-10).
 ///
 /// The caller runs it in one transaction. The pair qualifies when both rows are active, differ,
 /// carry the same machine hash, and the new row was created after the old row. The old row must have
@@ -497,11 +499,13 @@ pub async fn replace(
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
+    let parameter_values = crate::parameters::move_agent_values(tx, old, new).await?;
     revoke(tx, old, actor, now).await?;
     Ok(ReplaceOutcome::Replaced(Replaced {
         plans,
         repositories,
         queued_jobs,
+        parameter_values,
     }))
 }
 

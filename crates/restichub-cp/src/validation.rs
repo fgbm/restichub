@@ -73,6 +73,16 @@ pub enum Reason {
     PlanOnOtherHost,
     /// A local path has the format of another operating system than the host (FR-RP-10).
     PathOnOtherOs,
+    /// A required parameter of a plan has no value (FR-PF-11).
+    ParameterMissing,
+    /// A change would leave plans without a required parameter (FR-PF-11).
+    ParameterMissingInPlans,
+    /// A value has another kind than the parameter (FR-PF-11).
+    ParameterKindMismatch,
+    /// A secret parameter cannot expand in a template field (FR-PF-12, FR-AG-06).
+    ParameterSecretInTemplate,
+    /// A parameter cannot expand in the retention or the check fields (ADR-0047).
+    ParameterNotAllowed,
 }
 
 impl Reason {
@@ -100,6 +110,11 @@ impl Reason {
             Self::NotRepositoryHost => "not_repository_host",
             Self::PlanOnOtherHost => "plan_on_other_host",
             Self::PathOnOtherOs => "path_on_other_os",
+            Self::ParameterMissing => "parameter_missing",
+            Self::ParameterMissingInPlans => "parameter_missing_in_plans",
+            Self::ParameterKindMismatch => "parameter_kind_mismatch",
+            Self::ParameterSecretInTemplate => "parameter_secret_in_template",
+            Self::ParameterNotAllowed => "parameter_not_allowed",
         }
     }
 }

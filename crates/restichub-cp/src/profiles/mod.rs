@@ -265,9 +265,21 @@ pub async fn update_profile(
     }
     let warnings = save_warnings(&validated)?;
     script_secrets::check_script_secrets(&mut tx, &validated.scripts).await?;
+    // A parameter that left the profile takes the overrides of its name with it; a rename is a new
+    // parameter (owner decision, ADR-0047). The host values stay.
+    let removed = removed_parameters(&current, &validated)?;
+    for name in &removed {
+        restichub_db::parameters::delete_profile_name(&mut tx, profile_id, name).await?;
+    }
     repo::update(&mut tx, profile_id, &validated.update())
         .await
         .map_err(map_write_error)?;
+    if let Some(missing) =
+        crate::parameters::missing_in_plans_of_profile(&mut tx, profile_id, &validated.parameters)
+            .await?
+    {
+        return Err(crate::parameters::refuse_missing(missing));
+    }
 
     let mut event =
         context.audit_event(AuditAction::ProfileUpdate, "profile", profile_id.as_uuid());
@@ -405,9 +417,19 @@ pub async fn preview_profile(
         Some(value) => Some(named_repository(&mut tx, value).await?),
         None => planned_repository(&mut tx, profile_id, agent_id).await?,
     };
+    // The preview shows the value that the job of the chosen plan runs with: the plan, then the
+    // host, then the default (FR-PF-10, AC-PF-08).
+    let plan_of_preview = planned_plan(&mut tx, profile_id, agent_id, repository.as_ref()).await?;
+    let definitions = crate::parameters::from_row(&profile.parameters)?;
+    let plan_values = match &plan_of_preview {
+        Some(plan) => restichub_db::parameters::plan_values(&mut tx, plan.id).await?,
+        None => Vec::new(),
+    };
+    let host_values = restichub_db::parameters::agent_values(&mut tx, agent_id).await?;
+    let parameters = crate::parameters::resolve(&definitions, &plan_values, &host_values);
     tx.commit().await?;
 
-    let target = target_facts(&agent, state.auth().clock.now())?;
+    let target = target_facts_with(&agent, state.auth().clock.now(), parameters)?;
     let compiler_profile = compiler_profile_from_row(&profile)?;
     let repository_id = repository
         .as_ref()
@@ -452,6 +474,35 @@ async fn named_repository(
         return Err(ApiError::invalid_field("repository_id", Reason::Unknown));
     };
     Ok(repository)
+}
+
+/// The plan whose values and repository the preview shows (FR-PF-10).
+///
+/// The preview names an agent and, when the caller gives one, a repository. The plan of this
+/// profile that runs on the agent with that repository supplies the overrides; without such a plan
+/// the host values and the defaults apply.
+async fn planned_plan(
+    tx: &mut restichub_db::TenantTx<'_>,
+    profile_id: ProfileId,
+    agent_id: AgentId,
+    repository: Option<&Repository>,
+) -> Result<Option<plans_repo::Plan>, ApiError> {
+    let plans = plans_repo::list_by_profile(tx, profile_id).await?;
+    let chosen = plans
+        .iter()
+        .find(|plan| {
+            plan.agent_id == agent_id
+                && repository.is_none_or(|repository| plan.repository_id == repository.id)
+        })
+        .or_else(|| plans.iter().find(|plan| plan.agent_id == agent_id))
+        .or_else(|| {
+            repository.and_then(|repository| {
+                plans
+                    .iter()
+                    .find(|plan| plan.repository_id == repository.id)
+            })
+        });
+    Ok(chosen.cloned())
 }
 
 /// The repository of a preview that names none (ADR-0047).
@@ -517,6 +568,16 @@ pub(crate) fn target_facts(
     agent: &Agent,
     now: time::OffsetDateTime,
 ) -> Result<TargetFacts, ApiError> {
+    target_facts_with(agent, now, BTreeMap::new())
+}
+
+/// The compiler input facts of a registered agent, with the resolved values of its parameters
+/// (FR-PF-03, FR-PF-10).
+pub(crate) fn target_facts_with(
+    agent: &Agent,
+    now: time::OffsetDateTime,
+    parameters: BTreeMap<String, restichub_compiler::ParameterValue>,
+) -> Result<TargetFacts, ApiError> {
     let os =
         parse_os(&agent.os).ok_or_else(|| ApiError::invalid_field("agent_id", Reason::Unknown))?;
     let arch = parse_arch(&agent.arch);
@@ -530,6 +591,7 @@ pub(crate) fn target_facts(
         os,
         arch,
         labels: parse_labels(&agent.labels),
+        parameters,
         restic_version,
         now,
         server_scripts: crate::scripts::server_scripts_of(agent),
@@ -616,12 +678,31 @@ pub(crate) fn compile_for_agent(
     profile: &repo::Profile,
     repository_id: restichub_db::RepositoryId,
     agent: &restichub_db::agents::Agent,
+    parameters: BTreeMap<String, restichub_compiler::ParameterValue>,
     now: time::OffsetDateTime,
 ) -> Result<Plan, ApiError> {
-    let target = target_facts(agent, now)?;
+    let target = target_facts_with(agent, now, parameters)?;
     let compiler_profile = compiler_profile_from_row(profile)?;
     compile(&compiler_profile, Some(&repository_id.to_string()), &target)
         .map_err(compile_error_to_api)
+}
+
+/// The names of the parameters that the update removes from the profile (ADR-0047).
+fn removed_parameters(
+    current: &repo::Profile,
+    validated: &settings::ValidatedProfile,
+) -> Result<Vec<String>, ApiError> {
+    let before = crate::parameters::from_row(&current.parameters)?;
+    Ok(before
+        .iter()
+        .map(|definition| definition.name.clone())
+        .filter(|name| {
+            !validated
+                .parameters
+                .iter()
+                .any(|definition| &definition.name == name)
+        })
+        .collect())
 }
 
 /// The plans of the profile that no longer compile for the facts of their agent (FR-SC-11).
@@ -634,12 +715,16 @@ async fn plan_compile_warnings(
     now: time::OffsetDateTime,
 ) -> Result<Vec<PlanWarning>, ApiError> {
     let compiler_profile = compiler_profile_from_row(profile)?;
+    let definitions = crate::parameters::from_row(&profile.parameters)?;
     let mut warnings = Vec::new();
     for plan in plans_repo::list_by_profile(tx, profile.id).await? {
         let Some(agent) = agents_repo::get(tx, plan.agent_id).await? else {
             continue;
         };
-        let Ok(target) = target_facts(&agent, now) else {
+        let plan_values = restichub_db::parameters::plan_values(tx, plan.id).await?;
+        let host_values = restichub_db::parameters::agent_values(tx, plan.agent_id).await?;
+        let parameters = crate::parameters::resolve(&definitions, &plan_values, &host_values);
+        let Ok(target) = target_facts_with(&agent, now, parameters) else {
             continue;
         };
         if let Err(error) = compile(
@@ -673,6 +758,15 @@ fn compile_error_parts(error: &CompileError) -> (String, Reason) {
         | CompileError::InvalidDate { field, .. }
         | CompileError::UnterminatedTemplate { field }
         | CompileError::InvalidValue { field } => (field.to_string(), Reason::InvalidFormat),
+        CompileError::MissingParameter { field, .. } => {
+            (field.to_string(), Reason::ParameterMissing)
+        }
+        CompileError::SecretParameterInTemplate { field, .. } => {
+            (field.to_string(), Reason::ParameterSecretInTemplate)
+        }
+        CompileError::ParameterNotAllowed { field, .. } => {
+            (field.to_string(), Reason::ParameterNotAllowed)
+        }
         CompileError::InvalidCron { .. } => ("cron".to_owned(), Reason::InvalidFormat),
         CompileError::NoPaths { .. } => ("paths".to_owned(), Reason::Empty),
         CompileError::ServerScriptsDisabled { field } => {
