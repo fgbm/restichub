@@ -1,4 +1,4 @@
-# STE rule: a sentence in a procedure has 20 words or fewer.
+# STE rule: a sentence in a procedure has 20 words or fewer. A long list item can be many facts (ste-en.md, rule 3.9).
 extends: occurrence
 # Vale counts the full list item, not each sentence. For this reason the level is "warning".
 message: "This list item has more than 20 words. If it is a procedure step, make each sentence 20 words or fewer."

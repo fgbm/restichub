@@ -208,7 +208,7 @@ printf 'Authorization: Bearer %s\n' "$RESTICHUB_API_TOKEN" |
 
 ## Повторная регистрация существующего хоста
 
-При повторной регистрации хост сохраняет идентификатор, планы и метки (см. [Повторная регистрация хоста](/restichub/ru/guides/enroll-a-host-again/)).
+При повторной регистрации хост сохраняет идентификатор, планы и метки (см. [Повторная регистрация хоста](/restichub/ru/guides/agent-certificates/)).
 
 1. Отправьте `POST /api/v1/agents/<id>/reenroll` с телом `{}` или `{"ttl_seconds": 600}`.
 2. Прочитайте значение токена из поля `token` ответа.
@@ -248,7 +248,7 @@ printf 'Authorization: Bearer %s\n' "$RESTICHUB_API_TOKEN" |
 ## См. также
 
 - [Добавление хоста](/restichub/ru/getting-started/add-a-host/)
-- [Повторная регистрация хоста и дубли хостов](/restichub/ru/guides/enroll-a-host-again/)
+- [Сертификаты агента и повторная регистрация](/restichub/ru/guides/agent-certificates/)
 - [Токены API](/restichub/ru/guides/api-tokens/)
 - [Пакеты агента](/restichub/ru/reference/agent-packages/)
 - [Команды и файлы агента](/restichub/ru/reference/agent-commands/)

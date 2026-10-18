@@ -21,7 +21,7 @@ The profile and the agent belong to the same tenant. The control plane compiles 
 
 ## A local repository
 
-The path of a local repository exists on the repository host only. A plan of a profile that writes to a local repository therefore runs on the repository host only. The plan page offers only this host, and it selects the host when you select the profile. The page does not change the host of a stored plan by itself. If a stored plan runs on another host, the field "Host" shows an error until you select the repository host. The control plane refuses another host with the reason `not_repository_host` on the field "Host". It also refuses a profile change to a local repository while a plan of the profile runs on another host. See [A local repository](/restichub/guides/add-a-repository/#a-local-repository).
+The path of a local repository exists on the repository host only. A plan of a profile that writes to a local repository therefore runs on the repository host only. The plan page offers only this host, and it selects the host when you select the profile. The page does not change the host of a stored plan by itself. If a stored plan runs on another host, the field "Host" shows an error until you select the repository host. The control plane refuses another host with the reason `not_repository_host` on the field "Host". It also refuses a profile change to a local repository while a plan of the profile runs on another host. See [A local repository](/restichub/getting-started/add-a-repository/#a-local-repository).
 
 ## Schedule
 

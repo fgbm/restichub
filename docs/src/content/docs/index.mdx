@@ -5,15 +5,26 @@ template: splash
 hero:
   title: "One place to plan, run and watch restic backups"
   tagline: "The control plane keeps profiles, schedules and secrets. A thin agent on each host runs restic."
+  actions:
+    - text: Start the first backup
+      link: /restichub/getting-started/quick-start/
+      variant: primary
+    - text: Read the concepts
+      link: /restichub/concepts/architecture/
+      variant: minimal
 ---
 
 import Diagram from '../../components/Diagram.astro';
 
 <div class="rh-cards">
-<a class="rh-card" href="/restichub/getting-started/install-control-plane/"><span class="rh-step">1</span><strong>Install the control plane</strong><span>Start the server and open the web interface.</span></a>
-<a class="rh-card" href="/restichub/getting-started/add-a-host/"><span class="rh-step">2</span><strong>Add a host</strong><span>Register an agent with a one-time token.</span></a>
-<a class="rh-card" href="/restichub/getting-started/quick-start/"><span class="rh-step">3</span><strong>Run the first backup</strong><span>Follow the quick start to the first backup.</span></a>
+<a class="rh-card" href="/restichub/getting-started/install-control-plane/"><strong>Run ResticHub</strong><span>Install the control plane, add a host and a repository.</span></a>
+<a class="rh-card" href="/restichub/concepts/architecture/"><strong>Understand the model</strong><span>Learn what profiles, plans, repositories and jobs are, and how the trust model works.</span></a>
+<a class="rh-card" href="/restichub/reference/api/"><strong>Connect a system</strong><span>Use the REST API, the agent commands and the environment variables.</span></a>
 </div>
+
+:::caution
+ResticHub is pre-release. The team built the MVP, and it is in acceptance testing on real hosts. There is no stable release yet, and the interfaces can still change.
+:::
 
 ## How it works
 
@@ -21,10 +32,15 @@ import Diagram from '../../components/Diagram.astro';
 
 The agent opens the connection to the control plane. The control plane never connects to a host. The backup data goes from the host to the repository directly.
 
-:::caution
-ResticHub is pre-release. The MVP is built and is in acceptance testing on real hosts. There is no stable release yet, and the interfaces can still change.
-:::
+## Find a topic
 
-Read [Concepts](/restichub/concepts/architecture/) to learn the main terms.
+<div class="rh-cards">
+<a class="rh-card" href="/restichub/getting-started/about/"><strong>Getting started</strong><span>Install, enroll the first host and make the first backup.</span></a>
+<a class="rh-card" href="/restichub/concepts/architecture/"><strong>Concepts</strong><span>Learn the terms and the model behind a backup.</span></a>
+<a class="rh-card" href="/restichub/guides/organizations/"><strong>Administration</strong><span>Manage organizations, users, tokens, alerts, restores and upgrades.</span></a>
+<a class="rh-card" href="/restichub/operations/security-for-operators/"><strong>Operations and security</strong><span>Back up the control plane, rotate the keys and recover from an incident.</span></a>
+<a class="rh-card" href="/restichub/reference/api/"><strong>Reference</strong><span>Look up the API, the agent commands, the metrics, the codes and the glossary.</span></a>
+<a class="rh-card" href="/restichub/reference/troubleshooting/"><strong>Troubleshooting</strong><span>Find the cause of a symptom and the action that removes it.</span></a>
+</div>
 
 Read [About ResticHub](/restichub/getting-started/about/) to learn why ResticHub exists and how it compares with similar tools.

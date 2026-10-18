@@ -47,4 +47,4 @@ Apply all controls that your storage supports.
 ## Related pages
 
 - [Job signing key compromise](/restichub/operations/job-signing-key-compromise/)
-- [Agent certificate rotation](/restichub/operations/certificate-rotation/)
+- [Agent certificates and enrollment](/restichub/guides/agent-certificates/)

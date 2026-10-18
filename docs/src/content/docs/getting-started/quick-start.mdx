@@ -15,7 +15,7 @@ The time budget does not include these preparations:
 - A domain name, for example `restichub.example.com`, with a DNS record of type A to the server.
 - The ports 80, 443 and 8443 open on the server.
 - A second Linux host for the agent, with `root` access. The host must reach the server on the ports 443 and 8443.
-- A backend for the repository: an S3 bucket with an access key and a secret key, or a rest-server. See [Add a repository](/restichub/guides/add-a-repository/#before-you-start).
+- A backend for the repository: an S3 bucket with an access key and a secret key, or a rest-server. See [Add a repository](/restichub/getting-started/add-a-repository/#before-you-start).
 
 ## Steps
 
@@ -67,7 +67,7 @@ The time budget does not include these preparations:
 
 6. **Add the repository (3 min).** Add the repository with this host as the "Maintenance host". Then select "Initialize" in the menu "…" of its row.
 
-   Result: the repository has the status "Ready". See [Add a repository](/restichub/guides/add-a-repository/).
+   Result: the repository has the status "Ready". See [Add a repository](/restichub/getting-started/add-a-repository/).
 
 7. **Create a profile (3 min).** On the screen "Profiles", select "Add profile" and enter these values:
 
@@ -75,7 +75,7 @@ The time budget does not include these preparations:
    - "What to back up": a directory in "All systems", for example `/etc`.
    - "Retention": the preset "Standard".
 
-   Result: after "Save", the profile is in the list. See [Profiles](/restichub/concepts/profiles/).
+   Result: after "Save", the profile is in the list. See [Create a profile and a plan](/restichub/getting-started/profiles-and-plans/).
 
 8. **Create a plan (2 min).** On the screen "Plans", select "Add plan" and enter these values:
 
@@ -83,7 +83,7 @@ The time budget does not include these preparations:
    - "What to back up": the new profile in "Profile", and the host in "Host".
    - "Schedule": the preset "Daily at 02:00".
 
-   Result: after "Save", the plan is in the list. See [Plans](/restichub/concepts/plans/).
+   Result: after "Save", the plan is in the list. See [Create a profile and a plan](/restichub/getting-started/profiles-and-plans/).
 
 9. **Run the first backup (2 min).** On the screen "Plans", select "Run now" in the menu "…" of the plan.
 
@@ -105,3 +105,9 @@ This check is outside the time budget. It takes about 3 minutes.
 <Screen name="restore-dialog" alt="The restore dialog with the target host and the target path" />
 
 Result: the restore job has the status "Succeeded", and the file is in the target path on the host. See [Restore](/restichub/guides/restore/).
+
+## Next steps
+
+- Add a channel for alerts. See [Alerts and notification channels](/restichub/guides/alerts/).
+- Read [Concepts](/restichub/concepts/architecture/) to learn the model that the screens use.
+- Read [Upgrade](/restichub/guides/upgrade/) before you install a new release.

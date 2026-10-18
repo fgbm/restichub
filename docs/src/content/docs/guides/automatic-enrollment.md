@@ -208,7 +208,7 @@ A new host has the state `waiting` until the agent opens its stream. Then it has
 
 ## Enroll an existing host again
 
-A host keeps its identifier, plans and labels when it enrolls again (see [Enroll a host again](/restichub/guides/enroll-a-host-again/)).
+A host keeps its identifier, plans and labels when it enrolls again (see [Enroll a host again](/restichub/guides/agent-certificates/)).
 
 1. Send `POST /api/v1/agents/<id>/reenroll` with the body `{}` or `{"ttl_seconds": 600}`.
 2. Read the token value from the field `token` of the response.
@@ -248,7 +248,7 @@ See also [Troubleshooting](/restichub/reference/troubleshooting/#hosts).
 ## Related
 
 - [Add a host](/restichub/getting-started/add-a-host/)
-- [Enroll a host again and find duplicate hosts](/restichub/guides/enroll-a-host-again/)
+- [Agent certificates and enrollment](/restichub/guides/agent-certificates/)
 - [API tokens](/restichub/guides/api-tokens/)
 - [Agent packages](/restichub/reference/agent-packages/)
 - [Agent commands and files](/restichub/reference/agent-commands/)

@@ -123,7 +123,7 @@ A local path exists on the disk of one host only. Thus a local repository is bou
 
 For an S3 or rest-server repository, each host reaches the repository on the network. A change of the maintenance host is a usual operation.
 
-The replace of a host record moves the repository host to the new record, also after the initialization. The two records belong to the same machine, so the path stays on the same disk. See [Enroll a host again](/restichub/guides/enroll-a-host-again/).
+The replace of a host record moves the repository host to the new record, also after the initialization. The two records belong to the same machine, so the path stays on the same disk. See [Enroll a host again](/restichub/guides/agent-certificates/).
 
 :::caution
 Do not use a shared network disk (NFS or SMB) as a local repository for several hosts. ResticHub sends the jobs of a local repository to the repository host only, so the plans on the other hosts fail. For a repository that several hosts write to, use rest-server or SFTP.
@@ -172,6 +172,7 @@ The delete removes the repository record and its stored secrets from ResticHub. 
 
 ## Related
 
+- [Create a profile and a plan](/restichub/getting-started/profiles-and-plans/)
 - [Repositories](/restichub/concepts/repositories/)
 - [Profiles](/restichub/concepts/profiles/)
 - [Register an agent](/restichub/getting-started/add-a-host/)

@@ -84,7 +84,7 @@ Use the same release as the dump. To restore to a newer release, restore first a
 
 9. Wait until `docker compose ps cp` shows `(healthy)`.
 
-If the new host has another address, point the DNS record of the domain to it. The agents connect to the domain, so they find the new host. If the domain changes, register each host again. See [Enroll a host again](/restichub/guides/enroll-a-host-again/).
+If the new host has another address, point the DNS record of the domain to it. The agents connect to the domain, so they find the new host. If the domain changes, register each host again. See [Enroll a host again](/restichub/guides/agent-certificates/).
 
 Check the result:
 

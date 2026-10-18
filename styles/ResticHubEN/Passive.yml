@@ -1,6 +1,6 @@
-# STE rule: use the active voice.
+# STE rule: use the active voice. A passive sentence can describe a state (ste-en.md, rule 3.5).
 extends: existence
-message: "'%s' looks like the passive voice. Use the active voice."
+message: "'%s' looks like the passive voice. Use the active voice, or keep it for a state."
 level: warning
 ignorecase: true
 raw:
