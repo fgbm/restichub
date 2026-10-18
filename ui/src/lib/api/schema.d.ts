@@ -3055,6 +3055,8 @@ export interface components {
             /** @description Free text of 1 to 100 characters. Unique in the tenant, ignoring the letter case. Holds no control or format character. */
             name: string;
             options?: components["schemas"]["BackupOptions"];
+            /** @description What the draft offers to its hosts (FR-PF-09). At most 64. */
+            parameters?: components["schemas"]["ParameterDefRequest"][];
             paths?: components["schemas"]["ProfilePaths"];
             /** @description The stored profile that the draft edits. Absent for a new profile. */
             profile_id?: string | null;
