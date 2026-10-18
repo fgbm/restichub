@@ -1,6 +1,7 @@
 /*
  * The platform Users screen lists every installation account and links each one to its record
- * page (ADR-0028, ADR-0029).
+ * page (ADR-0028, ADR-0029). Without the Platform Admin right the screen has no account action
+ * (AC-AU-02).
  */
 import { render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
@@ -14,6 +15,8 @@ const mocks = vi.hoisted(() => ({
 	createPlatformUser: vi.fn(),
 	pushToast: vi.fn()
 }));
+
+const session = vi.hoisted(() => ({ platform_admin: true }));
 
 const route = vi.hoisted(() => ({ url: new URL('http://localhost/platform/users') }));
 
@@ -32,7 +35,7 @@ vi.mock('#lib/stores/session.svelte.ts', () => ({
 		user: { id: 'self', username: 'neimp', display_name: 'Self', role: 'admin' },
 		tenant: null,
 		role: 'admin',
-		platform_admin: true
+		platform_admin: session.platform_admin
 	})
 }));
 vi.mock('#lib/stores/toasts.svelte.ts', () => ({ pushToast: mocks.pushToast }));
@@ -65,6 +68,7 @@ function account(id: string, displayName: string, platformAdmin: boolean) {
 
 beforeEach(() => {
 	route.url = new URL('http://localhost/platform/users');
+	session.platform_admin = true;
 	for (const mock of Object.values(mocks)) mock.mockReset();
 	mocks.listPlatformUsers.mockResolvedValue([
 		account('self', 'Self', true),
@@ -153,5 +157,19 @@ describe('Platform Users screen', () => {
 		expect(within(dialog).getAllByText('This field is required.')).toHaveLength(2);
 		expect(within(dialog).getByLabelText(/User name/)).toHaveFocus();
 		expect(within(dialog).getByText('At least 12 characters.')).toHaveClass('rh-field__error');
+	});
+
+	// The UI hides what the API refuses: a platform operation needs the installation-wide right
+	// (ADR-0029, AC-AU-02).
+	it('ac_au_02_hides_every_account_action_without_the_platform_admin_right', async () => {
+		session.platform_admin = false;
+		render(PlatformUsers);
+
+		expect(await screen.findByRole('link', { name: 'Ivan Egorkin' })).toHaveAttribute(
+			'href',
+			'/platform/users/u_02'
+		);
+		expect(screen.queryByRole('button', { name: 'Create user' })).toBeNull();
+		expect(screen.queryByRole('button', { name: 'More actions for Ivan Egorkin' })).toBeNull();
 	});
 });

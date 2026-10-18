@@ -8,7 +8,7 @@
 	import type { KeyValueItem, MenuItem, SelectOption } from './ui/index.ts';
 	import { formatTime, relativeTime } from '#lib/format.ts';
 	import { t, tErrorCode, type MessageKey } from '#lib/i18n/index.ts';
-	import { getSession } from '#lib/stores/session.svelte.ts';
+	import { getSession, hasRole } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 	import { orgChangeLock, orgResetLock } from '#lib/user-locks.ts';
 	import { userState } from '#lib/vocabulary.ts';
@@ -33,6 +33,10 @@
 
 	const selfId = $derived(getSession()?.user?.id ?? null);
 	const name = $derived(user?.display_name ?? '');
+
+	// An Admin changes the role, the password and the state of a member (ADR-0023, operation
+	// `users_write`).
+	const canWrite = $derived(hasRole('admin', 'platform_admin'));
 
 	const roleLabels = $derived<Record<Role, string>>({
 		platform_admin: t('users.role.platformAdmin'),
@@ -137,7 +141,7 @@
 		{/if}
 	{/snippet}
 	{#snippet actions()}
-		{#if user}
+		{#if user && canWrite}
 			<Button
 				size="sm"
 				icon="key"
@@ -169,7 +173,7 @@
 						options={roleOptions}
 						value={roleDraft}
 						title={changeLock ?? undefined}
-						disabled={roleBusy || Boolean(changeLock)}
+						disabled={!canWrite || roleBusy || Boolean(changeLock)}
 						onchange={(event) =>
 							changeRole((event.currentTarget as HTMLSelectElement).value as Role)}
 					/>

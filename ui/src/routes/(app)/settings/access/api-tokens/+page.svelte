@@ -27,9 +27,13 @@
 	import { ago, expiry } from '#lib/list-format.ts';
 	import { apiTokenState, iconOf, pillOf } from '#lib/vocabulary.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
+	import { hasRole } from '#lib/stores/session.svelte.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import { formatTime } from '#lib/format.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
+
+	// An Admin creates and revokes the API tokens (ADR-0023, operation `api_tokens_write`).
+	const canWrite = $derived(hasRole('admin', 'platform_admin'));
 
 	let tokens = $state<ApiToken[]>([]);
 	let loading = $state(true);
@@ -199,6 +203,7 @@
 	);
 
 	function rowActions(token: ApiToken): RowAction[] {
+		if (!canWrite) return [];
 		return [
 			{
 				id: 'revoke',
@@ -319,7 +324,9 @@
 	count={loading ? undefined : tokens.length}
 >
 	{#snippet actions()}
-		<Button variant="primary" icon="plus" onclick={openCreate}>{t('tokens.create')}</Button>
+		{#if canWrite}
+			<Button variant="primary" icon="plus" onclick={openCreate}>{t('tokens.create')}</Button>
+		{/if}
 	{/snippet}
 
 	<ListView

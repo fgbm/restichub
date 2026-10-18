@@ -55,6 +55,10 @@
 	const sessionTenantId = $derived(getSession()?.tenant?.id ?? null);
 	const name = $derived(user?.display_name ?? '');
 
+	// A platform operation needs the installation-wide right (ADR-0029, operation
+	// `platform_users_write`).
+	const canWrite = $derived(getSession()?.platform_admin === true);
+
 	const roleLabels = $derived<Record<Role, string>>({
 		platform_admin: t('users.role.platformAdmin'),
 		admin: t('users.role.admin'),
@@ -154,6 +158,7 @@
 	]);
 
 	function rowActions(member: PlatformMembership): RowAction[] {
+		if (!canWrite) return [];
 		// The API refuses only the own membership in the organization of this session (HTTP 409).
 		const sessionOrg = self && member.tenant_id === sessionTenantId;
 		return [
@@ -311,7 +316,7 @@
 		aria-label={t('platformUsers.roleIn', { name: member.tenant_name })}
 		options={roleOptions}
 		value={roleDrafts[member.tenant_id] ?? member.role}
-		disabled={roleBusy !== null}
+		disabled={!canWrite || roleBusy !== null}
 		onchange={(event) =>
 			selectRole(member, (event.currentTarget as HTMLSelectElement).value as Role)}
 	/>
@@ -354,7 +359,7 @@
 		{/if}
 	{/snippet}
 	{#snippet actions()}
-		{#if user}
+		{#if user && canWrite}
 			<Button
 				size="sm"
 				icon="key"
@@ -378,7 +383,11 @@
 
 	{#if user}
 		<div class="memberships">
-			<Panel header={membershipsHead} flush footer={addOptions.length > 0 ? addRow : undefined}>
+			<Panel
+				header={membershipsHead}
+				flush
+				footer={addOptions.length > 0 && canWrite ? addRow : undefined}
+			>
 				<DataTable
 					{columns}
 					rows={user.memberships}
