@@ -192,6 +192,27 @@ describe('the repository page', () => {
 		expect(screen.getByText(/cannot be replaced/)).toBeInTheDocument();
 	});
 
+	it('shows the sentence of the repositories list and the hint of a stored secret', async () => {
+		mocks.listRepositories.mockResolvedValue([
+			repository({
+				backend: {
+					kind: 's3',
+					endpoint: 'https://s3.example.net',
+					bucket: 'backups-prod',
+					region: 'eu-central-1'
+				}
+			})
+		]);
+		render(RepositoryEditor, { repositoryId: 'r_1' });
+		await screen.findByRole('heading', { level: 1, name: 'repo-a' });
+		expect(
+			screen.getByText(
+				'Each repository holds one restic backend. The control plane keeps the secrets and the maintenance host.'
+			)
+		).toBeInTheDocument();
+		expect(screen.getAllByText('Leave the field empty to keep the current value.')).toHaveLength(2);
+	});
+
 	it('fr_sc_01 lists the next runs on one line each with the UTC time in the tooltip', async () => {
 		render(RepositoryEditor, { repositoryId: 'r_1' });
 

@@ -11,6 +11,7 @@
 		JobLimitDefaults,
 		JobTemplate,
 		Plan,
+		PreviewRequest,
 		PreviewResponse,
 		Profile,
 		ProfileWarning,
@@ -35,16 +36,14 @@
 		Disclosure,
 		Field,
 		Icon,
-		Select,
 		SidePanel,
 		TextField
 	} from './ui/index.ts';
-	import type { KeyValueItem, SelectOption } from './ui/index.ts';
+	import type { KeyValueItem } from './ui/index.ts';
 	import { formatMinutes } from '#lib/format.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import {
 		SUMMARY_ORDER,
-		buildSteps,
 		draftFromProfile,
 		emptyDraft,
 		enabledCount,
@@ -53,8 +52,7 @@
 		minutesToHours,
 		MAX_TAGS
 	} from '#lib/profile-form.ts';
-	import type { Os, ProfileDraft, SummaryKey } from '#lib/profile-form.ts';
-	import { repositoryAddress } from '#lib/repository-picker.ts';
+	import type { ProfileDraft, SummaryKey } from '#lib/profile-form.ts';
 	import { rememberSections } from '#lib/section-state.svelte.ts';
 	import { loadPreference, savePreference } from '#lib/stores/ui-preferences.svelte.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
@@ -118,24 +116,7 @@
 	const summaries = $derived(summarize(draft, scriptCounts, limitDefaults));
 	const counts = $derived(enabledCount(summaries));
 	const activeHosts = $derived(agents.filter((agent) => agent.status === 'active'));
-	const commandHost = $derived(activeHosts.find((agent) => agent.id === commandHostId));
 	const commandRepository = $derived(repositories.find((item) => item.id === commandRepositoryId));
-	// The OS of the chosen host decides the paths and the flags of the commands; the person does
-	// not guess Windows or Linux (FR-PF-04).
-	const commandOs = $derived<Os>(
-		commandHost?.os === 'windows' ? 'windows' : commandHost?.os === 'darwin' ? 'macos' : 'linux'
-	);
-	const steps = $derived(
-		buildSteps(
-			draft,
-			commandOs,
-			draft.scripts.map((script) => ({
-				name: script.name,
-				phase: script.phase === 'before' ? ('before' as const) : ('after' as const)
-			})),
-			commandRepository ? repositoryAddress(commandRepository) : null
-		)
-	);
 	const stateKey = $derived(
 		JSON.stringify([draft.name, settingsOf(draft, { canEditScripts: true, existing })])
 	);
@@ -183,10 +164,18 @@
 			repositories = repositoryList;
 			agents = agentList;
 			plans = planList;
-			// The commands panel opens with the host that the person kept, or the first active one.
+			// The commands panel opens with the host that the person kept, else the host of the first
+			// plan of the profile, else the first online host (AC-UI-11).
 			const active = agentList.filter((agent) => agent.status === 'active');
 			if (!active.some((agent) => agent.id === commandHostId)) {
-				commandHostId = active[0]?.id ?? '';
+				const planned = profileId
+					? planList.find((plan) => plan.profile_id === profileId)?.agent_id
+					: undefined;
+				commandHostId =
+					active.find((agent) => agent.id === planned)?.id ??
+					active.find((agent) => agent.online)?.id ??
+					active[0]?.id ??
+					'';
 			}
 			commandRepositoryId =
 				repositoryList.find((item) => item.initialized)?.id ?? repositoryList[0]?.id ?? '';
@@ -298,54 +287,13 @@
 		SUMMARY_ORDER.map((key) => ({ key, label: t(titles[key]), value: summaries[key].text }))
 	);
 
-	// The preview of the server compiler for one host (FR-PF-04) needs a stored profile.
-	let previewOpen = $state(false);
-	let previewAgentId = $state('');
+	// The server compiles the draft for one host, so the panel shows the same command that the agent
+	// runs, with the secrets masked (FR-PF-04, AC-PF-01).
+	let commandsOpen = $state(false);
 	let previewLoading = $state(false);
 	let previewResult = $state<PreviewResponse | null>(null);
 	let previewProblem = $state<ApiProblem | null>(null);
-	const previewHosts = $derived<SelectOption[]>([
-		{ value: '', label: t('profiles.previewHost') },
-		...agents
-			.filter((agent) => agent.status === 'active')
-			.map((agent) => ({ value: agent.id, label: agent.hostname }))
-	]);
-
-	function openPreview(): void {
-		previewAgentId = '';
-		previewResult = null;
-		previewProblem = null;
-		previewOpen = true;
-	}
-
-	// A profile has no repository (ADR-0047), so the preview takes the repository of a plan of this
-	// profile on the chosen host. Without such a plan the answer carries none.
-	function previewRepositoryFor(agentId: string): string | undefined {
-		const plan =
-			plans.find((item) => item.profile_id === existing?.id && item.agent_id === agentId) ??
-			plans.find((item) => item.profile_id === existing?.id);
-		return plan?.repository_id;
-	}
-
-	async function runPreview(): Promise<void> {
-		if (!existing || !previewAgentId) return;
-		previewLoading = true;
-		previewProblem = null;
-		previewResult = null;
-		try {
-			previewResult = await service.previewProfile(
-				existing.id,
-				previewAgentId,
-				previewRepositoryFor(previewAgentId)
-			);
-		} catch (problem) {
-			previewProblem = problemOf(problem);
-		} finally {
-			previewLoading = false;
-		}
-	}
-
-	let commandsOpen = $state(false);
+	let previewSequence = 0;
 	// AC-UI-11 keeps the host of the commands panel for the browser.
 	let commandHostId = $state(
 		loadPreference(
@@ -361,6 +309,62 @@
 		commandHostId = id;
 		savePreference('browser', 'commands.host', id);
 	}
+
+	const previewMessage = $derived.by(() => {
+		const problem = previewProblem;
+		if (!problem) return null;
+		const reason = problem.field ? fieldError(problem, problem.field) : undefined;
+		return reason ? `${problem.field} · ${reason}` : (tErrorCode(problem.code) ?? problem.title);
+	});
+	// The whole draft is the input, so a change of any setting refreshes the commands.
+	const previewKey = $derived(
+		JSON.stringify([
+			commandHostId,
+			commandRepositoryId,
+			draft.name,
+			settingsOf(draft, { canEditScripts, existing })
+		])
+	);
+	let lastPreviewKey = '';
+
+	async function runPreview(): Promise<void> {
+		if (!commandHostId) {
+			previewResult = null;
+			return;
+		}
+		// The panel and the debounce both ask for the commands, so one key is sent one time.
+		if (previewKey === lastPreviewKey) return;
+		lastPreviewKey = previewKey;
+		const sequence = ++previewSequence;
+		const request: PreviewRequest = {
+			agent_id: commandHostId,
+			profile_id: existing?.id,
+			repository_id: commandRepositoryId || undefined,
+			name: draft.name,
+			...settingsOf(draft, { canEditScripts, existing })
+		};
+		previewLoading = true;
+		previewProblem = null;
+		try {
+			const result = await service.previewProfile(request);
+			if (sequence === previewSequence) previewResult = result;
+		} catch (problem) {
+			if (sequence !== previewSequence) return;
+			previewResult = null;
+			previewProblem = problemOf(problem);
+		} finally {
+			if (sequence === previewSequence) previewLoading = false;
+		}
+	}
+
+	// A person types a path or a tag one key at a time, so the server runs after a pause.
+	$effect(() => {
+		void previewKey;
+		if (!commandsOpen) return;
+		const timer = setTimeout(() => void runPreview(), 400);
+		return () => clearTimeout(timer);
+	});
+
 	const hasPaths = $derived(
 		[draft.pathsAll, draft.pathsWindows, draft.pathsLinux, draft.pathsMacos].some(
 			(text) => text.trim() !== ''
@@ -368,7 +372,8 @@
 	);
 
 	async function copyCommands(): Promise<void> {
-		await navigator.clipboard?.writeText(steps.map((step) => step.command).join('\n\n'));
+		const commands = previewResult?.steps.map((step) => step.command) ?? [];
+		await navigator.clipboard?.writeText(commands.join('\n\n'));
 		copied = true;
 		setTimeout(() => (copied = false), 1200);
 	}
@@ -376,7 +381,7 @@
 
 <RecordPage
 	title={profileId ? (existing?.name ?? '') : t('pe.newTitle')}
-	description={t('pe.description')}
+	description={t('profiles.description')}
 	{loading}
 	error={loadError}
 	onsubmit={() => void save()}
@@ -395,15 +400,15 @@
 		<Button
 			size="sm"
 			icon="terminal"
-			onclick={() => (commandsOpen = true)}
+			onclick={() => {
+				commandsOpen = true;
+				void runPreview();
+			}}
 			disabled={!hasPaths}
 			title={hasPaths ? undefined : t('pe.commands.noPaths')}
 		>
 			{t('pe.side.commands')}
 		</Button>
-		{#if existing}
-			<Button size="sm" icon="eye" onclick={openPreview}>{t('profiles.preview')}</Button>
-		{/if}
 	{/snippet}
 	{#snippet banners()}
 		{#if formError}
@@ -735,51 +740,12 @@
 			{#if !commandRepository}
 				<p class="muted">{t('pe.commands.noRepository')}</p>
 			{/if}
-			{#each steps as step, index (step.kind + index)}
-				<div class="step">
-					<div class="step__title">{step.title}</div>
-					<pre
-						class="step__cmd"
-						class:step__cmd--script={step.kind === 'script'}>{step.command}</pre>
-				</div>
-			{/each}
-			<p class="muted note">
-				<Icon name="clock" size="xs" />
-				{summaries.limits.text}
-			</p>
-		</div>
-		{#snippet footer()}
-			<Button icon="copy" onclick={copyCommands}>
-				{copied ? t('pe.side.copied') : t('pe.side.copy')}
-			</Button>
-		{/snippet}
-	</SidePanel>
-
-	<SidePanel
-		bind:open={previewOpen}
-		title={t('profiles.previewTitle')}
-		subtitle={t('profiles.previewDescription')}
-	>
-		<div class="preview">
-			<Select
-				id="preview-host"
-				label={t('profiles.previewHost')}
-				options={previewHosts}
-				bind:value={previewAgentId}
-				onchange={runPreview}
-			/>
-			{#if previewProblem}
-				<Alert tone="danger" title={tErrorCode(previewProblem.code) ?? previewProblem.title}>
-					{previewProblem.field}{previewProblem.reason ? `: ${previewProblem.reason}` : ''}
-				</Alert>
-			{/if}
-			{#if previewLoading}
-				<p class="preview__hint">{t('common.loading')}</p>
+			{#if previewMessage}
+				<Alert tone="danger" title={previewMessage} />
+			{:else if previewLoading}
+				<p class="muted">{t('common.loading')}</p>
 			{:else if previewResult}
-				{#if !previewResult.repository_id}
-					<p class="preview__hint">{t('profiles.previewNoRepository')}</p>
-				{/if}
-				{#each previewResult.steps as step (step.kind + step.command)}
+				{#each previewResult.steps as step, index (step.kind + index)}
 					<div class="step">
 						<div class="step__head">
 							<span class="step__kind">{step.kind}</span>
@@ -787,7 +753,6 @@
 								<Badge tone="info">{t('profiles.previewMaintenance')}</Badge>
 							{/if}
 						</div>
-						<div class="step__label">{t('profiles.previewCommand')}</div>
 						<pre class="step__command">{step.command}</pre>
 						{#if step.environment.length > 0}
 							<div class="step__label">{t('profiles.previewEnvironment')}</div>
@@ -800,35 +765,22 @@
 					</div>
 				{/each}
 			{:else}
-				<p class="preview__hint">{t('profiles.previewEmpty')}</p>
+				<p class="muted">{t('profiles.previewEmpty')}</p>
 			{/if}
+			<p class="muted note">
+				<Icon name="clock" size="xs" />
+				{summaries.limits.text}
+			</p>
 		</div>
+		{#snippet footer()}
+			<Button icon="copy" onclick={copyCommands}>
+				{copied ? t('pe.side.copied') : t('pe.side.copy')}
+			</Button>
+		{/snippet}
 	</SidePanel>
 </RecordPage>
 
 <style>
-	.step__title {
-		margin-bottom: var(--rh-space-1);
-		color: var(--rh-color-text-muted);
-		font-size: var(--rh-font-size-sm);
-	}
-
-	.step__cmd {
-		margin: 0;
-		padding: var(--rh-space-2);
-		overflow-x: auto;
-		border-radius: var(--rh-radius-sm);
-		background-color: var(--rh-color-code-bg);
-		font-family: var(--rh-font-mono);
-		font-size: var(--rh-font-size-xs);
-		white-space: pre-wrap;
-		word-break: break-all;
-	}
-
-	.step__cmd--script {
-		font-style: italic;
-	}
-
 	.note {
 		margin: 0;
 	}
@@ -876,15 +828,10 @@
 		}
 	}
 
-	.preview,
 	.commands {
 		display: flex;
 		flex-direction: column;
 		gap: var(--rh-space-4);
-	}
-
-	.preview__hint {
-		color: var(--rh-color-text-muted);
 	}
 
 	.step {

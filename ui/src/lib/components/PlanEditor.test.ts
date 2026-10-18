@@ -4,8 +4,11 @@
  */
 import { render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '#lib/api/index.ts';
+import { setLocale } from '#lib/i18n/index.ts';
+
+afterEach(() => setLocale('en'));
 import PlanEditor from './PlanEditor.svelte';
 
 const mocks = vi.hoisted(() => ({
@@ -187,6 +190,25 @@ describe('the plan page', () => {
 		);
 		expect(mocks.pushToast).toHaveBeenCalledWith('success', 'The plan is created.');
 		expect(mocks.goto).toHaveBeenCalledWith('/(app)/plans');
+	});
+
+	it('shows the sentence of the plans list on the page of a new plan and a stored plan', async () => {
+		const sentence = 'A plan backs up a profile from a host to a repository on a schedule.';
+		const first = render(PlanEditor);
+		expect(await screen.findByText(sentence)).toBeInTheDocument();
+		first.unmount();
+
+		render(PlanEditor, { planId: 'pl_1' });
+		await screen.findByRole('heading', { level: 1, name: 'nightly-web' });
+		expect(screen.getByText(sentence)).toBeInTheDocument();
+	});
+
+	it('shows the effective objective with the unit of the locale', async () => {
+		setLocale('ru');
+		render(PlanEditor, { planId: 'pl_1' });
+		await screen.findByRole('heading', { level: 1, name: 'nightly-web' });
+		expect((await screen.findAllByText(/Действует: 26 ч/)).length).toBeGreaterThan(0);
+		expect(screen.queryByText(/26 h/)).not.toBeInTheDocument();
 	});
 
 	it('adr_0047 shows the profile and the repository of a stored plan', async () => {

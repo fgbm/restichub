@@ -21,7 +21,7 @@
 	import { RecordPage, SummaryPanel } from './layout/index.ts';
 	import { Alert, Button, ConfirmDialog, Select, StatusPill, TextField } from './ui/index.ts';
 	import type { KeyValueItem, SelectOption } from './ui/index.ts';
-	import { formatLocalTime, formatTimeInZone } from '#lib/format.ts';
+	import { formatHours, formatLocalTime, formatTimeInZone } from '#lib/format.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
 	import type { HostRef } from '#lib/host-picker.ts';
@@ -145,11 +145,6 @@
 		agentId = active ? host : '';
 	}
 
-	function describeHours(seconds: number): string {
-		const hours = seconds / 3600;
-		return `${Number.isInteger(hours) ? hours : hours.toFixed(1)} h`;
-	}
-
 	const summaries = $derived<Record<SectionKey, { text: string; state: SummaryState }>>({
 		basics: name ? { text: name, state: 'on' } : { text: t('pl.summary.noName'), state: 'warn' },
 		source:
@@ -161,7 +156,7 @@
 				? { text: `${describeCron(cron, t)} · ${timeZone}`, state: 'on' }
 				: { text: t('pl.summary.noSchedule'), state: 'warn' },
 		objective: rpoHours.trim()
-			? { text: `${rpoHours.trim()} h`, state: 'on' }
+			? { text: t('duration.h', { h: rpoHours.trim() }), state: 'on' }
 			: { text: t('pl.summary.rpoDefault'), state: 'off' }
 	});
 
@@ -192,7 +187,7 @@
 			key: 'rpo',
 			label: t('plans.rpoColumn'),
 			value: existing
-				? `${summaries.objective.text} · ${t('plans.rpoEffective', { value: describeHours(existing.effective_rpo_seconds) })}`
+				? `${summaries.objective.text} · ${t('plans.rpoEffective', { value: formatHours(existing.effective_rpo_seconds) })}`
 				: summaries.objective.text
 		},
 		{
@@ -391,7 +386,7 @@
 
 <RecordPage
 	title={planId ? (existing?.name ?? '') : t('pl.newTitle')}
-	description={t(planId ? 'plans.editDescription' : 'plans.addDescription')}
+	description={t('plans.description')}
 	{loading}
 	error={loadError}
 	onsubmit={() => void save()}
@@ -574,7 +569,7 @@
 			id="plan-rpo"
 			label={t('plans.rpo')}
 			help={existing
-				? `${t('plans.rpoHint')} ${t('plans.rpoEffective', { value: describeHours(existing.effective_rpo_seconds) })}`
+				? `${t('plans.rpoHint')} ${t('plans.rpoEffective', { value: formatHours(existing.effective_rpo_seconds) })}`
 				: t('plans.rpoHint')}
 			error={fieldError(formProblem, 'rpo_seconds')}
 			inputmode="decimal"

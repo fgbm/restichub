@@ -7,16 +7,8 @@
 	import HostActions from './HostActions.svelte';
 	import ProfileSection from './ProfileSection.svelte';
 	import { RecordPage, SummaryPanel } from './layout/index.ts';
-	import {
-		Alert,
-		Badge,
-		Button,
-		CopyField,
-		DropdownMenu,
-		ListView,
-		StatusPill
-	} from './ui/index.ts';
-	import type { KeyValueItem, MenuItem, StatusTone } from './ui/index.ts';
+	import { Alert, Badge, Button, CopyField, ListView, StatusPill } from './ui/index.ts';
+	import type { KeyValueItem, StatusTone } from './ui/index.ts';
 	import { isTimed, jobDuration, jobMeta, jobTitle } from '#lib/job-item.ts';
 	import { iconOf, jobState, pillOf } from '#lib/vocabulary.ts';
 	import { formatTime, relativeTime } from '#lib/format.ts';
@@ -246,25 +238,6 @@
 			{ key: 'scripts', label: t('hosts.serverScripts'), value: summaries.scripts.text }
 		];
 	});
-
-	const menuItems = $derived.by<MenuItem[]>(() => {
-		const item = agent;
-		if (!item) return [];
-		return [
-			{
-				label: t('hosts.reregister'),
-				icon: 'key',
-				onSelect: () => hostActions.openReregister(item)
-			},
-			{
-				label: t('hosts.revokeAgent'),
-				icon: 'octagon',
-				tone: 'danger',
-				separatorBefore: true,
-				onSelect: () => hostActions.openRevoke(item)
-			}
-		];
-	});
 </script>
 
 {#snippet time(value: string | null | undefined)}
@@ -288,7 +261,7 @@
 
 <RecordPage
 	title={agent?.hostname ?? ''}
-	description={t('hp.description')}
+	description={t('hosts.description')}
 	{loading}
 	error={loadError ?? (!loading && !agent ? t('table.error') : null)}
 >
@@ -302,12 +275,6 @@
 			<Button size="sm" icon="tag" onclick={() => hostActions.openRename(agent!)}>
 				{t('hosts.rename')}
 			</Button>
-			<DropdownMenu
-				icon="more"
-				align="end"
-				label={t('hosts.moreActions', { name: agent.hostname })}
-				items={menuItems}
-			/>
 		{/if}
 	{/snippet}
 	{#snippet banners()}

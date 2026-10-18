@@ -391,7 +391,7 @@
 	title={templateId
 		? name || (existing ? templateName(existing) : '')
 		: t('scriptTemplates.newTitle')}
-	description={t('scriptTemplates.formDescription')}
+	description={t('scriptTemplates.description')}
 	{loading}
 	error={loadError}
 	onsubmit={() => void save()}

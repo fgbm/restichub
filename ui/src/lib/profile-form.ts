@@ -11,7 +11,6 @@ import { draftOf, scriptOf } from '#lib/scripts.ts';
 import type { ScriptDraft } from '#lib/scripts.ts';
 
 export type SectionKey = 'excludes' | 'tags' | 'options' | 'retention' | 'check' | 'scripts';
-export type Os = 'linux' | 'windows' | 'macos';
 export type RuleKey =
 	'keepLast' | 'keepHourly' | 'keepDaily' | 'keepWeekly' | 'keepMonthly' | 'keepYearly';
 
@@ -604,91 +603,4 @@ export function enabledCount(summaries: Record<SummaryKey, Summary>): {
 } {
 	const states = Object.values(summaries);
 	return { on: states.filter((summary) => summary.state === 'on').length, total: states.length };
-}
-
-/* ----------------------------------------------------------------- commands */
-
-export interface PreviewStep {
-	kind: 'script' | 'backup' | 'forget' | 'check';
-	title: string;
-	command: string;
-}
-
-function quote(value: string): string {
-	return /[\s*?'"$\\[\]()]/.test(value) ? `'${value.replace(/'/g, "'\\''")}'` : value;
-}
-
-export function buildSteps(
-	draft: ProfileDraft,
-	os: Os,
-	scripts: { name: string; phase: 'before' | 'after' }[],
-	/** The repository as restic names it in `-r`; absent leaves the commands without one. */
-	repository: string | null = null
-): PreviewStep[] {
-	const on = draft.enabled;
-	const steps: PreviewStep[] = [];
-	// The prefix of a restic command: the binary and the repository, when the person chose one.
-	const restic = (command: string[]): string =>
-		['restic', ...(repository === null ? [] : ['-r', quote(repository)]), ...command].join(' ');
-	const own =
-		os === 'windows' ? draft.pathsWindows : os === 'macos' ? draft.pathsMacos : draft.pathsLinux;
-	const paths = [...splitLines(draft.pathsAll), ...splitLines(own)];
-	const scriptSteps = (phase: 'before' | 'after') => {
-		if (!on.scripts) return;
-		for (const script of scripts.filter((item) => item.phase === phase)) {
-			steps.push({
-				kind: 'script',
-				title: t(phase === 'before' ? 'pe.cmd.scriptBefore' : 'pe.cmd.scriptAfter'),
-				command: script.name
-			});
-		}
-	};
-	scriptSteps('before');
-	const backup = [restic(['backup'])];
-	if (on.tags) for (const tag of draft.tags) backup.push(`--tag ${quote(tag)}`);
-	if (on.excludes) {
-		for (const item of splitLines(draft.excludes)) backup.push(`--exclude ${quote(item)}`);
-		for (const item of splitLines(draft.excludeFiles)) backup.push(`--exclude-file ${quote(item)}`);
-	}
-	if (on.options) {
-		if (draft.vss && os === 'windows') backup.push('--use-fs-snapshot');
-		if (draft.oneFileSystem) backup.push('--one-file-system');
-		if (draft.excludeCaches) backup.push('--exclude-caches');
-		if (numberOrZero(draft.limitUpload)) {
-			backup.push(`--limit-upload ${numberOrZero(draft.limitUpload)}`);
-		}
-		if (numberOrZero(draft.limitDownload)) {
-			backup.push(`--limit-download ${numberOrZero(draft.limitDownload)}`);
-		}
-	}
-	for (const path of paths) backup.push(quote(path));
-	if (paths.length === 0) backup.push(`# ${t('pe.cmd.noPaths')}`);
-	steps.push({ kind: 'backup', title: t('pe.cmd.backup'), command: backup.join(' \\\n  ') });
-	scriptSteps('after');
-	if (on.retention && hasRetentionRules(draft)) {
-		const forget = [restic(['forget'])];
-		const group = groupByOf(draft);
-		if (group.length > 0) forget.push(`--group-by ${group.join(',')}`);
-		for (const rule of RULES) {
-			const count = numberOrZero(draft[rule.key]);
-			if (count > 0) forget.push(`${rule.flag} ${count}`);
-		}
-		if (draft.keepWithin.trim()) forget.push(`--keep-within ${draft.keepWithin.trim()}`);
-		for (const tag of draft.keepTags) forget.push(`--keep-tag ${quote(tag)}`);
-		for (const host of draft.filterHosts) forget.push(`--host ${quote(host)}`);
-		for (const tag of draft.filterTags) forget.push(`--tag ${quote(tag)}`);
-		for (const path of splitLines(draft.filterPaths)) forget.push(`--path ${quote(path)}`);
-		steps.push({ kind: 'forget', title: t('pe.cmd.forget'), command: forget.join(' \\\n  ') });
-	}
-	if (on.check) {
-		const subset = draft.readDataSubset.trim();
-		steps.push({
-			kind: 'check',
-			title: t('pe.cmd.check'),
-			command: [restic(['check']), ...(subset ? ['--read-data-subset', quote(subset)] : [])].join(
-				' \\\n  '
-			)
-		});
-	}
-	return steps;
 }

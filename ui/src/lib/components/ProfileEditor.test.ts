@@ -6,6 +6,7 @@
 import { render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApiError } from '#lib/api/index.ts';
 import ProfileEditor from './ProfileEditor.svelte';
 
 const mocks = vi.hoisted(() => ({
@@ -19,6 +20,7 @@ const mocks = vi.hoisted(() => ({
 	listSecrets: vi.fn(),
 	createProfile: vi.fn(),
 	updateProfile: vi.fn(),
+	previewProfile: vi.fn(),
 	pushToast: vi.fn(),
 	goto: vi.fn()
 }));
@@ -55,7 +57,8 @@ vi.mock('#lib/api/index.ts', async (importOriginal) => {
 			listJobTemplates: mocks.listJobTemplates,
 			listSecrets: mocks.listSecrets,
 			createProfile: mocks.createProfile,
-			updateProfile: mocks.updateProfile
+			updateProfile: mocks.updateProfile,
+			previewProfile: mocks.previewProfile
 		}
 	};
 });
@@ -114,6 +117,7 @@ function agent(overrides: Record<string, unknown> = {}) {
 		certificate_serial: '01',
 		certificate_expires_at: '2999-01-01T00:00:00Z',
 		status: 'active',
+		online: true,
 		last_seen_at: null,
 		created_at: '2026-01-01T00:00:00Z',
 		revoked_at: null,
@@ -146,6 +150,23 @@ beforeEach(() => {
 	const saved = { profile: profile(), warnings: [], plan_warnings: [] };
 	mocks.createProfile.mockResolvedValue(saved);
 	mocks.updateProfile.mockResolvedValue(saved);
+	mocks.previewProfile.mockResolvedValue({
+		repository_id: 'r_1',
+		steps: [
+			{
+				kind: 'backup',
+				maintenance: false,
+				command: 'restic -r rest:https://rest.example.net/a backup -- /srv /etc',
+				environment: [{ name: 'RESTIC_PASSWORD', value: '***' }]
+			},
+			{
+				kind: 'forget',
+				maintenance: true,
+				command: 'restic -r rest:https://rest.example.net/a forget --keep-daily=7',
+				environment: []
+			}
+		]
+	});
 });
 
 function user() {
@@ -284,7 +305,7 @@ describe('Profile editor sections', () => {
 		expect(toggle).toHaveAttribute('aria-expanded', 'true');
 	});
 
-	it('fr_pf_04 shows the restic commands of the chosen host and repository', async () => {
+	it('fr_pf_04_the_commands_come_from_the_server_for_the_draft', async () => {
 		const u = user();
 		mocks.listProfiles.mockResolvedValue([
 			profile({ paths: { all: ['/srv'], windows: ['C:\\Data'], linux: ['/etc'], macos: [] } })
@@ -298,16 +319,114 @@ describe('Profile editor sections', () => {
 		expect(screen.queryByText(/^restic -r/)).not.toBeInTheDocument();
 		await u.click(screen.getByRole('button', { name: 'Restic commands' }));
 		const panel = await screen.findByRole('dialog', { name: 'Restic commands' });
-		expect(within(panel).getByText(/^restic -r/)).toHaveTextContent(
-			'-r rest:https://rest.example.net/a backup'
-		);
-		expect(within(panel).getByText(/^restic -r/)).toHaveTextContent('/etc');
+		await waitFor(() => expect(mocks.previewProfile).toHaveBeenCalledTimes(1));
+		expect(mocks.previewProfile.mock.calls[0][0]).toMatchObject({
+			agent_id: 'a_1',
+			profile_id: 'p_1',
+			repository_id: 'r_1',
+			name: 'db-nightly',
+			paths: { all: ['/srv'], windows: ['C:\\Data'], linux: ['/etc'], macos: [] }
+		});
+		expect(within(panel).getAllByText(/^restic -r/)[0]).toHaveTextContent('/etc');
+		expect(within(panel).getByText('Maintenance')).toBeInTheDocument();
+		expect(within(panel).getByText('RESTIC_PASSWORD')).toBeInTheDocument();
 		expect(within(panel).getByRole('button', { name: 'Copy' })).toBeInTheDocument();
+		await u.click(within(panel).getByRole('button', { name: 'Close' }));
+	});
 
+	it('fr_pf_04_the_commands_wait_for_a_pause_after_a_change', async () => {
+		const u = user();
+		mocks.listAgents.mockResolvedValue([
+			agent(),
+			agent({ id: 'a_2', hostname: 'win-fs01', os: 'windows' })
+		]);
+		render(ProfileEditor, { profileId: 'p_1' });
+		await screen.findByLabelText(/^Profile/);
+		await u.click(screen.getByRole('button', { name: 'Restic commands' }));
+		const panel = await screen.findByRole('dialog', { name: 'Restic commands' });
+		await waitFor(() => expect(mocks.previewProfile).toHaveBeenCalledTimes(1));
 		await u.click(within(panel).getByRole('combobox', { name: /^Host/ }));
 		await u.click(await screen.findByText('win-fs01', { selector: '.rh-record__option-label' }));
-		expect(within(panel).getByText(/^restic -r/)).toHaveTextContent('C:\\Data');
-		expect(within(panel).getByText(/^restic -r/)).not.toHaveTextContent('/etc');
+		expect(mocks.previewProfile).toHaveBeenCalledTimes(1);
+		await waitFor(() => expect(mocks.previewProfile).toHaveBeenCalledTimes(2), { timeout: 2000 });
+		expect(mocks.previewProfile.mock.calls[1][0].agent_id).toBe('a_2');
+		await u.click(within(panel).getByRole('button', { name: 'Close' }));
+	});
+
+	it('fr_pf_04_a_new_profile_previews_the_unsaved_draft', async () => {
+		const u = user();
+		render(ProfileEditor);
+		await screen.findByLabelText(/^Profile/);
+		await u.type(screen.getByLabelText(/^Profile/), 'draft-profile');
+		await u.type(screen.getByLabelText(/^All systems/), '/srv');
+		await u.click(screen.getByRole('button', { name: 'Restic commands' }));
+		await waitFor(() => expect(mocks.previewProfile).toHaveBeenCalledTimes(1));
+		const request = mocks.previewProfile.mock.calls[0][0];
+		expect(request.name).toBe('draft-profile');
+		expect(request.profile_id).toBeUndefined();
+		expect(request.paths.all).toEqual(['/srv']);
+	});
+
+	it('fr_pf_04_shows_the_field_of_a_refused_draft', async () => {
+		const u = user();
+		mocks.previewProfile.mockRejectedValue(
+			new ApiError({
+				status: 400,
+				code: 'invalid_argument',
+				title: 'Bad Request',
+				field: 'paths',
+				reason: 'empty'
+			})
+		);
+		render(ProfileEditor, { profileId: 'p_1' });
+		await waitFor(() =>
+			expect(screen.getByRole('button', { name: 'Restic commands' })).toBeEnabled()
+		);
+		await u.click(screen.getByRole('button', { name: 'Restic commands' }));
+		expect(await screen.findByText('paths · This field is required.')).toBeInTheDocument();
+		const panel = screen.getByRole('dialog', { name: 'Restic commands' });
+		await u.click(within(panel).getByRole('button', { name: 'Close' }));
+	});
+
+	it('ac_ui_11_the_commands_start_at_the_host_of_the_first_plan', async () => {
+		const u = user();
+		mocks.listAgents.mockResolvedValue([
+			agent({ online: false }),
+			agent({ id: 'a_2', hostname: 'win-fs01', os: 'windows', online: true })
+		]);
+		mocks.listPlans.mockResolvedValue([{ id: 'pl_1', profile_id: 'p_1', agent_id: 'a_2' }]);
+		render(ProfileEditor, { profileId: 'p_1' });
+		await screen.findByLabelText(/^Profile/);
+		await u.click(screen.getByRole('button', { name: 'Restic commands' }));
+		await waitFor(() => expect(mocks.previewProfile).toHaveBeenCalledTimes(1));
+		expect(mocks.previewProfile.mock.calls[0][0].agent_id).toBe('a_2');
+		expect(screen.getByRole('combobox', { name: /^Host/ })).toHaveTextContent('win-fs01');
+		await u.click(
+			within(screen.getByRole('dialog', { name: 'Restic commands' })).getByRole('button', {
+				name: 'Close'
+			})
+		);
+	});
+
+	it('ac_ui_11_a_new_profile_starts_at_the_first_online_host', async () => {
+		const u = user();
+		mocks.listAgents.mockResolvedValue([
+			agent({ online: false }),
+			agent({ id: 'a_2', hostname: 'win-fs01', os: 'windows', online: true })
+		]);
+		mocks.listPlans.mockResolvedValue([]);
+		render(ProfileEditor);
+		await screen.findByLabelText(/^Profile/);
+		await u.type(screen.getByLabelText(/^Profile/), 'draft-profile');
+		await u.type(screen.getByLabelText(/^All systems/), '/srv');
+		await u.click(screen.getByRole('button', { name: 'Restic commands' }));
+		await waitFor(() => expect(mocks.previewProfile).toHaveBeenCalledTimes(1));
+		expect(mocks.previewProfile.mock.calls[0][0].agent_id).toBe('a_2');
+		await u.click(
+			within(screen.getByRole('dialog', { name: 'Restic commands' })).getByRole('button', {
+				name: 'Close'
+			})
+		);
 	});
 
 	it('ac_ui_11_restic_commands_keep_the_host', async () => {

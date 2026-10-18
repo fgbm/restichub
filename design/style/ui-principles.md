@@ -11,6 +11,7 @@ Use the shared components of [ui/COMPONENTS.md](../../ui/COMPONENTS.md). They ap
 3. A record opens on its own page, with the route `/<list>/<id>`. Do not open a record in a large modal.
 4. A record page has the sections on the left and a sticky side panel on the right. The side panel shows a summary or the record parameters, with the label above the value (see `RepositoryEditor`, `ProfileEditor` and `HostPage`).
 5. A small form or a confirmation stays in a centered modal.
+6. A record page shows one sentence that says what the record is. The sentence is the same as the one of its list page. Do not add a second sentence about the form. Put a fact that a person needs in the hint of the field or of the section.
 
 ## 2. Lists and tables
 

@@ -43,10 +43,11 @@ test('the profiles screen creates, previews, edits and deletes a profile', async
 	await page.locator('#profile-tags').fill('daily, web ');
 	await expect(page.getByRole('button', { name: 'Remove daily' })).toBeVisible();
 	await expect(page.getByRole('button', { name: 'Remove web' })).toBeVisible();
-	// The restic commands panel shows the command of the profile as it is typed (FR-PF-04).
+	// The commands panel shows the command of the draft from the server (FR-PF-04).
 	await page.getByRole('button', { name: 'Restic commands' }).click();
 	const commands = page.getByRole('dialog', { name: 'Restic commands' });
-	await expect(commands.getByText('--tag daily')).toBeVisible();
+	await expect(commands.getByText('--tag=daily')).toBeVisible();
+	await expect(commands.getByText('RESTIC_PASSWORD').first()).toBeVisible();
 	await page.keyboard.press('Escape');
 	await page.getByRole('button', { name: 'Save' }).click();
 
@@ -58,12 +59,10 @@ test('the profiles screen creates, previews, edits and deletes a profile', async
 	await page.getByRole('link', { name: 'web-daily' }).click();
 	await expect(page.getByRole('heading', { level: 1, name: 'web-daily' })).toBeVisible();
 
-	// The preview of the profile page shows the steps and the command line with masked secrets.
-	await page.getByRole('button', { name: 'Preview' }).click();
-	const preview = page.getByRole('dialog', { name: 'Preview' });
-	await expect(preview).toBeVisible();
-	await page.locator('#preview-host').selectOption({ label: 'win-fs01' });
-	await expect(preview.getByText('restic backup', { exact: false })).toBeVisible();
+	// The panel of a stored profile shows the command line with masked secrets (AC-PF-01).
+	await page.getByRole('button', { name: 'Restic commands' }).click();
+	const preview = page.getByRole('dialog', { name: 'Restic commands' });
+	await expect(preview.getByText('restic', { exact: false }).first()).toBeVisible();
 	await expect(preview.getByText('***', { exact: false }).first()).toBeVisible();
 	await page.keyboard.press('Escape');
 

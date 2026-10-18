@@ -1,12 +1,11 @@
 /*
- * The model of the profile editor: tags, summaries, the retention preview, the request and the
- * command preview (FR-PF-01, FR-PF-04, ADR-0039).
+ * The model of the profile editor: tags, summaries, the retention preview and the request
+ * (FR-PF-01, FR-PF-04, ADR-0039).
  */
 import { describe, expect, it } from 'vitest';
 import type { Profile } from '#lib/api/index.ts';
 import {
 	PRESETS,
-	buildSteps,
 	draftFromProfile,
 	emptyDraft,
 	enabledCount,
@@ -239,41 +238,5 @@ describe('settingsOf', () => {
 		);
 		expect(draft.stallMinutes).toBe('30');
 		expect(draft.maxDurationHours).toBe('0');
-	});
-});
-
-describe('buildSteps', () => {
-	const scripts = [
-		{ name: 'Stop db', phase: 'before' as const },
-		{ name: 'Start db', phase: 'after' as const }
-	];
-
-	it('takes the paths of the chosen system', () => {
-		const draft = draftFromProfile(stored());
-		const linux = buildSteps(draft, 'linux', []).find((step) => step.kind === 'backup');
-		const windows = buildSteps(draft, 'windows', []).find((step) => step.kind === 'backup');
-		expect(linux?.command).toContain('/srv');
-		expect(linux?.command).not.toContain('C:\\Data');
-		expect(linux?.command).not.toContain('--use-fs-snapshot');
-		expect(windows?.command).toContain('C:\\Data');
-		expect(windows?.command).toContain('--use-fs-snapshot');
-	});
-
-	it('adds forget only when a rule is set and orders the script steps', () => {
-		const withRetention = draftFromProfile(
-			stored({ retention: { keep_daily: 7 }, scripts: [{ name: 'x' } as never] })
-		);
-		withRetention.enabled.scripts = true;
-		const kinds = buildSteps(withRetention, 'linux', scripts).map((step) => step.kind);
-		expect(kinds).toEqual(['script', 'backup', 'script', 'forget']);
-		const noRule = draftFromProfile(stored({ retention: { keep_daily: 0 } }));
-		expect(buildSteps(noRule, 'linux', []).map((step) => step.kind)).toEqual(['backup']);
-	});
-
-	it('quotes a value that holds a space or a star', () => {
-		const draft = draftFromProfile(stored({ excludes: ['*.tmp', 'my dir'] }));
-		const command = buildSteps(draft, 'linux', [])[0].command;
-		expect(command).toContain("--exclude '*.tmp'");
-		expect(command).toContain("--exclude 'my dir'");
 	});
 });

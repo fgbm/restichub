@@ -78,6 +78,7 @@ import type {
 	PlanResponse,
 	PlatformUser,
 	PlatformUserRecord,
+	PreviewRequest,
 	PreviewResponse,
 	PreviewScheduleRequest,
 	Profile,
@@ -126,8 +127,11 @@ function nextFireTime(cron: string, timeZone: string): string {
 	return nextRunsFromCron(cron, timeZone, 1)[0] ?? new Date(Date.now() + 60 * 60_000).toISOString();
 }
 
-/// The paths of a profile for one operating system: `all` plus the paths of that system.
-function pathsForOs(profile: Profile, os: string): string[] {
+/// The paths of a profile or a draft for one operating system: `all` plus the paths of that system.
+function pathsForOs(
+	profile: { paths?: { all?: string[]; windows?: string[]; linux?: string[]; macos?: string[] } },
+	os: string
+): string[] {
 	const paths = profile.paths ?? { all: [], windows: [], linux: [], macos: [] };
 	const extra =
 		os === 'windows'
@@ -2254,59 +2258,82 @@ export class MockApiService {
 		};
 	}
 
-	async previewProfile(
-		id: string,
-		agentId: string,
-		repositoryId?: string
-	): Promise<PreviewResponse> {
-		const profile = this.profiles.find((item) => item.id === id);
-		if (!profile) throw new Error('not found');
-		const agent = this.agents.find((item) => item.id === agentId);
-		if (!agent) throw new Error('not found');
-		const paths = pathsForOs(profile, agent.os);
+	async previewProfile(request: PreviewRequest): Promise<PreviewResponse> {
+		const agent = this.agents.find((item) => item.id === request.agent_id);
+		if (!agent) throw problemError('invalid_argument', 'agent_id', 'unknown');
+		const paths = pathsForOs(request, agent.os);
 		if (paths.length === 0) {
 			// The compiler refuses a target without a path for its operating system.
 			throw problemError('invalid_argument', 'paths', 'empty');
 		}
-		const plan = this.plans.find((item) => item.profile_id === id && item.agent_id === agentId);
-		const found = repositoryId ?? plan?.repository_id ?? null;
-		// Without a plan of the profile that names a repository, the steps carry none.
+		const plan = this.plans.find(
+			(item) => item.profile_id === request.profile_id && item.agent_id === request.agent_id
+		);
+		const found = request.repository_id ?? plan?.repository_id ?? null;
+		if (found !== null && !this.repositories.some((item) => item.id === found)) {
+			throw problemError('invalid_argument', 'repository_id', 'unknown');
+		}
+		// Without a stored profile or a plan of it, the steps carry no repository.
 		const prefix = found === null ? [] : ['-r', 's3:https://s3.example.net/backups-prod'];
 		const repositoryEnv =
 			found === null
 				? []
 				: [{ name: 'RESTIC_REPOSITORY', value: 's3:https://s3.example.net/backups-prod' }];
-		return {
-			profile_id: id,
-			repository_id: found,
-			steps: [
-				{
-					kind: 'backup',
-					maintenance: false,
+		const options = request.options;
+		const backup = [
+			'restic',
+			...prefix,
+			'backup',
+			...(options?.one_file_system ? ['--one-file-system'] : []),
+			...(request.tags ?? []).map((tag) => `--tag=${tag}`),
+			...(request.excludes ?? []).map((pattern) => `--exclude=${pattern}`),
+			'--',
+			...paths
+		].join(' ');
+		const steps: PreviewResponse['steps'] = [
+			{
+				kind: 'backup',
+				maintenance: false,
+				command: backup,
+				environment: [
+					...repositoryEnv,
+					{ name: 'RESTIC_PASSWORD', value: '***' },
+					{ name: 'AWS_ACCESS_KEY_ID', value: '***' },
+					{ name: 'AWS_SECRET_ACCESS_KEY', value: '***' }
+				]
+			}
+		];
+		const retention = request.retention;
+		if (retention) {
+			const keep = [
+				retention.keep_last ? `--keep-last=${retention.keep_last}` : '',
+				retention.keep_daily ? `--keep-daily=${retention.keep_daily}` : '',
+				retention.keep_weekly ? `--keep-weekly=${retention.keep_weekly}` : ''
+			].filter(Boolean);
+			if (keep.length > 0 || retention.keep_within) {
+				steps.push({
+					kind: 'forget',
+					maintenance: true,
 					command: [
 						'restic',
 						...prefix,
-						'backup',
-						'--one-file-system',
-						'--tag=daily',
-						'--',
-						...paths
+						'forget',
+						...keep,
+						...(retention.keep_within ? [`--keep-within=${retention.keep_within}`] : [])
 					].join(' '),
-					environment: [
-						...repositoryEnv,
-						{ name: 'RESTIC_PASSWORD', value: '***' },
-						{ name: 'AWS_ACCESS_KEY_ID', value: '***' },
-						{ name: 'AWS_SECRET_ACCESS_KEY', value: '***' }
-					]
-				},
-				{
-					kind: 'forget',
-					maintenance: true,
-					command: ['restic', ...prefix, 'forget', '--keep-daily=7', '--retry-lock'].join(' '),
 					environment: [...repositoryEnv, { name: 'RESTIC_PASSWORD', value: '***' }]
-				}
-			]
-		};
+				});
+			}
+		}
+		if (request.check) {
+			steps.push({
+				kind: 'check',
+				maintenance: true,
+				command: ['restic', ...prefix, 'check'].join(' '),
+				environment: [...repositoryEnv, { name: 'RESTIC_PASSWORD', value: '***' }]
+			});
+		}
+		return { repository_id: found, steps };
 	}
 
 	async listTenants(): Promise<Tenant[]> {
