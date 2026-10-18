@@ -10,7 +10,7 @@ use restichub_db::test_util::test_database;
 use tower::ServiceExt;
 
 #[tokio::test]
-async fn readyz_is_ready_with_a_database() -> Result<(), Box<dyn std::error::Error>> {
+async fn ac_nfr_11_readyz_is_ready_with_a_database() -> Result<(), Box<dyn std::error::Error>> {
     let Some(database) = test_database().await else {
         return Ok(());
     };

@@ -204,7 +204,8 @@ A user can be a member of more than one tenant. In the MVP a role applies to the
 | ID | Requirement | Priority |
 |---|---|---|
 | FR-LG-01 | Log storage is a separate component with backends `database` (default) and `s3`. The design is similar to remote logging in Apache Airflow. | M (database), 1.0 (s3) |
-| FR-LG-02 | The connection to the log storage and the retention rules are separate settings. Retention is by age, by size or both, and can be different for each tenant. Retention works the same way for all backends. | M |
+| FR-LG-02 | The connection to the log storage and the retention rules are separate settings. Retention is by age. One global period applies to all tenants. Retention works the same way for all backends. | M |
+| FR-LG-08 | Log retention can also be by size, and it can be different for each tenant. | 1.0 |
 | FR-LG-03 | Job metadata (status, summary, duration) is always in the database. Only log text goes to the external storage. | M |
 | FR-LG-04 | If S3 is not available, the CP writes logs to the database, sends an alert and does not fail the job. After a backend change, the CP can still read the old logs. | 1.0 |
 | FR-LG-07 | The agent keeps each log chunk of a job on disk until the CP acknowledges it. After a reconnect or a restart, the agent sends every chunk that is not acknowledged, in order. The CP stores each chunk once. If the spool is full, the agent sends one marker line with the number of lost lines. | M |
@@ -262,7 +263,8 @@ FR-IN-03, FR-IN-04 and FR-IN-05 are out of the MVP. The MVP installs an agent by
 | NFR-SEC-03 | On a host without the local trust mode, a compromised CP cannot execute an arbitrary command. It can send only typed steps. A restore below a root that covers system or user files, for example `/` or `/home`, can still lead to code execution (T2, ADR-0035). On a host with the trust mode on, the CP can run any command with the rights of the agent service (ADR-0037, ADR-0040). A pinned-hash mode for scripts is planned after the MVP (issue #136). |
 | NFR-SEC-04 | A compromised CP database without the KEK does not disclose secrets. Job signing protects against a network attacker, a replayed or altered job, and a CP without the key. It does not protect against an attacker who can write to the database or who holds the KEK (T3). |
 | NFR-SEC-05 | The agent does not write secrets to logs, files or process arguments. The agent masks secrets in restic and script logs. |
-| NFR-SEC-06 | Releases are signed (cosign or minisign, Authenticode for Windows, notarization for macOS). Builds are reproducible. Each release has an SBOM. |
+| NFR-SEC-06 | MVP: releases are signed with cosign. Each release has an SBOM. The Linux agent package is reproducible. |
+| NFR-SEC-10 | 1.0: the Windows agent has an Authenticode signature (issue #126). The Windows package and the images are reproducible. Notarization for macOS comes with the macOS agent. |
 | NFR-SEC-07 | CI checks dependencies with `cargo deny` and `npm audit`. |
 | NFR-SEC-08 | The documentation describes the residual risk of D2 and the controls. The controls are bucket versioning, lifecycle rules, separate backend credentials for each host group and a dedicated maintenance agent. Another control is a secondary copy (`copy`) to a repository that agents cannot access. |
 | NFR-SEC-09 | Responsible disclosure policy in `SECURITY.md`. |
@@ -284,16 +286,17 @@ FR-IN-03, FR-IN-04 and FR-IN-05 are out of the MVP. The MVP installs an agent by
 | NFR-PERF-01 | One CP instance (2 vCPU, 4 GB RAM) serves 500 connected agents. Target for 1.0: 2000. |
 | NFR-PERF-02 | From "Run" in the UI to the restic start on an online agent: 3 s or less. |
 | NFR-PERF-03 | Progress shows in the UI 2 s or less after the agent sends it. |
-| NFR-PERF-04 | A load test with emulated agents runs before each release. |
+| NFR-PERF-04 | A load test with emulated agents runs before each release. The release procedure in [CONTRIBUTING.md](../CONTRIBUTING.md) runs bench S2 on the release candidate and attaches the report to the draft release. |
 
 ### 4.4. Compatibility
 
 | ID | Requirement |
 |---|---|
 | NFR-CMP-01 | CP: Linux x86_64 and arm64. Container image and Docker Compose file. |
-| NFR-CMP-02 | Agent in the MVP: Windows 10, 11 and Server 2016 or later (x86_64, arm64); Linux x86_64 and arm64 (static musl build, with or without systemd). Agent in 1.0: macOS 12 or later. |
+| NFR-CMP-02 | Agent in the MVP: Windows 10, 11 and Server 2016 or later (x86_64 only); Linux x86_64 and arm64 (static musl build, with or without systemd). Agent in 1.0: macOS 12 or later. |
 | NFR-CMP-03 | restic 0.18.1 or later. Target version 0.19.x. A compatibility test suite checks each supported version. |
 | NFR-CMP-04 | PostgreSQL 16 or later. |
+| NFR-CMP-05 | Agent in 1.0: Windows arm64. |
 
 ### 4.5. Operations and open source
 

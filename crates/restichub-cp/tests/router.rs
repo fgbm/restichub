@@ -32,7 +32,7 @@ async fn body_json(
 }
 
 #[tokio::test]
-async fn healthz_is_alive() -> Result<(), Box<dyn std::error::Error>> {
+async fn ac_nfr_11_healthz_is_alive() -> Result<(), Box<dyn std::error::Error>> {
     let response = app()?
         .oneshot(Request::builder().uri("/healthz").body(Body::empty())?)
         .await?;

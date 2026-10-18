@@ -24,6 +24,7 @@ Each automated test refers to its criterion ID in its name or in a comment.
 | A | Automated test |
 | L | Load test |
 | M | Manual check with a checklist |
+| R | Release check: the release workflow or the release procedure runs it, and the report is part of the release |
 | S | Security test |
 
 ### 1.3. Test benches
@@ -61,6 +62,7 @@ Each automated test refers to its criterion ID in its name or in a comment.
 | AC-AG-11 | FR-AG-11 | Replace the installed restic binary with a different binary. **Expected:** the agent refuses to run restic and reports the mismatch. The control plane has no setting for the restic path. | S |
 | AC-AG-12 | FR-AG-05 | A backup step reports progress for longer than the stall timeout and for longer than 12 hours. **Expected:** the agent does not stop the step. A step whose status does not change for the stall timeout is stopped in two stages, and the job result has the code `stalled`. | A |
 | AC-AG-13 | FR-AG-05 | A profile sets a maximum duration and the backup is still in progress after that time. **Expected:** the agent stops the step, and the job result has the code `max_duration_exceeded`. A profile without a maximum duration has no wall-clock limit. | A |
+| AC-AG-14 | FR-AG-15 | A step asks for the low priority. **Expected:** on Linux restic starts with a nice value 10 above the agent (19 at most) and the lowest best-effort I/O class. On Windows restic starts in the below-normal priority class. A step without the low priority changes nothing. | A (Linux), M (Windows) |
 
 ## 3. Enrollment, identity, connection
 
@@ -144,6 +146,7 @@ Each automated test refers to its criterion ID in its name or in a comment.
 | AC-SC-08 | FR-SC-08 | Limit 1 job for each agent and 2 jobs for each repository. Start 10 jobs at the same time. **Expected:** the start log shows that no limit was exceeded. | A |
 | AC-SC-09 | FR-SC-09, NFR-PERF-02 | Manual run for an online agent. **Expected:** from the click to the restic start, 3 s or less (95th percentile of 100 runs). | L |
 | AC-SC-10 | FR-SC-06 | A job runs on an online agent for longer than 12 hours. **Expected:** the CP keeps the job in the status `running`. When the agent stays away for 30 minutes, or connects and does not list the job, the CP fails the job with the reason `agent_lost`. A running job past the hard ceiling fails with the reason `timed_out`. | A |
+| AC-SC-11 | FR-SC-11 | Create a plan for agent A, and change it to agent B. **Expected:** the plan stores the agent. The audit log records each change. The plan creates its jobs only for that agent. A plan for an unknown agent is refused. | A |
 
 ## 9. Restore
 
@@ -168,11 +171,12 @@ Each automated test refers to its criterion ID in its name or in a comment.
 | AC-MN-07 | FR-MN-03, FR-MN-04 | A condition stays open, and two control plane instances run. **Expected:** each message is sent once, with no repeat while the alert is open. A failed send retries with a backoff and stops after five attempts. | A |
 | AC-MN-08 | FR-MN-04, NFR-SEC-04 | A webhook channel is created, rotated and listed. **Expected:** the secret appears in the create response and in the rotation response only. No read, audit record or database row holds it in clear text. | A |
 | AC-MN-09 | FR-MN-01 | A tenant holds hosts, plans, repositories, jobs and alerts. **Expected:** the dashboard shows the hosts online and offline. It shows each plan with its last success and RPO state. It shows the repository lock state, the recent failed jobs and the open alerts. It shows rows of that tenant only. | A |
-| AC-LG-01 | FR-LG-01, FR-LG-02 | Backend `database`, retention 7 days, simulated clock. **Expected:** logs older than 7 days are deleted. Job metadata stays. | A |
+| AC-LG-01 | FR-LG-01, FR-LG-02 | Backend `database`, global retention of 7 days, simulated clock. **Expected:** logs older than 7 days are deleted. Job metadata stays. The setting is one value for all tenants and counts only the age. | A |
 | AC-LG-02 | FR-LG-01, FR-LG-02 (1.0) | Change the backend to `s3`. **Expected:** new logs go to S3 with the keys `<tenant>/<job>/<step>`. The UI shows old logs from the database and new logs from S3. Retention in S3 works independently. | A |
 | AC-LG-03 | FR-LG-04 (1.0) | MinIO is not available for 30 minutes. **Expected:** jobs do not fail. The logs go to the database. An alert occurs. | A |
 | AC-LG-04 | NFR-SEC-05 | After the full end-to-end suite, search for the canary in all logs of all backends. **Expected:** 0 matches. | S |
 | AC-LG-05 | FR-LG-07, FR-PR-07 | The stream drops in the middle of a backup that writes a long log. The agent restarts once, and the control plane acknowledges only a part of the log. The spool of the agent is full for a short time. **Expected:** after the reconnect, the CP has every line once and in order. The acknowledged data leaves the disk of the agent. A full spool leaves one marker line with the number of lost lines. A stalled CP does not delay a cancel. | A |
+| AC-LG-06 | FR-LG-08 (1.0) | Set a retention size, and a different retention for two tenants. **Expected:** the control plane deletes the oldest log text when a tenant exceeds its size. Each tenant keeps its logs for its own period. | A |
 
 ## 11. Tenants
 
@@ -228,12 +232,25 @@ Each automated test refers to its criterion ID in its name or in a comment.
 
 | ID | Requirement | Criterion | Method |
 |---|---|---|---|
-| AC-NFR-01 | NFR-PERF-01 | Bench S2: 500 agents, each gets a job every 15 minutes, for 4 hours. **Expected:** CP CPU below 70 % (95th percentile), RAM below 3 GB, dispatch delay below 3 s (95th percentile). | L |
+| AC-NFR-01 | NFR-PERF-01, NFR-PERF-04 | Bench S2: 500 agents, each gets a job every 15 minutes, for 4 hours. **Expected:** CP CPU below 70 % (95th percentile), RAM below 3 GB, dispatch delay below 3 s (95th percentile). | L, R |
 | AC-NFR-02 | NFR-REL-01 | Kill the CP with SIGKILL while 50 jobs run. **Expected:** after the restart all jobs get a final status. No job is lost or runs two times. | A |
-| AC-NFR-03 | NFR-SEC-06, NFR-SEC-07 | Make a release. **Expected:** all artifacts are signed. The command in the documentation verifies the signature. The release has an SBOM. `cargo deny` and `npm audit` show no high or critical findings. | A |
+| AC-NFR-03 | NFR-SEC-06, NFR-SEC-07 | Make a release. **Expected:** all artifacts are signed with cosign. Two builds of the Linux agent package from one commit give the same archive bytes. The command in the documentation verifies the signature. The release has an SBOM. `cargo deny` and `npm audit` show no high or critical findings. | A |
 | AC-NFR-04 | NFR-SEC-02, NFR-SEC-08 | Read the threat model. **Expected:** it is in the repository. It describes the residual risk of direct repository access and the controls from NFR-SEC-08. | M |
 | AC-NFR-05 | NFR-OPS-01 | A person who did not write the documentation installs the product with it. **Expected:** from an empty virtual machine to the first successful backup in 30 minutes or less. | M |
 | AC-NFR-06 | NFR-OPS-03 | Capture the network traffic of the CP and an agent for 24 h. **Expected:** no connections other than the configured ones. | S |
+| AC-NFR-07 | NFR-CMP-01 | Make a release. **Expected:** the control plane image has the platforms `linux/amd64` and `linux/arm64`. The image starts with `compose.yaml`. | R |
+| AC-NFR-08 | NFR-CMP-02 | Make a release. **Expected:** the agent packages exist for Linux (x86_64, arm64; static musl build) and for Windows (x86_64 only). The install smoke workflow registers the agent as a service on Linux with systemd and on Windows. Windows 10, Windows Server 2016 and Linux without systemd stay manual checks. | A, M |
+| AC-NFR-09 | NFR-CMP-03 | Run the agent with restic 0.18.1 and with 0.19.1 on bench S1. **Expected:** backup, restore and the output parser work with both versions. An agent with an older restic gets no job (AC-AG-09). | R |
+| AC-NFR-10 | NFR-CMP-04 | Run the database tests of CI. **Expected:** they use PostgreSQL 16 and pass. | A |
+| AC-NFR-11 | NFR-OPS-02 | Start the control plane with `RESTICHUB_LOG_FORMAT=json`. **Expected:** each log line is a JSON object. `/healthz` answers `200` and `/readyz` answers `200` with a database. The agent writes its log as text lines, so the JSON format of the agent is not met yet. | A (control plane), M (agent) |
+| AC-NFR-12 | NFR-OSS-01 | List the root of the repository. **Expected:** it holds LICENSE, CONTRIBUTING.md, CODE_OF_CONDUCT.md, SECURITY.md and `design/adr/`. A public roadmap exists. | R |
+| AC-NFR-13 | NFR-OSS-02 | Open the published documentation. **Expected:** it holds the installation guide, the threat model, the resticprofile migration guide and the API reference. | M |
+| AC-NFR-14 | NFR-OSS-03 | Connect an agent of version N, one of version N-1 and one of the next major version. **Expected:** the control plane accepts the first two and refuses the last one with a typed reason (AC-PR-06). The release tag is a strict semantic version, and the release workflow refuses any other tag. | A, R |
+| AC-NFR-15 | NFR-REL-03 | Upgrade the control plane image of a Compose installation and run `docker compose up`. **Expected:** the `migrate` service applies the migrations before `cp` starts, with no other step. The control plane refuses to start on a database with a newer schema and shows the cause. | A, R |
+| AC-NFR-16 | NFR-REL-04 | Follow the backup guide on a running control plane. Restore it on a new host from the database dump, the KEK, the job signing key and the CA. **Expected:** the new control plane starts. The agents connect and a backup job runs. | M |
+| AC-NFR-17 | NFR-REL-05 | Review the control plane code and run two instances on one database (AC-SC-02). **Expected:** the control plane keeps no state outside the database. A restart of an instance loses nothing (AC-NFR-02). | M |
+| AC-NFR-18 | NFR-SEC-10 (1.0) | Make a release. **Expected:** `restichub-agent.exe` has a valid Authenticode signature. Two builds of the Windows package and of the images from one commit give the same bytes. | A |
+| AC-NFR-19 | NFR-CMP-05 (1.0) | Install the Windows arm64 agent on a Windows 11 arm64 host. **Expected:** it registers, runs as a service and completes a backup. | A, M |
 | AC-DOC-01 | NFR-DOC-01, NFR-DOC-03 | Build the documentation in CI. **Expected:** Vale finds no errors. Procedural sentences have 20 words or fewer. Descriptive sentences have 25 words or fewer. | A |
 | AC-DOC-02 | NFR-DOC-01, NFR-DOC-02 | Review each new section with the style checklist. **Expected:** one instruction in each step, imperative mood, one term for one concept, terms from the glossary. | M |
 | AC-DOC-03 | NFR-DOC-04 | Take 50 error messages from the UI and the agent. **Expected:** each message tells what occurred and what to do. Each message passes Vale. | M |
@@ -258,3 +275,4 @@ The MVP is accepted when all these conditions are true:
 | AC-IN-01 | FR-AG-11, FR-IN-07 | Open the agent package. **Expected:** it contains `restichub-agent`, the license text, a third-party notice and the package hashes. It does not contain `restic`. After `register`, the installed `restic` has the SHA-256 from the signed restic `SHA256SUMS`. | A |
 | AC-IN-02 | FR-ID-01, FR-IN-07 | Register a host with `restichub-agent register --url <url> --token <token>`. **Expected:** the host appears active with the certificate of ADR-0026. The control plane consumes the token. A second registration with the same token, an expired token and a token that an Admin revoked are each refused with a clear error. | A |
 | AC-IN-03 | FR-IN-08 | Run `restichub-agent install-service` on Windows and on Linux. **Expected:** the operating system registers the service and it starts after a reboot. The workflow `Install smoke (AC-IN-03)` covers the registration, the start and the connection to a control plane on Linux and on Windows. The reboot stays a manual check. | A |
+| AC-IN-04 | FR-IN-01 | In the Web UI, add a host with labels. **Expected:** the screen shows the enrollment token and the command `restichub-agent register --url <url> --token <token>` one time. The URL is the address of the control plane. The same command works for Windows and Linux (AC-IN-02). | A |

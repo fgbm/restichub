@@ -9,7 +9,7 @@ use crate::MIGRATOR;
 use crate::test_util::test_database;
 
 #[tokio::test]
-async fn db_verify_migrations_detects_a_newer_schema() -> TestResult {
+async fn ac_nfr_15_verify_migrations_detects_a_newer_schema() -> TestResult {
     let Some(db) = test_database().await else {
         return Ok(());
     };

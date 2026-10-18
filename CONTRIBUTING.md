@@ -44,3 +44,12 @@ docs(design): add ADR for log storage
 2. Fill in the pull request template.
 3. Make sure that CI passes.
 4. A maintainer must approve the pull request before the merge.
+
+## Releases
+
+A maintainer makes a release with these steps:
+
+1. Push a `v*` tag on a commit of `main` whose CI run succeeded. The release workflow builds, signs and drafts the release.
+2. Run the load test of NFR-PERF-04 on the release candidate. Check out the tagged commit and run bench S2 as [`bench/s2/README.md`](bench/s2/README.md) tells (AC-NFR-01 targets: 500 agents, 4 hours). The command exits with status 1 when a target fails.
+3. Attach `out/report.md` to the draft release as a file. The file is not in `SHA256SUMS`. Do not publish a release whose bench S2 report shows a failed target.
+4. Replace the `TODO` in the release notes with the real changes, and then publish the draft.

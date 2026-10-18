@@ -14,7 +14,7 @@ Each package holds these files:
 - `THIRD_PARTY_NOTICES`: a note that the agent downloads restic, and the fingerprint of the restic release signing key inside the agent.
 - `SHA256SUMS`: the SHA-256 of each file above.
 
-The package format is `tar.gz` on Linux and `zip` on Windows. The package name is `restichub-agent-<version>-<os>-<arch>`. The workflow publishes only these packages as artifacts. A build step passes its output to the package step as an intermediate artifact that expires after one day.
+The package format is `tar.gz` on Linux and `zip` on Windows. The package name is `restichub-agent-<version>-<os>-<arch>`. The agent for Windows exists for `x86_64` only. An `arm64` agent for Windows is planned for the 1.0 release. The workflow publishes only these packages as artifacts. A build step passes its output to the package step as an intermediate artifact that expires after one day.
 
 ## The verification chain of the agent
 
@@ -77,7 +77,7 @@ The latest release can fail the checks. Examples are a new major version, a chan
 
 A host without access to GitHub uses files that you copied from another computer. Download these three files from the restic release page of the version that you want:
 
-- `restic_<version>_linux_amd64.bz2` (Linux) or `restic_<version>_windows_amd64.zip` (Windows). Use `arm64` for an ARM host.
+- `restic_<version>_linux_amd64.bz2` (Linux) or `restic_<version>_windows_amd64.zip` (Windows). Use `arm64` for an ARM Linux host. A Windows host needs the `amd64` file.
 - `SHA256SUMS`
 - `SHA256SUMS.asc`
 
