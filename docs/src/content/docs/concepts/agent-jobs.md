@@ -12,7 +12,7 @@ The agent runs the steps of a signed job with the restic binary that it download
 | `backup` | `restic backup` | Files new, changed and unmodified, bytes added, snapshot ID, duration |
 | `check` | `restic check` | Number of errors, repair suggestion |
 | `snapshots` | `restic snapshots` | List of snapshots |
-| `ls` | `restic ls` | One page of the entries of one directory of a snapshot |
+| `ls` | `restic ls` | One page of the entries of one directory of a snapshot, with the target of each link |
 | `restore` | `restic restore` | Files and bytes restored and skipped, duration |
 | `forget` | `restic forget` | Snapshots that the rule kept and removed |
 | `prune` | `restic prune` | Exit code and log |
