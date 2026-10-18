@@ -144,7 +144,7 @@
 	</span>
 	<TagInput
 		id="profile-keep-tags"
-		label={t('profiles.tags')}
+		ariaLabel={t('profiles.tags')}
 		placeholder={t('pe.tags.placeholder')}
 		max={MAX_RETENTION_LIST}
 		error={fieldError(problem, 'retention.keep_tags')}

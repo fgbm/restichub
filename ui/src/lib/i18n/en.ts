@@ -1355,7 +1355,10 @@ export const en = {
 	'restore.dialog.excludes': 'Exclude paths',
 	'restore.dialog.excludesHelp':
 		'Optional. restic patterns such as *.tmp or /var/cache, one for each line. The restore skips the paths that match.',
+	'restore.dialog.rootLabel': 'Restore root',
 	'restore.dialog.rootsLabel': 'Restore roots',
+	'restore.dialog.rootRule':
+		'A host restores only inside its restore root. It does not replace the files of the agent itself.',
 	'restore.dialog.rootsRule':
 		'A host restores only inside its restore roots. It does not replace the files of the agent itself.',
 	'restore.dialog.rootUse': 'Use {root}',
@@ -1721,6 +1724,7 @@ export const en = {
 	'hp.section.danger': 'Dangerous actions',
 	'hp.summary.general': '{os} · {arch} · agent {version}',
 	'hp.summary.noRoots': 'No restore root reported',
+	'hp.summary.root': 'One restore root',
 	'hp.summary.roots': 'Restore roots: {count}',
 	'hp.summary.jobs': 'Recent jobs: {count}',
 	'hp.summary.danger': 'Re-register, replace or revoke',
@@ -1734,7 +1738,10 @@ export const en = {
 	'hp.f.rotation': 'Last renewal',
 	'hp.cert.superseded':
 		'An old certificate connected {time}. Re-register the host if you did not expect it.',
+	'hp.restore.root': 'Restore root',
 	'hp.restore.roots': 'Restore roots',
+	'hp.restore.ruleOne':
+		'The host restores files only into this directory. It denies a target outside it and never replaces the files of the agent itself.',
 	'hp.restore.rule':
 		'The host restores files only into these directories. It denies a target outside them and never replaces the files of the agent itself.',
 	'hp.restore.none':

@@ -6,6 +6,7 @@
 	let {
 		value = $bindable([]),
 		label,
+		ariaLabel,
 		help,
 		error,
 		id,
@@ -18,6 +19,8 @@
 	}: {
 		value?: string[];
 		label?: string;
+		/** The name of the input when a heading nearby already shows it. */
+		ariaLabel?: string;
 		help?: string;
 		error?: string;
 		id?: string;
@@ -129,6 +132,7 @@
 			class="tags__input"
 			class:mono
 			autocomplete="off"
+			aria-label={label ? undefined : ariaLabel}
 			placeholder={value.length === 0 ? (placeholder ?? t('tagInput.placeholder')) : undefined}
 			aria-invalid={shownError ? 'true' : undefined}
 			aria-describedby={shownError ? errorId : help ? helpId : undefined}

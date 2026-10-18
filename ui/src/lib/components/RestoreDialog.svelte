@@ -231,7 +231,11 @@
 				/>
 				{#if roots.length > 0}
 					<p class="roots">
-						<span class="roots__label">{t('restore.dialog.rootsLabel')}:</span>
+						<span class="roots__label"
+							>{t(
+								roots.length === 1 ? 'restore.dialog.rootLabel' : 'restore.dialog.rootsLabel'
+							)}:</span
+						>
 						{#each roots as root (root)}
 							{#if roots.length > 1}
 								<button
@@ -247,7 +251,9 @@
 							{/if}
 						{/each}
 					</p>
-					<p class="hint">{t('restore.dialog.rootsRule')}</p>
+					<p class="hint">
+						{t(roots.length === 1 ? 'restore.dialog.rootRule' : 'restore.dialog.rootsRule')}
+					</p>
 				{/if}
 			</div>
 			{#if agentId && roots.length === 0}

@@ -1363,7 +1363,10 @@ export const ru: Record<MessageKey, string> = {
 	'restore.dialog.excludes': 'Исключить пути',
 	'restore.dialog.excludesHelp':
 		'Необязательно. Шаблоны restic, например *.tmp или /var/cache, по одному в строке. Восстановление пропустит подходящие пути.',
+	'restore.dialog.rootLabel': 'Корень восстановления',
 	'restore.dialog.rootsLabel': 'Корни восстановления',
+	'restore.dialog.rootRule':
+		'Хост восстанавливает только внутрь этого каталога. Файлы самого агента хост не заменяет.',
 	'restore.dialog.rootsRule':
 		'Хост восстанавливает только внутрь корней. Файлы самого агента хост не заменяет.',
 	'restore.dialog.rootUse': 'Подставить {root}',
@@ -1731,6 +1734,7 @@ export const ru: Record<MessageKey, string> = {
 	'hp.section.danger': 'Опасные действия',
 	'hp.summary.general': '{os} · {arch} · агент {version}',
 	'hp.summary.noRoots': 'Корень восстановления не сообщён',
+	'hp.summary.root': 'Один корень восстановления',
 	'hp.summary.roots': 'Корней восстановления: {count}',
 	'hp.summary.jobs': 'Недавних заданий: {count}',
 	'hp.summary.danger': 'Зарегистрировать заново, заменить или отозвать',
@@ -1744,7 +1748,10 @@ export const ru: Record<MessageKey, string> = {
 	'hp.f.rotation': 'Последнее обновление',
 	'hp.cert.superseded':
 		'Старый сертификат подключался {time}. Если вы этого не ждали, зарегистрируйте хост заново.',
+	'hp.restore.root': 'Корень восстановления',
 	'hp.restore.roots': 'Корни восстановления',
+	'hp.restore.ruleOne':
+		'Хост восстанавливает файлы только внутрь этого каталога. Цель вне корня он отклоняет и никогда не заменяет файлы самого агента.',
 	'hp.restore.rule':
 		'Хост восстанавливает файлы только внутрь этих каталогов. Цель вне корней он отклоняет и никогда не заменяет файлы самого агента.',
 	'hp.restore.none':

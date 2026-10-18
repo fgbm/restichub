@@ -116,8 +116,21 @@ describe('the host page', () => {
 		expect(screen.getByText('prod')).toBeInTheDocument();
 		expect(screen.getByDisplayValue('/var/lib/restichub-restore')).toBeInTheDocument();
 		expect(screen.getByText(/never replaces the files of the agent itself/)).toBeInTheDocument();
+		expect(screen.getByText('Restore root')).toBeInTheDocument();
+		expect(screen.getByText(/only into this directory/)).toBeInTheDocument();
+		expect(screen.getByText('Linux')).toBeInTheDocument();
+		expect(screen.queryByText('linux')).not.toBeInTheDocument();
 		expect(screen.getByRole('link', { name: 'Restore to this host' })).toBeInTheDocument();
 		expect(screen.getByDisplayValue('0f01')).toBeInTheDocument();
+	});
+
+	it('names several restore roots in the plural', async () => {
+		mocks.getAgent.mockResolvedValue(
+			agent({ restore_roots: ['/var/lib/restichub-restore', '/mnt/restore'] })
+		);
+		render(HostPage, { hostId: 'a_01' });
+		expect(await screen.findByText('Restore roots')).toBeInTheDocument();
+		expect(screen.getByText(/only into these directories/)).toBeInTheDocument();
 	});
 
 	it('ac_rs_05 explains a host without restore roots', async () => {

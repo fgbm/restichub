@@ -23,6 +23,7 @@
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
 	import type { SummaryState } from '#lib/profile-form.ts';
+	import { osFamily } from '#lib/host-picker.ts';
 	import { enableCommand } from '#lib/scripts.ts';
 	import { onEvent } from '#lib/stores/events.svelte.ts';
 	import { rememberSections } from '#lib/section-state.svelte.ts';
@@ -183,7 +184,7 @@
 		return {
 			general: {
 				text: t('hp.summary.general', {
-					os: item.os,
+					os: osFamily(item.os),
 					arch: item.arch,
 					version: item.agent_version
 				}),
@@ -196,7 +197,13 @@
 				state: certExpired || certWarn || item.superseded_certificate_used_at ? 'warn' : 'on'
 			},
 			restore: hasRoots
-				? { text: t('hp.summary.roots', { count: item.restore_roots.length }), state: 'on' }
+				? {
+						text:
+							item.restore_roots.length === 1
+								? t('hp.summary.root')
+								: t('hp.summary.roots', { count: item.restore_roots.length }),
+						state: 'on'
+					}
 				: { text: t('hp.summary.noRoots'), state: 'warn' },
 			scripts: {
 				text: scriptsLabel(item),
@@ -347,7 +354,7 @@
 		>
 			<dl class="facts">
 				<dt>{t('hosts.os')}</dt>
-				<dd>{agent.os}</dd>
+				<dd>{osFamily(agent.os)}</dd>
 				<dt>{t('hosts.arch')}</dt>
 				<dd>{agent.arch}</dd>
 				<dt>{t('hosts.version')}</dt>
@@ -433,10 +440,14 @@
 			state={summaries.restore.state}
 			bind:open={open.restore}
 		>
-			<p class="lead">{t('hp.restore.rule')}</p>
+			<p class="lead">
+				{t(agent.restore_roots.length === 1 ? 'hp.restore.ruleOne' : 'hp.restore.rule')}
+			</p>
 			{#if hasRoots}
 				<div class="roots">
-					<span class="label">{t('hp.restore.roots')}</span>
+					<span class="label"
+						>{t(agent.restore_roots.length === 1 ? 'hp.restore.root' : 'hp.restore.roots')}</span
+					>
 					{#each agent.restore_roots as root (root)}
 						<CopyField value={root} />
 					{/each}
