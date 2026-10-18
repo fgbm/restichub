@@ -6,7 +6,12 @@
  * The server resolves a value for the job. The screens resolve it only to show the source and the
  * value that the server would use: the plan, then the host, then the default.
  */
-import type { ApiProblem, ParameterKind, PlanParameterValue, ProfileParameter } from '#lib/api/index.ts';
+import type {
+	ApiProblem,
+	ParameterKind,
+	PlanParameterValue,
+	ProfileParameter
+} from '#lib/api/index.ts';
 import { blockedView } from '#lib/delete-check.ts';
 import type { BlockedView } from '#lib/delete-check.ts';
 import type { HostParameterRow } from '#lib/api/index.ts';
@@ -67,9 +72,8 @@ export function usageOf(name: string, source: UsageSource): ParameterUsage {
 		excludes: held(source.excludes, token),
 		excludeFiles: held(source.excludeFiles, token),
 		tags: held(source.tags, token),
-		scripts: source.scripts.filter(
-			(script) =>
-				script.env.some((variable) => variable.kind === 'parameter' && variable.value === name)
+		scripts: source.scripts.filter((script) =>
+			script.env.some((variable) => variable.kind === 'parameter' && variable.value === name)
 		).length
 	};
 }

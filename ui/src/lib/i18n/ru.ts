@@ -1127,8 +1127,7 @@ export const ru: Record<MessageKey, string> = {
 	'pl.param.removePlan': 'Убрать значение плана',
 	'pl.param.removePlanOf': 'Убрать значение {name} у плана',
 	'pl.param.dialogTitle': 'Параметр {name}',
-	'pl.param.dialogDescription':
-		'Значение плана заменяет значение хоста и значение по умолчанию.',
+	'pl.param.dialogDescription': 'Значение плана заменяет значение хоста и значение по умолчанию.',
 	'pl.param.dialogSecret': 'Секрет',
 	'pl.param.dialogSet': 'Задать',
 	'pl.param.secretLocked': 'Секретное значение задаёт только администратор.',

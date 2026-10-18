@@ -1385,7 +1385,9 @@ export class MockApiService {
 		const declared = this.declaredOfHost(id);
 		const names = [
 			...declared.map((item) => item.definition.name),
-			...stored.map((value) => value.name).filter((name) => !declared.some((d) => d.definition.name === name))
+			...stored
+				.map((value) => value.name)
+				.filter((name) => !declared.some((d) => d.definition.name === name))
 		];
 		return names.map((name) => {
 			const found = declared.find((item) => item.definition.name === name);

@@ -6,6 +6,7 @@
 import { render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApiError } from '#lib/api/index.ts';
 import HostPage from './HostPage.svelte';
 
 const mocks = vi.hoisted(() => ({
@@ -15,6 +16,9 @@ const mocks = vi.hoisted(() => ({
 	listPlans: vi.fn(),
 	listAlerts: vi.fn(),
 	renameAgent: vi.fn(),
+	getAgentParameters: vi.fn(),
+	replaceAgentParameters: vi.fn(),
+	listSecrets: vi.fn(),
 	pushToast: vi.fn()
 }));
 
@@ -58,7 +62,10 @@ vi.mock('#lib/api/index.ts', async (importOriginal) => {
 			listJobs: mocks.listJobs,
 			listPlans: mocks.listPlans,
 			listAlerts: mocks.listAlerts,
-			renameAgent: mocks.renameAgent
+			renameAgent: mocks.renameAgent,
+			getAgentParameters: mocks.getAgentParameters,
+			replaceAgentParameters: mocks.replaceAgentParameters,
+			listSecrets: mocks.listSecrets
 		}
 	};
 });
@@ -104,6 +111,9 @@ describe('the host page', () => {
 		mocks.listJobs.mockResolvedValue({ items: [], next_cursor: null });
 		mocks.listPlans.mockResolvedValue([]);
 		mocks.listAlerts.mockResolvedValue({ items: [], next_cursor: null });
+		mocks.getAgentParameters.mockResolvedValue({ agent_id: 'a_01', parameters: [] });
+		mocks.replaceAgentParameters.mockResolvedValue({ agent_id: 'a_01', parameters: [] });
+		mocks.listSecrets.mockResolvedValue([]);
 	});
 
 	it('shows the properties, the restore directories and the rule for the targets', async () => {
@@ -336,5 +346,182 @@ describe('the host page', () => {
 		render(HostPage, { hostId: 'missing' });
 
 		expect(await screen.findByRole('alert')).toBeInTheDocument();
+	});
+});
+
+describe('the parameter values of a host (FR-PF-10 to FR-PF-12, ADR-0047)', () => {
+	function row(overrides: Record<string, unknown> = {}) {
+		return {
+			name: 'pg_dir',
+			kind: 'text',
+			required: true,
+			default_value: null,
+			description: 'Directory of the dumps',
+			needed_by: ['pg-dump'],
+			value: null,
+			unused: false,
+			hidden: false,
+			...overrides
+		};
+	}
+
+	const SECRET_ROW = row({
+		name: 'pg_password',
+		kind: 'secret',
+		value: { kind: 'secret', value: null, secret_id: 's_1', secret_name: 'db.password' }
+	});
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		session.role = 'admin';
+		mocks.getAgent.mockResolvedValue(agent());
+		mocks.listUsers.mockResolvedValue([]);
+		mocks.listJobs.mockResolvedValue({ items: [], next_cursor: null });
+		mocks.listPlans.mockResolvedValue([]);
+		mocks.listAlerts.mockResolvedValue({ items: [], next_cursor: null });
+		mocks.getAgentParameters.mockResolvedValue({ agent_id: 'a_01', parameters: [] });
+		mocks.replaceAgentParameters.mockResolvedValue({ agent_id: 'a_01', parameters: [] });
+		mocks.listSecrets.mockResolvedValue([]);
+	});
+
+	// The section is open by default; a remembered state can fold it.
+	async function openSection(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+		const button = screen.getByRole('button', { name: /^Parameter values/ });
+		if (button.getAttribute('aria-expanded') !== 'true') await user.click(button);
+	}
+
+	it('ac_pf_06_gives_a_value_and_sends_the_whole_set', async () => {
+		const user = userEvent.setup();
+		mocks.getAgentParameters.mockResolvedValue({
+			agent_id: 'a_01',
+			parameters: [row(), SECRET_ROW]
+		});
+		const saved = {
+			agent_id: 'a_01',
+			parameters: [
+				row({ value: { kind: 'text', value: '/srv/db', secret_id: null, secret_name: null } }),
+				SECRET_ROW
+			]
+		};
+		mocks.replaceAgentParameters.mockResolvedValue(saved);
+		render(HostPage, { hostId: 'a_01' });
+		await screen.findByRole('heading', { level: 1, name: 'srv-db-01' });
+
+		await openSection(user);
+		await user.type(screen.getAllByLabelText('Value')[0], '/srv/db');
+		await user.click(screen.getByRole('button', { name: 'Save the values' }));
+
+		await waitFor(() =>
+			expect(mocks.replaceAgentParameters).toHaveBeenCalledWith('a_01', [
+				{ name: 'pg_dir', kind: 'text', value: '/srv/db' },
+				{ name: 'pg_password', kind: 'secret', secret_id: 's_1' }
+			])
+		);
+		expect(mocks.pushToast).toHaveBeenCalledWith('success', 'The values are saved.');
+	});
+
+	it('ac_pf_10_hides_the_text_values_from_a_viewer', async () => {
+		session.role = 'viewer';
+		mocks.getAgentParameters.mockResolvedValue({
+			agent_id: 'a_01',
+			parameters: [
+				row({
+					value: { kind: 'text', value: null, secret_id: null, secret_name: null },
+					hidden: true
+				}),
+				SECRET_ROW
+			]
+		});
+		render(HostPage, { hostId: 'a_01' });
+		await screen.findByRole('heading', { level: 1, name: 'srv-db-01' });
+
+		await openSection(userEvent.setup());
+		expect(
+			screen.getByText('Your role does not show the values of text parameters.')
+		).toBeInTheDocument();
+		expect(screen.getByDisplayValue('••••••')).toBeDisabled();
+		expect(screen.getByDisplayValue('db.password')).toBeDisabled();
+		expect(screen.queryByRole('button', { name: 'Save the values' })).not.toBeInTheDocument();
+	});
+
+	it('ac_pf_07_shows_the_plans_of_a_refused_change', async () => {
+		const user = userEvent.setup();
+		mocks.getAgentParameters.mockResolvedValue({ agent_id: 'a_01', parameters: [row()] });
+		mocks.replaceAgentParameters.mockRejectedValue(
+			new ApiError({
+				status: 400,
+				code: 'parameter_missing_in_plans',
+				title: 'Bad Request',
+				field: 'parameters',
+				parameters: ['pg_dir'],
+				blockers: { items: [{ kind: 'plan', id: 'pl_1', name: 'pg-dump-daily' }], total: 1 }
+			})
+		);
+		render(HostPage, { hostId: 'a_01' });
+		await screen.findByRole('heading', { level: 1, name: 'srv-db-01' });
+
+		await openSection(user);
+		await user.type(screen.getAllByLabelText('Value')[0], '/srv/db');
+		await user.click(screen.getByRole('button', { name: 'Save the values' }));
+
+		expect(
+			await screen.findByText(
+				'The values are not saved: plans would stay without the required parameter pg_dir.'
+			)
+		).toBeInTheDocument();
+		expect(screen.getByRole('link', { name: 'pg-dump-daily' })).toHaveAttribute(
+			'href',
+			'/(app)/plans/pl_1'
+		);
+	});
+
+	it('fr_pf_10_removes_a_value_that_no_profile_needs', async () => {
+		const user = userEvent.setup();
+		const unused = row({
+			name: 'old_dir',
+			required: false,
+			needed_by: [],
+			unused: true,
+			value: { kind: 'text', value: '/var/backups/old', secret_id: null, secret_name: null }
+		});
+		mocks.getAgentParameters.mockResolvedValue({
+			agent_id: 'a_01',
+			parameters: [row(), unused]
+		});
+		mocks.replaceAgentParameters.mockResolvedValue({ agent_id: 'a_01', parameters: [row()] });
+		render(HostPage, { hostId: 'a_01' });
+		await screen.findByRole('heading', { level: 1, name: 'srv-db-01' });
+
+		await openSection(user);
+		expect(screen.getByText('No profile needs it')).toBeInTheDocument();
+		await user.click(screen.getByRole('button', { name: 'Delete the value of old_dir' }));
+		expect(screen.queryByDisplayValue('/var/backups/old')).not.toBeInTheDocument();
+		await user.click(screen.getByRole('button', { name: 'Save the values' }));
+		await waitFor(() => expect(mocks.replaceAgentParameters).toHaveBeenCalledWith('a_01', []));
+	});
+
+	it('adr_0047_locks_a_secret_value_for_an_operator', async () => {
+		const user = userEvent.setup();
+		session.role = 'operator';
+		mocks.getAgentParameters.mockResolvedValue({
+			agent_id: 'a_01',
+			parameters: [row(), SECRET_ROW]
+		});
+		mocks.listSecrets.mockResolvedValue([
+			{
+				id: 's_1',
+				name: 'db.password',
+				purpose: 'hook_secret',
+				created_at: '2026-01-01T00:00:00Z',
+				updated_at: '2026-01-01T00:00:00Z',
+				used_by: []
+			}
+		]);
+		render(HostPage, { hostId: 'a_01' });
+		await screen.findByRole('heading', { level: 1, name: 'srv-db-01' });
+
+		await openSection(user);
+		expect(screen.getByText('Only an Admin changes a secret value.')).toBeInTheDocument();
+		expect(screen.getByDisplayValue('db.password')).toBeDisabled();
 	});
 });

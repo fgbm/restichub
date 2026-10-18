@@ -211,3 +211,66 @@ describe('ScriptsEditor', () => {
 		expect(screen.queryByRole('button', { name: 'Remove the script' })).not.toBeInTheDocument();
 	});
 });
+
+describe('a script variable of the kind "profile parameter" (FR-PF-10, ADR-0047)', () => {
+	const DECLARED = [
+		{
+			name: 'pg_dir',
+			kind: 'text' as const,
+			required: false,
+			default_value: '/var/backups/pg',
+			description: 'Directory of the dumps',
+			hidden: false
+		},
+		{
+			name: 'pg_password',
+			kind: 'secret' as const,
+			required: true,
+			default_value: null,
+			description: 'Backup password',
+			hidden: false
+		}
+	];
+
+	function withVariable(value: string, kind: 'parameter' | 'string' = 'parameter'): ScriptDraft {
+		const draft = script('dump', 'before');
+		draft.open = true;
+		draft.env = [{ name: 'PGPASSWORD', kind, value }];
+		return draft;
+	}
+
+	it('ac_pf_09_offers_the_declared_parameters_and_names_a_lost_one', async () => {
+		const user = userEvent.setup();
+		render(ScriptsEditor, {
+			props: { scripts: [withVariable('pg_old')], parameters: DECLARED }
+		});
+
+		expect(
+			await screen.findByText('The parameter pg_old is not declared in the profile.')
+		).toBeInTheDocument();
+
+		await user.click(document.querySelector<HTMLElement>('[role="combobox"]')!);
+		const option = await screen.findByText('pg_password', {
+			selector: '.rh-record__option-label'
+		});
+		expect(option.closest('[role="option"]')).toHaveTextContent('Secret');
+		expect(option.closest('[role="option"]')).toHaveTextContent('Backup password');
+		await user.keyboard('{Escape}');
+	});
+
+	it('shows the kind of the chosen parameter in the closed field', async () => {
+		render(ScriptsEditor, {
+			props: { scripts: [withVariable('pg_dir')], parameters: DECLARED }
+		});
+		expect(await screen.findByRole('combobox', { name: /Parameter/ })).toHaveTextContent('pg_dir');
+		expect(screen.queryByText(/is not declared in the profile/)).not.toBeInTheDocument();
+	});
+
+	it('shows two kinds of a variable without a profile', async () => {
+		render(ScriptsEditor, { props: { scripts: [withVariable('', 'string')] } });
+
+		const kind = (await screen.findByLabelText('Type')) as HTMLSelectElement;
+		const values = [...kind.options].map((option) => option.textContent);
+		expect(values).toEqual(['Text', 'Secret']);
+	});
+});

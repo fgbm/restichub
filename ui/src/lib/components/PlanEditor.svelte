@@ -8,10 +8,15 @@
 		Agent,
 		ApiProblem,
 		CreatePlanRequest,
+		HostParameterRow,
 		MissedRunPolicy,
+		ParameterKind,
+		ParameterValueDef,
 		Plan,
+		PlanParameterValue,
 		Profile,
 		Repository,
+		Secret,
 		UpdatePlanRequest
 	} from '#lib/api/index.ts';
 	import HostPicker from './HostPicker.svelte';
@@ -21,14 +26,18 @@
 	import { RecordPage, SummaryPanel } from './layout/index.ts';
 	import {
 		Alert,
+		Badge,
 		Button,
 		ConfirmDialog,
 		DangerZone,
+		DataTable,
+		Dialog,
+		Icon,
 		Select,
 		StatusPill,
 		TextField
 	} from './ui/index.ts';
-	import type { DangerAction, KeyValueItem, SelectOption } from './ui/index.ts';
+	import type { DangerAction, KeyValueItem, SelectOption, TableColumn } from './ui/index.ts';
 	import { formatHours, formatLocalTime, formatTimeInZone } from '#lib/format.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
@@ -43,11 +52,21 @@
 	import { rememberSections } from '#lib/section-state.svelte.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
+	import { kindLabel, missingValue, parameterCount, resolveValue } from '#lib/parameters.ts';
+	import type { ResolvedValue, ValueSource } from '#lib/parameters.ts';
+	import { plural } from '#lib/list-format.ts';
 
 	let { planId = null }: { planId?: string | null } = $props();
 
-	type SectionKey = 'basics' | 'source' | 'schedule' | 'objective' | 'danger';
-	const SECTIONS: SectionKey[] = ['source', 'basics', 'schedule', 'objective', 'danger'];
+	type SectionKey = 'basics' | 'source' | 'parameters' | 'schedule' | 'objective' | 'danger';
+	const SECTIONS: SectionKey[] = [
+		'source',
+		'parameters',
+		'basics',
+		'schedule',
+		'objective',
+		'danger'
+	];
 
 	const POLICIES: MissedRunPolicy[] = ['run_all', 'latest_only', 'skip'];
 	// The number of fire times that the preview requests (FR-SC-01).
@@ -66,6 +85,17 @@
 	let profiles = $state<Profile[]>([]);
 	let agents = $state<Agent[]>([]);
 	let repositories = $state<Repository[]>([]);
+	let secrets = $state<Secret[]>([]);
+	/** The values on the host of the plan, as the server shows them to this reader (FR-PF-12). */
+	let hostParameters = $state<HostParameterRow[]>([]);
+	/** The override that the plan sets, by parameter name. It is never sent for a name that the profile drops. */
+	let planValues = $state<Record<string, { kind: ParameterKind; text: string; secretId: string }>>(
+		{}
+	);
+	let valueDialog = $state(false);
+	let valueParameter = $state('');
+	let valueText = $state('');
+	let valueSecretId = $state('');
 	let saving = $state(false);
 	let saved = false;
 	let deleteOpen = $state(false);
@@ -135,7 +165,8 @@
 			timeZone,
 			policy,
 			enabled,
-			rpoHours
+			rpoHours,
+			planValues
 		])
 	);
 	const dirty = $derived(!loading && stateKey !== baseline);
@@ -153,7 +184,151 @@
 		agentId = active ? host : '';
 	}
 
+	/* ------------------------------------------------------- profile parameters */
+
+	const profile = $derived(profiles.find((item) => item.id === profileId));
+	const declared = $derived(profile?.parameters ?? []);
+	const canSetSecret = $derived(getSession()?.role === 'admin');
+	const secretOptions = $derived<SelectOption[]>([
+		{ value: '', label: t('scripts.parameter.selectSecret') },
+		...secrets.map((secret) => ({ value: secret.id, label: secret.name }))
+	]);
+
+	// The plan sets a value for a name of a declared parameter only, so a stale edit is dropped.
+	const planParameterValues = $derived<PlanParameterValue[]>(
+		declared.flatMap<PlanParameterValue>((definition) => {
+			const value = planValues[definition.name];
+			if (!value || value.kind !== definition.kind) return [];
+			if (definition.kind === 'secret') {
+				if (value.secretId === '') return [];
+				return [
+					{
+						name: definition.name,
+						kind: 'secret' as const,
+						value: null,
+						secret_id: value.secretId,
+						secret_name: secrets.find((item) => item.id === value.secretId)?.name ?? null,
+						hidden: false
+					}
+				];
+			}
+			if (value.text.trim() === '') return [];
+			return [
+				{
+					name: definition.name,
+					kind: 'text' as const,
+					value: value.text,
+					secret_id: null,
+					secret_name: null,
+					hidden: false
+				}
+			];
+		})
+	);
+	const resolved = $derived(
+		Object.fromEntries(
+			declared.map((definition) => [
+				definition.name,
+				resolveValue(definition, planParameterValues, hostParameters)
+			])
+		)
+	);
+	const missing = $derived(
+		declared.filter((definition) => missingValue(definition, planParameterValues, hostParameters))
+	);
+	const blockedSave = $derived(
+		missing.length > 0 ? t('pl.param.missingBlocked', { name: missing[0].name }) : null
+	);
+
+	const parameterSummary = $derived.by<{ text: string; state: SummaryState }>(() => {
+		if (declared.length === 0) return { text: t('pl.param.noParameters'), state: 'off' };
+		if (missing.length > 0) {
+			return { text: plural('pl.param.missingSummary', missing.length), state: 'warn' };
+		}
+		return { text: parameterCount(declared.length), state: 'on' };
+	});
+
+	/** A row of the table: the declaration and the value that the server would use. */
+	type ParameterRow = Profile['parameters'][number] & { resolved: ResolvedValue };
+
+	// A new row object follows a change of the value, so the row actions follow it too.
+	const parameterRows = $derived<ParameterRow[]>(
+		declared.map((definition) => ({
+			...definition,
+			resolved: resolved[definition.name] ?? {
+				source: 'none' as ValueSource,
+				text: '',
+				secretName: null,
+				hidden: false
+			}
+		}))
+	);
+
+	function sourceLabel(source: ValueSource): string {
+		return t(`pl.param.source.${source}` as MessageKey);
+	}
+
+	// A value is set for the whole plan, so the row asks for the value of one parameter.
+	function openValueDialog(name: string): void {
+		const value = planValues[name];
+		valueParameter = name;
+		valueText = value?.text ?? '';
+		valueSecretId = value?.secretId ?? '';
+		valueDialog = true;
+	}
+
+	function setPlanValue(): void {
+		const definition = declared.find((item) => item.name === valueParameter);
+		if (!definition) return;
+		planValues = {
+			...planValues,
+			[definition.name]: {
+				kind: definition.kind,
+				text: definition.kind === 'text' ? valueText : '',
+				secretId: definition.kind === 'secret' ? valueSecretId : ''
+			}
+		};
+		valueDialog = false;
+	}
+
+	// The values of a host are one table on the host page, so this action goes there and does not
+	// copy that table into a dialog (UI principles 1.5, FR-PF-10).
+	async function openHostParameters(): Promise<void> {
+		if (!agentId) return;
+		// The section of the host page is the anchor of the address.
+		// eslint-disable-next-line svelte/no-navigation-without-resolve -- resolved path with an anchor
+		await goto(`${resolve('/(app)/hosts/[id]', { id: agentId })}#parameters`);
+	}
+
+	function removePlanValue(name: string): void {
+		const { [name]: _removed, ...rest } = planValues;
+		planValues = rest;
+	}
+
+	// The host values belong to the host of the plan, so they follow the host field.
+	async function loadHostParameters(): Promise<void> {
+		if (!agentId) {
+			hostParameters = [];
+			return;
+		}
+		try {
+			const response = await service.getAgentParameters(agentId);
+			hostParameters = response.parameters;
+		} catch {
+			// The section shows the plan values and the defaults; a missing host value stays "not set".
+			hostParameters = [];
+		}
+	}
+
+	$effect(() => {
+		if (loading) return;
+		const id = agentId;
+		void id;
+		void loadHostParameters();
+	});
+
 	const summaries = $derived<Record<SectionKey, { text: string; state: SummaryState }>>({
+		parameters: parameterSummary,
 		basics: name ? { text: name, state: 'on' } : { text: t('pl.summary.noName'), state: 'warn' },
 		source:
 			profileName && repositoryName && hostName
@@ -172,6 +347,7 @@
 	const titles: Record<SectionKey, MessageKey> = {
 		basics: 'pl.section.basics',
 		source: 'pl.section.source',
+		parameters: 'pl.section.parameters',
 		schedule: 'plans.section.schedule',
 		objective: 'pl.section.objective',
 		danger: 'danger.title'
@@ -245,14 +421,16 @@
 
 	async function load(): Promise<void> {
 		try {
-			const [planList, profileList, agentList, repositoryList] = await Promise.all([
+			const [planList, profileList, agentList, repositoryList, secretList] = await Promise.all([
 				service.listPlans(),
 				service.listProfiles(),
 				service.listAgents(),
 				// The repository is only a hint in the profile field and the summary, so its failure does not
 				// block the form.
-				service.listRepositories().catch(() => [])
+				service.listRepositories().catch(() => []),
+				service.listSecrets().catch(() => [])
 			]);
+			secrets = secretList;
 			profiles = profileList;
 			planNames = planList.map((item) => item.name);
 			agents = agentList;
@@ -273,6 +451,16 @@
 				policy = found.missed_run_policy;
 				enabled = found.enabled;
 				rpoHours = found.rpo_seconds ? String(found.rpo_seconds / 3600) : '';
+				planValues = Object.fromEntries(
+					found.parameter_values.map((value) => [
+						value.name,
+						{
+							kind: value.kind,
+							text: value.kind === 'text' ? (value.value ?? '') : '',
+							secretId: value.secret_id ?? ''
+						}
+					])
+				);
 			} else {
 				profileId = profiles[0]?.id ?? '';
 				// A repository without an init step holds no snapshot, so the form prefers another.
@@ -343,7 +531,8 @@
 			['cron', 'schedule'],
 			['time_zone', 'schedule'],
 			['missed_run_policy', 'schedule'],
-			['rpo_seconds', 'objective']
+			['rpo_seconds', 'objective'],
+			['parameters', 'parameters']
 		];
 		const hit = target.find(([prefix]) => field.startsWith(prefix));
 		if (hit) open[hit[1]] = true;
@@ -373,7 +562,14 @@
 				time_zone: timeZone,
 				missed_run_policy: policy,
 				enabled,
-				rpo_seconds: rpoSeconds()
+				rpo_seconds: rpoSeconds(),
+				parameter_values: planParameterValues.map((value): ParameterValueDef => ({
+					name: value.name,
+					kind: value.kind,
+					...(value.kind === 'secret'
+						? { secret_id: value.secret_id ?? undefined }
+						: { value: value.value ?? '' })
+				}))
 			};
 			if (existing) {
 				await service.updatePlan(existing.id, { name, ...body } satisfies UpdatePlanRequest);
@@ -408,6 +604,44 @@
 	}
 </script>
 
+{#snippet planParameterNameCell(row: ParameterRow)}
+	<span class="mono nowrap">{row.name}</span>
+	<span class="param-kind">
+		{#if row.kind === 'secret'}<Icon name="lock" size="xs" />{/if}
+		{kindLabel(row.kind)}{#if row.required}<span class="t-danger">
+				· {t('pl.param.required')}</span
+			>{/if}
+	</span>
+{/snippet}
+
+{#snippet planParameterValueCell(row: ParameterRow)}
+	{#if row.resolved.source === 'none'}
+		<span class="value value--missing">{t('common.notSet')}</span>
+	{:else if row.kind === 'secret'}
+		<span class="value"
+			><span class="mask">••••••</span>
+			<span class="muted">{row.resolved.secretName ?? ''}</span></span
+		>
+	{:else}
+		<span class="value mono">{row.resolved.text}</span>
+	{/if}
+{/snippet}
+
+{#snippet planParameterSourceCell(row: ParameterRow)}
+	{@const source = row.resolved.source}
+	<Badge
+		tone={source === 'plan'
+			? 'accent'
+			: source === 'host'
+				? 'info'
+				: source === 'none'
+					? 'danger'
+					: 'neutral'}
+	>
+		{sourceLabel(source)}
+	</Badge>
+{/snippet}
+
 <RecordPage
 	title={planId ? (existing?.name ?? '') : t('pl.newTitle')}
 	description={t('plans.description')}
@@ -419,6 +653,7 @@
 		saving,
 		create: !planId,
 		readonly: canWrite ? null : t('pl.save.readonly'),
+		blocked: blockedSave,
 		oncancel: () => goto(resolve('/(app)/plans'))
 	}}
 >
@@ -478,6 +713,89 @@
 			<p class="muted">
 				{t('pl.source.localHost', { name: repositoryName, host: localHostName })}
 			</p>
+		{/if}
+	</ProfileSection>
+
+	<ProfileSection
+		id="parameters"
+		title={t(titles.parameters)}
+		summary={summaries.parameters.text}
+		state={summaries.parameters.state}
+		badge={declared.length > 0 ? String(declared.length) : undefined}
+		bind:open={open.parameters}
+	>
+		<p class="lead">{t('pl.param.hint')}</p>
+		{#if missing.length > 0}
+			<Alert tone="danger" title={t('pl.param.missingTitle', { name: missing[0].name })}>
+				{t('pl.param.missingHint', { host: hostName })}
+			</Alert>
+		{/if}
+		{#if fieldError(formProblem, 'parameters')}
+			<Alert variant="inline" tone="danger" title={fieldError(formProblem, 'parameters') ?? ''} />
+		{/if}
+		{#if declared.length === 0}
+			<p class="muted">{t('pl.param.noParameters')}</p>
+		{:else}
+			<DataTable
+				paginated={false}
+				rowKey={(row) => row.name}
+				rows={parameterRows}
+				columns={[
+					{
+						key: 'name',
+						header: t('parameters.name'),
+						sortable: false,
+						nowrap: true,
+						render: planParameterNameCell
+					},
+					{
+						key: 'value',
+						header: t('pl.param.value'),
+						sortable: false,
+						render: planParameterValueCell
+					},
+					{
+						key: 'source',
+						header: t('pl.param.source'),
+						sortable: false,
+						nowrap: true,
+						render: planParameterSourceCell
+					}
+				] satisfies TableColumn<ParameterRow>[]}
+				actions={(row) => {
+					const source = row.resolved.source;
+					const secretLocked = row.kind === 'secret' && !canSetSecret;
+					return [
+						{
+							id: 'plan',
+							label: t('pl.param.setForPlanOf', { name: row.name }),
+							hint: secretLocked ? t('pl.param.secretLocked') : t('pl.param.setForPlan'),
+							icon: 'replace',
+							disabled: !canWrite || secretLocked,
+							onSelect: () => openValueDialog(row.name)
+						},
+						{
+							id: 'host',
+							label: t('pl.param.setOnHostOf', { name: row.name }),
+							hint: t('pl.param.setOnHost'),
+							icon: 'host',
+							// A value of the plan hides the host value, so the host field would mislead.
+							hidden: row.kind === 'secret' || source === 'plan',
+							disabled: !canWrite || !agentId,
+							onSelect: () => void openHostParameters()
+						},
+						{
+							id: 'remove',
+							label: t('pl.param.removePlanOf', { name: row.name }),
+							hint: t('pl.param.removePlan'),
+							icon: 'rotate-ccw',
+							hidden: source !== 'plan',
+							disabled: !canWrite,
+							onSelect: () => removePlanValue(row.name)
+						}
+					];
+				}}
+			/>
 		{/if}
 	</ProfileSection>
 
@@ -603,6 +921,28 @@
 		</ProfileSection>
 	{/if}
 
+	<Dialog
+		bind:open={valueDialog}
+		size="md"
+		title={t('pl.param.dialogTitle', { name: valueParameter })}
+		description={t('pl.param.dialogDescription')}
+		onsubmit={setPlanValue}
+	>
+		{#if declared.find((item) => item.name === valueParameter)?.kind === 'secret'}
+			<Select
+				label={t('pl.param.dialogSecret')}
+				options={secretOptions}
+				bind:value={valueSecretId}
+			/>
+		{:else}
+			<TextField label={t('pl.param.value')} mono bind:value={valueText} />
+		{/if}
+		{#snippet footer()}
+			<Button onclick={() => (valueDialog = false)}>{t('common.cancel')}</Button>
+			<Button type="submit" variant="primary">{t('pl.param.dialogSet')}</Button>
+		{/snippet}
+	</Dialog>
+
 	<ConfirmDialog
 		bind:open={deleteOpen}
 		title={t('plans.deleteTitle')}
@@ -615,6 +955,34 @@
 </RecordPage>
 
 <style>
+	.param-kind {
+		display: flex;
+		align-items: center;
+		gap: var(--rh-space-1);
+		color: var(--rh-color-text-muted);
+		font-size: var(--rh-font-size-xs);
+	}
+
+	.value {
+		display: inline-flex;
+		align-items: center;
+		gap: var(--rh-space-2);
+		overflow-wrap: anywhere;
+	}
+
+	.value--missing {
+		color: var(--rh-color-danger-text);
+	}
+
+	.mask {
+		font-family: var(--rh-font-mono);
+		letter-spacing: 1px;
+	}
+
+	.t-danger {
+		color: var(--rh-color-danger-text);
+	}
+
 	.muted {
 		margin: 0;
 		color: var(--rh-color-text-muted);

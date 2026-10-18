@@ -2108,7 +2108,7 @@ export const en = {
 	'parameters.count.many': '{n} parameters',
 	'parameters.count.other': '{n} parameters',
 	'parameters.name': 'Parameter',
-	'parameters.kind': 'Kind',
+	'parameters.kind': 'Type',
 	'parameters.kind.text': 'Text',
 	'parameters.kind.secret': 'Secret',
 	'parameters.required': 'Required',

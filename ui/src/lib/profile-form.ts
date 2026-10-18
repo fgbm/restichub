@@ -385,7 +385,7 @@ export function parameterUses(draft: ProfileDraft): Record<string, ParameterUsag
 /** The plural form of a counted word. The catalog holds `.one`, `.few`, `.many` and `.other`. */
 export function plural(base: string, count: number): string {
 	const category = pluralRules().select(count);
-	return t(`${base}.${category}` as MessageKey);
+	return t(`${base}.${category}` as MessageKey, { n: count });
 }
 
 /* ---------------------------------------------------------------- retention */

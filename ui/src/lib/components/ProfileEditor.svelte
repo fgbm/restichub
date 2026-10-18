@@ -420,7 +420,6 @@
 	}
 </script>
 
-
 {#snippet parameterNameCell(row: ProfileParameterDraft)}
 	<TextField
 		value={row.name}
@@ -466,7 +465,11 @@
 {/snippet}
 
 {#snippet parameterUsedCell(row: ProfileParameterDraft)}
-	<span class="muted nowrap">{usageText(uses[row.name.trim()] ?? { paths: 0, excludes: 0, excludeFiles: 0, tags: 0, scripts: 0 })}</span>
+	<span class="muted nowrap"
+		>{usageText(
+			uses[row.name.trim()] ?? { paths: 0, excludes: 0, excludeFiles: 0, tags: 0, scripts: 0 }
+		)}</span
+	>
 {/snippet}
 
 {#snippet parameterDescriptionNote(row: ProfileParameterDraft)}
@@ -478,7 +481,6 @@
 		error={parameterError(row, 'description')}
 	/>
 {/snippet}
-
 
 <RecordPage
 	title={profileId ? (existing?.name ?? '') : t('pe.newTitle')}
@@ -519,7 +521,12 @@
 			<Alert tone="danger" title={t('pe.param.refusedTitle', { names: refused.names.join(', ') })}>
 				<ul class="blockers">
 					{#each refused.plans.links as link (link.href + link.label)}
-						<li><span class="blockers__kind">{link.kind}</span><a href={link.href}>{link.label}</a></li>
+						<li>
+							<span class="blockers__kind">{link.kind}</span>
+							<!-- The refusal resolves the address of the plan with `resolve()`. -->
+							<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+							<a href={link.href}>{link.label}</a>
+						</li>
 					{/each}
 					{#if refused.plans.more > 0}
 						<li class="blockers__more">{t('deleteBlocked.more', { n: refused.plans.more })}</li>
@@ -948,6 +955,10 @@
 			{:else}
 				<p class="muted">{t('profiles.previewEmpty')}</p>
 			{/if}
+			<p class="muted note">
+				<Icon name="info" size="xs" />
+				{t('pe.commands.visibility')}
+			</p>
 			<p class="muted note">
 				<Icon name="clock" size="xs" />
 				{summaries.limits.text}
