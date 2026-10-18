@@ -482,6 +482,27 @@ async fn ac_pf_09_a_secret_parameter_is_refused_in_every_template_field() {
         );
     }
 
+    // The retention expands no parameter, because one maintenance step serves every host
+    // (ADR-0034, ADR-0047).
+    let (status, _, response) = send(
+        &app,
+        request(
+            "POST",
+            "/api/v1/profiles",
+            Some(&cookie),
+            Some(json!({
+                "name": "retention",
+                "paths": {"all": ["/data"]},
+                "parameters": [{"name": "pg_dir", "kind": "text", "default_value": "/srv/pg"}],
+                "retention": {"keep_last": 3, "keep_within": "{{param.pg_dir}}"},
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{response}");
+    assert_eq!(response["field"], "retention.keep_within");
+    assert_eq!(response["reason"], "parameter_not_allowed");
+
     db.cleanup().await;
 }
 

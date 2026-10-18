@@ -556,6 +556,25 @@ pub fn check_templates<'a>(
     Ok(())
 }
 
+/// Refuses a parameter in the retention or in the check (ADR-0034, ADR-0047).
+///
+/// One maintenance step serves every host of the plans of a repository, so a value of one host has
+/// no single meaning there.
+///
+/// # Errors
+///
+/// The error is `parameter_not_allowed` on that field.
+pub fn check_maintenance(value: &str, field: &str) -> Result<(), ApiError> {
+    match restichub_compiler::parameter_names(value).first() {
+        Some(name) => Err(ApiError::invalid_field_cause(
+            field,
+            Reason::ParameterNotAllowed,
+            format!("the parameter {name} cannot expand in this field"),
+        )),
+        None => Ok(()),
+    }
+}
+
 /// Checks that each parameter variable of a script names a declared parameter (FR-PF-05).
 ///
 /// # Errors

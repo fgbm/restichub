@@ -1106,6 +1106,20 @@ fn validate_tags(field: &'static str, values: Vec<String>) -> Result<Vec<String>
 }
 
 fn validate_retention(retention: Retention) -> Result<Retention, ApiError> {
+    // A parameter cannot expand here, so the refusal names the rule and not the format (ADR-0034).
+    parameters::check_maintenance(&retention.keep_within, "retention.keep_within")?;
+    for (index, tag) in retention.keep_tags.iter().enumerate() {
+        parameters::check_maintenance(tag, &format!("retention.keep_tags[{index}]"))?;
+    }
+    for (index, host) in retention.filter.hosts.iter().enumerate() {
+        parameters::check_maintenance(host, &format!("retention.filter.hosts[{index}]"))?;
+    }
+    for (index, tag) in retention.filter.tags.iter().enumerate() {
+        parameters::check_maintenance(tag, &format!("retention.filter.tags[{index}]"))?;
+    }
+    for (index, path) in retention.filter.paths.iter().enumerate() {
+        parameters::check_maintenance(path, &format!("retention.filter.paths[{index}]"))?;
+    }
     if !retention.keep_within.is_empty() && !is_duration(&retention.keep_within) {
         return Err(ApiError::invalid_field(
             "retention.keep_within",
@@ -1158,6 +1172,7 @@ fn ensure_count(field: &'static str, length: usize, maximum: usize) -> Result<()
 }
 
 fn validate_check(check: CheckOptions) -> Result<CheckOptions, ApiError> {
+    parameters::check_maintenance(&check.read_data_subset, "check.read_data_subset")?;
     if !check.read_data_subset.is_empty() && !is_read_data_subset(&check.read_data_subset) {
         return Err(ApiError::invalid_field(
             "check.read_data_subset",
