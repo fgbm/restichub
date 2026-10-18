@@ -52,6 +52,10 @@ The save bar is a strip below the sections column. It is at the bottom edge of t
 
 `SummaryPanel` is a panel of the side panel. It shows `items` (`KeyValueItem[]`) with the label above the value. An item can have a `render` snippet instead of a text value. The panel does not appear when it has no items and no content.
 
+## DangerZone
+
+`DangerZone` (`$lib/components/ui`) is the body of the section `danger` of a record page (UI principles 1.7). It shows `actions` (`DangerAction[]`). Each action has a stable `key`, the `text` of one sentence on what the action does, the `label` and the `icon` of the button, and the `onclick`. It can have `tone` (`danger` for an action that removes data or blocks the record), `hint` and `disabled`. Put the component in a `ProfileSection` with the id `danger`, the title `danger.title` and a short summary of the actions. Show the section for a stored record and for a role that may run the action, and nowhere else. The delete of a record has this section as its only place. Do not put the same action in the page header or in a header menu.
+
 ## ListView
 
 `ListView` (`$lib/components/ui`) is the list of the entities: hosts, jobs, plans, repositories, profiles, snapshots, alerts, audit events, channels, users, tokens, secrets, templates and organizations. Each item has two lines. Use `DataTable` only for tabular data.

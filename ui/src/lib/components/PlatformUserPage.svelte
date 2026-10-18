@@ -3,20 +3,28 @@
 	import { ApiError, service } from '#lib/api/index.ts';
 	import type { PlatformMembership, PlatformUserRecord, Role, Tenant } from '#lib/api/index.ts';
 	import PlatformUserDialogs from './PlatformUserDialogs.svelte';
+	import ProfileSection from './ProfileSection.svelte';
 	import { RecordPage, SummaryPanel } from './layout/index.ts';
 	import {
 		Button,
 		ConfirmDialog,
+		DangerZone,
 		DataTable,
-		DropdownMenu,
 		Icon,
 		Panel,
 		Select,
 		StatusPill
 	} from './ui/index.ts';
-	import type { KeyValueItem, MenuItem, RowAction, SelectOption, TableColumn } from './ui/index.ts';
+	import type {
+		DangerAction,
+		KeyValueItem,
+		RowAction,
+		SelectOption,
+		TableColumn
+	} from './ui/index.ts';
 	import { formatTime, relativeTime } from '#lib/format.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
+	import { rememberSections } from '#lib/section-state.svelte.ts';
 	import { getSession, loadSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 	import { platformChangeLock, platformResetLock } from '#lib/user-locks.ts';
@@ -54,6 +62,7 @@
 	const self = $derived(user?.id === selfId);
 	const sessionTenantId = $derived(getSession()?.tenant?.id ?? null);
 	const name = $derived(user?.display_name ?? '');
+	const open = rememberSections('platform-user', ['danger'], { danger: true });
 
 	// A platform operation needs the installation-wide right (ADR-0029, operation
 	// `platform_users_write`).
@@ -101,28 +110,34 @@
 		user ? platformChangeLock(user, selfId, user.platform_admin_count) : null
 	);
 
-	const menuItems = $derived.by<MenuItem[]>(() => {
+	// The right of the account and its state are dangerous actions, so they live in one section
+	// (UI principles 1.7). The removal of one membership stays a row action of the table.
+	const dangerActions = $derived.by<DangerAction[]>(() => {
 		const account = user;
-		if (!account) return [];
+		if (!account || !canWrite) return [];
 		return [
 			{
-				label: account.platform_admin
-					? t('platformUsers.revokeAdmin')
-					: t('platformUsers.grantAdmin'),
+				key: 'admin',
+				text: t(
+					account.platform_admin ? 'platformUsers.danger.revoke' : 'platformUsers.danger.grant'
+				),
+				label: t(account.platform_admin ? 'platformUsers.revokeAdmin' : 'platformUsers.grantAdmin'),
 				icon: 'shield',
+				tone: account.platform_admin ? 'danger' : 'secondary',
 				disabled: Boolean(changeLock),
 				hint: (self ? t('platformUsers.revokeSelfHint') : changeLock) ?? undefined,
-				onSelect: () =>
+				onclick: () =>
 					account.platform_admin ? dialogs?.openRevoke(account) : dialogs?.openGrant(account)
 			},
 			{
-				label: account.disabled ? t('users.enableUser') : t('users.disableUser'),
+				key: 'state',
+				text: t(account.disabled ? 'platformUsers.danger.enable' : 'platformUsers.danger.disable'),
+				label: t(account.disabled ? 'users.enableUser' : 'users.disableUser'),
 				icon: 'power',
-				tone: account.disabled ? 'default' : 'danger',
-				separatorBefore: true,
+				tone: account.disabled ? 'secondary' : 'danger',
 				disabled: Boolean(changeLock),
 				hint: (self ? t('platformUsers.disableSelfHint') : changeLock) ?? undefined,
-				onSelect: () => void dialogs?.toggleDisabled(account)
+				onclick: () => void dialogs?.toggleDisabled(account)
 			}
 		];
 	});
@@ -352,7 +367,7 @@
 	</div>
 {/snippet}
 
-<RecordPage title={name} {loading} error={loadError}>
+<RecordPage title={name} description={t('platformUsers.description')} {loading} error={loadError}>
 	{#snippet status()}
 		{#if user?.disabled}
 			<StatusPill tone="neutral">{userState(user).label}</StatusPill>
@@ -369,12 +384,6 @@
 			>
 				{t('users.resetPassword')}
 			</Button>
-			<DropdownMenu
-				icon="more"
-				align="end"
-				label={t('users.moreActions', { name })}
-				items={menuItems}
-			/>
 		{/if}
 	{/snippet}
 	{#snippet side()}
@@ -400,6 +409,18 @@
 				/>
 			</Panel>
 		</div>
+
+		{#if dangerActions.length > 0}
+			<ProfileSection
+				id="danger"
+				title={t('danger.title')}
+				summary={t('platformUsers.danger.summary')}
+				state="off"
+				bind:open={open.danger}
+			>
+				<DangerZone actions={dangerActions} />
+			</ProfileSection>
+		{/if}
 	{/if}
 </RecordPage>
 

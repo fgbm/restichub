@@ -18,11 +18,13 @@ const mocks = vi.hoisted(() => ({
 	goto: vi.fn()
 }));
 
+const session = vi.hoisted(() => ({ role: 'admin' as string }));
+
 vi.mock('#lib/stores/session.svelte.ts', () => ({
 	getSession: () => ({
-		user: { id: 'u_01', username: 'admin', display_name: 'Anna', role: 'admin' },
+		user: { id: 'u_01', username: 'admin', display_name: 'Anna', role: session.role },
 		tenant: { id: 't_01', name: 'acme' },
-		role: 'admin'
+		role: session.role
 	})
 }));
 
@@ -79,6 +81,7 @@ const OWN = {
 };
 
 beforeEach(() => {
+	session.role = 'admin';
 	for (const mock of Object.values(mocks)) mock.mockReset();
 	mocks.listJobTemplates.mockResolvedValue([BUILTIN, OWN]);
 	mocks.listScriptTemplates.mockResolvedValue([]);
@@ -132,6 +135,39 @@ describe('Job template page', () => {
 		expect(request.scripts.map((item: { name: string }) => item.name)).toEqual(['check', 'dump']);
 		expect(request.scripts[0].env).toEqual([{ name: 'PGPASSWORD', kind: 'secret_ref', value: '' }]);
 		expect(mocks.goto).toHaveBeenCalledWith('/settings/scripts/jobs');
+	});
+
+	it('keeps the delete of an own template in the dangerous section only', async () => {
+		render(JobTemplateEditor, { templateId: 'jt_1' });
+		await screen.findByRole('heading', { level: 1, name: 'Web application' });
+
+		const danger = screen
+			.getByRole('button', { name: /Dangerous actions/ })
+			.closest('section') as HTMLElement;
+		expect(danger).toHaveAttribute('data-section', 'danger');
+		expect(
+			within(danger).getByText(/The profiles keep the scripts that they copied/)
+		).toBeInTheDocument();
+		expect(within(danger).getByRole('button', { name: 'Delete' })).toHaveClass('btn--danger');
+		const header = document.querySelector<HTMLElement>('.page-header__actions') as HTMLElement;
+		expect(within(header).queryByRole('button', { name: 'Delete' })).toBeNull();
+	});
+
+	it('shows no dangerous section for a built-in template, a new template and a viewer', async () => {
+		const builtin = render(JobTemplateEditor, { templateId: 'builtin:postgres-linux' });
+		await screen.findByRole('heading', { level: 1, name: 'PostgreSQL server (Linux)' });
+		expect(document.querySelector('[data-section="danger"]')).toBeNull();
+		builtin.unmount();
+
+		const created = render(JobTemplateEditor);
+		await screen.findByRole('heading', { level: 1, name: 'New job template' });
+		expect(document.querySelector('[data-section="danger"]')).toBeNull();
+		created.unmount();
+
+		session.role = 'viewer';
+		render(JobTemplateEditor, { templateId: 'jt_1' });
+		await screen.findByRole('heading', { level: 1, name: 'Web application' });
+		expect(document.querySelector('[data-section="danger"]')).toBeNull();
 	});
 
 	it('deletes an own template after a confirmation and returns to the list', async () => {

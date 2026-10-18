@@ -100,6 +100,9 @@ export const en = {
 	'common.deleted': 'Deleted',
 	'common.active': 'Active',
 
+	// Record page sections
+	'danger.title': 'Dangerous actions',
+
 	// Pagination and table
 	'pagination.summary': 'Showing {from} to {to} of {total}',
 	'pagination.pageOf': 'Page {page} of {pages}',
@@ -280,10 +283,13 @@ export const en = {
 	'users.disableTitle': 'Disable the user?',
 	'users.disableBody':
 		'{name} cannot work in the organization {org}. The role stays; you can enable the user again.',
+	'users.danger.disable':
+		'The person cannot work in the organization. The role stays; you can enable the user again.',
+	'users.danger.enable': 'The person can sign in to the organization again.',
 
 	// Platform users (installation-wide accounts)
 	'platformUsers.title': 'Users',
-	'platformUsers.description': 'Create installation accounts and manage their memberships.',
+	'platformUsers.description': 'Installation accounts and their memberships in the organizations.',
 	'platformUsers.create': 'Create user',
 	'platformUsers.createTitle': 'Create an installation account',
 	'platformUsers.username': 'User name',
@@ -313,6 +319,14 @@ export const en = {
 	'platformUsers.revokeAdmin': 'Remove the Platform Admin right',
 	'platformUsers.rightGranted': 'The Platform Admin right is granted.',
 	'platformUsers.rightRemoved': 'The Platform Admin right is removed.',
+	'platformUsers.danger.summary': 'The Platform Admin right and the state of the account',
+	'platformUsers.danger.grant':
+		'The person manages the organizations and the users of the installation.',
+	'platformUsers.danger.revoke':
+		'The person does not manage the organizations and the users of the installation any more.',
+	'platformUsers.danger.disable':
+		'The person cannot sign in to any organization. The memberships and the roles stay.',
+	'platformUsers.danger.enable': 'The person can sign in to the organizations again.',
 	'platformUsers.disableBody':
 		'{name} cannot sign in to any organization. The memberships and the roles stay; you can enable the user again.',
 	'platformUsers.lastAdminHint': 'This is the last Platform Admin',
@@ -1038,6 +1052,9 @@ export const en = {
 	'plans.delete': 'Delete plan',
 	'plans.deleteTitle': 'Delete the plan?',
 	'plans.deleteBody': 'This action removes the plan "{name}". Continue?',
+	'pl.danger.summary': 'Delete the plan',
+	'pl.danger.delete':
+		'The scheduler does not run the plan any more. The jobs that it ran stay in the job list.',
 	'plans.moreActions': 'More actions for {name}',
 	'pl.newTitle': 'New plan',
 	'pl.notFound': 'The plan does not exist.',
@@ -1679,6 +1696,9 @@ export const en = {
 	'scriptTemplates.deleted': 'The template is deleted.',
 	'scriptTemplates.deleteTitle': 'Delete the template?',
 	'scriptTemplates.deleteBody': 'The profiles keep the scripts that they copied from "{name}".',
+	'scriptTemplates.danger.summary': 'Delete the template',
+	'scriptTemplates.danger.delete':
+		'The template is removed. The profiles keep the scripts that they copied from it.',
 	'scriptTemplates.parameter.label': 'Label',
 	'scriptTemplates.parameter.default': 'Default value',
 	'scriptTemplates.parameter.type.string': 'Text',
@@ -1707,6 +1727,9 @@ export const en = {
 	'jobTemplates.deleted': 'The template is deleted.',
 	'jobTemplates.deleteTitle': 'Delete the template?',
 	'jobTemplates.deleteBody': 'The profiles keep the scripts that they copied from "{name}".',
+	'jobTemplates.danger.summary': 'Delete the template',
+	'jobTemplates.danger.delete':
+		'The template is removed. The profiles keep the scripts that they copied from it.',
 	'jobTemplates.copy': 'Make a copy',
 	'hp.revokedNote': 'This host is revoked. It does not connect any more.',
 	'hp.revokedBy': 'Revoked by {name}',
@@ -1717,7 +1740,6 @@ export const en = {
 	'hp.section.restore': 'Restore',
 	'hp.section.scripts': 'Server scripts',
 	'hp.section.jobs': 'Jobs and plans',
-	'hp.section.danger': 'Dangerous actions',
 	'hp.summary.general': '{os} · {arch} · agent {version}',
 	'hp.summary.noRoots': 'No restore directory reported',
 	'hp.summary.root': 'One restore directory',

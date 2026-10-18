@@ -101,6 +101,9 @@ export const ru: Record<MessageKey, string> = {
 	'common.deleted': 'Удалён',
 	'common.active': 'Активен',
 
+	// Record page sections
+	'danger.title': 'Опасные действия',
+
 	// Pagination and table
 	'pagination.summary': 'Показано с {from} по {to} из {total}',
 	'pagination.pageOf': 'Страница {page} из {pages}',
@@ -286,11 +289,13 @@ export const ru: Record<MessageKey, string> = {
 	'users.disableTitle': 'Отключить пользователя?',
 	'users.disableBody':
 		'{name} не сможет работать в организации {org}. Роль сохранится; пользователя можно включить снова.',
+	'users.danger.disable':
+		'Пользователь не может работать в организации. Роль сохранится; пользователя можно включить снова.',
+	'users.danger.enable': 'Пользователь снова может войти в организацию.',
 
 	// Platform users (installation-wide accounts)
 	'platformUsers.title': 'Пользователи',
-	'platformUsers.description':
-		'Создавайте учётные записи установки и управляйте их членством в организациях.',
+	'platformUsers.description': 'Учётные записи установки и их членство в организациях.',
 	'platformUsers.create': 'Создать пользователя',
 	'platformUsers.createTitle': 'Создание учётной записи установки',
 	'platformUsers.username': 'Имя пользователя',
@@ -320,6 +325,13 @@ export const ru: Record<MessageKey, string> = {
 	'platformUsers.revokeAdmin': 'Забрать право администратора платформы',
 	'platformUsers.rightGranted': 'Право администратора платформы выдано.',
 	'platformUsers.rightRemoved': 'Право администратора платформы забрано.',
+	'platformUsers.danger.summary': 'Право Platform Admin и состояние учётной записи',
+	'platformUsers.danger.grant': 'Пользователь управляет организациями и пользователями установки.',
+	'platformUsers.danger.revoke':
+		'Пользователь больше не управляет организациями и пользователями установки.',
+	'platformUsers.danger.disable':
+		'Пользователь не может войти ни в одну организацию. Членство и роли сохраняются.',
+	'platformUsers.danger.enable': 'Пользователь снова может входить в организации.',
 	'platformUsers.disableBody':
 		'{name} не сможет войти ни в одну организацию. Членство и роли сохранятся; пользователя можно включить снова.',
 	'platformUsers.lastAdminHint': 'Это последний администратор платформы',
@@ -1046,6 +1058,9 @@ export const ru: Record<MessageKey, string> = {
 	'plans.delete': 'Удалить план',
 	'plans.deleteTitle': 'Удалить план?',
 	'plans.deleteBody': 'Действие удаляет план «{name}». Продолжить?',
+	'pl.danger.summary': 'Удалить план',
+	'pl.danger.delete':
+		'Планировщик больше не запускает план. Задания, которые он выполнил, остаются в списке заданий.',
 	'plans.moreActions': 'Другие действия: {name}',
 	'pl.newTitle': 'Новый план',
 	'pl.notFound': 'Такого плана нет.',
@@ -1689,6 +1704,9 @@ export const ru: Record<MessageKey, string> = {
 	'scriptTemplates.deleteTitle': 'Удалить шаблон?',
 	'scriptTemplates.deleteBody':
 		'Профили сохраняют скрипты, которые они скопировали из шаблона «{name}».',
+	'scriptTemplates.danger.summary': 'Удалить шаблон',
+	'scriptTemplates.danger.delete':
+		'Шаблон удалён. Профили сохраняют скрипты, которые они скопировали из него.',
 	'scriptTemplates.parameter.label': 'Подпись',
 	'scriptTemplates.parameter.default': 'Значение по умолчанию',
 	'scriptTemplates.parameter.type.string': 'Текст',
@@ -1718,6 +1736,9 @@ export const ru: Record<MessageKey, string> = {
 	'jobTemplates.deleteTitle': 'Удалить шаблон?',
 	'jobTemplates.deleteBody':
 		'Профили сохраняют скрипты, которые они скопировали из шаблона «{name}».',
+	'jobTemplates.danger.summary': 'Удалить шаблон',
+	'jobTemplates.danger.delete':
+		'Шаблон удалён. Профили сохраняют скрипты, которые они скопировали из него.',
 	'jobTemplates.copy': 'Сделать копию',
 	'hp.revokedNote': 'Хост отозван. Он больше не подключается.',
 	'hp.revokedBy': 'Отозван пользователем {name}',
@@ -1728,7 +1749,6 @@ export const ru: Record<MessageKey, string> = {
 	'hp.section.restore': 'Восстановление',
 	'hp.section.scripts': 'Скрипты сервера',
 	'hp.section.jobs': 'Задания и планы',
-	'hp.section.danger': 'Опасные действия',
 	'hp.summary.general': '{os} · {arch} · агент {version}',
 	'hp.summary.noRoots': 'Каталог восстановления не сообщён',
 	'hp.summary.root': 'Один каталог восстановления',

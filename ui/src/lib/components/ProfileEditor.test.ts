@@ -489,6 +489,23 @@ describe('Profile editor sections', () => {
 		expect(action).toBeDisabled();
 		expect(action).toHaveAttribute('title', 'Set the paths to see the commands.');
 	});
+
+	it('fr_pf_04_shows_the_commands_of_a_new_profile_without_a_name', async () => {
+		const u = user();
+		render(ProfileEditor);
+		await screen.findByLabelText(/^Profile/);
+		expect(document.querySelector<HTMLInputElement>('#profile-name')?.value).toBe('');
+
+		const paths = document.querySelector<HTMLTextAreaElement>('#profile-paths-all');
+		await u.type(paths as HTMLTextAreaElement, '/srv');
+		await u.click(screen.getByRole('button', { name: 'Restic commands' }));
+		const panel = await screen.findByRole('dialog', { name: 'Restic commands' });
+
+		await waitFor(() => expect(mocks.previewProfile).toHaveBeenCalled());
+		// A new profile has no name yet: the draft goes to the server unnamed and the commands show.
+		expect(mocks.previewProfile.mock.calls[0][0]).toMatchObject({ name: '' });
+		expect(within(panel).getAllByText(/^restic -r/)[0]).toHaveTextContent('/srv');
+	});
 });
 
 describe('Profile editor retention', () => {

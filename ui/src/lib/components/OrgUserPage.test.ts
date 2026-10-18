@@ -111,11 +111,13 @@ describe('Organization user page', () => {
 		).toBeVisible();
 	});
 
-	it('asks before it disables the member', async () => {
+	it('asks before it disables the member in the dangerous section', async () => {
 		const user = userEvent.setup();
 		render(OrgUserPage, { userId: 'u_02' });
-		await user.click(await screen.findByRole('button', { name: 'More actions for Ivan Egorkin' }));
-		await user.click(await screen.findByText('Disable user'));
+		const danger = (await screen.findByRole('button', { name: /Dangerous actions/ })).closest(
+			'section'
+		) as HTMLElement;
+		await user.click(within(danger).getByRole('button', { name: 'Disable user' }));
 		const dialog = await screen.findByRole('dialog', { name: 'Disable the user?' });
 		expect(dialog).toHaveTextContent('Ivan Egorkin cannot work in the organization acme.');
 		await user.click(within(dialog).getByRole('button', { name: 'Disable user' }));
@@ -133,16 +135,18 @@ describe('Organization user page', () => {
 	});
 
 	it('disables every change of an account with the Platform Admin right', async () => {
-		const user = userEvent.setup();
 		mocks.getUser.mockResolvedValue(member({ platform_admin: true }));
 		render(OrgUserPage, { userId: 'u_02' });
 		const reset = await screen.findByRole('button', { name: 'Reset password' });
 		expect(reset).toBeDisabled();
 		expect(reset).toHaveAttribute('title', 'A Platform Admin manages this account');
 		expect(screen.getByLabelText('Role')).toBeDisabled();
-		await user.click(screen.getByRole('button', { name: 'More actions for Ivan Egorkin' }));
-		const item = (await screen.findByText('Disable user')).closest('[data-disabled]');
-		expect(item).toHaveTextContent('A Platform Admin manages this account');
+		const danger = screen
+			.getByRole('button', { name: /Dangerous actions/ })
+			.closest('section') as HTMLElement;
+		const disable = within(danger).getByRole('button', { name: 'Disable user' });
+		expect(disable).toBeDisabled();
+		expect(disable).toHaveAttribute('title', 'A Platform Admin manages this account');
 	});
 
 	it('disables the own role, the own disable switch and the own reset', async () => {
@@ -152,6 +156,39 @@ describe('Organization user page', () => {
 		const reset = screen.getByRole('button', { name: 'Reset password' });
 		expect(reset).toBeDisabled();
 		expect(reset).toHaveAttribute('title', 'This is your account');
+	});
+
+	it('keeps the state of the member in the dangerous section only', async () => {
+		render(OrgUserPage, { userId: 'u_02' });
+		await screen.findByRole('heading', { level: 1, name: 'Ivan Egorkin' });
+		// The sentence of the organization user list is the subtitle of the record.
+		expect(
+			screen.getByText('Members of the organization acme and their roles.')
+		).toBeInTheDocument();
+		const header = document.querySelector<HTMLElement>('.page-header__actions') as HTMLElement;
+		expect(within(header).getByRole('button', { name: 'Reset password' })).toBeInTheDocument();
+		expect(within(header).queryByRole('button', { name: /More actions/ })).toBeNull();
+
+		const danger = screen
+			.getByRole('button', { name: /Dangerous actions/ })
+			.closest('section') as HTMLElement;
+		expect(
+			within(danger).getByText(/The person cannot work in the organization/)
+		).toBeInTheDocument();
+		expect(within(danger).getByRole('button', { name: 'Disable user' })).toHaveClass('btn--danger');
+	});
+
+	it('offers the enable action of a disabled member in the dangerous section', async () => {
+		mocks.getUser.mockResolvedValue(member({ disabled: true }));
+		render(OrgUserPage, { userId: 'u_02' });
+		await screen.findByRole('heading', { level: 1, name: 'Ivan Egorkin' });
+		const danger = screen
+			.getByRole('button', { name: /Dangerous actions/ })
+			.closest('section') as HTMLElement;
+		expect(within(danger).getByText(/can sign in to the organization again/)).toBeInTheDocument();
+		expect(within(danger).getByRole('button', { name: 'Enable user' })).toHaveClass(
+			'btn--secondary'
+		);
 	});
 
 	// The UI hides what the API refuses: an Admin changes a member (ADR-0023, AC-AU-02).
@@ -164,7 +201,7 @@ describe('Organization user page', () => {
 			expect(screen.getByLabelText('Role')).toBeDisabled();
 			expect(screen.getByLabelText('Role')).toHaveValue('operator');
 			expect(screen.queryByRole('button', { name: 'Reset password' })).toBeNull();
-			expect(screen.queryByRole('button', { name: 'More actions for Ivan Egorkin' })).toBeNull();
+			expect(document.querySelector('[data-section="danger"]')).toBeNull();
 		}
 	);
 });
