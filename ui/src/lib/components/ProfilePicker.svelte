@@ -12,7 +12,9 @@
 		...rest
 	}: {
 		value?: string;
-		profiles: readonly Pick<Profile, 'id' | 'name' | 'paths' | 'retention'>[];
+		profiles: readonly (Pick<Profile, 'id' | 'name' | 'paths' | 'retention'> & {
+			parameters?: Profile['parameters'];
+		})[];
 		label?: string;
 		id?: string;
 		help?: string;

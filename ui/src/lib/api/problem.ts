@@ -18,8 +18,10 @@ export interface ApiProblem {
 	type?: string;
 	field?: string;
 	reason?: string;
-	/** The records that block a delete. */
+	/** The records that block a delete, and the plans that lose a required parameter. */
 	blockers?: Blockers;
+	/** The names of the parameters of a `parameter_missing` or `parameter_kind_mismatch` refusal. */
+	parameters?: string[];
 	/** The repository that holds a taken location. */
 	existingName?: string;
 }
@@ -47,6 +49,7 @@ export function parseProblem(body: unknown, status: number): ApiProblem {
 			field: asString(wire.field),
 			reason: asString(wire.reason),
 			blockers: wire.blockers ?? undefined,
+			parameters: wire.parameters ?? undefined,
 			existingName: asString(wire.existing_name)
 		};
 	}

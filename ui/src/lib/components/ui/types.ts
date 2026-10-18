@@ -7,7 +7,7 @@ export interface SelectOption {
 }
 
 /** A part of the secondary line of a record: a muted text or a small tag chip. */
-export type RecordPart = string | { tag: string };
+export type RecordPart = string | { tag: string; icon?: IconName };
 
 /** A native select cannot draw a secondary line, so only `RecordPicker` takes this type. */
 export interface RecordOption extends SelectOption {
@@ -138,6 +138,8 @@ export interface ListPill {
 export interface ListField {
 	text: string;
 	mono?: boolean;
+	/** A Lucide icon before the text; the field shows as a neutral chip, for example the count of parameters. */
+	icon?: IconName;
 	/** An RFC 3339 time: the field is a `<time>` element with the full time in a tooltip. */
 	time?: string;
 	/** The tooltip of the field, for example the cron expression of a schedule. */

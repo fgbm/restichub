@@ -11,7 +11,7 @@
 			{#if index > 0}<span class="record-line__sep" aria-hidden="true">·</span>{/if}
 			<span class="record-line__text">{part}</span>
 		{:else}
-			<Badge>{part.tag}</Badge>
+			<Badge icon={part.icon}>{part.tag}</Badge>
 		{/if}
 	{/each}
 </span>

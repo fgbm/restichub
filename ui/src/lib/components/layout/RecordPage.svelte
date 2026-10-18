@@ -106,7 +106,9 @@
 							{t('record.save.clean')}
 						{/if}
 					</span>
-					{#if save.note && !save.readonly}
+					{#if save.blocked && !save.readonly}
+						<span class="record__blocked">{save.blocked}</span>
+					{:else if save.note && !save.readonly}
 						<span class="record__note">{save.note}</span>
 					{/if}
 				</span>
@@ -118,7 +120,8 @@
 						type="submit"
 						variant="primary"
 						loading={save.saving}
-						disabled={!save.dirty && !save.create}
+						disabled={(!save.dirty && !save.create) || Boolean(save.blocked)}
+						title={save.blocked ?? undefined}
 						aria-describedby={stateId}
 					>
 						{t('common.save')}
@@ -229,6 +232,11 @@
 	}
 
 	.record__note {
+		font-size: var(--rh-font-size-xs);
+	}
+
+	.record__blocked {
+		color: var(--rh-color-danger-text);
 		font-size: var(--rh-font-size-xs);
 	}
 

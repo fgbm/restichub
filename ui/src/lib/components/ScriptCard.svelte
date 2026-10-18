@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import type { ScriptEnvKind, Secret } from '#lib/api/index.ts';
-	import { Badge, Button, Select, TextField } from '#lib/components/ui/index.ts';
-	import type { SelectOption } from '#lib/components/ui/index.ts';
+	import type { ProfileParameter, ScriptEnvKind, Secret } from '#lib/api/index.ts';
+	import { Badge, Button, RecordPicker, Select, TextField } from '#lib/components/ui/index.ts';
+	import type { RecordOption, SelectOption } from '#lib/components/ui/index.ts';
+	import { kindLabel } from '#lib/parameters.ts';
 	import { t } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
 	import { AFTER_PHASES, INTERPRETERS, MAX_BODY_BYTES, byteLength } from '#lib/scripts.ts';
@@ -14,6 +15,8 @@
 		number,
 		group,
 		secrets,
+		/** The parameters that the profile declares. Without a profile the list has two kinds. */
+		parameters,
 		readonly = false,
 		canUp,
 		canDown,
@@ -28,6 +31,7 @@
 		number: number;
 		group: Group;
 		secrets: Secret[];
+		parameters?: readonly ProfileParameter[];
 		readonly?: boolean;
 		canUp: boolean;
 		canDown: boolean;
@@ -58,8 +62,21 @@
 	]);
 	const kindOptions = $derived<SelectOption[]>([
 		{ value: 'string', label: t('scripts.parameter.kind.string') },
-		{ value: 'secret_ref', label: t('scripts.parameter.kind.secret_ref') }
+		{ value: 'secret_ref', label: t('scripts.parameter.kind.secret_ref') },
+		...(parameters === undefined
+			? []
+			: [{ value: 'parameter', label: t('scripts.parameter.kind.parameter') }])
 	]);
+	const parameterOptions = $derived<RecordOption[]>(
+		(parameters ?? []).map((parameter) => ({
+			value: parameter.name,
+			label: parameter.name,
+			description: [
+				kindLabel(parameter.kind),
+				...(parameter.description ? [parameter.description] : [])
+			]
+		}))
+	);
 	const secretOptions = $derived<SelectOption[]>([
 		{ value: '', label: t('scripts.parameter.selectSecret') },
 		...secrets.map((secret) => ({ value: secret.id, label: secret.name }))
@@ -71,6 +88,14 @@
 		error('body') ?? (bodyBytes > MAX_BODY_BYTES ? t('scripts.bodyTooLong') : undefined)
 	);
 	const invalid = $derived(Boolean(error('name') || error('body') || error('env')));
+
+	// The profile can drop a parameter after a script took it, so the field names the lost name.
+	function notDeclared(name: string): string | undefined {
+		if (parameters === undefined || name === '') return undefined;
+		return parameters.some((parameter) => parameter.name === name)
+			? undefined
+			: t('scripts.parameter.notDeclared', { name });
+	}
 
 	function addParameter(): void {
 		script.env = [...script.env, { name: '', kind: 'string', value: '' }];
@@ -232,6 +257,17 @@
 									</a>
 								{/if}
 							</div>
+						{:else if variable.kind === 'parameter'}
+							<RecordPicker
+								label={t('scripts.parameter.parameter')}
+								options={parameterOptions}
+								placeholder={t('scripts.parameter.parameter')}
+								searchPlaceholder={t('scripts.parameter.searchPlaceholder')}
+								emptyLabel={t('scripts.parameter.none')}
+								error={error(`env[${index}].value`) ?? notDeclared(variable.value)}
+								bind:value={variable.value}
+								disabled={readonly}
+							/>
 						{:else}
 							<TextField
 								label={t('scripts.parameter.value')}

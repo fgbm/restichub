@@ -33,26 +33,32 @@
 		Badge,
 		Button,
 		Checkbox,
+		DataTable,
 		Disclosure,
 		Field,
 		Icon,
+		Select,
 		SidePanel,
 		TextField
 	} from './ui/index.ts';
-	import type { KeyValueItem } from './ui/index.ts';
+	import type { KeyValueItem, SelectOption, TableColumn } from './ui/index.ts';
 	import { formatMinutes } from '#lib/format.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import {
 		SUMMARY_ORDER,
+		blankParameter,
+		declaredParameters,
 		draftFromProfile,
 		emptyDraft,
 		enabledCount,
+		parameterUses,
 		settingsOf,
 		summarize,
 		minutesToHours,
 		MAX_TAGS
 	} from '#lib/profile-form.ts';
-	import type { ProfileDraft, SummaryKey } from '#lib/profile-form.ts';
+	import type { ProfileDraft, ProfileParameterDraft, SummaryKey } from '#lib/profile-form.ts';
+	import { parameterNameError, plansRefusal, usageText } from '#lib/parameters.ts';
 	import { rememberSections } from '#lib/section-state.svelte.ts';
 	import { loadPreference, savePreference } from '#lib/stores/ui-preferences.svelte.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
@@ -134,6 +140,7 @@
 		retention: 'profiles.retention',
 		check: 'pe.section.check',
 		scripts: 'pe.section.scripts',
+		parameters: 'pe.section.parameters',
 		limits: 'pe.section.limits'
 	};
 
@@ -246,7 +253,8 @@
 			['options.max', 'limits'],
 			['retention', 'retention'],
 			['check', 'check'],
-			['scripts', 'scripts']
+			['scripts', 'scripts'],
+			['parameters', 'parameters']
 		];
 		const hit = target.find(([prefix]) => field.startsWith(prefix));
 		if (hit) open[hit[1]] = true;
@@ -254,6 +262,36 @@
 
 	function setAll(value: boolean): void {
 		for (const key of SECTIONS) open[key] = value;
+	}
+
+	// The parameters of the draft: one row of the table each, with the server error of its fields.
+	const kindOptions = $derived<SelectOption[]>([
+		{ value: 'text', label: t('parameters.kind.text') },
+		{ value: 'secret', label: t('parameters.kind.secret') }
+	]);
+	const uses = $derived(parameterUses(draft));
+
+	function parameterIndexOf(row: ProfileParameterDraft): number {
+		return draft.parameters.findIndex((parameter) => parameter.key === row.key);
+	}
+
+	function parameterError(row: ProfileParameterDraft, field: string): string | undefined {
+		return fieldError(formProblem, `parameters[${parameterIndexOf(row)}].${field}`);
+	}
+
+	function addParameter(): void {
+		draft.parameters = [...draft.parameters, blankParameter()];
+		open.parameters = true;
+	}
+
+	function removeParameter(row: ProfileParameterDraft): void {
+		draft.parameters = draft.parameters.filter((parameter) => parameter.key !== row.key);
+	}
+
+	// Only a text parameter holds a default value (ADR-0047), so a switch to a secret clears it.
+	function changeParameterKind(row: ProfileParameterDraft, kind: string): void {
+		row.kind = kind === 'secret' ? 'secret' : 'text';
+		if (row.kind === 'secret') row.defaultValue = '';
 	}
 
 	async function save(): Promise<void> {
@@ -282,6 +320,9 @@
 			saving = false;
 		}
 	}
+
+	// The server refused the save because plans would stay without a required parameter (FR-PF-11).
+	const refused = $derived(plansRefusal(formProblem));
 
 	const resultItems = $derived<KeyValueItem[]>(
 		SUMMARY_ORDER.map((key) => ({ key, label: t(titles[key]), value: summaries[key].text }))
@@ -379,6 +420,66 @@
 	}
 </script>
 
+
+{#snippet parameterNameCell(row: ProfileParameterDraft)}
+	<TextField
+		value={row.name}
+		oninput={(event) => (row.name = event.currentTarget.value)}
+		mono
+		aria-label={t('parameters.name')}
+		error={parameterNameError(row.name) ?? parameterError(row, 'name')}
+		placeholder={t('pe.param.nameExample')}
+	/>
+{/snippet}
+
+{#snippet parameterKindCell(row: ProfileParameterDraft)}
+	<Select
+		value={row.kind}
+		options={kindOptions}
+		onchange={(event) => changeParameterKind(row, event.currentTarget.value)}
+		aria-label={t('parameters.kind')}
+	/>
+{/snippet}
+
+{#snippet parameterRequiredCell(row: ProfileParameterDraft)}
+	<Checkbox bind:checked={row.required} aria-label={t('parameters.required')} />
+{/snippet}
+
+{#snippet parameterDefaultCell(row: ProfileParameterDraft)}
+	{#if row.kind === 'secret'}
+		<TextField
+			disabled
+			value={t('parameters.defaultLocked')}
+			aria-label={t('parameters.default')}
+			error={parameterError(row, 'default_value')}
+		/>
+	{:else}
+		<TextField
+			value={row.defaultValue}
+			oninput={(event) => (row.defaultValue = event.currentTarget.value)}
+			mono
+			aria-label={t('parameters.default')}
+			placeholder={t('pe.param.defaultExample')}
+			error={parameterError(row, 'default_value')}
+		/>
+	{/if}
+{/snippet}
+
+{#snippet parameterUsedCell(row: ProfileParameterDraft)}
+	<span class="muted nowrap">{usageText(uses[row.name.trim()] ?? { paths: 0, excludes: 0, excludeFiles: 0, tags: 0, scripts: 0 })}</span>
+{/snippet}
+
+{#snippet parameterDescriptionNote(row: ProfileParameterDraft)}
+	<TextField
+		value={row.description}
+		oninput={(event) => (row.description = event.currentTarget.value)}
+		aria-label={t('parameters.description')}
+		placeholder={t('pe.param.descriptionExample')}
+		error={parameterError(row, 'description')}
+	/>
+{/snippet}
+
+
 <RecordPage
 	title={profileId ? (existing?.name ?? '') : t('pe.newTitle')}
 	description={t('profiles.description')}
@@ -413,6 +514,19 @@
 	{#snippet banners()}
 		{#if formError}
 			<Alert tone="danger" title={formError} />
+		{/if}
+		{#if refused}
+			<Alert tone="danger" title={t('pe.param.refusedTitle', { names: refused.names.join(', ') })}>
+				<ul class="blockers">
+					{#each refused.plans.links as link (link.href + link.label)}
+						<li><span class="blockers__kind">{link.kind}</span><a href={link.href}>{link.label}</a></li>
+					{/each}
+					{#if refused.plans.more > 0}
+						<li class="blockers__more">{t('deleteBlocked.more', { n: refused.plans.more })}</li>
+					{/if}
+				</ul>
+				<p class="blockers__hint">{t('pe.param.refusedHint')}</p>
+			</Alert>
 		{/if}
 		{#if warnings.length > 0}
 			<Alert tone="attention" title={t('profiles.warningsTitle')}>
@@ -665,10 +779,77 @@
 			templates={scriptTemplates}
 			{jobTemplates}
 			targets={scriptTargets}
+			parameters={declaredParameters(draft)}
 			readonly={!canEditScripts}
 			problem={formProblem}
 			framed={false}
 		/>
+	</ProfileSection>
+
+	<ProfileSection
+		id="parameters"
+		title={t(titles.parameters)}
+		summary={summaries.parameters.text}
+		state={summaries.parameters.state}
+		badge={draft.parameters.length > 0 ? String(draft.parameters.length) : undefined}
+		bind:open={open.parameters}
+	>
+		<p class="lead">{t('pe.param.hint')}</p>
+		{#if draft.parameters.length > 0}
+			<DataTable
+				paginated={false}
+				rowKey={(row) => String(row.key)}
+				rows={draft.parameters}
+				columns={[
+					{ key: 'name', header: t('parameters.name'), sortable: false, render: parameterNameCell },
+					{
+						key: 'kind',
+						header: t('parameters.kind'),
+						sortable: false,
+						nowrap: true,
+						render: parameterKindCell
+					},
+					{
+						key: 'required',
+						header: t('parameters.required'),
+						sortable: false,
+						align: 'center',
+						render: parameterRequiredCell
+					},
+					{
+						key: 'default',
+						header: t('parameters.default'),
+						sortable: false,
+						render: parameterDefaultCell
+					},
+					{
+						key: 'used',
+						header: t('parameters.used'),
+						sortable: false,
+						nowrap: true,
+						render: parameterUsedCell
+					}
+				] satisfies TableColumn<ProfileParameterDraft>[]}
+				rowNote={parameterDescriptionNote}
+				actions={(row) => [
+					{
+						id: 'remove',
+						label: t('parameters.remove', { name: row.name.trim() }),
+						hint: t('parameters.remove', { name: row.name.trim() }),
+						icon: 'trash',
+						danger: true,
+						onSelect: () => removeParameter(row)
+					}
+				]}
+			/>
+		{:else}
+			<p class="muted">{t('pe.param.summaryNone')}</p>
+		{/if}
+		<Alert variant="inline" tone="info" title={t('pe.param.visibility')} />
+		<div>
+			<Button variant="ghost" icon="plus" onclick={addParameter}>{t('pe.param.add')}</Button>
+		</div>
+		<p class="muted">{t('pe.param.nameRule')}</p>
 	</ProfileSection>
 
 	<ProfileSection
@@ -812,6 +993,30 @@
 		display: flex;
 		flex-direction: column;
 		gap: var(--rh-space-3);
+	}
+
+	.blockers {
+		display: flex;
+		flex-direction: column;
+		gap: var(--rh-space-1);
+		margin: var(--rh-space-2) 0 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.blockers__kind {
+		margin-inline-end: var(--rh-space-2);
+		color: var(--rh-color-text-muted);
+	}
+
+	.blockers__more,
+	.blockers__hint {
+		color: var(--rh-color-text-muted);
+		font-size: var(--rh-font-size-sm);
+	}
+
+	.blockers__hint {
+		margin: var(--rh-space-2) 0 0;
 	}
 
 	.warnings {

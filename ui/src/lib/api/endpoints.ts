@@ -35,7 +35,8 @@ export const endpoints = {
 		byId: (id: string) => `/agents/${encodeURIComponent(id)}`,
 		revoke: (id: string) => `/agents/${encodeURIComponent(id)}/revoke`,
 		reenroll: (id: string) => `/agents/${encodeURIComponent(id)}/reenroll`,
-		replace: (id: string) => `/agents/${encodeURIComponent(id)}/replace`
+		replace: (id: string) => `/agents/${encodeURIComponent(id)}/replace`,
+		parameters: (id: string) => `/agents/${encodeURIComponent(id)}/parameters`
 	},
 	enrollmentTokens: {
 		list: '/enrollment-tokens',

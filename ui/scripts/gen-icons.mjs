@@ -107,6 +107,7 @@ export const mapping = {
 	power: 'power',
 	ban: 'ban',
 	replace: 'replace',
+	braces: 'braces',
 	play: 'play',
 	webhook: 'webhook',
 	eraser: 'eraser',

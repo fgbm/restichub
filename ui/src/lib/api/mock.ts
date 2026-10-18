@@ -26,6 +26,9 @@ import type {
 	AgentQuery,
 	HostState,
 	AlertListResponse,
+	HostParameters,
+	HostParameterRow,
+	ParameterValueDef,
 	AlertQuery,
 	AlertRule,
 	ApiToken,
@@ -444,7 +447,16 @@ function makeProfiles(): Profile[] {
 				max_duration_minutes: 2880
 			},
 			scripts: [],
-			parameters: [],
+			parameters: [
+				{
+					name: 'site_name',
+					kind: 'text' as const,
+					required: false,
+					default_value: 'acme',
+					description: 'Site name for the tag',
+					hidden: false
+				}
+			],
 			retention,
 			check: { read_data_subset: '10%' },
 			created_at: iso(60 * 24 * 10),
@@ -490,7 +502,40 @@ function makeProfiles(): Profile[] {
 				limit_download_kib: 0
 			},
 			scripts: sampleScripts(),
-			parameters: [],
+			parameters: [
+				{
+					name: 'pg_password',
+					kind: 'secret' as const,
+					required: true,
+					default_value: null,
+					description: 'Backup password',
+					hidden: false
+				},
+				{
+					name: 'pg_dir',
+					kind: 'text' as const,
+					required: true,
+					default_value: '/var/backups/pg',
+					description: 'Directory of the dumps',
+					hidden: false
+				},
+				{
+					name: 'keep_logs',
+					kind: 'text' as const,
+					required: false,
+					default_value: '14',
+					description: 'Days to keep the dumps',
+					hidden: false
+				},
+				{
+					name: 'pg_host',
+					kind: 'text' as const,
+					required: true,
+					default_value: null,
+					description: 'Address of the database',
+					hidden: false
+				}
+			],
 			retention: null,
 			check: null,
 			created_at: iso(60 * 24 * 3),
@@ -614,7 +659,16 @@ function makePlans(): Plan[] {
 			profile_id: 'p_3',
 			profile_name: 'db-nightly',
 			repository_id: 'r_1',
-			parameter_values: [],
+			parameter_values: [
+				{
+					name: 'keep_logs',
+					kind: 'text' as const,
+					value: '30',
+					secret_id: null,
+					secret_name: null,
+					hidden: false
+				}
+			],
 			agent_id: '2',
 			agent_hostname: 'srv-db-01',
 			cron: '30 1 * * *',
@@ -632,6 +686,30 @@ function makePlans(): Plan[] {
 		}
 	];
 	return plans.filter((item) => item.id !== SCRIPTED_PLAN || scriptsSample());
+}
+
+/// The sample values of the host srv-db-01: the secrets of the profile db-nightly and one value
+/// that no profile declares (FR-PF-10, FR-PF-12).
+function makeAgentParameterValues(): Map<string, ParameterValueDef[]> {
+	if (
+		typeof localStorage === 'undefined' ||
+		localStorage.getItem(SAMPLE_PROFILES_KEY) !== 'sample' ||
+		localStorage.getItem(SAMPLE_PLANS_KEY) !== 'sample' ||
+		!scriptsSample()
+	) {
+		return new Map();
+	}
+	return new Map([
+		[
+			'2',
+			[
+				{ name: 'pg_password', kind: 'secret', secret_id: 's_db' },
+				{ name: 'pg_dir', kind: 'text', value: '/var/backups/pg' },
+				{ name: 'pg_host', kind: 'text', value: 'db.local' },
+				{ name: 'old_dir', kind: 'text', value: '/var/backups/old' }
+			] satisfies ParameterValueDef[]
+		]
+	]);
 }
 
 /// Sample jobs of the sample plan, one for each lifecycle state that the Jobs screen shows
@@ -1008,6 +1086,7 @@ export class MockApiService {
 	>();
 	private profiles: Profile[] = makeProfiles();
 	private plans: Plan[] = makePlans();
+	private agentParameters: Map<string, ParameterValueDef[]> = makeAgentParameterValues();
 	private alertMock = new MockAlerts();
 	private scriptMock = new MockScripts();
 	private audit: AuditRecord[] = makeAudit();
@@ -1265,6 +1344,157 @@ export class MockApiService {
 		const agent = this.agents.find((item) => item.id === id);
 		if (!agent) throw new Error('not found');
 		return { ...agent };
+	}
+
+	async getAgentParameters(id: string): Promise<HostParameters> {
+		if (!this.agents.some((item) => item.id === id)) throw notFound();
+		return { agent_id: id, parameters: this.parameterTable(id) };
+	}
+
+	async replaceAgentParameters(
+		id: string,
+		parameters: ParameterValueDef[]
+	): Promise<HostParameters> {
+		if (!this.agents.some((item) => item.id === id)) throw notFound();
+		const before = this.agentParameters.get(id) ?? [];
+		const secrets = (values: ParameterValueDef[]) =>
+			values
+				.filter((value) => value.kind === 'secret')
+				.map((value) => `${value.name}:${value.secret_id ?? ''}`)
+				.sort()
+				.join(',');
+		// Only an Admin changes a secret value (ADR-0047).
+		if (secrets(before) !== secrets(parameters) && this.me().role !== 'admin') {
+			throw new ApiError({ status: 403, code: 'forbidden', title: 'Forbidden' });
+		}
+		this.agentParameters.set(
+			id,
+			parameters.map((value) => ({ ...value }))
+		);
+		const broken = this.plans
+			.filter((plan) => plan.agent_id === id)
+			.filter((plan) => this.missingValues(plan).length > 0);
+		if (broken.length > 0) throw this.plansRefusal(broken);
+		return { agent_id: id, parameters: this.parameterTable(id) };
+	}
+
+	/// The rows of the parameter table of a host (FR-PF-10, FR-PF-12).
+	private parameterTable(id: string): HostParameterRow[] {
+		const mayReadText = this.me().role !== 'viewer';
+		const stored = this.agentParameters.get(id) ?? [];
+		const declared = this.declaredOfHost(id);
+		const names = [
+			...declared.map((item) => item.definition.name),
+			...stored.map((value) => value.name).filter((name) => !declared.some((d) => d.definition.name === name))
+		];
+		return names.map((name) => {
+			const found = declared.find((item) => item.definition.name === name);
+			const value = stored.find((item) => item.name === name);
+			const kind = found?.definition.kind ?? value?.kind ?? 'text';
+			const secret = value?.secret_id
+				? (this.scriptMock.listSecrets().find((item) => item.id === value.secret_id)?.name ?? null)
+				: null;
+			const hidden = mayReadText ? false : kind === 'text' && Boolean(value);
+			return {
+				name,
+				kind,
+				required: found?.definition.required ?? false,
+				default_value: found?.definition.default_value ?? null,
+				description: found?.definition.description ?? null,
+				needed_by: found ? [...found.needed_by] : [],
+				value: value
+					? {
+							kind,
+							value: kind === 'text' && mayReadText ? (value.value ?? '') : null,
+							secret_id: value.secret_id ?? null,
+							secret_name: secret
+						}
+					: null,
+				unused: !found,
+				hidden
+			} satisfies HostParameterRow;
+		});
+	}
+
+	/// The parameters that the profiles of the plans of a host declare, with the profiles.
+	private declaredOfHost(id: string): {
+		definition: Profile['parameters'][number];
+		needed_by: string[];
+	}[] {
+		const result: { definition: Profile['parameters'][number]; needed_by: string[] }[] = [];
+		for (const plan of this.plans.filter((item) => item.agent_id === id)) {
+			const profile = this.profiles.find((item) => item.id === plan.profile_id);
+			for (const definition of profile?.parameters ?? []) {
+				const known = result.find((item) => item.definition.name === definition.name);
+				if (known) {
+					if (!known.needed_by.includes(profile!.name)) known.needed_by.push(profile!.name);
+					known.definition.required = known.definition.required || definition.required;
+				} else {
+					result.push({ definition: { ...definition }, needed_by: [profile!.name] });
+				}
+			}
+		}
+		return result;
+	}
+
+	/// The declarations that a plan would save without a value (FR-PF-11).
+	private missingValues(plan: Plan, profile?: Profile): string[] {
+		const declared = profile ?? this.profiles.find((item) => item.id === plan.profile_id);
+		const stored = this.agentParameters.get(plan.agent_id) ?? [];
+		return (declared?.parameters ?? [])
+			.filter((definition) => definition.required)
+			.filter(
+				(definition) =>
+					!plan.parameter_values.some(
+						(value) => value.name === definition.name && value.kind === definition.kind
+					) &&
+					!stored.some(
+						(value) => value.name === definition.name && value.kind === definition.kind
+					) &&
+					!(definition.kind === 'text' && definition.default_value)
+			)
+			.map((definition) => definition.name);
+	}
+
+	/// The values of a plan request as a reader sees them (FR-PF-10).
+	private planValues(values: ParameterValueDef[]): Plan['parameter_values'] {
+		return values.map((value) => ({
+			name: value.name,
+			kind: value.kind,
+			value: value.kind === 'text' ? (value.value ?? '') : null,
+			secret_id: value.secret_id ?? null,
+			secret_name: value.secret_id
+				? (this.scriptMock.listSecrets().find((item) => item.id === value.secret_id)?.name ?? null)
+				: null,
+			hidden: false
+		}));
+	}
+
+	/// A plan save without a value for a required parameter is refused (FR-PF-11).
+	private refuseMissingValues(plan: Plan, profile: Profile): void {
+		const missing = this.missingValues(plan, profile);
+		if (missing.length === 0) return;
+		throw new ApiError({
+			status: 400,
+			code: 'parameter_missing',
+			title: 'Bad Request',
+			field: 'parameters',
+			parameters: missing
+		});
+	}
+
+	/// The refusal that names the plans without a required value (FR-PF-11).
+	private plansRefusal(plans: Plan[]): ApiError {
+		return new ApiError({
+			status: 400,
+			code: 'parameter_missing_in_plans',
+			title: 'Bad Request',
+			field: 'parameters',
+			blockers: {
+				items: plans.map((plan) => ({ kind: 'plan', id: plan.id, name: plan.name })),
+				total: plans.length
+			}
+		});
 	}
 
 	async renameAgent(id: string, hostname: string): Promise<Agent> {
@@ -2009,6 +2239,13 @@ export class MockApiService {
 		if (!current) throw new Error('not found');
 		const updated: Profile = {
 			...current,
+			parameters: request.parameters
+				? request.parameters.map((parameter) => ({
+						...parameter,
+						required: parameter.required ?? false,
+						hidden: false
+					}))
+				: current.parameters,
 			name: request.name ?? current.name,
 			paths: request.paths ?? { all: [], windows: [], linux: [], macos: [] },
 			excludes: request.excludes ?? [],
@@ -2029,6 +2266,11 @@ export class MockApiService {
 			check: request.check ?? null,
 			updated_at: new Date().toISOString()
 		};
+		// A plan of the profile must keep a value for each required parameter (FR-PF-11).
+		const broken = this.plans
+			.filter((plan) => plan.profile_id === id)
+			.filter((plan) => this.missingValues(plan, updated).length > 0);
+		if (broken.length > 0) throw this.plansRefusal(broken);
 		this.profiles = this.profiles.map((item) => (item.id === id ? updated : item));
 		return { profile: updated, warnings: warningsFor(updated), plan_warnings: [] };
 	}
@@ -2194,7 +2436,7 @@ export class MockApiService {
 			profile_id: request.profile_id,
 			profile_name: profile.name,
 			repository_id: repository.id,
-			parameter_values: [],
+			parameter_values: this.planValues(request.parameter_values ?? []),
 			agent_id: request.agent_id,
 			agent_hostname: agent.hostname,
 			cron: request.cron,
@@ -2209,6 +2451,7 @@ export class MockApiService {
 			created_at: now,
 			updated_at: now
 		};
+		this.refuseMissingValues(plan, profile);
 		this.plans = [...this.plans, plan];
 		return { plan };
 	}
@@ -2232,7 +2475,7 @@ export class MockApiService {
 			profile_id: request.profile_id,
 			profile_name: profile.name,
 			repository_id: repository.id,
-			parameter_values: [],
+			parameter_values: this.planValues(request.parameter_values ?? []),
 			agent_id: request.agent_id,
 			agent_hostname: agent.hostname,
 			cron: request.cron,
@@ -2244,6 +2487,7 @@ export class MockApiService {
 			next_run_at: enabled ? nextFireTime(request.cron, request.time_zone) : null,
 			updated_at: new Date().toISOString()
 		};
+		this.refuseMissingValues(updated, profile);
 		this.plans = this.plans.map((item) => (item.id === id ? updated : item));
 		return { plan: updated };
 	}

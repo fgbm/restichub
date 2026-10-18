@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { ApiError, fieldError, service } from '#lib/api/index.ts';
-	import type { Agent, JobTemplate, ScriptTemplate, Secret } from '#lib/api/index.ts';
+	import type { Agent, JobTemplate, ProfileParameter, ScriptTemplate, Secret } from '#lib/api/index.ts';
 	import { Alert, Badge, Button, CopyField, Dialog, TextField } from '#lib/components/ui/index.ts';
 	import PasswordField from '#lib/components/ui/PasswordField.svelte';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
@@ -27,6 +27,7 @@
 		jobTemplates = [],
 		secrets = $bindable([]),
 		targets = [],
+		parameters,
 		readonly = false,
 		problem = null,
 		framed = true
@@ -37,6 +38,8 @@
 		secrets?: Secret[];
 		/** The hosts that run the profile: the hosts of its plans. */
 		targets?: Agent[];
+		/** The parameters that the profile declares, for a variable of the kind `parameter`. */
+		parameters?: readonly ProfileParameter[];
 		/** An Operator and a Viewer read the scripts and change nothing. */
 		readonly?: boolean;
 		problem?: ApiProblem | null;
@@ -245,6 +248,7 @@
 						number={numbers[item.key] ?? 1}
 						{group}
 						{secrets}
+						{parameters}
 						{readonly}
 						canUp={canMove(scripts, item.key, -1)}
 						canDown={canMove(scripts, item.key, 1)}

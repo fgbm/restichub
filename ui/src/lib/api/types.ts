@@ -338,6 +338,27 @@ export type CheckOptions = components['schemas']['CheckOptions'];
 /** One profile (FR-PF-01). It holds no secret. */
 export type Profile = components['schemas']['ProfileView'];
 
+/** The kind of a profile parameter: a text or a reference to a secret (FR-PF-09). */
+export type ParameterKind = components['schemas']['ParameterKind'];
+
+/** One declared parameter of a profile, as a reader sees it (FR-PF-09, FR-PF-12). */
+export type ProfileParameter = components['schemas']['ParameterDefView'];
+
+/** One value of a parameter in a plan request or in a host request (FR-PF-10). */
+export type ParameterValueDef = components['schemas']['ParameterValueDef'];
+
+/** The value of one parameter on a host, as a reader sees it (FR-PF-12). */
+export type ParameterValueView = components['schemas']['ParameterValueView'];
+
+/** One override of a plan, as a reader sees it (FR-PF-10, FR-PF-12). */
+export type PlanParameterValue = components['schemas']['PlanParameterValueView'];
+
+/** One row of the parameter table of a host (FR-PF-10, FR-PF-12). */
+export type HostParameterRow = components['schemas']['HostParameterView'];
+
+/** The parameter table of a host (FR-PF-10). */
+export type HostParameters = components['schemas']['HostParametersResponse'];
+
 export type JobLimitDefaults = components['schemas']['JobLimitDefaults'];
 export type ProfileListResponse = components['schemas']['ProfileListResponse'];
 
