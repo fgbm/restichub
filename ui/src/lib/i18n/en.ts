@@ -2037,6 +2037,8 @@ export const en = {
 	'pe.commands.noPaths': 'Set the paths to see the commands.',
 	'pe.commands.noRepository':
 		'No repository is selected, so the commands carry none. Choose a repository.',
+	'pe.commands.unsavedTag':
+		'The commands show the tag restichub-profile-new. The saved profile shows the tag with its identifier.',
 	'pe.save.plans':
 		'Plans that use this profile: {count}. The new settings apply to their next run.',
 	'pe.save.readonly': 'Your role cannot change a profile.',

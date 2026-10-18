@@ -357,13 +357,14 @@
 		const reason = problem.field ? fieldError(problem, problem.field) : undefined;
 		return reason ? `${problem.field} · ${reason}` : (tErrorCode(problem.code) ?? problem.title);
 	});
-	// The whole draft is the input, so a change of any setting refreshes the commands.
+	// The whole draft is the input of a writer, so a change of any setting refreshes the commands.
+	// A role without the write right changes no setting: the server previews the stored profile.
 	const previewKey = $derived(
 		JSON.stringify([
 			commandHostId,
 			commandRepositoryId,
-			draft.name,
-			settingsOf(draft, { canEditScripts, existing })
+			canWrite ? draft.name : null,
+			canWrite ? settingsOf(draft, { canEditScripts, existing }) : null
 		])
 	);
 	let lastPreviewKey = '';
@@ -381,8 +382,7 @@
 			agent_id: commandHostId,
 			profile_id: existing?.id,
 			repository_id: commandRepositoryId || undefined,
-			name: draft.name,
-			...settingsOf(draft, { canEditScripts, existing })
+			...(canWrite ? { name: draft.name, ...settingsOf(draft, { canEditScripts, existing }) } : {})
 		};
 		previewLoading = true;
 		previewProblem = null;
@@ -954,6 +954,9 @@
 				{/each}
 			{:else}
 				<p class="muted">{t('profiles.previewEmpty')}</p>
+			{/if}
+			{#if !existing && previewResult}
+				<p class="muted note">{t('pe.commands.unsavedTag')}</p>
 			{/if}
 			<p class="muted note">
 				<Icon name="info" size="xs" />

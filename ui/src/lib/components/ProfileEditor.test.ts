@@ -505,6 +505,32 @@ describe('Profile editor sections', () => {
 		// A new profile has no name yet: the draft goes to the server unnamed and the commands show.
 		expect(mocks.previewProfile.mock.calls[0][0]).toMatchObject({ name: '' });
 		expect(within(panel).getAllByText(/^restic -r/)[0]).toHaveTextContent('/srv');
+		// The commands of an unsaved profile hold the placeholder tag, and the panel says so.
+		expect(
+			within(panel).getByText(
+				'The commands show the tag restichub-profile-new. The saved profile shows the tag with its identifier.'
+			)
+		).toBeInTheDocument();
+	});
+
+	it('fr_hk_12_a_role_without_write_sends_the_identifiers_only', async () => {
+		const u = user();
+		session.role = 'viewer';
+		render(ProfileEditor, { profileId: 'p_1' });
+		await screen.findByLabelText(/^Profile/);
+		await u.click(screen.getByRole('button', { name: 'Restic commands' }));
+		await waitFor(() => expect(mocks.previewProfile).toHaveBeenCalledTimes(1));
+		// The server compiles the stored profile for this role, so the draft stays out of the request.
+		expect(mocks.previewProfile.mock.calls[0][0]).toEqual({
+			agent_id: 'a_1',
+			profile_id: 'p_1',
+			repository_id: 'r_1'
+		});
+		await u.click(
+			within(screen.getByRole('dialog', { name: 'Restic commands' })).getByRole('button', {
+				name: 'Close'
+			})
+		);
 	});
 });
 

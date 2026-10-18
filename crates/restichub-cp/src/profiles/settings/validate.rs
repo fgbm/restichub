@@ -59,26 +59,6 @@ pub fn validate_create(body: CreateProfileRequest) -> Result<ValidatedProfile, A
     )
 }
 
-/// Validates a preview draft and returns the normalized settings (FR-PF-04).
-///
-/// A new profile has no name until the first save, so an empty name is not a draft error.
-pub fn validate_draft(body: CreateProfileRequest) -> Result<ValidatedProfile, ApiError> {
-    reject_hooks(body.hooks.as_deref())?;
-    let name = (!body.name.trim().is_empty()).then_some(body.name);
-    validate_profile(
-        name,
-        body.paths,
-        body.excludes,
-        body.exclude_files,
-        body.tags,
-        body.options,
-        body.scripts,
-        body.retention,
-        body.check,
-        body.parameters,
-    )
-}
-
 /// Validates an update request. `current_name` is used when the body holds no name.
 pub fn validate_update(
     body: UpdateProfileRequest,
@@ -100,7 +80,7 @@ pub fn validate_update(
     )
 }
 
-fn reject_hooks(hooks: Option<&[serde_json::Value]>) -> Result<(), ApiError> {
+pub(crate) fn reject_hooks(hooks: Option<&[serde_json::Value]>) -> Result<(), ApiError> {
     match hooks {
         Some([_, ..]) => Err(ApiError::invalid_field("hooks", Reason::Removed)),
         _ => Ok(()),
@@ -108,7 +88,7 @@ fn reject_hooks(hooks: Option<&[serde_json::Value]>) -> Result<(), ApiError> {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn validate_profile(
+pub(crate) fn validate_profile(
     // `None` skips the name check: a preview of a new profile has no name yet (FR-PF-04).
     name: Option<String>,
     paths: ProfilePaths,
