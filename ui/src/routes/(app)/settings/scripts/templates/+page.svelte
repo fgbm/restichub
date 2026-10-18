@@ -9,12 +9,17 @@
 	import type { FilterFacet, RowAction } from '#lib/components/ui/index.ts';
 	import { facetCounts, matchesSearch, splitList } from '#lib/filters.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
+	import { hasRole } from '#lib/stores/session.svelte.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
 	import { templateDescription, templateName } from '#lib/scripts.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 	import { scriptTemplateMeta } from '#lib/template-item.ts';
 	import { ENTITY_ICONS } from '#lib/vocabulary.ts';
+
+	// An Operator reads the templates; only an Admin writes them (ADR-0037, operation
+	// `scripts_write`).
+	const canWrite = $derived(hasRole('admin', 'platform_admin'));
 
 	let templates = $state<ScriptTemplate[]>([]);
 	let loading = $state(true);
@@ -135,6 +140,8 @@
 	}
 
 	function actionsFor(template: ScriptTemplate): RowAction[] {
+		// A copy is a create, so it needs the same right as the create button.
+		if (!canWrite) return [];
 		return [
 			{
 				id: 'copy',
@@ -163,7 +170,9 @@
 	count={loading ? undefined : templates.length}
 >
 	{#snippet actions()}
-		<Button variant="primary" icon="plus" onclick={openCreate}>{t('scriptTemplates.add')}</Button>
+		{#if canWrite}
+			<Button variant="primary" icon="plus" onclick={openCreate}>{t('scriptTemplates.add')}</Button>
+		{/if}
 	{/snippet}
 
 	<ListView
@@ -185,7 +194,9 @@
 		emptyDescription={t('scriptTemplates.emptyDescription')}
 	>
 		{#snippet emptyActions()}
-			<Button variant="primary" onclick={openCreate}>{t('scriptTemplates.addFirst')}</Button>
+			{#if canWrite}
+				<Button variant="primary" onclick={openCreate}>{t('scriptTemplates.addFirst')}</Button>
+			{/if}
 		{/snippet}
 		{#snippet toolbar()}
 			<FilterBar

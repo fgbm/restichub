@@ -1,7 +1,8 @@
 /*
  * The platform user page shows one installation account with its memberships and the account
- * actions (ADR-0028, ADR-0029). The test replaces the session, the toast store and the service, so
- * it renders the page alone.
+ * actions (ADR-0028, ADR-0029). Without the Platform Admin right the page has no action
+ * (AC-AU-02). The test replaces the session, the toast store and the service, so it renders the
+ * page alone.
  */
 import { render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
@@ -21,13 +22,14 @@ const mocks = vi.hoisted(() => ({
 	pushToast: vi.fn()
 }));
 const loadSession = vi.hoisted(() => vi.fn());
+const session = vi.hoisted(() => ({ platform_admin: true }));
 
 vi.mock('#lib/stores/session.svelte.ts', () => ({
 	getSession: () => ({
 		user: { id: 'self', username: 'neimp', display_name: 'Self', role: 'admin' },
 		tenant: { id: 't_01', name: 'acme' },
 		role: 'admin',
-		platform_admin: true
+		platform_admin: session.platform_admin
 	}),
 	loadSession
 }));
@@ -74,6 +76,7 @@ const self = account({
 });
 
 beforeEach(() => {
+	session.platform_admin = true;
 	for (const mock of Object.values(mocks)) mock.mockReset();
 	loadSession.mockReset();
 	loadSession.mockResolvedValue(null);
@@ -317,5 +320,19 @@ describe('Platform user page', () => {
 				'The Platform Admin right gives no access to the data of an organization. Add an organization to work in it.'
 			)
 		).toBeVisible();
+	});
+
+	// The UI hides what the API refuses: a platform operation needs the installation-wide right
+	// (ADR-0029, AC-AU-02).
+	it('ac_au_02_shows_the_account_to_a_caller_without_the_platform_admin_right', async () => {
+		session.platform_admin = false;
+		render(PlatformUserPage, { userId: 'u_02' });
+
+		expect(await screen.findByRole('heading', { level: 1, name: 'Ivan Egorkin' })).toBeVisible();
+		expect(screen.queryByRole('button', { name: 'Reset password' })).toBeNull();
+		expect(screen.queryByRole('button', { name: 'More actions for Ivan Egorkin' })).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Remove from the organization acme' })).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Add an organization' })).toBeNull();
+		expect(screen.getByLabelText('Role in the organization acme')).toBeDisabled();
 	});
 });

@@ -1,6 +1,7 @@
 /*
  * The organization user page shows one member with its role and the member actions (ADR-0025,
- * ADR-0029). The test replaces the session, the toast store and the service.
+ * ADR-0029). A role below Admin gets the account facts only (AC-AU-02). The test replaces the
+ * session, the toast store and the service.
  */
 import { render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
@@ -15,13 +16,16 @@ const mocks = vi.hoisted(() => ({
 	pushToast: vi.fn()
 }));
 
+const session = vi.hoisted(() => ({ role: 'admin' }));
+
 vi.mock('#lib/stores/session.svelte.ts', () => ({
 	getSession: () => ({
-		user: { id: 'u_01', username: 'admin', display_name: 'Anna', role: 'admin' },
+		user: { id: 'u_01', username: 'admin', display_name: 'Anna', role: session.role },
 		tenant: { id: 't_01', name: 'acme' },
-		role: 'admin',
+		role: session.role,
 		platform_admin: false
-	})
+	}),
+	hasRole: (...roles: string[]) => roles.includes(session.role)
 }));
 vi.mock('#lib/stores/toasts.svelte.ts', () => ({ pushToast: mocks.pushToast }));
 vi.mock('#lib/api/index.ts', async (importOriginal) => {
@@ -52,6 +56,7 @@ function member(overrides: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
+	session.role = 'admin';
 	for (const mock of Object.values(mocks)) mock.mockReset();
 	mocks.getUser.mockResolvedValue(member());
 	mocks.updateUser.mockImplementation(async (_id: string, patch: Record<string, unknown>) =>
@@ -148,4 +153,18 @@ describe('Organization user page', () => {
 		expect(reset).toBeDisabled();
 		expect(reset).toHaveAttribute('title', 'This is your account');
 	});
+
+	// The UI hides what the API refuses: an Admin changes a member (ADR-0023, AC-AU-02).
+	it.each(['operator', 'viewer'] as const)(
+		'ac_au_02_shows_the_member_to_a_%s_without_a_way_to_change_it',
+		async (role) => {
+			session.role = role;
+			render(OrgUserPage, { userId: 'u_02' });
+			expect(await screen.findByRole('heading', { level: 1, name: 'Ivan Egorkin' })).toBeVisible();
+			expect(screen.getByLabelText('Role')).toBeDisabled();
+			expect(screen.getByLabelText('Role')).toHaveValue('operator');
+			expect(screen.queryByRole('button', { name: 'Reset password' })).toBeNull();
+			expect(screen.queryByRole('button', { name: 'More actions for Ivan Egorkin' })).toBeNull();
+		}
+	);
 });

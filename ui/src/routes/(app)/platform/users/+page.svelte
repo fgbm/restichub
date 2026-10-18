@@ -31,6 +31,10 @@
 	// The platform tenant holds the role `platform_admin` only, so a membership here is below it.
 	const ASSIGNABLE: Role[] = ['admin', 'operator', 'viewer'];
 
+	// A platform operation needs the installation-wide right, not a membership (ADR-0029,
+	// operation `platform_users_write`).
+	const canWrite = $derived(getSession()?.platform_admin === true);
+
 	let accounts = $state<PlatformUser[]>([]);
 	let tenants = $state<Tenant[]>([]);
 	let loading = $state(true);
@@ -177,6 +181,7 @@
 	}
 
 	function rowActions(user: PlatformUser): RowAction[] {
+		if (!canWrite) return [];
 		const resetLock = platformResetLock(user, selfId);
 		const changeLock = platformChangeLock(user, selfId, activeAdmins);
 		return [
@@ -282,7 +287,10 @@
 	count={loading ? undefined : accounts.length}
 >
 	{#snippet actions()}
-		<Button variant="primary" icon="plus" onclick={openCreate}>{t('platformUsers.create')}</Button>
+		{#if canWrite}
+			<Button variant="primary" icon="plus" onclick={openCreate}>{t('platformUsers.create')}</Button
+			>
+		{/if}
 	{/snippet}
 
 	<ListView

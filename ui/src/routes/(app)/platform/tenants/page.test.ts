@@ -1,6 +1,7 @@
 /*
  * The organizations screen of the platform lists the active organizations first, marks an
- * organization without an Admin and suspends one (FR-TN-02).
+ * organization without an Admin and suspends one (FR-TN-02). Without the Platform Admin right the
+ * screen has no organization action (ADR-0029, AC-AU-02).
  */
 import { render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
@@ -13,6 +14,8 @@ const mocks = vi.hoisted(() => ({
 	pushToast: vi.fn()
 }));
 
+const session = vi.hoisted(() => ({ platform_admin: true }));
+
 const route = vi.hoisted(() => ({ url: new URL('http://localhost/platform/tenants') }));
 
 vi.mock('$app/state', () => ({ page: route }));
@@ -20,6 +23,14 @@ vi.mock('$app/navigation', () => ({
 	goto: (address: string) => {
 		route.url = new URL(address, 'http://localhost');
 	}
+}));
+vi.mock('#lib/stores/session.svelte.ts', () => ({
+	getSession: () => ({
+		user: { id: 'self', username: 'neimp', display_name: 'Self', role: 'admin' },
+		tenant: null,
+		role: 'admin',
+		platform_admin: session.platform_admin
+	})
 }));
 vi.mock('#lib/stores/toasts.svelte.ts', () => ({ pushToast: mocks.pushToast }));
 vi.mock('#lib/api/index.ts', async (importOriginal) => {
@@ -49,6 +60,7 @@ function tenant(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
 	route.url = new URL('http://localhost/platform/tenants');
+	session.platform_admin = true;
 	for (const mock of Object.values(mocks)) mock.mockReset();
 	mocks.listTenants.mockResolvedValue([
 		tenant(),
@@ -79,5 +91,19 @@ describe('Organizations screen', () => {
 		const item = (await screen.findByText('acme')).closest('li') as HTMLElement;
 		await user.click(within(item).getByRole('button', { name: 'Suspend' }));
 		await waitFor(() => expect(mocks.suspendTenant).toHaveBeenCalledWith('t_1'));
+	});
+
+	// The UI hides what the API refuses: a platform operation needs the installation-wide right
+	// (ADR-0029, AC-AU-02).
+	it('ac_au_02_hides_every_organization_action_without_the_platform_admin_right', async () => {
+		session.platform_admin = false;
+		render(Tenants);
+
+		await screen.findByText('acme');
+		expect(screen.queryByRole('button', { name: 'Create organization' })).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Suspend' })).toBeNull();
+		// The organization stays readable: its name opens the side panel.
+		await userEvent.setup().click(screen.getByRole('button', { name: 'acme' }));
+		expect(await screen.findByRole('dialog')).toBeInTheDocument();
 	});
 });
