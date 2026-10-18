@@ -2085,7 +2085,7 @@ export interface components {
             name: string;
             profile_id: string;
             /** @description The repository that the plan backs up into (ADR-0047). */
-            repository_id: string | null;
+            repository_id: string;
             /**
              * Format: int32
              * @description The recovery point objective in seconds, from 900 to 34560000. Absent or null uses the
@@ -3630,7 +3630,7 @@ export interface components {
             name?: string | null;
             profile_id: string;
             /** @description The repository that the plan backs up into (ADR-0047). An absent value is refused. */
-            repository_id: string | null;
+            repository_id: string;
             /**
              * Format: int32
              * @description The recovery point objective in seconds. Null restores the default of the schedule.

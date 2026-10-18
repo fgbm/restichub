@@ -352,9 +352,9 @@ async fn ac_ag_09_an_agent_with_an_older_restic_gets_no_job_and_the_status_is_in
 }
 
 /// ADR-0047: a job keeps the repository that its plan named when the queue took it, so a plan that
-/// moves to another repository does not write there (AC-RP-07).
+/// moves to another repository does not write there.
 #[tokio::test]
-async fn ac_rp_07_a_queued_backup_fails_when_its_plan_moves_to_another_repository() {
+async fn adr_0047_a_queued_backup_fails_when_its_plan_moves_to_another_repository() {
     let Some(db) = common::test_db().await else {
         return;
     };
