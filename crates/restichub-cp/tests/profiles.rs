@@ -171,14 +171,29 @@ async fn ac_pf_01_the_preview_masks_the_secrets() {
         &app,
         request(
             "POST",
-            &format!("/api/v1/profiles/{profile_id}/preview"),
+            "/api/v1/profiles/preview",
             Some(&cookie),
-            Some(json!({"agent_id": agent.to_string()})),
+            Some(json!({
+                "agent_id": agent.to_string(),
+                "profile_id": profile_id,
+                "name": "web-daily",
+                "paths": {"all": ["/srv"], "linux": ["/etc"]},
+                "excludes": ["*.tmp"],
+                "tags": ["daily"],
+                "options": {"one_file_system": true},
+            })),
         ),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{preview}");
     assert_eq!(preview["repository_id"], repository_id.as_str());
+    // The commands of a stored profile filter the retention on its own tag.
+    assert!(
+        preview
+            .to_string()
+            .contains(&format!("restichub-profile-{profile_id}")),
+        "{preview}"
+    );
 
     let steps = preview["steps"].as_array().expect("the steps");
     assert!(!steps.is_empty());
@@ -218,8 +233,8 @@ async fn ac_pf_01_the_preview_masks_the_secrets() {
     db.cleanup().await;
 }
 
-/// ADR-0047: the preview takes the repository of the body, and a profile without a plan shows no
-/// repository (FR-PF-04, AC-PF-01).
+/// ADR-0047: the preview takes the repository of the body, and a draft without a stored profile
+/// shows no repository (FR-PF-04, AC-PF-01).
 #[tokio::test]
 async fn ac_pf_01_the_preview_takes_the_repository_of_the_body_or_none() {
     let Some(db) = common::test_db().await else {
@@ -238,23 +253,24 @@ async fn ac_pf_01_the_preview_takes_the_repository_of_the_body_or_none() {
     )
     .await;
     let repository = repository_fixture(db.database(), tenant).await;
-    let profile =
-        create_profile(&app, &cookie, profile_body("preview-repo", json!(["/srv"]))).await;
-    let profile_id = profile["id"].as_str().expect("the identifier").to_owned();
     let preview_body = |repository: Option<String>| {
-        let mut body = json!({"agent_id": agent.to_string()});
+        let mut body = json!({
+            "agent_id": agent.to_string(),
+            "name": "preview-repo",
+            "paths": {"all": ["/srv"]},
+        });
         if let Some(repository) = repository {
             body["repository_id"] = json!(repository);
         }
         body
     };
 
-    // A profile without a plan names no repository, so its steps carry no repository environment.
+    // A new draft has no plan, so its steps carry no repository environment.
     let (status, _, preview) = send(
         &app,
         request(
             "POST",
-            &format!("/api/v1/profiles/{profile_id}/preview"),
+            "/api/v1/profiles/preview",
             Some(&cookie),
             Some(preview_body(None)),
         ),
@@ -276,7 +292,7 @@ async fn ac_pf_01_the_preview_takes_the_repository_of_the_body_or_none() {
         &app,
         request(
             "POST",
-            &format!("/api/v1/profiles/{profile_id}/preview"),
+            "/api/v1/profiles/preview",
             Some(&cookie),
             Some(preview_body(Some(format!("  {repository}  ")))),
         ),
@@ -307,26 +323,21 @@ async fn ac_pf_02_the_preview_points_to_the_field() {
     let old_agent = seed_agent_full(db.database(), tenant, "old-1", "linux", "0.17.0", &[]).await;
 
     // VSS on a Linux agent.
-    let vss = create_profile(
-        &app,
-        &cookie,
+    let vss_draft = |agent: &str| {
         json!({
+            "agent_id": agent,
             "name": "vss-profile",
             "paths": {"all": ["/srv"]},
             "options": {"use_fs_snapshot": true},
-        }),
-    )
-    .await;
+        })
+    };
     let (status, _, problem) = send(
         &app,
         request(
             "POST",
-            &format!(
-                "/api/v1/profiles/{}/preview",
-                vss["id"].as_str().expect("the identifier")
-            ),
+            "/api/v1/profiles/preview",
             Some(&cookie),
-            Some(json!({"agent_id": linux_agent.to_string()})),
+            Some(vss_draft(&linux_agent.to_string())),
         ),
     )
     .await;
@@ -339,12 +350,9 @@ async fn ac_pf_02_the_preview_points_to_the_field() {
         &app,
         request(
             "POST",
-            &format!(
-                "/api/v1/profiles/{}/preview",
-                vss["id"].as_str().expect("the identifier")
-            ),
+            "/api/v1/profiles/preview",
             Some(&cookie),
-            Some(json!({"agent_id": old_agent.to_string()})),
+            Some(vss_draft(&old_agent.to_string())),
         ),
     )
     .await;
@@ -505,17 +513,16 @@ async fn ac_pf_03_each_agent_gets_its_own_values() {
     )
     .await;
 
-    let profile = create_profile(
-        &app,
-        &cookie,
-        json!({
-            "name": "templated",
-            "paths": {"all": ["/srv/{{hostname}}/{{agent.label.env}}"]},
-            "tags": ["{{os}}"],
-        }),
-    )
-    .await;
-    let profile_id = profile["id"].as_str().expect("the identifier").to_owned();
+    let draft = json!({
+        "name": "templated",
+        "paths": {"all": ["/srv/{{hostname}}/{{agent.label.env}}"]},
+        "tags": ["{{os}}"],
+    });
+    let preview_for = |agent: &str| {
+        let mut body = draft.clone();
+        body["agent_id"] = json!(agent);
+        body
+    };
 
     let backup_command = |preview: &Value| -> String {
         preview["steps"]
@@ -532,9 +539,9 @@ async fn ac_pf_03_each_agent_gets_its_own_values() {
         &app,
         request(
             "POST",
-            &format!("/api/v1/profiles/{profile_id}/preview"),
+            "/api/v1/profiles/preview",
             Some(&cookie),
-            Some(json!({"agent_id": prod.to_string()})),
+            Some(preview_for(&prod.to_string())),
         ),
     )
     .await;
@@ -542,9 +549,9 @@ async fn ac_pf_03_each_agent_gets_its_own_values() {
         &app,
         request(
             "POST",
-            &format!("/api/v1/profiles/{profile_id}/preview"),
+            "/api/v1/profiles/preview",
             Some(&cookie),
-            Some(json!({"agent_id": dev.to_string()})),
+            Some(preview_for(&dev.to_string())),
         ),
     )
     .await;
@@ -558,6 +565,66 @@ async fn ac_pf_03_each_agent_gets_its_own_values() {
     assert!(prod_command.contains("--tag=linux"), "{prod_command}");
     assert!(dev_command.contains("/srv/web-dev/dev"), "{dev_command}");
     assert_ne!(prod_command, dev_command);
+
+    db.cleanup().await;
+}
+
+/// AC-PF-02: the draft preview validates the draft as a create request and points to the field.
+#[tokio::test]
+async fn ac_pf_02_the_draft_preview_points_to_the_field() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant_with_key(db.database(), "acme").await;
+    let app = app_with_kek(db.database());
+    let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
+    let agent = seed_agent_full(db.database(), tenant, "draft-1", "linux", "0.19.0", &[]).await;
+
+    // A relative path is refused with its field.
+    let (status, _, problem) = send(
+        &app,
+        request(
+            "POST",
+            "/api/v1/profiles/preview",
+            Some(&cookie),
+            Some(json!({
+                "agent_id": agent.to_string(),
+                "name": "relative",
+                "paths": {"all": ["relative/path"]},
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
+    assert_eq!(problem["field"], "paths.all");
+    assert_eq!(problem["reason"], "invalid_format");
+
+    // The name keeps the rule of a create request.
+    let (status, _, problem) = send(
+        &app,
+        request(
+            "POST",
+            "/api/v1/profiles/preview",
+            Some(&cookie),
+            Some(json!({
+                "agent_id": agent.to_string(),
+                "name": "",
+                "paths": {"all": ["/srv"]},
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
+    assert_eq!(problem["field"], "name");
+
+    // The preview stores nothing, so the list is still empty.
+    let (status, _, body) = send(
+        &app,
+        request("GET", "/api/v1/profiles", Some(&cookie), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["items"].as_array().map(Vec::len), Some(0), "{body}");
 
     db.cleanup().await;
 }
@@ -967,40 +1034,65 @@ async fn ac_tn_01_a_foreign_tenant_agent_and_repository_are_refused() {
     assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
     assert_eq!(problem["field"], "repository_id");
 
-    // A preview with the agent of tenant B is refused.
+    // The draft preview with the agent of tenant B is refused.
     let agent_b = seed_agent_full(db.database(), tenant_b, "b-host", "linux", "0.19.0", &[]).await;
-    let profile = create_profile(&app, &cookie_a, profile_body("local", json!(["/srv"]))).await;
-    let profile_id = profile["id"].as_str().expect("the identifier");
+    let draft = |extra: Value| {
+        let mut body = json!({
+            "agent_id": agent_a.to_string(),
+            "name": "foreign-repo",
+            "paths": {"all": ["/srv"]},
+        });
+        for (key, value) in extra.as_object().expect("an object") {
+            body[key] = value.clone();
+        }
+        body
+    };
     let (status, _, problem) = send(
         &app,
         request(
             "POST",
-            &format!("/api/v1/profiles/{profile_id}/preview"),
+            "/api/v1/profiles/preview",
             Some(&cookie_a),
-            Some(json!({"agent_id": agent_b.to_string()})),
+            Some(draft(json!({"agent_id": agent_b.to_string()}))),
         ),
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
     assert_eq!(problem["field"], "agent_id");
 
-    // A preview that names the repository of tenant B is refused.
+    // A draft preview that names the repository of tenant B is refused.
     let (status, _, problem) = send(
         &app,
         request(
             "POST",
-            &format!("/api/v1/profiles/{profile_id}/preview"),
+            "/api/v1/profiles/preview",
             Some(&cookie_a),
-            Some(json!({
-                "agent_id": agent_a.to_string(),
-                "repository_id": repository_b,
-            })),
+            Some(draft(json!({"repository_id": repository_b}))),
         ),
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
     assert_eq!(problem["field"], "repository_id");
     assert_eq!(problem["reason"], "unknown");
+
+    // A draft preview of the stored profile of tenant B is not found.
+    let cookie_b = seed_session(db.database(), tenant_b, "admin-b", "admin").await;
+    let profile_b =
+        create_profile(&app, &cookie_b, profile_body("b-profile", json!(["/srv"]))).await;
+    let (status, _, problem) = send(
+        &app,
+        request(
+            "POST",
+            "/api/v1/profiles/preview",
+            Some(&cookie_a),
+            Some(draft(json!({
+                "profile_id": profile_b["id"].as_str().expect("the identifier"),
+            }))),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{problem}");
+    assert_eq!(problem["code"], "not_found");
 
     db.cleanup().await;
 }
@@ -1016,15 +1108,17 @@ async fn an_unparsable_restic_version_is_refused() {
     let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
     let agent = seed_agent_full(db.database(), tenant, "no-version", "linux", "", &[]).await;
 
-    let profile = create_profile(&app, &cookie, profile_body("no-version", json!(["/srv"]))).await;
-    let profile_id = profile["id"].as_str().expect("the identifier");
     let (status, _, problem) = send(
         &app,
         request(
             "POST",
-            &format!("/api/v1/profiles/{profile_id}/preview"),
+            "/api/v1/profiles/preview",
             Some(&cookie),
-            Some(json!({"agent_id": agent.to_string()})),
+            Some(json!({
+                "agent_id": agent.to_string(),
+                "name": "no-version",
+                "paths": {"all": ["/srv"]},
+            })),
         ),
     )
     .await;

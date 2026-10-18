@@ -1000,6 +1000,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/profiles/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Previews a profile draft for one target agent.
+         * @description The steps and the command lines agree with the command that the agent runs. The draft is not stored. Secrets are masked (AC-PF-01).
+         */
+        post: operations["preview_profile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/profiles/{id}": {
         parameters: {
             query?: never;
@@ -1017,26 +1037,6 @@ export interface paths {
         head?: never;
         /** Updates a profile. The body replaces the settings; an absent name keeps the name. */
         patch: operations["update_profile"];
-        trace?: never;
-    };
-    "/api/v1/profiles/{id}/preview": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Previews a profile for one target agent.
-         * @description The steps and the command lines agree with the command that the agent runs. Secrets are masked (AC-PF-01).
-         */
-        post: operations["preview_profile"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
         trace?: never;
     };
     "/api/v1/profiles/{id}/usage": {
@@ -2917,21 +2917,44 @@ export interface components {
             name: string;
             value: string;
         };
-        /** @description The agent identifier of the request (FR-PF-04). */
+        /**
+         * @description The body of the draft preview (FR-PF-04, AC-PF-01).
+         *
+         *     The profile fields describe a draft: the server validates them as a create request, stores
+         *     nothing and checks no name uniqueness.
+         */
         PreviewRequest: {
             /** @description The identifier of the registered agent that supplies the target facts. */
             agent_id: string;
+            check?: components["schemas"]["CheckOptions"] | null;
+            exclude_files?: string[];
+            excludes?: string[];
+            /** @description Free text of 1 to 100 characters. Unique in the tenant, ignoring the letter case. Holds no control or format character. */
+            name: string;
+            options?: components["schemas"]["BackupOptions"];
+            paths?: components["schemas"]["ProfilePaths"];
+            /** @description The stored profile that the draft edits. Absent for a new profile. */
+            profile_id?: string | null;
             /**
-             * @description The repository of the plan to preview. Absent uses the repository of the first plan of the
-             *     profile on this agent, then of the first plan of the profile, and a placeholder without a
-             *     repository environment when the profile has no plan (ADR-0047).
+             * @description The repository of the commands. Absent uses the repository of the first plan of
+             *     `profile_id` on this agent, then of the first plan of `profile_id`, and no repository when
+             *     the draft holds no stored profile or plan (ADR-0047).
              */
             repository_id?: string | null;
+            retention?: components["schemas"]["Retention"] | null;
+            /**
+             * @description Scripts from the control plane, in the order they run in their phase (FR-HK-09). Only an
+             *     Admin can set them.
+             */
+            scripts?: components["schemas"]["ScriptDef"][];
+            tags?: string[];
         };
-        /** @description The preview of a profile for one target agent (FR-PF-04). */
+        /** @description The preview of a profile draft for one target agent (FR-PF-04). */
         PreviewResponse: {
-            profile_id: string;
-            /** @description Null when no plan of the profile names a repository, so the steps carry no repository. */
+            /**
+             * @description Null when the draft names no repository and its stored profile has no plan, so the steps
+             *     carry no repository.
+             */
             repository_id?: string | null;
             steps: components["schemas"]["PreviewStepView"][];
         };
@@ -7554,6 +7577,66 @@ export interface operations {
             };
         };
     };
+    preview_profile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description The previewed steps. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PreviewResponse"];
+                };
+            };
+            /** @description The draft or the agent is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The stored profile of the draft is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
     get_profile: {
         parameters: {
             query?: never;
@@ -7687,69 +7770,6 @@ export interface operations {
                 };
             };
             /** @description A field is not valid. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemBody"];
-                };
-            };
-            /** @description The request is not authenticated. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemBody"];
-                };
-            };
-            /** @description The role is not sufficient. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemBody"];
-                };
-            };
-            /** @description The profile is not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemBody"];
-                };
-            };
-        };
-    };
-    preview_profile: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description The identifier of the profile. */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PreviewRequest"];
-            };
-        };
-        responses: {
-            /** @description The previewed steps. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PreviewResponse"];
-                };
-            };
-            /** @description The profile or the agent is not valid. */
             400: {
                 headers: {
                     [name: string]: unknown;

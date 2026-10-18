@@ -708,7 +708,7 @@ pub const ROUTES: &[Route] = &[
     },
     Route {
         method: "post",
-        path: "/api/v1/profiles/{id}/preview",
+        path: "/api/v1/profiles/preview",
         access: Access::Protected(Operation::ProfilesRead),
         handler: || {
             routes!(crate::profiles::preview_profile)

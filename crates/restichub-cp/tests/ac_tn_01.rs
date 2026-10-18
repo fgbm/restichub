@@ -188,10 +188,9 @@ const FIXTURES: &[(&str, Fixture)] = &[
     ("/api/v1/profiles", Fixture::Collection),
     ("/api/v1/profiles/defaults", Fixture::Collection),
     ("/api/v1/profiles/{id}", Fixture::Object(Object::Profile)),
-    (
-        "/api/v1/profiles/{id}/preview",
-        Fixture::Object(Object::Profile),
-    ),
+    // The draft preview names the agent and the repository in the body. `tests/profiles.rs`
+    // proves that an object of another tenant is refused.
+    ("/api/v1/profiles/preview", Fixture::Exempt),
     (
         "/api/v1/profiles/{id}/usage",
         Fixture::Object(Object::Profile),
