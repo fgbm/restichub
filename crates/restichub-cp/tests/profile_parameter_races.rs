@@ -64,9 +64,16 @@ async fn fr_pf_11_a_host_change_waits_for_a_profile_save_and_then_fails() {
         .expect("cannot change the declarations");
 
     let (app_for_request, cookie_for_request) = (app.clone(), cookie.clone());
-    let request_task = tokio::spawn(async move {
+    let mut request_task = tokio::spawn(async move {
         put_host_values(&app_for_request, &cookie_for_request, agent, json!([])).await
     });
+    // The handler waits for the profile lock, so it reaches no field of the request.
+    assert!(
+        tokio::time::timeout(Duration::from_secs(2), &mut request_task)
+            .await
+            .is_err(),
+        "the request changed the values while the profile save held the lock"
+    );
     writer
         .commit()
         .await
@@ -139,7 +146,7 @@ async fn fr_pf_11_a_plan_save_waits_for_a_host_change_and_then_fails() {
         (app.clone(), cookie.clone(), profile.clone());
     let repository_for_request = repository.clone();
     let plan_for_request = plan.clone();
-    let request_task = tokio::spawn(async move {
+    let mut request_task = tokio::spawn(async move {
         parameters_support::update_plan(
             &app_for_request,
             &cookie_for_request,
@@ -151,6 +158,13 @@ async fn fr_pf_11_a_plan_save_waits_for_a_host_change_and_then_fails() {
         )
         .await
     });
+    // The handler waits for the host lock, so it reads the values after the commit.
+    assert!(
+        tokio::time::timeout(Duration::from_secs(2), &mut request_task)
+            .await
+            .is_err(),
+        "the request changed the plan while the host change held the lock"
+    );
     writer
         .commit()
         .await

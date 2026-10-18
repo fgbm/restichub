@@ -87,8 +87,6 @@ async fn ac_pf_09_a_secret_parameter_is_refused_in_every_template_field() {
 }
 
 /// AC-PF-10: a Viewer reads no text value, and the audit holds none.
-
-/// AC-PF-10: a Viewer reads no text value, and the audit holds none.
 #[tokio::test]
 async fn ac_pf_10_a_viewer_reads_no_text_value_and_the_audit_keeps_none() {
     let Some(db) = common::test_db().await else {
@@ -183,8 +181,6 @@ async fn ac_pf_10_a_viewer_reads_no_text_value_and_the_audit_keeps_none() {
 
     db.cleanup().await;
 }
-
-/// ADR-0047: a removed parameter keeps the host values and drops the overrides of the plan.
 
 /// FR-PF-10: a secret value of a host blocks the delete of the secret.
 #[tokio::test]

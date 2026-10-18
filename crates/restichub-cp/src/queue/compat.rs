@@ -237,7 +237,10 @@ mod tests {
         ))];
         assert_eq!(
             required_capabilities(&steps),
-            [AgentCapability::ScriptMaskedValue]
+            [
+                AgentCapability::ScriptsV1,
+                AgentCapability::ScriptMaskedValue
+            ]
         );
         fit_masked_values(&mut steps, &[]);
         assert_eq!(
@@ -256,6 +259,13 @@ mod tests {
             script_value(&steps[0]),
             script_env::Value::MaskedValue("/srv/pg".to_owned())
         );
-        assert_eq!(required_capabilities(&steps), []);
+        // The value stays masked, so the step still needs the capability.
+        assert_eq!(
+            required_capabilities(&steps),
+            [
+                AgentCapability::ScriptsV1,
+                AgentCapability::ScriptMaskedValue
+            ]
+        );
     }
 }

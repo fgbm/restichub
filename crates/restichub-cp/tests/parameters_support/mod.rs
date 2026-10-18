@@ -209,16 +209,10 @@ pub fn row<'a>(table: &'a Value, name: &str) -> &'a Value {
         .unwrap_or_else(|| panic!("the parameter {name} is absent: {table}"))
 }
 
-/// The audit records of the tenant, as one value.
-pub async fn audit(app: &Router, cookie: &str) -> Value {
-    let (status, _, body) = send(app, request("GET", "/api/v1/audit", Some(cookie), None)).await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    body
-}
-
-/// The diff of the newest audit record of one action on one object.
+/// The diff of the newest record of one action on one object in the log of the tenant.
 pub async fn audit_diff(app: &Router, cookie: &str, action: &str, object_id: &str) -> Value {
-    let records = audit(app, cookie).await;
+    let (status, _, records) = send(app, request("GET", "/api/v1/audit", Some(cookie), None)).await;
+    assert_eq!(status, StatusCode::OK, "{records}");
     records["items"]
         .as_array()
         .expect("a list of records")

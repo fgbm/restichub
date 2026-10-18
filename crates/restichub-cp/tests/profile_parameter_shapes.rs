@@ -99,9 +99,6 @@ async fn adr_0047_a_removed_parameter_keeps_the_host_values_and_drops_the_overri
 
 /// ADR-0047: an optional parameter without a default cannot fill a path or a tag, and a script
 /// variable accepts the empty string.
-
-/// ADR-0047: an optional parameter without a default cannot fill a path or a tag, and a script
-/// variable accepts the empty string.
 #[tokio::test]
 async fn adr_0047_an_optional_parameter_without_a_default_fills_no_path() {
     let Some(db) = common::test_db().await else {
@@ -477,7 +474,6 @@ async fn fr_pf_10_a_value_that_breaks_a_plan_is_refused() {
         "the refused change kept no value: {table}"
     );
 
-    // A value that the tag accepts saves.
     let (status, body) = put_host_values(
         &app,
         &cookie,
