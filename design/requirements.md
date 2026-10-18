@@ -303,9 +303,10 @@ FR-IN-03, FR-IN-04 and FR-IN-05 are out of the MVP. The MVP installs an agent by
 | ID | Requirement |
 |---|---|
 | NFR-OPS-01 | One command installs the CP (Docker Compose). A wizard does the initial setup. |
-| NFR-OPS-02 | Structured JSON logs from the CP and the agent. Health and readiness endpoints. |
+| NFR-OPS-02 | Structured JSON logs from the CP. Health and readiness endpoints. |
 | NFR-OPS-03 | No telemetry by default. |
-| NFR-OSS-01 | The repository contains LICENSE, CONTRIBUTING, CODE_OF_CONDUCT, SECURITY, ADR log and a public roadmap. |
+| NFR-OPS-04 | 1.0: structured JSON logs from the agent. |
+| NFR-OSS-01 | The repository contains LICENSE, CONTRIBUTING, CODE_OF_CONDUCT, SECURITY and the ADR log. The public roadmap is the GitHub milestones of the repository. The README or CONTRIBUTING.md links to the milestones. |
 | NFR-OSS-02 | Documentation: installation, threat model, migration from resticprofile, API reference. |
 | NFR-OSS-03 | Semantic versioning. The CP supports agents of the current and the previous minor version. |
 
