@@ -1,9 +1,12 @@
 /*
- * The Users screen lists the active users first and changes the role of one (FR-TN-02).
+ * The Users screen lists the active users first and changes the role of one (FR-TN-02). A role
+ * below Admin gets no user action, because the API refuses every user operation of that role
+ * (AC-AU-02).
  */
 import { render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApiError } from '#lib/api/index.ts';
 import Users from './+page.svelte';
 
 const mocks = vi.hoisted(() => ({
@@ -11,6 +14,8 @@ const mocks = vi.hoisted(() => ({
 	updateUser: vi.fn(),
 	pushToast: vi.fn()
 }));
+
+const session = vi.hoisted(() => ({ role: 'admin' }));
 
 const route = vi.hoisted(() => ({ url: new URL('http://localhost/settings/access/users') }));
 
@@ -26,10 +31,11 @@ vi.mock('$app/navigation', () => ({
 }));
 vi.mock('#lib/stores/session.svelte.ts', () => ({
 	getSession: () => ({
-		user: { id: 'u_01', username: 'admin', display_name: 'Anna', role: 'admin' },
+		user: { id: 'u_01', username: 'admin', display_name: 'Anna', role: session.role },
 		tenant: { id: 't_01', name: 'acme' },
-		role: 'admin'
-	})
+		role: session.role
+	}),
+	hasRole: (...roles: string[]) => roles.includes(session.role)
 }));
 vi.mock('#lib/stores/toasts.svelte.ts', () => ({ pushToast: mocks.pushToast }));
 vi.mock('#lib/api/index.ts', async (importOriginal) => {
@@ -82,6 +88,7 @@ const users = [
 
 beforeEach(() => {
 	route.url = new URL('http://localhost/settings/access/users');
+	session.role = 'admin';
 	for (const mock of Object.values(mocks)) mock.mockReset();
 	mocks.listUsers.mockResolvedValue(users);
 	mocks.updateUser.mockResolvedValue(users[1]);
@@ -147,5 +154,50 @@ describe('Users screen', () => {
 		await user.click(screen.getByRole('button', { name: 'More actions for Root' }));
 		const item = (await screen.findByText('Change role')).closest('[data-disabled]');
 		expect(item).toHaveTextContent('A Platform Admin manages this account');
+	});
+
+	// The UI hides what the API refuses: an Admin manages the users (ADR-0023, AC-AU-02).
+	it.each(['operator', 'viewer'] as const)(
+		'ac_au_02_hides_the_create_button_from_a_%s_when_the_api_refuses_the_list',
+		async (role) => {
+			session.role = role;
+			mocks.listUsers.mockRejectedValue(
+				new ApiError({
+					status: 403,
+					code: 'forbidden',
+					title: 'You do not have permission for this operation.'
+				})
+			);
+			render(Users);
+
+			expect(
+				await screen.findByText(/You do not have permission for this operation/)
+			).toBeInTheDocument();
+			expect(screen.queryByRole('button', { name: 'Create user' })).toBeNull();
+		}
+	);
+
+	it.each(['operator', 'viewer'] as const)(
+		'ac_au_02_hides_every_user_action_from_a_%s',
+		async (role) => {
+			session.role = role;
+			render(Users);
+
+			await screen.findByText('Duty shift');
+			expect(screen.queryByRole('button', { name: 'Create user' })).toBeNull();
+			expect(screen.queryByRole('button', { name: 'More actions for Duty shift' })).toBeNull();
+			// The member stays readable: the name is a link to the record page.
+			expect(screen.getByRole('link', { name: 'Duty shift' })).toHaveAttribute(
+				'href',
+				'/settings/access/users/u_02'
+			);
+		}
+	);
+
+	it('shows the create button to an admin', async () => {
+		render(Users);
+
+		await screen.findByText('Anna Petrova');
+		expect(screen.getByRole('button', { name: 'Create user' })).toBeInTheDocument();
 	});
 });

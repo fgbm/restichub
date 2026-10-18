@@ -23,9 +23,13 @@
 	import { passwordProblem } from '#lib/password-policy.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
-	import { getSession } from '#lib/stores/session.svelte.ts';
+	import { getSession, hasRole } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 	import { orgChangeLock, orgResetLock } from '#lib/user-locks.ts';
+
+	// An Admin creates the organization users and changes them (ADR-0023, operation
+	// `users_write`).
+	const canWrite = $derived(hasRole('admin', 'platform_admin'));
 
 	let users = $state<User[]>([]);
 	let loading = $state(true);
@@ -180,6 +184,7 @@
 	}
 
 	function rowActions(user: User): RowAction[] {
+		if (!canWrite) return [];
 		const resetLock = orgResetLock(user, selfId);
 		const changeLock = orgChangeLock(user, selfId);
 		return [
@@ -279,7 +284,9 @@
 	count={loading ? undefined : users.length}
 >
 	{#snippet actions()}
-		<Button variant="primary" icon="plus" onclick={openCreate}>{t('users.create')}</Button>
+		{#if canWrite}
+			<Button variant="primary" icon="plus" onclick={openCreate}>{t('users.create')}</Button>
+		{/if}
 	{/snippet}
 
 	<ListView

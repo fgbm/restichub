@@ -20,7 +20,12 @@
 	import { iconOf, pillOf, tenantState } from '#lib/vocabulary.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { getLocale, t, tErrorCode } from '#lib/i18n/index.ts';
+	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
+
+	// A platform operation needs the installation-wide right, not a membership (ADR-0029,
+	// operation `platform_tenants_write`).
+	const canWrite = $derived(getSession()?.platform_admin === true);
 
 	let tenants = $state<Tenant[]>([]);
 	let loading = $state(true);
@@ -129,7 +134,7 @@
 	);
 
 	function rowActions(tenant: Tenant): RowAction[] {
-		if (tenant.status === 'deleted') return [];
+		if (!canWrite || tenant.status === 'deleted') return [];
 		return [
 			{
 				id: 'status',
@@ -242,7 +247,9 @@
 	count={loading ? undefined : tenants.length}
 >
 	{#snippet actions()}
-		<Button variant="primary" icon="plus" onclick={openCreate}>{t('tenants.create')}</Button>
+		{#if canWrite}
+			<Button variant="primary" icon="plus" onclick={openCreate}>{t('tenants.create')}</Button>
+		{/if}
 	{/snippet}
 
 	<ListView
