@@ -38,8 +38,10 @@ Each requirement has an ID. Acceptance criteria refer to these IDs. See [accepta
 |---|---|
 | Tenant | An organization: the isolation unit that owns hosts, repositories, plans, profiles, secrets and memberships (ADR-0006, ADR-0024, ADR-0025). |
 | Repository | A restic repository: backend address, password, backend credentials. |
-| Profile | A declarative backup definition, similar to a resticprofile profile. |
-| Plan | A profile assigned to agents, with a schedule. |
+| Profile | A declarative backup definition: what to back up and how, similar to a resticprofile profile. |
+| Plan | A profile assigned to a host, with a repository and a schedule. |
+| Profile parameter | A value that a profile declares for its plans. A host or a plan sets the value. |
+| Parameter value | The value of a profile parameter on a host or on a plan. |
 | Job | One run of a plan. |
 | Step | One atomic command for an agent in a job. |
 | Maintenance agent | The agent that runs `forget`, `prune` and `check` for a repository. |
@@ -99,7 +101,7 @@ A user can be a member of more than one tenant. In the MVP a role applies to the
 | FR-ID-08 | The agent reconnects with exponential backoff and jitter. After a CP restart, the CP waits for a grace period before it marks agents offline. | M |
 | FR-ID-09 | Fallback transport for networks with restrictive proxies. | L |
 | FR-ID-10 | An Admin can issue an enrollment token for an existing host. The enrollment with that token keeps the agent ID, the plans, the maintenance references and the labels, and replaces the certificate. The old certificate stops working at once. Such a token lives one hour at most, and a successful use revokes the other unused tokens of the host. | M |
-| FR-ID-11 | The CP warns when two active hosts of a tenant report the same machine identifier. An Admin can replace the old record with the new one. The plans, the maintenance references and the labels move. The old record is revoked as by FR-ID-04, and it must have been silent for the online window. The CP never decides on identity from the machine identifier alone. | S |
+| FR-ID-11 | The CP warns when two active hosts of a tenant report the same machine identifier. An Admin can replace the old record with the new one. The plans, the maintenance references, the labels and the host parameter values move. The old record is revoked as by FR-ID-04, and it must have been silent for the online window. The CP never decides on identity from the machine identifier alone. | S |
 
 ### 3.3. Protocol and job model
 
@@ -134,7 +136,7 @@ A user can be a member of more than one tenant. In the MVP a role applies to the
 
 | ID | Requirement | Priority |
 |---|---|---|
-| FR-RP-01 | Create, read, update and delete repositories. Backends: S3-compatible, rest-server, SFTP, local or SMB path, B2, Azure, GCS, rclone. | M (S3, rest, local), 1.0 (SFTP, B2, Azure, GCS, rclone) |
+| FR-RP-01 | Create, read, update and delete repositories. A plan that uses a repository blocks its delete (ADR-0047). Backends: S3-compatible, rest-server, SFTP, local or SMB path, B2, Azure, GCS, rclone. | M (S3, rest, local), 1.0 (SFTP, B2, Azure, GCS, rclone) |
 | FR-RP-02 | Initialize a repository and test access from a selected agent. | M |
 | FR-RP-03 | The CP encrypts secrets with AES-256-GCM. Envelope encryption: one data key for each tenant, encrypted by a key encryption key (KEK). The KEK is in a file or an environment variable outside the database. | M |
 | FR-RP-04 | Pluggable KEK providers: HashiCorp Vault Transit, OpenBao, cloud KMS. | L |
@@ -150,20 +152,24 @@ A user can be a member of more than one tenant. In the MVP a role applies to the
 
 | ID | Requirement | Priority |
 |---|---|---|
-| FR-PF-01 | A profile contains the repository, paths for each operating system, excludes, exclude files and tags. It also contains backup options (VSS, one file system, exclude caches, rate limits), job limits (stall timeout, maximum duration), scripts, retention and check options (`read-data-subset`). | M |
+| FR-PF-01 | A profile contains paths for each operating system, excludes, exclude files and tags. It also contains backup options (VSS, one file system, exclude caches, rate limits) and job limits (stall timeout, maximum duration). It holds the scripts, the retention, the check options (`read-data-subset`) and the profile parameters (FR-PF-09). The profile does not contain the repository: the plan holds it (FR-SC-01). | M |
 | FR-PF-02 | Inheritance with `extends`: deep merge, cycle detection, explicit merge rules for lists (replace or append). | 1.0 |
-| FR-PF-03 | Variables: host name, operating system, agent name, agent labels, date. | M |
+| FR-PF-03 | Variables: host name, operating system, agent name, agent labels, date, and profile parameter (`{{param.<name>}}`, FR-PF-10). | M |
 | FR-PF-04 | The compiler converts a profile to a sequence of steps. The UI shows a preview: the steps and the equivalent restic command line with masked secrets. | M |
 | FR-PF-05 | Validation before save: references, scripts on the target agents (trust mode), cron expressions, options against the operating system and the restic version. | M |
 | FR-PF-06 | Profile revisions with diff and rollback. Each job refers to the revision that the compiler used. | 1.0 |
 | FR-PF-07 | Import and export of profiles in YAML. Import of a subset of resticprofile configuration for migration. | 1.0 (YAML), L (resticprofile) |
 | FR-PF-08 | Profile groups with sequential or parallel run. | 1.0 |
+| FR-PF-09 | A profile declares parameters. A parameter has a name, a kind, a required flag, a default value and a description. The name matches `^[a-z][a-z0-9_]{0,63}$` and is unique in the profile. The kind is `text` or `secret`. Only a `text` parameter has a default value (ADR-0047). | M |
+| FR-PF-10 | A host holds parameter values by name, and every profile of the host reads them. A plan can override a value. The CP resolves a value in the order plan, host, default. A `text` value expands as `{{param.<name>}}` in paths, excludes, exclude files and tags, and not in retention and check fields. A `secret` value is a reference to a secret of the purpose `hook_secret`. A script variable of the kind "profile parameter" names a parameter. | M |
+| FR-PF-11 | Each saved plan has a value for each required parameter. The CP refuses a plan save with a missing value (`parameter_missing`). It refuses a profile save or a host value change that leaves a plan without a required value (`parameter_missing_in_plans`). A value of the wrong kind gives `parameter_kind_mismatch`. The job builder checks the values again. | M |
+| FR-PF-12 | A Viewer does not see `text` parameter values on hosts and plans (FR-HK-12). The CP sends a parameter value in a script variable as a secret value, and the agent masks it in the logs. Previews, job details and audit diffs mask the values, and the audit keeps the names and the identifiers of the secrets only. A `secret` parameter never goes into a template field (FR-AG-06). | M |
 
 ### 3.7. Scheduler and queue
 
 | ID | Requirement | Priority |
 |---|---|---|
-| FR-SC-01 | Cron schedules with time zones and DST handling as in decision D8. The schedule belongs to the plan. | M |
+| FR-SC-01 | Cron schedules with time zones and DST handling as in decision D8. The schedule belongs to the plan. A plan binds a profile, a host and a repository (ADR-0047). | M |
 | FR-SC-02 | Job creation is idempotent: unique key `(plan_id, fire_time)`. | M |
 | FR-SC-03 | Persistent queue in PostgreSQL: `SKIP LOCKED`, lease, retries with exponential delay, dead-letter state. | M |
 | FR-SC-04 | Serialization for each repository. Exclusive operations (`forget`, `prune`, `check`, `tag`, `rewrite`, `repair`, `key`) are barriers. While they run, no backup or read operation starts on that repository, and the opposite. More than one backup can run on one repository at the same time, up to a configurable limit. | M |
