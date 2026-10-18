@@ -1,42 +1,86 @@
-import type { Agent, Profile, Repository, RepositoryBackendKind } from '#lib/api/index.ts';
-import type { RecordOption, RecordPart } from '#lib/components/ui/index.ts';
+import type { Profile } from '#lib/api/index.ts';
+import type { FilterOption, RecordOption, RecordPart } from '#lib/components/ui/index.ts';
 import { t } from '#lib/i18n/index.ts';
 import type { MessageKey } from '#lib/i18n/index.ts';
 
-const BACKEND_TAGS: Record<RepositoryBackendKind, MessageKey> = {
-	s3: 'profilePicker.backend.s3',
-	rest: 'profilePicker.backend.rest',
-	local: 'profilePicker.backend.local'
-};
+type ProfileRef = Pick<Profile, 'id' | 'name' | 'paths' | 'retention'>;
 
-type ProfileRef = Pick<Profile, 'id' | 'name' | 'repository_id'>;
-type RepositoryRef = Pick<Repository, 'id' | 'name' | 'backend' | 'maintenance_agent_id'>;
-type AgentRef = Pick<Agent, 'id' | 'hostname'>;
+const RETENTION: [keyof NonNullable<Profile['retention']>, MessageKey][] = [
+	['keep_last', 'profiles.short.last'],
+	['keep_hourly', 'profiles.short.hourly'],
+	['keep_daily', 'profiles.short.daily'],
+	['keep_weekly', 'profiles.short.weekly'],
+	['keep_monthly', 'profiles.short.monthly'],
+	['keep_yearly', 'profiles.short.yearly']
+];
 
-/** The repository of a profile, its backend and, for a local path, the host that holds it. */
-export function profileDescription(
-	profile: ProfileRef,
-	repositories: readonly RepositoryRef[],
-	agents: readonly AgentRef[]
-): RecordPart[] {
-	const repository = repositories.find((item) => item.id === profile.repository_id);
-	if (!repository) return [];
-	const parts: RecordPart[] = [repository.name, { tag: t(BACKEND_TAGS[repository.backend.kind]) }];
-	if (repository.backend.kind === 'local') {
-		const host = agents.find((agent) => agent.id === repository.maintenance_agent_id);
-		parts.push(host ? t('profilePicker.host', { name: host.hostname }) : t('profilePicker.noHost'));
-	}
-	return parts;
+/** Every path of a profile, in the order that the editor shows them. */
+export function profilePathList(profile: ProfileRef): string[] {
+	const paths = profile.paths;
+	return [
+		...(paths?.all ?? []),
+		...(paths?.windows ?? []),
+		...(paths?.linux ?? []),
+		...(paths?.macos ?? [])
+	];
 }
 
-export function profileOptions(
-	profiles: readonly ProfileRef[],
-	repositories: readonly RepositoryRef[],
-	agents: readonly AgentRef[]
-): RecordOption[] {
+/** The first path of a profile and the count of its paths, or null when it has none. */
+export function profilePaths(profile: ProfileRef): { first: string; total: number } | null {
+	const all = profilePathList(profile);
+	return all.length > 0 ? { first: all[0], total: all.length } : null;
+}
+
+/** The first path with the count of the others, for example "/srv +2". */
+export function profilePathText(profile: ProfileRef): string {
+	const path = profilePaths(profile);
+	if (!path) return '';
+	return path.total > 1 ? `${path.first} +${path.total - 1}` : path.first;
+}
+
+/** The retention rules in one short line, for example "7 d · 2 wk · 4 mo". */
+export function profileRetention(profile: ProfileRef): string {
+	const retention = profile.retention;
+	if (!retention) return '';
+	const parts = RETENTION.filter(([key]) => Number(retention[key] ?? 0) > 0).map(([key, message]) =>
+		t(message, { count: Number(retention[key]) })
+	);
+	if (retention.keep_within) {
+		parts.push(t('profiles.short.within', { value: retention.keep_within }));
+	}
+	return parts.join(' · ');
+}
+
+/**
+ * The secondary line of a profile: its path and its retention. A profile has no repository
+ * (ADR-0047); the parameters join this line in the next part of the change.
+ */
+export function profileDescription(profile: ProfileRef): RecordPart[] {
+	return [profilePathText(profile), profileRetention(profile)].filter(
+		(part): part is string => part !== ''
+	);
+}
+
+export function profileOptions(profiles: readonly ProfileRef[]): RecordOption[] {
 	return profiles.map((profile) => ({
 		value: profile.id,
 		label: profile.name,
-		description: profileDescription(profile, repositories, agents)
+		description: profileDescription(profile),
+		// The line shows the first path only, but the search finds each of them.
+		search: profilePathList(profile)
 	}));
+}
+
+/** Gives profile facet values the profile name and its secondary line. */
+export function withProfiles(
+	options: readonly FilterOption[],
+	profiles: readonly ProfileRef[]
+): FilterOption[] {
+	const byKey = new Map(profiles.map((profile) => [profile.id, profile]));
+	return options.map((option) => {
+		const profile = byKey.get(option.value);
+		return profile
+			? { ...option, label: profile.name, description: profileDescription(profile) }
+			: option;
+	});
 }

@@ -4,8 +4,11 @@
  */
 import { render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '#lib/api/index.ts';
+import { setLocale } from '#lib/i18n/index.ts';
+
+afterEach(() => setLocale('en'));
 import PlanEditor from './PlanEditor.svelte';
 
 const mocks = vi.hoisted(() => ({
@@ -111,6 +114,16 @@ async function pickProfile(user: ReturnType<typeof userEvent.setup>, name: strin
 	await user.click(label.closest('[role="option"]')!);
 }
 
+async function pickRepository(
+	user: ReturnType<typeof userEvent.setup>,
+	name: string
+): Promise<void> {
+	await screen.findByRole('heading', { level: 1 });
+	await user.click(input('#plan-repository'));
+	const label = await screen.findByText(name, { selector: '.rh-record__option-label' });
+	await user.click(label.closest('[role="option"]')!);
+}
+
 async function openHosts(user: ReturnType<typeof userEvent.setup>): Promise<HTMLElement> {
 	const host = await waitFor(() => {
 		const field = input('#plan-agent');
@@ -128,8 +141,8 @@ describe('the plan page', () => {
 		session.role = 'admin';
 		mocks.listPlans.mockResolvedValue([plan()]);
 		mocks.listProfiles.mockResolvedValue([
-			{ id: 'p_1', name: 'web-daily', repository_id: 'r_1' },
-			{ id: 'p_2', name: 'db-hourly', repository_id: 'r_1' }
+			{ id: 'p_1', name: 'web-daily', paths: { all: ['/srv'] }, retention: null },
+			{ id: 'p_2', name: 'db-hourly', paths: { all: ['/var/backups'] }, retention: null }
 		]);
 		mocks.listAgents.mockResolvedValue([
 			agent('a_1', 'win-fs01'),
@@ -140,7 +153,8 @@ describe('the plan page', () => {
 				id: 'r_1',
 				name: 'repo-a',
 				backend: { kind: 'rest', endpoint: 'https://rest.example.net/a' },
-				maintenance_agent_id: 'a_1'
+				maintenance_agent_id: 'a_1',
+				initialized: true
 			}
 		]);
 		mocks.previewSchedule.mockResolvedValue({ time_zone: 'Europe/Berlin', runs: [] });
@@ -158,12 +172,14 @@ describe('the plan page', () => {
 		// A new plan starts with the browser zone, so the test replaces it.
 		await user.clear(input('#plan-time-zone'));
 		await user.type(input('#plan-time-zone'), 'Europe/Berlin');
+		document.querySelector('form.record')?.addEventListener('submit', () => console.log('SUBMIT2'));
 		await user.click(screen.getByRole('button', { name: 'Save' }));
 
 		await waitFor(() =>
 			expect(mocks.createPlan).toHaveBeenCalledWith({
 				name: 'nightly-web',
 				profile_id: 'p_1',
+				repository_id: 'r_1',
 				agent_id: 'a_1',
 				cron: '0 2 * * *',
 				time_zone: 'Europe/Berlin',
@@ -176,15 +192,65 @@ describe('the plan page', () => {
 		expect(mocks.goto).toHaveBeenCalledWith('/(app)/plans');
 	});
 
-	it('fr_sc_01 shows the repository of each profile in the profile field', async () => {
+	it('shows the sentence of the plans list on the page of a new plan and a stored plan', async () => {
+		const sentence = 'A plan backs up a profile from a host to a repository on a schedule.';
+		const first = render(PlanEditor);
+		expect(await screen.findByText(sentence)).toBeInTheDocument();
+		first.unmount();
+
+		render(PlanEditor, { planId: 'pl_1' });
+		await screen.findByRole('heading', { level: 1, name: 'nightly-web' });
+		expect(screen.getByText(sentence)).toBeInTheDocument();
+	});
+
+	it('shows the effective objective with the unit of the locale', async () => {
+		setLocale('ru');
+		render(PlanEditor, { planId: 'pl_1' });
+		await screen.findByRole('heading', { level: 1, name: 'nightly-web' });
+		expect((await screen.findAllByText(/Действует: 26 ч/)).length).toBeGreaterThan(0);
+		expect(screen.queryByText(/26 h/)).not.toBeInTheDocument();
+	});
+
+	it('adr_0047 shows the profile and the repository of a stored plan', async () => {
 		const user = userEvent.setup();
 		render(PlanEditor, { planId: 'pl_1' });
 
 		await screen.findByRole('heading', { level: 1, name: 'nightly-web' });
-		expect(input('#plan-profile')).toHaveTextContent(/web-daily\s*· repo-a/);
-		await user.click(input('#plan-profile'));
-		const label = await screen.findByText('db-hourly', { selector: '.rh-record__option-label' });
-		expect(label.closest('[role="option"]')).toHaveTextContent(/repo-a\s*REST/);
+		expect(input('#plan-profile')).toHaveTextContent(/web-daily\s*· \/srv/);
+		expect(input('#plan-repository')).toHaveTextContent(
+			/repo-a\s*· REST · https:\/\/rest.example.net\/a/
+		);
+		await user.click(input('#plan-repository'));
+		expect(optionOf('repo-a')).toHaveTextContent('REST');
+		expect(optionOf('repo-a')).toHaveTextContent('https://rest.example.net/a');
+		expect(screen.getByText('1 repository')).toBeInTheDocument();
+	});
+
+	it('adr_0047 sends an empty repository and shows the refusal of the server', async () => {
+		const user = userEvent.setup();
+		mocks.listRepositories.mockResolvedValue([]);
+		mocks.createPlan.mockRejectedValue(
+			new ApiError({
+				status: 400,
+				code: 'invalid_argument',
+				title: 'Bad Request',
+				field: 'repository_id',
+				reason: 'empty'
+			})
+		);
+		render(PlanEditor);
+
+		await screen.findByRole('heading', { level: 1, name: 'New plan' });
+		await user.clear(input('#plan-name'));
+		await user.type(input('#plan-name'), 'nightly-web');
+		await user.type(input('#plan-cron'), '0 2 * * *');
+		await user.click(screen.getByRole('button', { name: 'Save' }));
+
+		await waitFor(() =>
+			expect(mocks.createPlan).toHaveBeenCalledWith(expect.objectContaining({ repository_id: '' }))
+		);
+		expect(await screen.findByText('This field is required.')).toBeInTheDocument();
+		expect(input('#plan-repository')).toHaveAttribute('aria-invalid', 'true');
 	});
 
 	it('fr_sc_01 offers only the active hosts with their state and platform', async () => {
@@ -200,28 +266,26 @@ describe('the plan page', () => {
 
 	it('ac_rp_07 offers only the repository host for a local repository', async () => {
 		mocks.listAgents.mockResolvedValue([agent('a_1', 'win-fs01'), agent('a_3', 'nas-01')]);
-		mocks.listProfiles.mockResolvedValue([
-			{ id: 'p_1', name: 'web-daily', repository_id: 'r_1' },
-			{ id: 'p_2', name: 'nas-files', repository_id: 'r_2' }
-		]);
 		mocks.listRepositories.mockResolvedValue([
 			{
 				id: 'r_1',
 				name: 'repo-a',
 				backend: { kind: 'rest', endpoint: 'https://rest.example.net/a' },
-				maintenance_agent_id: 'a_1'
+				maintenance_agent_id: 'a_1',
+				initialized: true
 			},
 			{
 				id: 'r_2',
 				name: 'nas-local',
 				backend: { kind: 'local', path: '/srv/restic' },
-				maintenance_agent_id: 'a_3'
+				maintenance_agent_id: 'a_3',
+				initialized: true
 			}
 		]);
 		const user = userEvent.setup();
 		render(PlanEditor);
 
-		await pickProfile(user, 'nas-files');
+		await pickRepository(user, 'nas-local');
 		const host = await openHosts(user);
 		await waitFor(() => expect(host).toHaveTextContent('nas-01'));
 		expect(hostOptions()).toEqual(['win-fs01', 'nas-01']);
@@ -239,7 +303,8 @@ describe('the plan page', () => {
 				id: 'r_1',
 				name: 'nas-local',
 				backend: { kind: 'local', path: '/srv/restic' },
-				maintenance_agent_id: 'a_3'
+				maintenance_agent_id: 'a_3',
+				initialized: true
 			}
 		]);
 		const user = userEvent.setup();
@@ -264,28 +329,26 @@ describe('the plan page', () => {
 	});
 
 	it('ac_rp_07 clears the host when the local repository host is not active', async () => {
-		mocks.listProfiles.mockResolvedValue([
-			{ id: 'p_1', name: 'web-daily', repository_id: 'r_1' },
-			{ id: 'p_2', name: 'nas-files', repository_id: 'r_2' }
-		]);
 		mocks.listRepositories.mockResolvedValue([
 			{
 				id: 'r_1',
 				name: 'repo-a',
 				backend: { kind: 'rest', endpoint: 'https://rest.example.net/a' },
-				maintenance_agent_id: 'a_1'
+				maintenance_agent_id: 'a_1',
+				initialized: true
 			},
 			{
 				id: 'r_2',
 				name: 'nas-local',
 				backend: { kind: 'local', path: '/srv/restic' },
-				maintenance_agent_id: 'a_2'
+				maintenance_agent_id: 'a_2',
+				initialized: true
 			}
 		]);
 		const user = userEvent.setup();
 		render(PlanEditor);
 
-		await pickProfile(user, 'nas-files');
+		await pickRepository(user, 'nas-local');
 		const host = await openHosts(user);
 
 		expect(host).not.toHaveTextContent('win-fs01');
@@ -310,6 +373,7 @@ describe('the plan page', () => {
 			expect(mocks.updatePlan).toHaveBeenCalledWith('pl_1', {
 				name: 'nightly-web',
 				profile_id: 'p_2',
+				repository_id: 'r_1',
 				agent_id: 'a_1',
 				cron: '0 2 * * *',
 				time_zone: 'Europe/Berlin',

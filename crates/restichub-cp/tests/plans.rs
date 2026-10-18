@@ -330,24 +330,35 @@ async fn adr_0047_a_plan_without_a_repository_is_refused() {
     let cookie = seed_session(db.database(), tenant, "operator", "operator").await;
     let (repository_id, profile_id, agent_id) = plan_fixture(db.database(), tenant).await;
 
-    for value in [Value::Null, json!("")] {
-        let mut body = plan_body("no-repository", &profile_id, &agent_id, &repository_id);
-        if value.is_null() {
-            body.as_object_mut()
-                .expect("an object")
-                .remove("repository_id");
-        } else {
-            body["repository_id"] = value.clone();
-        }
+    let mut absent = plan_body("no-repository", &profile_id, &agent_id, &repository_id);
+    absent
+        .as_object_mut()
+        .expect("an object")
+        .remove("repository_id");
+    let mut blank = plan_body("no-repository", &profile_id, &agent_id, &repository_id);
+    blank["repository_id"] = json!("");
+    for body in [absent, blank] {
         let (status, _, problem) = send(
             &app,
             request("POST", "/api/v1/plans", Some(&cookie), Some(body)),
         )
         .await;
-        assert_eq!(status, StatusCode::BAD_REQUEST, "{value}: {problem}");
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
         assert_eq!(problem["field"], "repository_id", "{problem}");
         assert_eq!(problem["reason"], "empty", "{problem}");
     }
+
+    // A null is a type error of the schema, and the extractor names the field (ADR-0023).
+    let mut null = plan_body("no-repository", &profile_id, &agent_id, &repository_id);
+    null["repository_id"] = Value::Null;
+    let (status, _, problem) = send(
+        &app,
+        request("POST", "/api/v1/plans", Some(&cookie), Some(null)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
+    assert_eq!(problem["field"], "repository_id", "{problem}");
+    assert_eq!(problem["reason"], "invalid_body", "{problem}");
 
     db.cleanup().await;
 }

@@ -11,8 +11,8 @@ const usage = {
 	blocked_by: 'repository_in_use' as const,
 	blockers: {
 		items: [
-			{ kind: 'profile' as const, id: 'p1', name: 'Alpha' },
-			{ kind: 'profile' as const, id: 'p2', name: 'Beta' }
+			{ kind: 'plan' as const, id: 'p1', name: 'Alpha' },
+			{ kind: 'plan' as const, id: 'p2', name: 'Beta' }
 		],
 		total: 12
 	}
@@ -22,9 +22,10 @@ describe('delete check', () => {
 	it('builds the reason, the links and the count of the hidden records', () => {
 		const view = fromUsage(usage);
 		expect(view?.code).toBe('repository_in_use');
-		expect(view?.reason).toMatch(/Profiles use this repository/);
+		expect(view?.reason).toMatch(/Plans use this repository/);
 		expect(view?.links.map((link) => link.label)).toEqual(['Alpha', 'Beta']);
-		expect(view?.links[0].href).toBe('/(app)/profiles/p1');
+		expect(view?.links[0].href).toBe('/(app)/plans/p1');
+		expect(view?.links[0].kind).toBe('Plan');
 		expect(view?.more).toBe(10);
 	});
 

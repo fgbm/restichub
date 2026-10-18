@@ -16,11 +16,12 @@
 	} from '#lib/api/index.ts';
 	import HostPicker from './HostPicker.svelte';
 	import ProfilePicker from './ProfilePicker.svelte';
+	import RepositoryPicker from './RepositoryPicker.svelte';
 	import ProfileSection from './ProfileSection.svelte';
 	import { RecordPage, SummaryPanel } from './layout/index.ts';
 	import { Alert, Button, ConfirmDialog, Select, StatusPill, TextField } from './ui/index.ts';
 	import type { KeyValueItem, SelectOption } from './ui/index.ts';
-	import { formatLocalTime, formatTimeInZone } from '#lib/format.ts';
+	import { formatHours, formatLocalTime, formatTimeInZone } from '#lib/format.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
 	import type { HostRef } from '#lib/host-picker.ts';
@@ -74,6 +75,7 @@
 	let nameEdited = $state(false);
 	let planNames = $state<string[]>([]);
 	let profileId = $state('');
+	let repositoryId = $state('');
 	let agentId = $state('');
 	let cron = $state('');
 	let timeZone = $state('');
@@ -89,16 +91,15 @@
 	const allOpen = $derived(SECTIONS.every((key) => open[key]));
 
 	function repositoryOf(id: string): Repository | undefined {
-		const repositoryId = profiles.find((profile) => profile.id === id)?.repository_id;
-		return repositories.find((item) => item.id === repositoryId);
+		return repositories.find((item) => item.id === id);
 	}
 	// A local path is on the disk of the repository host only, so the plan runs there (FR-RP-10).
 	function localHostOf(item: Repository | undefined): string | null {
 		return item?.backend.kind === 'local' ? (item.maintenance_agent_id ?? '') : null;
 	}
-	const repository = $derived(repositoryOf(profileId));
+	const repository = $derived(repositoryOf(repositoryId));
 	const localHost = $derived(localHostOf(repository));
-	// The stored host of a plan stays an option, so the field shows the real value and its error
+	// A stored host of a plan stays an option, so the field shows the real value and its error
 	// instead of a silent move to another host.
 	const hostChoices = $derived(
 		agents.filter((agent) => agent.status === 'active' || agent.id === existing?.agent_id)
@@ -117,7 +118,17 @@
 	);
 
 	const stateKey = $derived(
-		JSON.stringify([name, profileId, agentId, cron, timeZone, policy, enabled, rpoHours])
+		JSON.stringify([
+			name,
+			profileId,
+			repositoryId,
+			agentId,
+			cron,
+			timeZone,
+			policy,
+			enabled,
+			rpoHours
+		])
 	);
 	const dirty = $derived(!loading && stateKey !== baseline);
 
@@ -126,30 +137,26 @@
 	const repositoryName = $derived(repository?.name ?? '');
 	const localHostName = $derived(agents.find((agent) => agent.id === localHost)?.hostname ?? '');
 
-	function selectProfile(id: string): void {
+	// The host field follows the repository: a local path runs on one host (AC-RP-06, AC-RP-07).
+	function selectRepository(id: string): void {
 		const host = localHostOf(repositoryOf(id));
 		if (host === null) return;
 		const active = agents.some((agent) => agent.id === host && agent.status === 'active');
 		agentId = active ? host : '';
 	}
 
-	function describeHours(seconds: number): string {
-		const hours = seconds / 3600;
-		return `${Number.isInteger(hours) ? hours : hours.toFixed(1)} h`;
-	}
-
 	const summaries = $derived<Record<SectionKey, { text: string; state: SummaryState }>>({
 		basics: name ? { text: name, state: 'on' } : { text: t('pl.summary.noName'), state: 'warn' },
 		source:
-			profileName && hostName
-				? { text: `${profileName} · ${hostName}`, state: 'on' }
+			profileName && repositoryName && hostName
+				? { text: `${profileName} · ${repositoryName} · ${hostName}`, state: 'on' }
 				: { text: t('pl.summary.noSource'), state: 'warn' },
 		schedule:
 			cron.trim() && timeZone.trim()
 				? { text: `${describeCron(cron, t)} · ${timeZone}`, state: 'on' }
 				: { text: t('pl.summary.noSchedule'), state: 'warn' },
 		objective: rpoHours.trim()
-			? { text: `${rpoHours.trim()} h`, state: 'on' }
+			? { text: t('duration.h', { h: rpoHours.trim() }), state: 'on' }
 			: { text: t('pl.summary.rpoDefault'), state: 'off' }
 	});
 
@@ -168,17 +175,19 @@
 			value: t(enabled ? 'plans.enabled' : 'plans.disabled')
 		},
 		{ key: 'profile', label: t('plans.profile'), value: profileName || t('common.none') },
+		{
+			key: 'repository',
+			label: t('pl.side.repository'),
+			value: repositoryName || t('common.none')
+		},
 		{ key: 'host', label: t('plans.host'), value: hostName || t('common.none') },
-		...(repositoryName
-			? [{ key: 'repository', label: t('pl.side.repository'), value: repositoryName }]
-			: []),
 		{ key: 'schedule', label: t('plans.schedule'), value: summaries.schedule.text },
 		{ key: 'policy', label: t('plans.missedRunPolicy'), value: describeMissedRunPolicy(policy, t) },
 		{
 			key: 'rpo',
 			label: t('plans.rpoColumn'),
 			value: existing
-				? `${summaries.objective.text} · ${t('plans.rpoEffective', { value: describeHours(existing.effective_rpo_seconds) })}`
+				? `${summaries.objective.text} · ${t('plans.rpoEffective', { value: formatHours(existing.effective_rpo_seconds) })}`
 				: summaries.objective.text
 		},
 		{
@@ -232,6 +241,7 @@
 				existing = found;
 				name = found.name;
 				profileId = found.profile_id;
+				repositoryId = found.repository_id;
 				agentId = found.agent_id;
 				cron = found.cron;
 				timeZone = found.time_zone;
@@ -240,6 +250,9 @@
 				rpoHours = found.rpo_seconds ? String(found.rpo_seconds / 3600) : '';
 			} else {
 				profileId = profiles[0]?.id ?? '';
+				// A repository without an init step holds no snapshot, so the form prefers another.
+				repositoryId =
+					repositories.find((item) => item.initialized)?.id ?? repositories[0]?.id ?? '';
 				agentId = hostChoices.find((agent) => hostReason(agent) === null)?.id ?? '';
 				timeZone = browserTimeZone();
 				name = defaultPlanName(hostName, profileName, planNames);
@@ -300,6 +313,7 @@
 		const target: [string, SectionKey][] = [
 			['name', 'basics'],
 			['profile_id', 'source'],
+			['repository_id', 'source'],
 			['agent_id', 'source'],
 			['cron', 'schedule'],
 			['time_zone', 'schedule'],
@@ -328,6 +342,7 @@
 		try {
 			const body = {
 				profile_id: profileId,
+				repository_id: repositoryId,
 				agent_id: agentId,
 				cron,
 				time_zone: timeZone,
@@ -371,7 +386,7 @@
 
 <RecordPage
 	title={planId ? (existing?.name ?? '') : t('pl.newTitle')}
-	description={t(planId ? 'plans.editDescription' : 'plans.addDescription')}
+	description={t('plans.description')}
 	{loading}
 	error={loadError}
 	onsubmit={() => void save()}
@@ -422,22 +437,28 @@
 			<ProfilePicker
 				id="plan-profile"
 				{profiles}
-				{repositories}
-				{agents}
 				error={fieldError(formProblem, 'profile_id')}
 				bind:value={profileId}
-				onchange={selectProfile}
 				required
 			/>
-			<HostPicker
-				id="plan-agent"
-				hosts={hostChoices}
-				reason={hostReason}
-				error={fieldError(formProblem, 'agent_id') ?? hostMismatch}
-				bind:value={agentId}
+			<RepositoryPicker
+				id="plan-repository"
+				{repositories}
+				{agents}
+				error={fieldError(formProblem, 'repository_id')}
+				bind:value={repositoryId}
+				onchange={selectRepository}
 				required
 			/>
 		</div>
+		<HostPicker
+			id="plan-agent"
+			hosts={hostChoices}
+			reason={hostReason}
+			error={fieldError(formProblem, 'agent_id') ?? hostMismatch}
+			bind:value={agentId}
+			required
+		/>
 		{#if repositoryName && localHost === ''}
 			<p class="muted">{t('pl.source.localNoHost', { name: repositoryName })}</p>
 		{:else if repositoryName && localHost !== null}
@@ -548,7 +569,7 @@
 			id="plan-rpo"
 			label={t('plans.rpo')}
 			help={existing
-				? `${t('plans.rpoHint')} ${t('plans.rpoEffective', { value: describeHours(existing.effective_rpo_seconds) })}`
+				? `${t('plans.rpoHint')} ${t('plans.rpoEffective', { value: formatHours(existing.effective_rpo_seconds) })}`
 				: t('plans.rpoHint')}
 			error={fieldError(formProblem, 'rpo_seconds')}
 			inputmode="decimal"

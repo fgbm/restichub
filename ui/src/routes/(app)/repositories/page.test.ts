@@ -23,6 +23,8 @@ const HOST = {
 const mocks = vi.hoisted(() => ({
 	listRepositories: vi.fn(),
 	listAgents: vi.fn(),
+	repositoryUsage: vi.fn(),
+	deleteRepository: vi.fn(),
 	runMaintenance: vi.fn(),
 	unlockAllRepository: vi.fn(),
 	initRepository: vi.fn(),
@@ -60,6 +62,8 @@ vi.mock('#lib/api/index.ts', async (importOriginal) => {
 			...actual.service,
 			listRepositories: mocks.listRepositories,
 			listAgents: mocks.listAgents,
+			repositoryUsage: mocks.repositoryUsage,
+			deleteRepository: mocks.deleteRepository,
 			runMaintenance: mocks.runMaintenance,
 			unlockAllRepository: mocks.unlockAllRepository,
 			initRepository: mocks.initRepository,
@@ -99,6 +103,10 @@ describe('the Repositories screen maintenance', () => {
 		session.role = 'admin';
 		mocks.listRepositories.mockResolvedValue([repository()]);
 		mocks.listAgents.mockResolvedValue([{ id: 'a_1', hostname: 'nas-backup', ...HOST }]);
+		mocks.repositoryUsage.mockResolvedValue({
+			blocked_by: null,
+			blockers: { items: [], total: 0 }
+		});
 	});
 
 	it('fr_rp_08 warns about a repository without a maintenance host', async () => {
@@ -293,6 +301,49 @@ describe('the host of an init and an access test', () => {
 		).toHaveAttribute('href', '/repositories/r_1#repo-agent');
 		expect(within(dialog).getByRole('button', { name: 'Start' })).toBeDisabled();
 		expect(mocks.initRepository).not.toHaveBeenCalled();
+	});
+
+	it('ac_rp_12 blocks the delete of a repository that plans use', async () => {
+		mocks.listRepositories.mockResolvedValue([repository()]);
+		mocks.repositoryUsage.mockResolvedValue({
+			blocked_by: 'repository_in_use',
+			blockers: {
+				items: [
+					{ kind: 'plan', id: 'pl_1', name: 'nightly-web' },
+					{ kind: 'plan', id: 'pl_2', name: 'nightly-db' }
+				],
+				total: 4
+			}
+		});
+		const dialog = await openAction('Delete repository');
+
+		expect(within(dialog).getByText(/Plans use this repository/)).toBeInTheDocument();
+		expect(within(dialog).getByRole('link', { name: 'nightly-web' })).toHaveAttribute(
+			'href',
+			'/plans/pl_1'
+		);
+		expect(within(dialog).getAllByText('Plan', { exact: true })).toHaveLength(2);
+		expect(within(dialog).getByText('and 2 more')).toBeInTheDocument();
+		expect(mocks.deleteRepository).not.toHaveBeenCalled();
+		const confirm = within(dialog).getByRole('button', { name: 'Delete repository' });
+		expect(confirm).toBeDisabled();
+		expect(confirm.parentElement).toHaveAttribute('title', 'Remove the cause above first.');
+	});
+
+	it('ac_rp_12 deletes a repository that no plan uses', async () => {
+		mocks.listRepositories.mockResolvedValue([repository()]);
+		mocks.repositoryUsage.mockResolvedValue({
+			blocked_by: null,
+			blockers: { items: [], total: 0 }
+		});
+		mocks.deleteRepository.mockResolvedValue(undefined);
+		const dialog = await openAction('Delete repository');
+
+		const confirm = await within(dialog).findByRole('button', { name: 'Delete repository' });
+		await waitFor(() => expect(confirm).toBeEnabled());
+		await userEvent.click(confirm);
+
+		await waitFor(() => expect(mocks.deleteRepository).toHaveBeenCalledWith('r_1'));
 	});
 
 	it('fr_rp_08 lets an access test of an S3 repository choose another host', async () => {

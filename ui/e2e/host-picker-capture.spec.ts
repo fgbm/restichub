@@ -65,7 +65,8 @@ for (const [labels, locale] of [
 		await page.screenshot({ path: `${out}/1-plan-host-open-${locale}.png` });
 		await page.keyboard.press('Escape');
 
-		await pickRecord(page, page.locator('#plan-profile'), 'nas-files');
+		// A local repository locks the host of the plan (ADR-0046, AC-RP-07).
+		await pickRecord(page, page.locator('#plan-repository'), 'nas-local');
 		await page.locator('#plan-agent').click();
 		await page.getByRole('listbox').getByRole('option').first().waitFor();
 		await page.keyboard.type('prod');

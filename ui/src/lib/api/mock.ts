@@ -78,6 +78,7 @@ import type {
 	PlanResponse,
 	PlatformUser,
 	PlatformUserRecord,
+	PreviewRequest,
 	PreviewResponse,
 	PreviewScheduleRequest,
 	Profile,
@@ -126,8 +127,11 @@ function nextFireTime(cron: string, timeZone: string): string {
 	return nextRunsFromCron(cron, timeZone, 1)[0] ?? new Date(Date.now() + 60 * 60_000).toISOString();
 }
 
-/// The paths of a profile for one operating system: `all` plus the paths of that system.
-function pathsForOs(profile: Profile, os: string): string[] {
+/// The paths of a profile or a draft for one operating system: `all` plus the paths of that system.
+function pathsForOs(
+	profile: { paths?: { all?: string[]; windows?: string[]; linux?: string[]; macos?: string[] } },
+	os: string
+): string[] {
 	const paths = profile.paths ?? { all: [], windows: [], linux: [], macos: [] };
 	const extra =
 		os === 'windows'
@@ -426,7 +430,6 @@ function makeProfiles(): Profile[] {
 		{
 			id: 'p_1',
 			name: 'web-daily',
-			repository_id: 'r_1',
 			paths: { all: ['/srv'], windows: [], linux: ['/etc'], macos: [] },
 			excludes: ['*.tmp', 'node_modules'],
 			exclude_files: [],
@@ -450,7 +453,6 @@ function makeProfiles(): Profile[] {
 		{
 			id: 'p_2',
 			name: 'win-files',
-			repository_id: 'r_1',
 			paths: { all: [], windows: ['C:\\Data'], linux: [], macos: [] },
 			excludes: [],
 			exclude_files: [],
@@ -474,7 +476,6 @@ function makeProfiles(): Profile[] {
 		{
 			id: 'p_3',
 			name: 'db-nightly',
-			repository_id: 'r_1',
 			paths: { all: ['/var/backups/postgres'], windows: [], linux: ['/etc'], macos: [] },
 			excludes: [],
 			exclude_files: [],
@@ -498,12 +499,11 @@ function makeProfiles(): Profile[] {
 		.flatMap((item) =>
 			backendsSample() && item.id === 'p_2'
 				? [
-						{ ...item, repository_id: 'r_3' },
+						item,
 						{
 							...item,
 							id: 'p_4',
 							name: 'nas-files',
-							repository_id: 'r_2',
 							paths: { all: ['/srv/files'], windows: [], linux: [], macos: [] }
 						}
 					]
@@ -1437,15 +1437,13 @@ export class MockApiService {
 
 	async repositoryUsage(id: string): Promise<UsageView> {
 		if (!this.repositories.some((item) => item.id === id)) throw notFound();
-		const profiles = this.profiles.filter((item) => item.repository_id === id);
-		if (profiles.length === 0) return { blocked_by: null, blockers: { items: [], total: 0 } };
+		const plans = this.plans.filter((item) => item.repository_id === id);
+		if (plans.length === 0) return { blocked_by: null, blockers: { items: [], total: 0 } };
 		return {
 			blocked_by: 'repository_in_use',
 			blockers: {
-				items: profiles
-					.slice(0, 10)
-					.map((item) => ({ kind: 'profile', id: item.id, name: item.name })),
-				total: profiles.length
+				items: plans.slice(0, 10).map((item) => ({ kind: 'plan', id: item.id, name: item.name })),
+				total: plans.length
 			}
 		};
 	}
@@ -1972,7 +1970,6 @@ export class MockApiService {
 		const profile: Profile = {
 			id: `p_${this.profiles.length + 1}`,
 			name: request.name,
-			repository_id: request.repository_id,
 			paths: request.paths ?? { all: [], windows: [], linux: [], macos: [] },
 			excludes: request.excludes ?? [],
 			exclude_files: request.exclude_files ?? [],
@@ -2003,7 +2000,6 @@ export class MockApiService {
 		const updated: Profile = {
 			...current,
 			name: request.name ?? current.name,
-			repository_id: request.repository_id,
 			paths: request.paths ?? { all: [], windows: [], linux: [], macos: [] },
 			excludes: request.excludes ?? [],
 			exclude_files: request.exclude_files ?? [],
@@ -2100,6 +2096,22 @@ export class MockApiService {
 		}
 	}
 
+	/// The repository of a plan request (ADR-0047). An absent value is refused, as the server does.
+	private planRepository(id: string | null | undefined): Repository {
+		if (!id) throw problemError('invalid_argument', 'repository_id', 'empty');
+		const repository = this.repositories.find((item) => item.id === id);
+		if (!repository) throw problemError('invalid_argument', 'repository_id', 'unknown');
+		return repository;
+	}
+
+	/// A local path lies on the disk of one host, so a plan of it runs on that host only (ADR-0046).
+	private checkRepositoryHost(repository: Repository, agent: Agent): void {
+		if (repository.backend.kind !== 'local') return;
+		if (repository.maintenance_agent_id !== agent.id) {
+			throw problemError('invalid_argument', 'agent_id', 'not_repository_host');
+		}
+	}
+
 	async listSecrets(): Promise<Secret[]> {
 		return this.scriptMock.listSecrets();
 	}
@@ -2158,10 +2170,12 @@ export class MockApiService {
 	async createPlan(request: CreatePlanRequest): Promise<PlanResponse> {
 		const profile = this.profiles.find((item) => item.id === request.profile_id);
 		const agent = this.agents.find((item) => item.id === request.agent_id);
+		const repository = this.planRepository(request.repository_id);
 		if (!profile) throw problemError('invalid_argument', 'profile_id', 'unknown');
 		if (!agent || agent.status !== 'active') {
 			throw problemError('invalid_argument', 'agent_id', 'unknown');
 		}
+		this.checkRepositoryHost(repository, agent);
 		this.checkScripts(profile, agent);
 		const now = new Date().toISOString();
 		const plan: Plan = {
@@ -2169,7 +2183,7 @@ export class MockApiService {
 			name: request.name,
 			profile_id: request.profile_id,
 			profile_name: profile.name,
-			repository_id: profile.repository_id,
+			repository_id: repository.id,
 			agent_id: request.agent_id,
 			agent_hostname: agent.hostname,
 			cron: request.cron,
@@ -2193,10 +2207,12 @@ export class MockApiService {
 		if (!current) throw new Error('not found');
 		const profile = this.profiles.find((item) => item.id === request.profile_id);
 		const agent = this.agents.find((item) => item.id === request.agent_id);
+		const repository = this.planRepository(request.repository_id);
 		if (!profile) throw problemError('invalid_argument', 'profile_id', 'unknown');
 		if (!agent || agent.status !== 'active') {
 			throw problemError('invalid_argument', 'agent_id', 'unknown');
 		}
+		this.checkRepositoryHost(repository, agent);
 		this.checkScripts(profile, agent);
 		const enabled = request.enabled ?? true;
 		const updated: Plan = {
@@ -2204,7 +2220,7 @@ export class MockApiService {
 			name: request.name ?? current.name,
 			profile_id: request.profile_id,
 			profile_name: profile.name,
-			repository_id: profile.repository_id,
+			repository_id: repository.id,
 			agent_id: request.agent_id,
 			agent_hostname: agent.hostname,
 			cron: request.cron,
@@ -2242,42 +2258,82 @@ export class MockApiService {
 		};
 	}
 
-	async previewProfile(id: string, agentId: string): Promise<PreviewResponse> {
-		const profile = this.profiles.find((item) => item.id === id);
-		if (!profile) throw new Error('not found');
-		const agent = this.agents.find((item) => item.id === agentId);
-		if (!agent) throw new Error('not found');
-		const paths = pathsForOs(profile, agent.os);
+	async previewProfile(request: PreviewRequest): Promise<PreviewResponse> {
+		const agent = this.agents.find((item) => item.id === request.agent_id);
+		if (!agent) throw problemError('invalid_argument', 'agent_id', 'unknown');
+		const paths = pathsForOs(request, agent.os);
 		if (paths.length === 0) {
 			// The compiler refuses a target without a path for its operating system.
 			throw problemError('invalid_argument', 'paths', 'empty');
 		}
-		return {
-			profile_id: id,
-			repository_id: profile.repository_id,
-			steps: [
-				{
-					kind: 'backup',
-					maintenance: false,
-					command: `restic backup --one-file-system --tag=daily -- ${paths.join(' ')}`,
-					environment: [
-						{ name: 'RESTIC_REPOSITORY', value: 's3:https://s3.example.net/backups-prod' },
-						{ name: 'RESTIC_PASSWORD', value: '***' },
-						{ name: 'AWS_ACCESS_KEY_ID', value: '***' },
-						{ name: 'AWS_SECRET_ACCESS_KEY', value: '***' }
-					]
-				},
-				{
+		const plan = this.plans.find(
+			(item) => item.profile_id === request.profile_id && item.agent_id === request.agent_id
+		);
+		const found = request.repository_id ?? plan?.repository_id ?? null;
+		if (found !== null && !this.repositories.some((item) => item.id === found)) {
+			throw problemError('invalid_argument', 'repository_id', 'unknown');
+		}
+		// Without a stored profile or a plan of it, the steps carry no repository.
+		const prefix = found === null ? [] : ['-r', 's3:https://s3.example.net/backups-prod'];
+		const repositoryEnv =
+			found === null
+				? []
+				: [{ name: 'RESTIC_REPOSITORY', value: 's3:https://s3.example.net/backups-prod' }];
+		const options = request.options;
+		const backup = [
+			'restic',
+			...prefix,
+			'backup',
+			...(options?.one_file_system ? ['--one-file-system'] : []),
+			...(request.tags ?? []).map((tag) => `--tag=${tag}`),
+			...(request.excludes ?? []).map((pattern) => `--exclude=${pattern}`),
+			'--',
+			...paths
+		].join(' ');
+		const steps: PreviewResponse['steps'] = [
+			{
+				kind: 'backup',
+				maintenance: false,
+				command: backup,
+				environment: [
+					...repositoryEnv,
+					{ name: 'RESTIC_PASSWORD', value: '***' },
+					{ name: 'AWS_ACCESS_KEY_ID', value: '***' },
+					{ name: 'AWS_SECRET_ACCESS_KEY', value: '***' }
+				]
+			}
+		];
+		const retention = request.retention;
+		if (retention) {
+			const keep = [
+				retention.keep_last ? `--keep-last=${retention.keep_last}` : '',
+				retention.keep_daily ? `--keep-daily=${retention.keep_daily}` : '',
+				retention.keep_weekly ? `--keep-weekly=${retention.keep_weekly}` : ''
+			].filter(Boolean);
+			if (keep.length > 0 || retention.keep_within) {
+				steps.push({
 					kind: 'forget',
 					maintenance: true,
-					command: 'restic forget --keep-daily=7 --retry-lock',
-					environment: [
-						{ name: 'RESTIC_REPOSITORY', value: 's3:https://s3.example.net/backups-prod' },
-						{ name: 'RESTIC_PASSWORD', value: '***' }
-					]
-				}
-			]
-		};
+					command: [
+						'restic',
+						...prefix,
+						'forget',
+						...keep,
+						...(retention.keep_within ? [`--keep-within=${retention.keep_within}`] : [])
+					].join(' '),
+					environment: [...repositoryEnv, { name: 'RESTIC_PASSWORD', value: '***' }]
+				});
+			}
+		}
+		if (request.check) {
+			steps.push({
+				kind: 'check',
+				maintenance: true,
+				command: ['restic', ...prefix, 'check'].join(' '),
+				environment: [...repositoryEnv, { name: 'RESTIC_PASSWORD', value: '***' }]
+			});
+		}
+		return { repository_id: found, steps };
 	}
 
 	async listTenants(): Promise<Tenant[]> {

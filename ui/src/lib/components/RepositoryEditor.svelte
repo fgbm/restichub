@@ -462,7 +462,7 @@
 
 <RecordPage
 	title={repositoryId ? (existing?.name ?? '') : t('rp.newTitle')}
-	description={t(repositoryId ? 'repositories.editDescription' : 'repositories.addDescription')}
+	description={t('repositories.description')}
 	{loading}
 	error={loadError}
 	onsubmit={() => void save()}
@@ -620,7 +620,7 @@
 				<PasswordField
 					id="repo-s3-access-key"
 					label={t('repositories.s3AccessKey')}
-					help={t('repositories.secretHint')}
+					help={t(existing ? 'repositories.passwordKeepHint' : 'repositories.secretHint')}
 					error={fieldError(formProblem, 's3_access_key')}
 					autocomplete="new-password"
 					bind:value={s3AccessKey}
@@ -629,7 +629,7 @@
 				<PasswordField
 					id="repo-s3-secret-key"
 					label={t('repositories.s3SecretKey')}
-					help={t('repositories.secretHint')}
+					help={t(existing ? 'repositories.passwordKeepHint' : 'repositories.secretHint')}
 					error={fieldError(formProblem, 's3_secret_key')}
 					autocomplete="new-password"
 					bind:value={s3SecretKey}
@@ -648,7 +648,7 @@
 			<PasswordField
 				id="repo-rest-password"
 				label={t('repositories.restPassword')}
-				help={t('repositories.restPasswordHint')}
+				help={t(existing ? 'repositories.passwordKeepHint' : 'repositories.restPasswordHint')}
 				error={fieldError(formProblem, 'rest_password')}
 				autocomplete="new-password"
 				bind:value={restPassword}

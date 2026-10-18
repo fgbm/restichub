@@ -18,6 +18,12 @@
 
 ALTER TABLE plans ADD COLUMN repository_id uuid;
 
+-- The creator-membership trigger (migration 0024) checks the unchanged `created_by` of every row
+-- that the copy writes. A Platform Admin can remove the membership of an account after it created a
+-- plan (ADR-0023), and the copy would then fail for the whole installation. The plans table belongs
+-- to the owner login, so the owner disables the trigger.
+ALTER TABLE plans DISABLE TRIGGER plans_creator_membership;
+
 DO $$
 DECLARE
     owner uuid;
@@ -33,6 +39,8 @@ BEGIN
     PERFORM set_config('restichub.tenant_id', '', true);
     PERFORM set_config('restichub.scope', '', true);
 END $$;
+
+ALTER TABLE plans ENABLE TRIGGER plans_creator_membership;
 
 ALTER TABLE plans ALTER COLUMN repository_id SET NOT NULL;
 

@@ -54,7 +54,8 @@ pub use settings::{
     ProfileResponse, ProfileView, ProfileWarning, Retention, SnapshotFilter, UpdateProfileRequest,
 };
 use settings::{
-    parse_profile_id, profile_value, save_warnings, stored_value, validate_create, validate_update,
+    parse_profile_id, profile_tag, profile_value, save_warnings, stored_value, validate_create,
+    validate_update,
 };
 
 /// Query parameters of the list endpoint (FR-PF-01).
@@ -389,61 +390,77 @@ pub async fn delete_profile(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Previews a profile for one target agent (FR-PF-04, AC-PF-01).
+/// Previews a profile draft for one target agent (FR-PF-04, AC-PF-01).
 ///
-/// The endpoint compiles the profile with the facts of the registered agent and renders the steps
-/// and the command lines with masked secrets. A compile error points to the profile field
-/// (AC-PF-02).
+/// The endpoint validates the draft as a create request and compiles it with the facts of the
+/// registered agent, then renders the steps and the command lines with masked secrets. A compile
+/// error points to the draft field (AC-PF-02).
 #[utoipa::path(
     post,
-    path = "/api/v1/profiles/{id}/preview",
-    summary = "Previews a profile for one target agent.",
-    description = "The steps and the command lines agree with the command that the agent runs. Secrets are masked (AC-PF-01).",
+    path = "/api/v1/profiles/preview",
+    summary = "Previews a profile draft for one target agent.",
+    description = "The steps and the command lines agree with the command that the agent runs. The draft is not stored. Secrets are masked (AC-PF-01).",
     security(("cookie" = []), ("bearer" = [])),
-    params(("id" = String, Path, description = "The identifier of the profile.")),
     request_body = PreviewRequest,
     responses(
         (status = 200, description = "The previewed steps.", body = PreviewResponse),
-        (status = 400, description = "The profile or the agent is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "The draft or the agent is not valid.", body = crate::error::ProblemBody),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The profile is not found.", body = crate::error::ProblemBody)
+        (status = 404, description = "The stored profile of the draft is not found.", body = crate::error::ProblemBody)
     )
 )]
 pub async fn preview_profile(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
     ApiJson(body): ApiJson<PreviewRequest>,
 ) -> Result<Json<PreviewResponse>, ApiError> {
     context.authorize(Operation::ProfilesRead)?;
-    let profile_id = parse_profile_id(&id)?;
     let agent_id = parse_agent_id(&body.agent_id)?;
+    let profile_id = body
+        .profile_id
+        .as_deref()
+        .map(parse_profile_id)
+        .transpose()?;
+    let repository_id = body.repository_id.clone();
+    let draft: CreateProfileRequest = body.into();
+    let validated = validate_create(draft)?;
 
     let mut tx = state.db().begin_tenant(context.tenant_id).await?;
-    let Some(profile) = repo::get(&mut tx, profile_id).await? else {
-        return Err(ApiError::not_found());
-    };
     let Some(agent) = agents_repo::get(&mut tx, agent_id).await? else {
         return Err(ApiError::invalid_field("agent_id", Reason::Unknown));
     };
-    let repository = match body.repository_id.as_deref() {
+    if let Some(profile_id) = profile_id
+        && repo::get(&mut tx, profile_id).await?.is_none()
+    {
+        return Err(ApiError::not_found());
+    }
+    let repository = match repository_id.as_deref() {
         Some(value) => Some(named_repository(&mut tx, value).await?),
         None => planned_repository(&mut tx, profile_id, agent_id).await?,
     };
     // The preview shows the value that the job of the chosen plan runs with: the plan, then the
-    // host, then the default (FR-PF-10, AC-PF-08).
-    let plan_of_preview = planned_plan(&mut tx, profile_id, agent_id, repository.as_ref()).await?;
-    let definitions = crate::parameters::from_row(&profile.parameters)?;
-    let plan_values = match &plan_of_preview {
-        Some(plan) => restichub_db::parameters::plan_values(&mut tx, plan.id).await?,
+    // host, then the default (FR-PF-10, AC-PF-08). A new draft has no plan, so the host values and
+    // the defaults apply.
+    let plan_values = match profile_id {
+        Some(profile_id) => {
+            let plan = planned_plan(&mut tx, profile_id, agent_id, repository.as_ref()).await?;
+            match plan {
+                Some(plan) => restichub_db::parameters::plan_values(&mut tx, plan.id).await?,
+                None => Vec::new(),
+            }
+        }
         None => Vec::new(),
     };
     let host_values = restichub_db::parameters::agent_values(&mut tx, agent_id).await?;
-    let parameters = crate::parameters::resolve(&definitions, &plan_values, &host_values);
+    let parameters = crate::parameters::resolve(&validated.parameters, &plan_values, &host_values);
     tx.commit().await?;
 
     let target = target_facts_with(&agent, state.auth().clock.now(), parameters)?;
-    let compiler_profile = compiler_profile_from_row(&profile)?;
+    let mut compiler_profile = validated.to_compiler_profile();
+    // The retention of a stored profile filters on its own tag, so the commands show it.
+    if let Some(profile_id) = profile_id {
+        compiler_profile.profile_tag = Some(profile_tag(profile_id));
+    }
     let repository_id = repository
         .as_ref()
         .map(|repository| repository.id.to_string());
@@ -453,7 +470,6 @@ pub async fn preview_profile(
     let steps = preview(&plan, access.as_ref(), target.os).map_err(preview_error_to_api)?;
 
     Ok(Json(PreviewResponse {
-        profile_id: profile_id.to_string(),
         repository_id,
         steps: steps
             .iter()
@@ -520,15 +536,18 @@ async fn planned_plan(
 
 /// The repository of a preview that names none (ADR-0047).
 ///
-/// A profile has no repository of its own. The first plan of the profile on the previewed agent
-/// most likely names the repository that the user wants; a profile without such a plan falls back
-/// to its first plan. A profile with no plan has no repository, and the preview then shows the
-/// steps without the repository environment.
+/// A profile has no repository of its own. The first plan of the stored profile on the previewed
+/// agent most likely names the repository that the user wants; a profile without such a plan falls
+/// back to its first plan. A new draft has no plan, and the preview then shows the steps without
+/// the repository environment.
 async fn planned_repository(
     tx: &mut restichub_db::TenantTx<'_>,
-    profile_id: ProfileId,
+    profile_id: Option<ProfileId>,
     agent_id: AgentId,
 ) -> Result<Option<Repository>, ApiError> {
+    let Some(profile_id) = profile_id else {
+        return Ok(None);
+    };
     let plans = plans_repo::list_by_profile(tx, profile_id).await?;
     let chosen = plans
         .iter()

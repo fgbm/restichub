@@ -558,17 +558,71 @@ fn classify_save_error(error: CompileError) -> SaveOutcome {
     }
 }
 
-/// The agent identifier of the request (FR-PF-04).
+/// The body of the draft preview (FR-PF-04, AC-PF-01).
+///
+/// The profile fields describe a draft: the server validates them as a create request, stores
+/// nothing and checks no name uniqueness.
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PreviewRequest {
     /// The identifier of the registered agent that supplies the target facts.
     pub agent_id: String,
-    /// The repository of the plan to preview. Absent uses the repository of the first plan of the
-    /// profile on this agent, then of the first plan of the profile, and a placeholder without a
-    /// repository environment when the profile has no plan (ADR-0047).
+    /// The repository of the commands. Absent uses the repository of the first plan of
+    /// `profile_id` on this agent, then of the first plan of `profile_id`, and no repository when
+    /// the draft holds no stored profile or plan (ADR-0047).
     #[serde(default)]
     pub repository_id: Option<String>,
+    /// The stored profile that the draft edits. Absent for a new profile.
+    #[serde(default)]
+    pub profile_id: Option<String>,
+    /// Free text of 1 to 100 characters. Unique in the tenant, ignoring the letter case. Holds no control or format character.
+    #[schema(max_length = 100)]
+    pub name: String,
+    #[serde(default)]
+    pub paths: ProfilePaths,
+    #[serde(default)]
+    pub excludes: Vec<String>,
+    #[serde(default)]
+    pub exclude_files: Vec<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub options: BackupOptions,
+    /// Scripts from the control plane, in the order they run in their phase (FR-HK-09). Only an
+    /// Admin can set them.
+    #[serde(default)]
+    pub scripts: Vec<ScriptDef>,
+    #[serde(default)]
+    pub retention: Option<Retention>,
+    #[serde(default)]
+    pub check: Option<CheckOptions>,
+    /// What the draft offers to its hosts (FR-PF-09). At most 64.
+    #[serde(default)]
+    #[schema(max_items = 64)]
+    pub parameters: Vec<ParameterDefRequest>,
+    /// Accepted only as an empty list, so an old client keeps working; use `scripts` instead
+    /// (ADR-0040).
+    #[serde(default)]
+    #[schema(ignore)]
+    pub hooks: Option<Vec<serde_json::Value>>,
+}
+
+impl From<PreviewRequest> for CreateProfileRequest {
+    fn from(body: PreviewRequest) -> Self {
+        Self {
+            name: body.name,
+            paths: body.paths,
+            excludes: body.excludes,
+            exclude_files: body.exclude_files,
+            tags: body.tags,
+            options: body.options,
+            scripts: body.scripts,
+            retention: body.retention,
+            check: body.check,
+            parameters: body.parameters,
+            hooks: body.hooks,
+        }
+    }
 }
 
 /// One environment variable of a previewed step. A secret value is masked (AC-PF-01).
@@ -592,11 +646,11 @@ pub struct PreviewStepView {
     pub environment: Vec<PreviewEnvView>,
 }
 
-/// The preview of a profile for one target agent (FR-PF-04).
+/// The preview of a profile draft for one target agent (FR-PF-04).
 #[derive(Debug, Serialize, ToSchema)]
 pub struct PreviewResponse {
-    pub profile_id: String,
-    /// Null when no plan of the profile names a repository, so the steps carry no repository.
+    /// Null when the draft names no repository and its stored profile has no plan, so the steps
+    /// carry no repository.
     pub repository_id: Option<String>,
     pub steps: Vec<PreviewStepView>,
 }

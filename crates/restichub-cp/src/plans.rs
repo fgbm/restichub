@@ -69,7 +69,7 @@ pub struct CreatePlanRequest {
     /// The repository that the plan backs up into (ADR-0047).
     #[schema(required)]
     #[serde(default)]
-    pub repository_id: Option<String>,
+    pub repository_id: String,
     pub cron: String,
     /// An IANA name, such as `Europe/Berlin`, validated before the write.
     pub time_zone: String,
@@ -99,7 +99,7 @@ pub struct UpdatePlanRequest {
     /// The repository that the plan backs up into (ADR-0047). An absent value is refused.
     #[schema(required)]
     #[serde(default)]
-    pub repository_id: Option<String>,
+    pub repository_id: String,
     pub cron: String,
     pub time_zone: String,
     pub missed_run_policy: MissedRunPolicy,
@@ -383,7 +383,7 @@ pub async fn create_plan(
         name: Some(body.name),
         profile_id: &body.profile_id,
         agent_id: &body.agent_id,
-        repository_id: body.repository_id.as_deref(),
+        repository_id: &body.repository_id,
         cron: &body.cron,
         time_zone: &body.time_zone,
         missed_run_policy: body.missed_run_policy,
@@ -503,7 +503,7 @@ pub async fn update_plan(
         name: body.name.or(Some(current.name.clone())),
         profile_id: &body.profile_id,
         agent_id: &body.agent_id,
-        repository_id: body.repository_id.as_deref(),
+        repository_id: &body.repository_id,
         cron: &body.cron,
         time_zone: &body.time_zone,
         missed_run_policy: body.missed_run_policy,
@@ -776,7 +776,7 @@ struct PlanPayload<'a> {
     name: Option<String>,
     profile_id: &'a str,
     agent_id: &'a str,
-    repository_id: Option<&'a str>,
+    repository_id: &'a str,
     cron: &'a str,
     time_zone: &'a str,
     missed_run_policy: MissedRunPolicy,
@@ -788,13 +788,14 @@ fn validate_input(payload: PlanPayload<'_>) -> Result<PlanInput, ApiError> {
     let profile_id = parse_id("profile_id", payload.profile_id, ProfileId::from_uuid)?;
     let agent_id = parse_id("agent_id", payload.agent_id, AgentId::from_uuid)?;
     // The plan always names its repository, so a request without one is refused here (ADR-0047).
-    let Some(repository_id) = payload
-        .repository_id
-        .filter(|value| !value.trim().is_empty())
-    else {
+    if payload.repository_id.trim().is_empty() {
         return Err(ApiError::invalid_field("repository_id", Reason::Empty));
-    };
-    let repository_id = parse_id("repository_id", repository_id, RepositoryId::from_uuid)?;
+    }
+    let repository_id = parse_id(
+        "repository_id",
+        payload.repository_id,
+        RepositoryId::from_uuid,
+    )?;
     let cron = payload.cron.trim().to_owned();
     let time_zone = payload.time_zone.trim().to_owned();
     // A schedule that the cron parser refuses names the fields here, so the handler and the preview

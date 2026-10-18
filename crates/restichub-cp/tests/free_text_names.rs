@@ -199,16 +199,18 @@ async fn fr_pf_01_the_name_of_a_profile_is_not_in_the_preview() {
         return;
     };
     let name = "Секретное имя \"$(whoami)\" `id` ; rm";
-    let (status, response) = f.post("/api/v1/profiles", f.profile(name)).await;
-    assert_eq!(status, StatusCode::CREATED, "{response}");
-    let id = response["profile"]["id"].as_str().expect("the id");
     let (status, _, preview) = send(
         &f.app,
         request(
             "POST",
-            &format!("/api/v1/profiles/{id}/preview"),
+            "/api/v1/profiles/preview",
             Some(&f.cookie),
-            Some(json!({"agent_id": f.agent_id})),
+            Some(json!({
+                "agent_id": f.agent_id,
+                "name": name,
+                "paths": {"all": ["/srv"]},
+                "tags": ["daily"],
+            })),
         ),
     )
     .await;

@@ -258,7 +258,7 @@
 	title={templateId
 		? name || (existing ? templateName(existing, 'job') : '')
 		: t('jobTemplates.newTitle')}
-	description={t('jobTemplates.formDescription')}
+	description={t('jobTemplates.description')}
 	{loading}
 	error={loadError}
 	onsubmit={() => void save()}
@@ -341,6 +341,7 @@
 		title={t('jobTemplates.scripts')}
 		summary={sectionSummaries.scripts}
 		state="on"
+		note={t('jobTemplates.scriptsNote')}
 		bind:open={open.scripts}
 	>
 		<ScriptsEditor

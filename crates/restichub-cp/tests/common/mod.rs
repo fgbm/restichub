@@ -169,7 +169,11 @@ pub fn write_body(
         ("PATCH", "/api/v1/profiles/{id}") => Some(json!({
             "paths": {"all": ["/srv"]},
         })),
-        ("POST", "/api/v1/profiles/{id}/preview") => Some(json!({"agent_id": repository_id})),
+        ("POST", "/api/v1/profiles/preview") => Some(json!({
+            "name": format!("matrix-profile-{index}"),
+            "paths": {"all": ["/srv"]},
+            "agent_id": repository_id,
+        })),
         ("POST", "/api/v1/plans") => Some(json!({
             "name": format!("matrix-plan-{index}"),
             "profile_id": profile_id,
