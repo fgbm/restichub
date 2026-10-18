@@ -18,7 +18,7 @@ const RESERVED_TAG_PREFIX: &str = "restichub-";
 ///
 /// A profile does not name a repository, so the save-time check and the preview of a profile
 /// without a plan still build the steps. The value never reaches an agent.
-pub const UNBOUND_REPOSITORY_ID: &str = "unbound";
+pub(crate) const UNBOUND_REPOSITORY_ID: &str = "unbound";
 
 /// The steps of one target agent, in execution order (FR-PF-04).
 #[derive(Debug, Clone, PartialEq)]
@@ -39,7 +39,7 @@ pub struct PlannedStep {
 ///
 /// The step order is the `before` scripts, the `backup` step, the remaining
 /// scripts, then the maintenance steps `forget`, `prune` and `check`. A `None` repository gives
-/// the steps of [`UNBOUND_REPOSITORY_ID`].
+/// the steps of a placeholder repository identifier.
 ///
 /// # Errors
 ///

@@ -553,9 +553,7 @@ pub async fn seed_repository(
     id
 }
 
-/// Inserts a profile row of a tenant and returns its identifier.
-///
-/// A test uses it only for a route fixture.
+/// Inserts a profile row of a tenant and returns its identifier, for a route fixture.
 pub async fn seed_profile(db: &Database, tenant: TenantId, name: &str) -> restichub_db::ProfileId {
     use restichub_db::profiles::{NewProfile, create};
     let mut tx = db

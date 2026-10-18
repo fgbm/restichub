@@ -66,7 +66,6 @@ pub struct Plan {
     /// The host name of the bound agent (display only).
     pub agent_hostname: String,
     pub agent_status: AgentStatus,
-    /// The repository that the plan backs up into.
     pub repository_id: RepositoryId,
     /// The recovery point objective in seconds. `None` means the default of the schedule (ADR-0036).
     pub rpo_seconds: Option<i32>,
