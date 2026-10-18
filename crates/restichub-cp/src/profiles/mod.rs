@@ -209,7 +209,7 @@ pub async fn create_profile(
 
     let mut event =
         context.audit_event(AuditAction::ProfileCreate, "profile", profile_id.as_uuid());
-    event.diff = Some(diff(None, Some(&profile_value(&validated)), &[]));
+    event.diff = Some(diff(None, Some(&profile_value(&validated, None)), &[]));
     restichub_db::audit::insert(&mut tx, &event).await?;
 
     let created = repo::get(&mut tx, profile_id).await?;
@@ -265,6 +265,18 @@ pub async fn update_profile(
     }
     let warnings = save_warnings(&validated)?;
     script_secrets::check_script_secrets(&mut tx, &validated.scripts).await?;
+    // A name cannot have two kinds on one host, because the host holds one value for each name
+    // (ADR-0047).
+    for agent_id in plans_of_profile_agents(&mut tx, profile_id).await? {
+        crate::parameters::check_kinds_of_host(
+            &mut tx,
+            agent_id,
+            profile_id,
+            "parameters",
+            &validated.parameters,
+        )
+        .await?;
+    }
     // A parameter that left the profile takes the overrides of its name with it; a rename is a new
     // parameter (owner decision, ADR-0047). The host values stay.
     let removed = removed_parameters(&current, &validated)?;
@@ -281,11 +293,12 @@ pub async fn update_profile(
         return Err(crate::parameters::refuse_missing(missing));
     }
 
+    let stored_definitions = crate::parameters::from_row(&current.parameters)?;
     let mut event =
         context.audit_event(AuditAction::ProfileUpdate, "profile", profile_id.as_uuid());
     event.diff = Some(diff(
         Some(&stored_value(&current)),
-        Some(&profile_value(&validated)),
+        Some(&profile_value(&validated, Some(&stored_definitions))),
         &[],
     ));
     restichub_db::audit::insert(&mut tx, &event).await?;
@@ -687,7 +700,24 @@ pub(crate) fn compile_for_agent(
         .map_err(compile_error_to_api)
 }
 
-/// The names of the parameters that the update removes from the profile (ADR-0047).
+/// The hosts of the plans of a profile, without a repeat (ADR-0047).
+async fn plans_of_profile_agents(
+    tx: &mut restichub_db::TenantTx<'_>,
+    profile_id: restichub_db::ProfileId,
+) -> Result<Vec<restichub_db::AgentId>, ApiError> {
+    let mut agents: Vec<restichub_db::AgentId> = Vec::new();
+    for plan in plans_repo::list_by_profile(tx, profile_id).await? {
+        if !agents.contains(&plan.agent_id) {
+            agents.push(plan.agent_id);
+        }
+    }
+    Ok(agents)
+}
+
+/// The names of the parameters that the update removes from the profile, or whose kind changes
+/// (ADR-0047).
+///
+/// An override of a removed name has no meaning, and an override of the other kind does not count.
 fn removed_parameters(
     current: &repo::Profile,
     validated: &settings::ValidatedProfile,
@@ -695,13 +725,14 @@ fn removed_parameters(
     let before = crate::parameters::from_row(&current.parameters)?;
     Ok(before
         .iter()
-        .map(|definition| definition.name.clone())
-        .filter(|name| {
-            !validated
+        .filter(|old| {
+            validated
                 .parameters
                 .iter()
-                .any(|definition| &definition.name == name)
+                .find(|new| new.name == old.name)
+                .is_none_or(|new| new.kind != old.kind)
         })
+        .map(|definition| definition.name.clone())
         .collect())
 }
 
@@ -751,7 +782,7 @@ fn compile_error_to_api(error: CompileError) -> ApiError {
 }
 
 /// The field and the stable reason of a compiler rejection (AC-PF-02).
-fn compile_error_parts(error: &CompileError) -> (String, Reason) {
+pub(crate) fn compile_error_parts(error: &CompileError) -> (String, Reason) {
     match error {
         CompileError::UnknownVariable { field, .. }
         | CompileError::MissingLabel { field, .. }

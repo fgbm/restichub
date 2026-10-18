@@ -18,7 +18,8 @@ mod host;
 use std::collections::BTreeMap;
 
 pub use checks::{
-    check_declared_values, check_secret_values, missing_in_plans_of_profile, refuse_missing,
+    check_declared_values, check_kinds_of_host, check_secret_values, missing_in_plans_of_host,
+    missing_in_plans_of_profile, refuse_missing,
 };
 pub use host::*;
 
@@ -36,16 +37,19 @@ use crate::validation::Reason;
 
 /// Limit of the parameters of one profile.
 pub const MAX_PARAMETERS: usize = 64;
-/// Limit in characters of one parameter value and of one default value.
+/// Limit in bytes of one parameter value and of one default value. It stays below the limit of the
+/// value of a script variable, which the agent checks (FR-PF-10).
 pub const MAX_PARAMETER_VALUE: usize = 4096;
 /// Limit in characters of the description of a parameter.
 pub const MAX_PARAMETER_DESCRIPTION: usize = 200;
 /// The longest parameter name, without the leading letter.
 const MAX_PARAMETER_NAME_SUFFIX: usize = 63;
 
-/// The declaration of one parameter of a profile (FR-PF-09).
+/// The declaration of one parameter as the profile row stores it (FR-PF-09).
+///
+/// The storage form tolerates a field that this version does not know, so a newer row does not stop
+/// an older control plane. [`ParameterDefRequest`] is the strict form of a request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
-#[serde(deny_unknown_fields)]
 pub struct ParameterDef {
     /// A lower-case letter, then letters, digits and underscores; at most 64 characters.
     #[schema(pattern = "^[a-z][a-z0-9_]{0,63}$")]
@@ -62,6 +66,37 @@ pub struct ParameterDef {
     pub description: Option<String>,
 }
 
+/// The declaration of one parameter in a profile request (FR-PF-09).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ParameterDefRequest {
+    /// A lower-case letter, then letters, digits and underscores; at most 64 characters.
+    #[schema(pattern = "^[a-z][a-z0-9_]{0,63}$")]
+    pub name: String,
+    pub kind: ParameterKind,
+    /// A plan without a value for a required parameter is refused (FR-PF-11).
+    #[serde(default)]
+    pub required: bool,
+    /// A text parameter only. A secret default would give one password to every host (ADR-0047).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_value: Option<String>,
+    /// At most 200 characters.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+impl From<ParameterDefRequest> for ParameterDef {
+    fn from(request: ParameterDefRequest) -> Self {
+        Self {
+            name: request.name,
+            kind: request.kind,
+            required: request.required,
+            default_value: request.default_value,
+            description: request.description,
+        }
+    }
+}
+
 /// One value of a parameter in a plan request or in a host request (FR-PF-10).
 ///
 /// The kind must agree with the declaration. Exactly one of `value` and `secret_id` is set.
@@ -70,7 +105,7 @@ pub struct ParameterDef {
 pub struct ParameterValueDef {
     pub name: String,
     pub kind: ParameterKind,
-    /// A text of 1 to 4096 characters, for a `text` parameter.
+    /// A text of 1 to 4096 bytes, for a `text` parameter.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
     /// The identifier of a secret of the purpose `hook_secret`, for a `secret` parameter.
@@ -193,7 +228,7 @@ pub fn is_parameter_name(name: &str) -> bool {
 /// refuses.
 pub fn validate_definitions(
     field: &str,
-    definitions: Vec<ParameterDef>,
+    definitions: Vec<ParameterDefRequest>,
 ) -> Result<Vec<ParameterDef>, ApiError> {
     if definitions.len() > MAX_PARAMETERS {
         return Err(ApiError::invalid_field(field, Reason::TooLong));
@@ -202,6 +237,7 @@ pub fn validate_definitions(
     let mut result = Vec::with_capacity(definitions.len());
     for (index, definition) in definitions.into_iter().enumerate() {
         let at = format!("{field}[{index}]");
+        let definition = ParameterDef::from(definition);
         if !is_parameter_name(&definition.name) {
             return Err(ApiError::invalid_field(
                 format!("{at}.name"),
@@ -211,7 +247,7 @@ pub fn validate_definitions(
         if !names.insert(definition.name.clone()) {
             return Err(ApiError::invalid_field(
                 format!("{at}.name"),
-                Reason::Reserved,
+                Reason::Duplicate,
             ));
         }
         let default_value = match (definition.kind, definition.default_value) {
@@ -257,12 +293,12 @@ pub fn validate_definitions(
     Ok(result)
 }
 
-/// A text value: 1 to 4096 characters and no control or format character.
+/// A text value: 1 to 4096 bytes and no control or format character.
 fn validate_value(field: &str, value: &str) -> Result<String, ApiError> {
     if value.is_empty() {
         return Err(ApiError::invalid_field(field, Reason::Empty));
     }
-    if value.chars().count() > MAX_PARAMETER_VALUE {
+    if value.len() > MAX_PARAMETER_VALUE {
         return Err(ApiError::invalid_field(field, Reason::TooLong));
     }
     if has_forbidden(value) {
@@ -296,7 +332,7 @@ pub fn validate_values(
         if !names.insert(value.name.clone()) {
             return Err(ApiError::invalid_field(
                 format!("{at}.name"),
-                Reason::Reserved,
+                Reason::Duplicate,
             ));
         }
         let stored = match (value.kind, value.value, value.secret_id) {
@@ -373,22 +409,35 @@ pub fn to_value(definitions: &[ParameterDef]) -> Value {
 /// The declarations of a stored row for an audit diff. A row that does not parse shows as null.
 #[must_use]
 pub fn stored_value(value: &Value) -> Value {
-    from_row(value).map_or(Value::Null, |definitions| audit_definitions(&definitions))
+    from_row(value).map_or(Value::Null, |definitions| {
+        audit_definitions(&definitions, None)
+    })
 }
 
 /// The declarations for an audit diff: the names, the kinds and no text default (FR-PF-12).
+///
+/// `previous` is the other side of the diff. The marker of a default value is [`CHANGED`] when the
+/// text of the previous declaration differs, so a change of a default shows in the diff and an
+/// unchanged one does not. The diff holds the marker only, never the text.
 #[must_use]
-pub fn audit_definitions(definitions: &[ParameterDef]) -> Value {
+pub fn audit_definitions(definitions: &[ParameterDef], previous: Option<&[ParameterDef]>) -> Value {
     Value::Array(
         definitions
             .iter()
             .map(|definition| {
+                let before = previous.and_then(|previous| {
+                    previous
+                        .iter()
+                        .find(|other| other.name == definition.name && other.kind == definition.kind)
+                });
                 json!({
                     "name": definition.name,
                     "kind": definition.kind.as_str(),
                     "required": definition.required,
-                    // The owner keeps a marker, never the text, so two values read the same.
-                    "default_value": definition.default_value.as_ref().map(|_| CHANGED),
+                    "default_value": definition
+                        .default_value
+                        .as_ref()
+                        .map(|text| marker(before.and_then(|definition| definition.default_value.as_deref()), text)),
                 })
             })
             .collect(),
@@ -397,16 +446,26 @@ pub fn audit_definitions(definitions: &[ParameterDef]) -> Value {
 
 /// The values of a record for an audit diff: the names, the kinds, the identifiers of the secrets
 /// and a marker for a text value (FR-PF-12).
+///
+/// `previous` is the side of the diff that the write replaces. See [`audit_definitions`].
 #[must_use]
-pub fn audit_values(values: &[ParameterValue]) -> Value {
+pub fn audit_values(values: &[ParameterValue], previous: Option<&[ParameterValue]>) -> Value {
     Value::Array(
         values
             .iter()
             .map(|value| {
+                let before = previous.and_then(|previous| {
+                    previous
+                        .iter()
+                        .find(|other| other.name == value.name && other.kind == value.kind)
+                });
                 json!({
                     "name": value.name,
                     "kind": value.kind.as_str(),
-                    "value": value.value.as_ref().map(|_| CHANGED),
+                    "value": value
+                        .value
+                        .as_ref()
+                        .map(|text| marker(before.and_then(|value| value.value.as_deref()), text)),
                     "secret_id": value.secret_id.map(|id| id.to_string()),
                 })
             })
@@ -414,14 +473,41 @@ pub fn audit_values(values: &[ParameterValue]) -> Value {
     )
 }
 
-/// The marker of a value that the diff names but does not show.
+/// True when the write adds, removes or changes a value of the kind `secret` (ADR-0047).
+///
+/// Only an Admin changes such a value: it chooses the credential that a script receives. An entry
+/// that the body leaves as it was is no change, so an Operator can save a full set that still names
+/// the secret of an Admin.
+#[must_use]
+pub fn changes_secret(before: &[ParameterValue], after: &[ParameterValue]) -> bool {
+    fn secrets(values: &[ParameterValue]) -> BTreeMap<&str, Option<restichub_db::SecretId>> {
+        values
+            .iter()
+            .filter(|value| value.kind == ParameterKind::Secret)
+            .map(|value| (value.name.as_str(), value.secret_id))
+            .collect()
+    }
+    secrets(before) != secrets(after)
+}
+
+/// The marker of a text value that the diff names but does not show.
 pub const CHANGED: &str = "<changed>";
+/// The marker of a text value that the write sets to the value that the other side holds.
+pub const SET: &str = "<set>";
+
+fn marker(before: Option<&str>, after: &str) -> &'static str {
+    match before {
+        Some(before) if before != after => CHANGED,
+        _ => SET,
+    }
+}
 
 /// Resolves the value of each declared parameter for one plan (FR-PF-10).
 ///
 /// The order is the plan, the host, then the default. A value of another kind than the declaration
-/// does not count. An optional `text` parameter without a value resolves to the empty string, as the
-/// owner decided; a required one stays absent, and the completeness check refuses it.
+/// does not count. An optional parameter of either kind without a value resolves to the empty
+/// string, as the owner decided, so a script variable of it is set and empty; a required one stays
+/// absent, and the completeness check refuses it.
 #[must_use]
 pub fn resolve(
     definitions: &[ParameterDef],
@@ -457,13 +543,13 @@ pub fn resolve(
                     CompilerParameterValue::Text(default.to_owned()),
                 );
             }
-            (None, ParameterKind::Text, None) if !definition.required => {
+            (None, _, _) if !definition.required => {
                 resolved.insert(
                     definition.name.clone(),
                     CompilerParameterValue::Text(String::new()),
                 );
             }
-            (None, ParameterKind::Secret, _) | (None, ParameterKind::Text, None) => {}
+            (None, _, _) => {}
         }
     }
     resolved

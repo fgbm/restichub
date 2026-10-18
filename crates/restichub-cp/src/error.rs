@@ -466,6 +466,18 @@ impl ApiError {
         error
     }
 
+    /// Creates a `400 parameter_kind_mismatch` error for a name that another profile of the same
+    /// host declares with another kind (FR-PF-11, ADR-0047).
+    ///
+    /// The body names the parameter; the cause, which only the log holds, names the other profile.
+    pub fn parameter_kind_conflict(field: impl Into<String>, name: String, other: &str) -> Self {
+        let mut error = Self::parameters(field, Reason::ParameterKindMismatch, vec![name.clone()]);
+        error.cause = Some(format!(
+            "the profile {other} declares the parameter {name} with another kind"
+        ));
+        error
+    }
+
     /// Creates a `400 parameter_missing_in_plans` error with the names of the parameters and the
     /// plans that a change would leave without a required value (FR-PF-11).
     pub fn parameters_in_plans(reason: Reason, names: Vec<String>, blockers: Blockers) -> Self {

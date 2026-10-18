@@ -1,10 +1,21 @@
 //! The checks that keep a saved plan complete (FR-PF-11, AC-PF-06, AC-PF-07).
 //!
-//! Every write that can take a value away runs the check under the lock that the write holds: a
-//! profile save locks the profile, a change of the host values locks the host, and a plan save
-//! takes a share lock on the profile and a key share lock on the host. Thus a plan never reaches the
-//! table without a value for each required parameter, and the scheduler has no incomplete plan to
+//! Every write that can take a value away runs the check under a lock that a conflicting write
+//! waits for: a profile save holds the profile row for update, a change of the host values holds the
+//! host row for update and each profile of the host for share, and a plan save holds the plan row
+//! for update, the profile for share and the host for key share. Thus a plan never reaches the table
+//! without a value for each required parameter, and the scheduler has no incomplete plan to
 //! dispatch.
+//!
+//! The locks keep this order, and no path takes them in the other order:
+//!
+//! - a plan save: plan, profile, host, repository;
+//! - a host values change: host, then the profiles of the plans of the host;
+//! - a profile save: the profile only.
+//!
+//! A host values change and a plan save meet on the host row, and a host values change and a profile
+//! save meet on the profile row. A share request is compatible with a share that another
+//! transaction already holds, so the two paths never wait for each other in a cycle.
 
 use restichub_db::parameters as repo;
 use restichub_db::{AgentId, ParameterKind, ProfileId};
@@ -23,6 +34,9 @@ pub struct Missing {
 }
 
 /// The plans of one host that a missing required value leaves without a value.
+///
+/// The read takes a share lock on each profile, so a concurrent profile save waits for this
+/// transaction (FR-PF-11).
 pub async fn missing_in_plans_of_host(
     tx: &mut restichub_db::TenantTx<'_>,
     agent_id: AgentId,
@@ -35,7 +49,7 @@ pub async fn missing_in_plans_of_host(
         },
     };
     for plan in plans_repo::list_by_agent(tx, agent_id).await? {
-        let Some(profile) = profiles_repo::get(tx, plan.profile_id).await? else {
+        let Some(profile) = profiles_repo::get_for_share(tx, plan.profile_id).await? else {
             continue;
         };
         let definitions = parameters::from_row(&profile.parameters)?;
@@ -75,6 +89,53 @@ pub async fn missing_in_plans_of_profile(
         );
     }
     Ok(finish(missing))
+}
+
+/// Refuses a declaration whose name another profile of the same host declares with another kind
+/// (FR-PF-11, ADR-0047).
+///
+/// A host holds one value for each name, so two kinds for one name on one host cannot both have a
+/// value. `own` is the profile that the write saves, and the plans of the other profiles of the
+/// host give their declarations.
+///
+/// # Errors
+///
+/// Returns `400 parameter_kind_mismatch` with the name of the parameter.
+pub async fn check_kinds_of_host(
+    tx: &mut restichub_db::TenantTx<'_>,
+    agent_id: AgentId,
+    own: ProfileId,
+    field: &str,
+    definitions: &[ParameterDef],
+) -> Result<(), ApiError> {
+    for plan in plans_repo::list_by_agent(tx, agent_id).await? {
+        if plan.profile_id == own {
+            continue;
+        }
+        let Some(profile) = profiles_repo::get_for_share(tx, plan.profile_id).await? else {
+            continue;
+        };
+        for other in parameters::from_row(&profile.parameters)? {
+            let shared = definitions
+                .iter()
+                .any(|definition| definition.name == other.name);
+            if shared && other.kind != kind_of(definitions, &other.name) {
+                return Err(ApiError::parameter_kind_conflict(
+                    field,
+                    other.name,
+                    &profile.name,
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn kind_of(definitions: &[ParameterDef], name: &str) -> ParameterKind {
+    definitions
+        .iter()
+        .find(|definition| definition.name == name)
+        .map_or(ParameterKind::Text, |definition| definition.kind)
 }
 
 fn add(missing: &mut Missing, names: Vec<String>, plan_id: restichub_db::PlanId, plan_name: &str) {

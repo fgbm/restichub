@@ -392,6 +392,11 @@ pub async fn create_plan(
     input.rpo_seconds = validate_rpo(body.rpo_seconds)?;
     input.parameter_values =
         parameters::validate_values("parameter_values", body.parameter_values)?;
+    // Only an Admin sets a secret value, because it chooses the credential that a script receives
+    // (ADR-0047). An Operator still saves the text values.
+    if parameters::changes_secret(&[], &input.parameter_values) {
+        context.authorize(Operation::ParameterSecretWrite)?;
+    }
     let now = state.auth().clock.now();
     let schedule = parse_schedule(&input.cron, &input.time_zone)?;
     let plan_id = PlanId::new();
@@ -403,7 +408,6 @@ pub async fn create_plan(
         input.profile_id,
         input.agent_id,
         input.repository_id,
-        None,
         &input.parameter_values,
         now,
     )
@@ -437,7 +441,7 @@ pub async fn create_plan(
     .await?;
 
     let mut event = context.audit_event(AuditAction::PlanCreate, "plan", plan_id.as_uuid());
-    event.diff = Some(diff(None, Some(&plan_value(&input)), &[]));
+    event.diff = Some(diff(None, Some(&plan_value(&input, None)), &[]));
     restichub_db::audit::insert(&mut tx, &event).await?;
 
     let created = repo::get(&mut tx, plan_id).await?;
@@ -492,6 +496,9 @@ pub async fn update_plan(
     let Some(current) = repo::get_for_update(&mut tx, plan_id).await? else {
         return Err(ApiError::not_found());
     };
+    // The values are read before the replace: the write removes the old rows, and the audit diff
+    // and the check of a secret value need them.
+    let before_values = restichub_db::parameters::plan_values(&mut tx, plan_id).await?;
     let mut input = validate_input(PlanPayload {
         name: body.name.or(Some(current.name.clone())),
         profile_id: &body.profile_id,
@@ -505,13 +512,17 @@ pub async fn update_plan(
     input.rpo_seconds = validate_rpo(body.rpo_seconds)?;
     input.parameter_values =
         parameters::validate_values("parameter_values", body.parameter_values)?;
+    // Only an Admin sets, changes or removes a secret value, because it chooses the credential that
+    // a script receives (ADR-0047). An entry that the body leaves as it was is no change.
+    if parameters::changes_secret(&before_values, &input.parameter_values) {
+        context.authorize(Operation::ParameterSecretWrite)?;
+    }
     let schedule = parse_schedule(&input.cron, &input.time_zone)?;
     check_references(
         &mut tx,
         input.profile_id,
         input.agent_id,
         input.repository_id,
-        Some(current.agent_id),
         &input.parameter_values,
         now,
     )
@@ -555,11 +566,10 @@ pub async fn update_plan(
         .await?;
     }
 
-    let before = restichub_db::parameters::plan_values(&mut tx, plan_id).await?;
     let mut event = context.audit_event(AuditAction::PlanUpdate, "plan", plan_id.as_uuid());
     event.diff = Some(diff(
-        Some(&stored_value(&current, &before)),
-        Some(&plan_value(&input)),
+        Some(&stored_value(&current, &before_values)),
+        Some(&plan_value(&input, Some(&before_values))),
         &[],
     ));
     restichub_db::audit::insert(&mut tx, &event).await?;
@@ -612,8 +622,9 @@ pub async fn delete_plan(
     // The queued jobs of the plan end as cancelled in the delete transaction, so no queued job
     // outlives its plan (FR-SC-07). A sent or running job keeps its lifecycle.
     restichub_db::jobs::cancel_for_plan(&mut tx, plan_id, now).await?;
-    repo::delete(&mut tx, plan_id).await?;
+    // The values are read before the delete: the foreign key removes them with the plan.
     let values = restichub_db::parameters::plan_values(&mut tx, plan_id).await?;
+    repo::delete(&mut tx, plan_id).await?;
     let mut event = context.audit_event(AuditAction::PlanDelete, "plan", plan_id.as_uuid());
     event.diff = Some(diff(Some(&stored_value(&current, &values)), None, &[]));
     restichub_db::audit::insert(&mut tx, &event).await?;
@@ -854,7 +865,6 @@ async fn check_references(
     profile_id: ProfileId,
     agent_id: AgentId,
     repository_id: RepositoryId,
-    current_agent: Option<AgentId>,
     plan_values: &[restichub_db::parameters::ParameterValue],
     now: time::OffsetDateTime,
 ) -> Result<(), ApiError> {
@@ -865,11 +875,9 @@ async fn check_references(
         Some(profile) => profile,
         None => return Err(ApiError::invalid_field("profile_id", Reason::Unknown)),
     };
-    let agent = if current_agent == Some(agent_id) {
-        agents_repo::get(tx, agent_id).await?
-    } else {
-        agents_repo::get_for_key_share(tx, agent_id).await?
-    };
+    // The key share lock keeps the host for the check of the values and of the compile: a change of
+    // its values waits for this transaction (FR-PF-11).
+    let agent = agents_repo::get_for_key_share(tx, agent_id).await?;
     let Some(agent) = agent else {
         return Err(ApiError::invalid_field("agent_id", Reason::Unknown));
     };
@@ -884,6 +892,16 @@ async fn check_references(
     // (ADR-0046, ADR-0047).
     crate::jobs::ensure_repository_host(&repository, agent_id)?;
     let definitions = parameters::from_row(&profile.parameters)?;
+    // A name cannot have two kinds on one host, because the host holds one value for each name
+    // (ADR-0047).
+    crate::parameters::check_kinds_of_host(
+        tx,
+        agent_id,
+        profile_id,
+        "parameter_values",
+        &definitions,
+    )
+    .await?;
     crate::parameters::check_declared_values(&definitions, plan_values, "parameter_values")?;
     crate::parameters::check_secret_values(tx, plan_values, "parameter_values").await?;
     let host_values = restichub_db::parameters::agent_values(tx, agent_id).await?;
@@ -940,9 +958,12 @@ fn decode_cursor(value: &str) -> Result<PlanCursor, String> {
     })
 }
 
-fn plan_value(input: &PlanInput) -> serde_json::Value {
+fn plan_value(
+    input: &PlanInput,
+    previous: Option<&[restichub_db::parameters::ParameterValue]>,
+) -> serde_json::Value {
     json!({
-        "parameter_values": parameters::audit_values(&input.parameter_values),
+        "parameter_values": parameters::audit_values(&input.parameter_values, previous),
         "name": input.name,
         "profile_id": input.profile_id.to_string(),
         "agent_id": input.agent_id.to_string(),
@@ -960,7 +981,7 @@ fn stored_value(
     parameter_values: &[restichub_db::parameters::ParameterValue],
 ) -> serde_json::Value {
     json!({
-        "parameter_values": parameters::audit_values(parameter_values),
+        "parameter_values": parameters::audit_values(parameter_values, None),
         "name": plan.name,
         "profile_id": plan.profile_id.to_string(),
         "agent_id": plan.agent_id.to_string(),

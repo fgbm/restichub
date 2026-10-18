@@ -51,6 +51,8 @@ pub enum Operation {
     AgentsWrite,
     /// Changes the values that the profiles of a host read (FR-PF-10).
     AgentParametersWrite,
+    /// Sets, changes or removes a value of the kind `secret` on a host or in a plan (ADR-0047).
+    ParameterSecretWrite,
     EnrollmentTokensRead,
     EnrollmentTokensWrite,
     SecretsRead,
@@ -100,6 +102,7 @@ impl Operation {
                 | Self::AgentsRead
                 | Self::AgentsWrite
                 | Self::AgentParametersWrite
+                | Self::ParameterSecretWrite
                 | Self::EnrollmentTokensRead
                 | Self::EnrollmentTokensWrite
                 | Self::RepositoriesRead
@@ -139,7 +142,7 @@ impl Operation {
 
     /// Every operation. A new variant stops the build in `the_platform_tenant_allow_list` and in
     /// [`crate::context::Operation::classify`].
-    pub const ALL: [Operation; 40] = [
+    pub const ALL: [Operation; 41] = [
         Operation::AuditRead,
         Operation::PlatformAuditRead,
         Operation::PlatformTenantsRead,
@@ -159,6 +162,7 @@ impl Operation {
         Operation::AgentsRead,
         Operation::AgentsWrite,
         Operation::AgentParametersWrite,
+        Operation::ParameterSecretWrite,
         Operation::EnrollmentTokensRead,
         Operation::EnrollmentTokensWrite,
         Operation::SecretsRead,
@@ -205,6 +209,7 @@ impl Operation {
             | Operation::AgentsRead
             | Operation::AgentsWrite
             | Operation::AgentParametersWrite
+            | Operation::ParameterSecretWrite
             | Operation::EnrollmentTokensRead
             | Operation::EnrollmentTokensWrite
             | Operation::SecretsRead
@@ -265,6 +270,9 @@ pub fn minimum_role(operation: Operation) -> Role {
         // The values of the host parameters belong to the profiles that an Operator manages
         // (owner decision, ADR-0047).
         Operation::AgentParametersWrite => Role::Operator,
+        // A secret value chooses the credential that a script receives, so only an Admin changes it
+        // (ADR-0047). An Operator still sets the text values.
+        Operation::ParameterSecretWrite => Role::Admin,
         Operation::EnrollmentTokensRead => Role::Viewer,
         Operation::EnrollmentTokensWrite => Role::Admin,
         Operation::SecretsRead => Role::Viewer,

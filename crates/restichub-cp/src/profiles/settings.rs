@@ -24,7 +24,7 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::error::ApiError;
-use crate::parameters::{self, ParameterDef, ParameterDefView};
+use crate::parameters::{self, ParameterDef, ParameterDefRequest, ParameterDefView};
 use crate::scripts::{EnvKind, ScriptDef};
 use crate::validation::{self, Reason};
 
@@ -286,7 +286,7 @@ pub struct CreateProfileRequest {
     /// What the profile offers to its hosts (FR-PF-09). At most 64.
     #[serde(default)]
     #[schema(max_items = 64)]
-    pub parameters: Vec<ParameterDef>,
+    pub parameters: Vec<ParameterDefRequest>,
     /// Accepted only as an empty list, so an old client keeps working; use `scripts` instead
     /// (ADR-0040).
     #[serde(default)]
@@ -322,7 +322,7 @@ pub struct UpdateProfileRequest {
     /// Replaces the whole list (FR-PF-09).
     #[serde(default)]
     #[schema(max_items = 64)]
-    pub parameters: Vec<ParameterDef>,
+    pub parameters: Vec<ParameterDefRequest>,
     /// Accepted only as an empty list, so an old client keeps working; use `scripts` instead
     /// (ADR-0040).
     #[serde(default)]
@@ -935,7 +935,7 @@ fn validate_profile(
     scripts: Vec<ScriptDef>,
     retention: Option<Retention>,
     check: Option<CheckOptions>,
-    parameters: Vec<ParameterDef>,
+    parameters: Vec<ParameterDefRequest>,
 ) -> Result<ValidatedProfile, ApiError> {
     let name = crate::validation::validate_record_name("name", &name.unwrap_or_default())?;
     let paths = validate_paths(paths)?;
@@ -1216,7 +1216,9 @@ pub fn parse_profile_id(value: &str) -> Result<ProfileId, ApiError> {
 }
 
 /// The settings of a validated profile for an audit diff. It holds no secret (FR-PF-01).
-pub fn profile_value(profile: &ValidatedProfile) -> Value {
+///
+/// `previous` is the declaration set that the row held before the write.
+pub fn profile_value(profile: &ValidatedProfile, previous: Option<&[ParameterDef]>) -> Value {
     json!({
         "name": profile.name,
         "paths": {
@@ -1240,7 +1242,7 @@ pub fn profile_value(profile: &ValidatedProfile) -> Value {
         "scripts": crate::scripts::audit_value(&profile.scripts),
         "retention": profile.retention,
         "check": profile.check,
-        "parameters": parameters::audit_definitions(&profile.parameters),
+        "parameters": parameters::audit_definitions(&profile.parameters, previous),
     })
 }
 

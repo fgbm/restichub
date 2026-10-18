@@ -438,6 +438,11 @@ pub async fn replace_agent(
         repo::ReplaceOutcome::NotPair => return Err(ApiError::not_found()),
         repo::ReplaceOutcome::OldRecentlyOnline => return Err(ApiError::agent_recently_online()),
     };
+    // A value of the successor with another kind keeps its row, so a plan that moves can lose a
+    // required value (FR-PF-11, FR-ID-11). The transaction rolls back, so nothing moves.
+    if let Some(missing) = crate::parameters::missing_in_plans_of_host(&mut tx, new_id).await? {
+        return Err(crate::parameters::refuse_missing(missing));
+    }
     let mut revoke_event = context.audit_event(AuditAction::AgentRevoke, "agent", old_id.as_uuid());
     revoke_event.diff = Some(diff(
         Some(&serde_json::json!({"status": AgentStatus::Active.as_str()})),

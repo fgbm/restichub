@@ -50,6 +50,8 @@ pub enum Reason {
     TooLong,
     InvalidCharacter,
     Reserved,
+    /// A name repeats one of the same request (FR-PF-09).
+    Duplicate,
     Unknown,
     InvalidFormat,
     InvalidBody,
@@ -94,6 +96,7 @@ impl Reason {
             Self::TooLong => "too_long",
             Self::InvalidCharacter => "invalid_character",
             Self::Reserved => "reserved",
+            Self::Duplicate => "duplicate",
             Self::Unknown => "unknown",
             Self::InvalidFormat => "invalid_format",
             Self::InvalidBody => "invalid_body",

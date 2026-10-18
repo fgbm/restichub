@@ -104,7 +104,7 @@ pub async fn get_parameters(
     if agents_repo::get(&mut tx, agent_id).await?.is_none() {
         return Err(ApiError::not_found());
     }
-    let declared = declared_of_host(&mut tx, agent_id).await?;
+    let declared = declared_of_host(&mut tx, agent_id, false).await?;
     let values = repo::agent_values(&mut tx, agent_id).await?;
     let names = secret_names(&mut tx, &values).await?;
     tx.commit().await?;
@@ -150,14 +150,20 @@ pub async fn replace_parameters(
     let Some(agent) = agents_repo::get_for_update(&mut tx, agent_id).await? else {
         return Err(ApiError::not_found());
     };
-    let declared = declared_of_host(&mut tx, agent_id).await?;
+    let before = repo::agent_values(&mut tx, agent_id).await?;
+    // Only an Admin changes a secret value, because it chooses the credential that a script
+    // receives (ADR-0047). An entry that the body leaves as it was is no change.
+    if super::changes_secret(&before, &values) {
+        context.authorize(Operation::ParameterSecretWrite)?;
+    }
+    let declared = declared_of_host(&mut tx, agent_id, true).await?;
     check_kinds(&declared, &values)?;
     super::checks::check_secret_values(&mut tx, &values, "parameters").await?;
-    let before = repo::agent_values(&mut tx, agent_id).await?;
     repo::replace_agent_values(&mut tx, agent_id, &values, actor_user(&context.actor)).await?;
     if let Some(missing) = super::checks::missing_in_plans_of_host(&mut tx, agent.id).await? {
         return Err(super::checks::refuse_missing(missing));
     }
+    check_plans_compile(&mut tx, &agent, &values, state.auth().clock.now()).await?;
     let names = secret_names(&mut tx, &values).await?;
     let mut event = context.audit_event(
         AuditAction::AgentParametersUpdate,
@@ -165,8 +171,8 @@ pub async fn replace_parameters(
         agent_id.as_uuid(),
     );
     event.diff = Some(diff(
-        Some(&json!({"parameters": audit_values(&before)})),
-        Some(&json!({"parameters": audit_values(&values)})),
+        Some(&json!({"parameters": audit_values(&before, None)})),
+        Some(&json!({"parameters": audit_values(&values, Some(&before))})),
         &[],
     ));
     restichub_db::audit::insert(&mut tx, &event).await?;
@@ -177,6 +183,69 @@ pub async fn replace_parameters(
     }))
 }
 
+/// Compiles every plan of the host with the new values (FR-PF-10).
+///
+/// A value can break a plan without breaking the profile, for example a tag that expands to a value
+/// with a comma. The refusal names the value that the compile rejects.
+async fn check_plans_compile(
+    tx: &mut restichub_db::TenantTx<'_>,
+    agent: &restichub_db::agents::Agent,
+    values: &[ParameterValue],
+    now: time::OffsetDateTime,
+) -> Result<(), ApiError> {
+    for plan in plans_repo::list_by_agent(tx, agent.id).await? {
+        let Some(profile) = profiles_repo::get_for_share(tx, plan.profile_id).await? else {
+            continue;
+        };
+        let definitions = parameters::from_row(&profile.parameters)?;
+        let plan_values = repo::plan_values(tx, plan.id).await?;
+        let compiler_profile = crate::profiles::compiler_profile_from_row(&profile)?;
+        let repository = plan.repository_id.to_string();
+        let compile_with = |values: &[ParameterValue]| {
+            let resolved = parameters::resolve(&definitions, &plan_values, values);
+            let target = crate::profiles::target_facts_with(agent, now, resolved)?;
+            Ok::<_, ApiError>(restichub_compiler::compile(
+                &compiler_profile,
+                Some(&repository),
+                &target,
+            ))
+        };
+        let Err(error) = compile_with(values)? else {
+            continue;
+        };
+        // A compile error does not always name the parameter, so the check tries each value in turn
+        // with a value that fills any template.
+        let mut field = "parameters".to_owned();
+        for (index, value) in values.iter().enumerate() {
+            let mut swapped = values.to_vec();
+            swapped[index] = benign(value);
+            if compile_with(&swapped)?.is_ok() {
+                field = format!("parameters[{index}].value");
+                break;
+            }
+        }
+        let (_, reason) = crate::profiles::compile_error_parts(&error);
+        return Err(ApiError::invalid_field_cause(
+            field,
+            reason,
+            error.to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// The same value of another kind of parameter that fills a template: a text parameter takes a word
+/// and a secret keeps its reference, which no template reads (ADR-0047).
+fn benign(value: &ParameterValue) -> ParameterValue {
+    match value.kind {
+        ParameterKind::Text => ParameterValue {
+            value: Some("x".to_owned()),
+            ..value.clone()
+        },
+        ParameterKind::Secret => value.clone(),
+    }
+}
+
 /// One declaration of a parameter of a profile, with the profiles of the host that declare it.
 struct Declared {
     definition: ParameterDef,
@@ -184,13 +253,22 @@ struct Declared {
 }
 
 /// The parameters that the profiles of the plans of a host declare (FR-PF-10).
+///
+/// `for_share` takes a share lock on each profile, so a concurrent save of a profile waits for this
+/// transaction and cannot make a parameter required between the check and the commit (FR-PF-11).
 async fn declared_of_host(
     tx: &mut restichub_db::TenantTx<'_>,
     agent_id: AgentId,
+    for_share: bool,
 ) -> Result<BTreeMap<String, Declared>, ApiError> {
     let mut declared: BTreeMap<String, Declared> = BTreeMap::new();
     for plan in plans_repo::list_by_agent(tx, agent_id).await? {
-        let Some(profile) = profiles_repo::get(tx, plan.profile_id).await? else {
+        let profile = if for_share {
+            profiles_repo::get_for_share(tx, plan.profile_id).await?
+        } else {
+            profiles_repo::get(tx, plan.profile_id).await?
+        };
+        let Some(profile) = profile else {
             continue;
         };
         for definition in parameters::from_row(&profile.parameters)? {
