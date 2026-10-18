@@ -9,7 +9,9 @@ async function signIn(page: Page): Promise<void> {
 	await expect(page.getByRole('navigation', { name: 'Primary navigation' })).toBeVisible();
 }
 
-test('ac_in_04 the hosts screen creates an enrollment token and shows it once', async ({ page }) => {
+test('ac_in_04 the hosts screen creates an enrollment token and shows it once', async ({
+	page
+}) => {
 	await signIn(page);
 	await page.getByRole('link', { name: 'Hosts' }).click();
 	await expect(page.getByRole('heading', { level: 1, name: 'Hosts' })).toBeVisible();
