@@ -3059,7 +3059,10 @@ export interface components {
              */
             name?: string;
             options?: components["schemas"]["BackupOptions"];
-            /** @description What the draft offers to its hosts (FR-PF-09). At most 64. */
+            /**
+             * @description A caller without the profile write right sends no fields, and the stored profile gives them
+             *     (FR-PF-09).
+             */
             parameters?: components["schemas"]["ParameterDefRequest"][];
             paths?: components["schemas"]["ProfilePaths"];
             /**
