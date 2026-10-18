@@ -228,7 +228,7 @@ fn fr_rs_02_a_link_target_comes_from_the_tree_object_of_the_directory() {
     assert!(super::has_symlink(&page));
 
     let tree = br#"{"nodes":[{"name":"current","type":"symlink","linktarget":"docs"},{"name":"docs","type":"dir"}]}"#;
-    super::fill_link_targets(&mut page, tree);
+    super::fill_link_targets(&mut page, "/data", tree);
     assert_eq!(page.nodes[0].link_target, "docs");
     assert_eq!(page.nodes[1].link_target, "", "a directory has no target");
     assert_eq!(
@@ -237,7 +237,7 @@ fn fr_rs_02_a_link_target_comes_from_the_tree_object_of_the_directory() {
     );
 
     // A tree that the agent cannot read changes nothing.
-    super::fill_link_targets(&mut page, br#"{"nodes":"#);
+    super::fill_link_targets(&mut page, "/data", br#"{"nodes":"#);
     assert_eq!(page.nodes[0].link_target, "docs");
 
     let plain = LsPage {
@@ -247,6 +247,30 @@ fn fr_rs_02_a_link_target_comes_from_the_tree_object_of_the_directory() {
     assert!(
         !super::has_symlink(&plain),
         "a page without a link reads no tree"
+    );
+}
+
+#[test]
+fn fr_rs_02_a_recursive_page_matches_a_link_target_by_the_full_path() {
+    use restichub_proto::agent::v1::{LsPage, Node, NodeType};
+
+    let link = |path: &str| Node {
+        name: "current".to_owned(),
+        r#type: NodeType::Symlink as i32,
+        path: path.to_owned(),
+        ..Node::default()
+    };
+    let mut page = LsPage {
+        nodes: vec![link("/data/current"), link("/data/sub/current")],
+        last: true,
+    };
+
+    let tree = br#"{"nodes":[{"name":"current","type":"symlink","linktarget":"docs"}]}"#;
+    super::fill_link_targets(&mut page, "/data", tree);
+    assert_eq!(page.nodes[0].link_target, "docs");
+    assert_eq!(
+        page.nodes[1].link_target, "",
+        "a link of a subdirectory takes no target of the listed directory"
     );
 }
 

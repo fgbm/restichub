@@ -2,10 +2,8 @@
 //!
 //! `restic ls --json` names the type of a link but not its target. The tree object of the listed
 //! directory holds it, so the agent reads that object one time for a page that names a link. The
-//! read is best effort: a cancel, the maximum duration of the step or a tree above the bound leaves
-//! the targets empty, and the page still shows the links.
-
-use std::time::Duration;
+//! read is best effort: a cancel, the rest of the budget of the step or a tree above the bound
+//! leaves the targets empty, and the page still shows the links.
 
 use restichub_compiler::ValidatedJob;
 use restichub_compiler::arg::build_ls_tree_command;
@@ -18,6 +16,7 @@ use super::log::JobLog;
 use super::runner::{
     CancelHandle, DRAIN_TIMEOUT, POLL_INTERVAL, interrupt, kill_tree, priority_of, reap,
 };
+use super::watchdog::{StepLimits, Watchdog};
 use super::{Jobs, lock};
 use crate::output::{DOCUMENT_QUEUE, Line, MAX_DOCUMENT, MAX_LINE, Pipe, spawn_reader};
 use crate::scrub::Scrubber;
@@ -25,16 +24,21 @@ use crate::scrub::Scrubber;
 impl Jobs {
     /// Reads the tree object of the directory of an `ls` step.
     ///
-    /// Gives `None` when restic does not start, exits with an error, the step is stopped or the
-    /// object is above the bound.
+    /// `deadline` is the end of the step, so the read never outlives the budget of the step, and
+    /// the same stall timeout guards it. Gives `None` when restic does not start, exits with an
+    /// error, the step is stopped or the object is above the bound.
     pub(super) async fn ls_tree(
         &self,
         validated: &ValidatedJob,
         step: &Step,
         cancel: &CancelHandle,
-        max: Option<Duration>,
+        limits: StepLimits,
+        deadline: Option<Instant>,
         log: &mut JobLog,
     ) -> Option<Vec<u8>> {
+        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            return None;
+        }
         let step_id = step.step_id.as_str();
         let line = match build_ls_tree_command(validated, step) {
             Ok(line) => line,
@@ -84,18 +88,23 @@ impl Jobs {
         *lock(&cancel.child) = Some(child);
 
         let started = Instant::now();
+        let mut watchdog = Watchdog::new(limits.stall, started);
         let mut document: Vec<u8> = Vec::new();
         let mut stopped_at: Option<Instant> = None;
         let mut hard_killed = false;
         let mut lines_open = true;
         let code = loop {
+            let now = Instant::now();
             if let Some(code) = reap(cancel) {
                 break code;
             }
             if stopped_at.is_none() {
-                if cancel.is_cancelled() || max.is_some_and(|max| started.elapsed() >= max) {
+                if cancel.is_cancelled()
+                    || deadline.is_some_and(|deadline| now >= deadline)
+                    || watchdog.is_stalled(now)
+                {
                     interrupt(&cancel.child);
-                    stopped_at = Some(Instant::now());
+                    stopped_at = Some(now);
                 }
             } else if !hard_killed
                 && stopped_at.is_some_and(|since| since.elapsed() >= self.stop_grace)
@@ -115,6 +124,7 @@ impl Jobs {
                 lines_open = false;
                 continue;
             };
+            watchdog.output(now);
             if line.pipe == Pipe::Stderr {
                 log_stderr(&line, &scrubber, log, step_id);
                 continue;

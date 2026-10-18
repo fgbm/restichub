@@ -448,6 +448,7 @@ impl Jobs {
 
         *lock(&cancel.child) = Some(child);
         let started = tokio::time::Instant::now();
+        let step_deadline = limits.max.map(|max| started + max);
         let mut limit_stop: Option<LimitStop> = None;
         let mut lines_open = true;
         // The stop is two stages: the graceful signal first, then the forced kill of the tree after
@@ -562,15 +563,18 @@ impl Jobs {
             outcome.error = Some(StepError::ReadOnly);
         }
         outcome.output = output.collector.finish();
-        // `restic ls --json` names a link but not its target, so a page that holds one reads the
-        // tree object of the directory (FR-RS-02).
-        if matches!(step.kind, Some(step::Kind::Ls(_)))
+        // A step that stopped by its limit or a cancel keeps its links without a target, and the
+        // second process never gets a budget of its own (FR-RS-02, ADR-0039).
+        if let Some(step::Kind::Ls(ls)) = step.kind.as_ref()
             && let Some(step_result::Output::LsPage(page)) = outcome.output.as_mut()
             && has_symlink(page)
+            && limit_stop.is_none()
             && !cancel.is_cancelled()
-            && let Some(tree) = self.ls_tree(validated, step, cancel, limits.max, log).await
+            && let Some(tree) = self
+                .ls_tree(validated, step, cancel, limits, step_deadline, log)
+                .await
         {
-            fill_link_targets(page, &tree);
+            fill_link_targets(page, &ls.path, &tree);
         }
         outcome
     }
