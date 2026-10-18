@@ -1,6 +1,6 @@
 ---
 title: Alerts and notification channels
-description: How the control plane raises alerts, which kinds exist, and how to send them by email or by webhook.
+description: How the control plane raises alerts, which kinds exist, how to send them by email or by webhook, and the installation settings that delivery needs.
 ---
 
 The control plane watches each organization and raises an alert when a backup needs attention. It sends a message to each enabled channel of the organization. When the condition clears, it sends a recovery message.
@@ -48,6 +48,85 @@ The control plane stores each message in a queue before it sends it. A failed se
 
 Two control plane instances send each message once. A crash between the send and the record can repeat a send, so a receiver must accept a repeat. The webhook payload holds the field `id` for this purpose.
 
+## Installation settings
+
+Four settings belong to the installation, not to an organization. Set them in the configuration file or in environment variables. An environment variable overrides the file. The page [Environment variables](/restichub/reference/environment-variables/) lists all the variables of the control plane.
+
+### Public origin
+
+The public origin is the base URL of the links in a message.
+
+| File key | Environment variable | Meaning |
+|---|---|---|
+| `public_origin` | `RESTICHUB_PUBLIC_ORIGIN` | The scheme, the host and the port of the web interface, for example `https://backup.example.com`. |
+
+The value has no user, no path and no query. Without it, a message holds no link.
+
+### Language of messages
+
+The emails and the webhook messages use one language for the whole installation. The web interface shows each alert in the language of the reader.
+
+| File key | Environment variable | Meaning |
+|---|---|---|
+| `notifications.language` | `RESTICHUB_NOTIFICATIONS_LANGUAGE` | `en` (the default) or `ru`. |
+
+A webhook message also holds fields for a receiver that builds its own text. The field `params` holds the typed values. The field `error_text` holds the stable error code of a job, or the scrubbed error text when the job has no code. The field `error_label` holds the words for a known code in the language of the installation. The field `error_text` never changes with the language. An email shows the words of the language.
+
+### SMTP server
+
+An email channel sends through one SMTP server. Without a server, email channels cannot send.
+
+| File key | Environment variable | Meaning |
+|---|---|---|
+| `smtp.host` | `RESTICHUB_SMTP_HOST` | The host name of the server. Setting it turns email on. |
+| `smtp.port` | `RESTICHUB_SMTP_PORT` | The port. The default is 587 for `starttls`, 465 for `tls` and 25 for `none`. |
+| `smtp.security` | `RESTICHUB_SMTP_SECURITY` | `starttls` (default), `tls` or `none`. |
+| `smtp.username` | `RESTICHUB_SMTP_USERNAME` | The user name. Without it, the control plane does not sign in. |
+| `smtp.password_file` | `RESTICHUB_SMTP_PASSWORD_FILE` | The path of a file that holds the password. |
+| — | `RESTICHUB_SMTP_PASSWORD` | The password. Use it instead of the file. Do not set both. |
+| `smtp.from` | `RESTICHUB_SMTP_FROM` | The sender address. It is required when the host is set. |
+
+Rules for the password:
+
+- The password never goes to the database or to the audit log.
+- Use the file for a production installation. The file must be a regular file that only its owner can read.
+- The control plane signs in with `AUTH PLAIN` and only over TLS. With `none` and a password, the control plane refuses to start.
+- When the server refuses a part of the recipients and accepts the others, the control plane sends the message. The delivery keeps a note with the number of refused recipients.
+- The control plane checks the certificate of the server against the system roots and the bundled public roots.
+
+Example:
+
+```toml
+public_origin = "https://backup.example.com"
+
+[smtp]
+host = "smtp.example.com"
+security = "starttls"
+username = "restichub"
+password_file = "/run/secrets/smtp-password"
+from = "restichub@example.com"
+```
+
+### Webhook allow-list
+
+By default, a webhook uses `https` and a public address. The administrator can relax two rules.
+
+| File key | Environment variable | Meaning |
+|---|---|---|
+| `webhook.allow_http` | `RESTICHUB_WEBHOOK_ALLOW_HTTP` | Allows the scheme `http`. The default is `false`. |
+| `webhook.allow_networks` | `RESTICHUB_WEBHOOK_ALLOW_NETWORKS` | Networks in CIDR form that the address check admits. In the variable, separate the entries with commas. |
+
+The address check always refuses the loopback, private, link-local, shared, reserved and multicast ranges. It also refuses the ranges `2001::/23` (which holds Teredo), `64:ff9b:1::/48` and `192.88.99.0/24`. Each user can send 6 test messages per minute. Each organization can send 20.
+
+A network in the allow-list applies to every organization of the installation. Add the smallest network that holds the receiver.
+
+```toml
+[webhook]
+allow_networks = ["10.20.30.0/24"]
+```
+
+> **Warning:** The allow-list lets an Admin of any organization make the control plane send requests into that network. Add a network only when you trust every Admin of the installation.
+
 ## Name a channel
 
 The name of a channel is any text of 1 to 100 characters. It is unique in the tenant, and the letter case does not matter. The name holds no control character and no bidirectional control character. The messages show the name as plain text.
@@ -58,7 +137,7 @@ The last field of a channel form is the switch **Send alerts**. When it is off, 
 
 ## Email channels
 
-An Admin adds an email channel in **Settings**, **Channels**. The channel holds 1 to 20 recipients. The installation needs an SMTP server. See [Configure alerts](/restichub/operations/alert-configuration/). Without it, an email channel cannot send, and the test button shows the error `smtp_not_configured`.
+An Admin adds an email channel in **Settings**, **Channels**. The channel holds 1 to 20 recipients. The installation needs an SMTP server. See [SMTP server](#smtp-server). Without it, an email channel cannot send, and the test button shows the error `smtp_not_configured`.
 
 The message is plain text with the subject `[ResticHub] <alert> - <plan> (<organization>)`. It holds the organization, the host, the plan, the repository, the error text and a link to the job.
 
@@ -128,7 +207,7 @@ The control plane refuses to send to a private network. It resolves the host nam
 
 A host name that resolves to one forbidden address among others is refused too. The control plane never follows a redirect. An answer other than 2xx is a failure. A send takes at most 10 seconds.
 
-To reach a private receiver, the administrator adds its network to the allow-list. See [Configure alerts](/restichub/operations/alert-configuration/).
+To reach a private receiver, the administrator adds its network to the allow-list. See [Webhook allow-list](#webhook-allow-list).
 
 ## Audit
 

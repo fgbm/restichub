@@ -11,7 +11,7 @@ The control plane encrypts each secret in the database. After you save a secret,
 
 Each repository has one maintenance host. Only this host runs `forget`, `prune` and `check`. A backup host never receives these steps. Use a dedicated host for the maintenance.
 
-A local repository is different: its path exists on one host only. This host is the repository host. It is the maintenance host, every job of the repository runs on it, and it cannot change after the initialization. See [A local repository](/restichub/guides/add-a-repository/#a-local-repository).
+A local repository is different: its path exists on one host only. This host is the repository host. It is the maintenance host, every job of the repository runs on it, and it cannot change after the initialization. See [A local repository](/restichub/getting-started/add-a-repository/#a-local-repository).
 
 A repository without a maintenance host gets no maintenance job. The page of the repository shows a warning, and the control plane creates no `forget`, `prune` or `check` job for the repository.
 

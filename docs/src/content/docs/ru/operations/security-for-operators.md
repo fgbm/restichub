@@ -47,4 +47,4 @@ description: Остаточный риск прямого доступа к ре
 ## Связанные страницы
 
 - [Компрометация ключа подписи заданий](/restichub/ru/operations/job-signing-key-compromise/)
-- [Замена сертификата агента](/restichub/ru/operations/certificate-rotation/)
+- [Сертификаты агента и повторная регистрация](/restichub/ru/guides/agent-certificates/)

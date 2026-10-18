@@ -4,10 +4,16 @@ import starlight from '@astrojs/starlight';
 import starlightLinksValidator from 'starlight-links-validator';
 import { fileURLToPath } from 'node:url';
 
-const group = (en, ru, slugs) => ({
+const page = (slug) => ({ slug });
+const subgroup = (en, ru, slugs) => ({
 	label: en,
 	translations: { ru },
-	items: slugs.map((slug) => ({ slug })),
+	items: slugs.map(page),
+});
+const group = (en, ru, items) => ({
+	label: en,
+	translations: { ru },
+	items: items.map((item) => (typeof item === 'string' ? page(item) : item)),
 });
 
 // Earlier page addresses stay valid for links outside the site.
@@ -17,7 +23,7 @@ const moved = [
 	['operations/install-control-plane', 'getting-started/install-control-plane'],
 	['operations/register-an-agent', 'getting-started/add-a-host'],
 	['operations/migrate-from-resticprofile', 'getting-started/migrate-from-resticprofile'],
-	['operations/add-a-repository', 'guides/add-a-repository'],
+	['operations/add-a-repository', 'getting-started/add-a-repository'],
 	['operations/restore', 'guides/restore'],
 	['operations/scripts', 'guides/scripts'],
 	['operations/alerts', 'guides/alerts'],
@@ -33,6 +39,10 @@ const moved = [
 	['operations/api-reference', 'reference/api'],
 	['operations/agent-version-compatibility', 'reference/agent-version-compatibility'],
 	['operations/glossary', 'reference/glossary'],
+	['guides/add-a-repository', 'getting-started/add-a-repository'],
+	['guides/enroll-a-host-again', 'guides/agent-certificates'],
+	['operations/certificate-rotation', 'guides/agent-certificates'],
+	['operations/alert-configuration', 'guides/alerts'],
 ];
 
 const redirects = Object.fromEntries(
@@ -74,55 +84,62 @@ export default defineConfig({
 					'getting-started/quick-start',
 					'getting-started/install-control-plane',
 					'getting-started/add-a-host',
+					'getting-started/add-a-repository',
+					'getting-started/profiles-and-plans',
 					'getting-started/migrate-from-resticprofile',
-				]),
-				group('Guides', 'Руководства', [
-					'guides/automatic-enrollment',
-					'guides/add-a-repository',
-					'guides/jobs',
-					'guides/restore',
-					'guides/scripts',
-					'guides/alerts',
-					'guides/users',
-					'guides/organizations',
-					'guides/api-tokens',
-					'guides/upgrade',
-					'guides/enroll-a-host-again',
-					'guides/agent-revocation',
 				]),
 				group('Concepts', 'Понятия', [
 					'concepts/architecture',
-					'concepts/job-lifecycle',
-					'concepts/agent-jobs',
+					'concepts/trust-model',
+					'concepts/repositories',
 					'concepts/profiles',
 					'concepts/plans',
-					'concepts/repositories',
-					'concepts/trust-model',
+					'concepts/job-lifecycle',
+					'concepts/agent-jobs',
+				]),
+				group('Administration', 'Администрирование', [
+					subgroup('Set up', 'Настройка', [
+						'guides/organizations',
+						'guides/users',
+						'guides/api-tokens',
+						'guides/alerts',
+						'guides/automatic-enrollment',
+					]),
+					subgroup('Everyday tasks', 'Текущие задачи', [
+						'guides/jobs',
+						'guides/restore',
+						'guides/scripts',
+						'guides/upgrade',
+						'guides/agent-certificates',
+						'guides/agent-revocation',
+					]),
 				]),
 				group('Operations and security', 'Эксплуатация и безопасность', [
+					'operations/security-for-operators',
+					'operations/verify-a-release',
 					'operations/back-up-the-control-plane',
-					'operations/certificate-rotation',
 					'operations/root-ca-rotation',
 					'operations/job-signing-key-compromise',
 					'operations/job-signing-key-recovery',
 					'operations/enrollment-rate-limit',
-					'operations/verify-a-release',
-					'operations/security-for-operators',
-					'operations/alert-configuration',
 				]),
 				group('Reference', 'Справочник', [
-					'reference/ui-tour',
+					'reference/api',
 					'reference/agent-commands',
 					'reference/agent-packages',
 					'reference/agent-logs',
 					'reference/environment-variables',
 					'reference/metrics',
-					'reference/api',
 					'reference/status-codes',
 					'reference/agent-version-compatibility',
-					'reference/troubleshooting',
+					'reference/ui-tour',
 					'reference/glossary',
 				]),
+				{
+					label: 'Troubleshooting',
+					translations: { ru: 'Устранение неполадок' },
+					slug: 'reference/troubleshooting',
+				},
 			],
 		}),
 	],

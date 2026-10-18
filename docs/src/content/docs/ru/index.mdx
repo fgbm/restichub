@@ -5,15 +5,26 @@ template: splash
 hero:
   title: "Одно место для планирования, запуска и контроля резервных копий restic"
   tagline: "Сервер управления хранит профили, расписания и секреты. Лёгкий агент на каждом хосте запускает restic."
+  actions:
+    - text: Сделать первую копию
+      link: /restichub/ru/getting-started/quick-start/
+      variant: primary
+    - text: Основные понятия
+      link: /restichub/ru/concepts/architecture/
+      variant: minimal
 ---
 
 import Diagram from '../../../components/Diagram.astro';
 
 <div class="rh-cards">
-<a class="rh-card" href="/restichub/ru/getting-started/install-control-plane/"><span class="rh-step">1</span><strong>Установить сервер управления</strong><span>Запустите сервер и откройте веб-интерфейс.</span></a>
-<a class="rh-card" href="/restichub/ru/getting-started/add-a-host/"><span class="rh-step">2</span><strong>Добавить хост</strong><span>Зарегистрируйте агент одноразовым токеном.</span></a>
-<a class="rh-card" href="/restichub/ru/getting-started/quick-start/"><span class="rh-step">3</span><strong>Сделать первую копию</strong><span>Пройдите быстрый старт до первой резервной копии.</span></a>
+<a class="rh-card" href="/restichub/ru/getting-started/install-control-plane/"><strong>Запустить ResticHub</strong><span>Установите сервер управления, добавьте хост и репозиторий.</span></a>
+<a class="rh-card" href="/restichub/ru/concepts/architecture/"><strong>Понять модель</strong><span>Изучите профили, планы, репозитории, задания и модель доверия.</span></a>
+<a class="rh-card" href="/restichub/ru/reference/api/"><strong>Подключить систему</strong><span>Используйте REST API, команды агента и переменные окружения.</span></a>
 </div>
+
+:::caution[Внимание]
+ResticHub находится на предрелизной стадии. MVP готов и проходит приёмочное тестирование на реальных хостах. Стабильного релиза пока нет, а интерфейсы ещё могут измениться.
+:::
 
 ## Как это работает
 
@@ -21,10 +32,15 @@ import Diagram from '../../../components/Diagram.astro';
 
 Агент сам открывает соединение с сервером управления. Сервер управления никогда не подключается к хосту. Данные копии идут с хоста в репозиторий напрямую.
 
-:::caution[Внимание]
-ResticHub находится на предрелизной стадии. MVP готов и проходит приёмочное тестирование на реальных хостах. Стабильного релиза пока нет, а интерфейсы ещё могут измениться.
-:::
+## Разделы документации
 
-Основные термины описаны в разделе [Основные понятия](/restichub/ru/concepts/architecture/).
+<div class="rh-cards">
+<a class="rh-card" href="/restichub/ru/getting-started/about/"><strong>Начало работы</strong><span>Установите сервер, зарегистрируйте первый хост и сделайте первую копию.</span></a>
+<a class="rh-card" href="/restichub/ru/concepts/architecture/"><strong>Понятия</strong><span>Узнайте термины и модель, которая лежит в основе резервной копии.</span></a>
+<a class="rh-card" href="/restichub/ru/guides/organizations/"><strong>Администрирование</strong><span>Управляйте организациями, пользователями, токенами, оповещениями, восстановлением и обновлением.</span></a>
+<a class="rh-card" href="/restichub/ru/operations/security-for-operators/"><strong>Эксплуатация и безопасность</strong><span>Сделайте резервную копию сервера управления, замените ключи и восстановитесь после сбоя.</span></a>
+<a class="rh-card" href="/restichub/ru/reference/api/"><strong>Справочник</strong><span>Найдите API, команды агента, метрики, коды и глоссарий.</span></a>
+<a class="rh-card" href="/restichub/ru/reference/troubleshooting/"><strong>Устранение неполадок</strong><span>Найдите причину симптома и действие, которое её устраняет.</span></a>
+</div>
 
 Зачем создан ResticHub и чем он отличается от похожих инструментов, описано в разделе [О ResticHub](/restichub/ru/getting-started/about/).

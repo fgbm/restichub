@@ -25,7 +25,7 @@ Find the symptom in the tables below. The column "Action" tells what to do first
 | The host stays in "Waiting for connection" | The service does not run, or it cannot reach port 8443. | Run `restichub-agent status` and read "last error". Check the firewall to port 8443. |
 | The host is "Offline" | The service stopped, or the network to the control plane is down. | Read the log of the agent. See [Agent logs](/restichub/reference/agent-logs/). |
 | The host shows "Agent too old" | The control plane refuses the protocol version of the agent. | Upgrade the agent. See [Upgrade](/restichub/guides/upgrade/). |
-| The list shows "Possible duplicate" | The computer enrolled again, and the old record stays. | On the newer record, select "Replace the old record". See [Possible duplicates](/restichub/guides/enroll-a-host-again/#possible-duplicates). |
+| The list shows "Possible duplicate" | The computer enrolled again, and the old record stays. | On the newer record, select "Replace the old record". See [Possible duplicates](/restichub/guides/agent-certificates/#possible-duplicates). |
 | The service exits with the code 78 | The agent has no usable identity, or restic is missing or differs from its record. The event log `ResticHub` (Linux: journald) names the cause. | For the identity, register the host again with `register --force`. For restic, run `install-service`. If the host cannot download restic, add `--restic-archive <ARCHIVE>`. |
 
 For a message of an agent command, see [Agent commands and files](/restichub/reference/agent-commands/#troubleshooting).
@@ -39,7 +39,7 @@ Open the job, and read the reason under its title and the log of the failed step
 | The job stays in "Waiting" | The host is offline, or another job holds the repository. | Check the host. See [Repository barriers](/restichub/concepts/job-lifecycle/#repository-barriers). |
 | The job failed with `wrong_password` | The repository password or the access keys are wrong. | Correct the secrets on the page of the repository. |
 | The job failed with `step_failed` | restic stopped with an error. | Read the log of the step. The last lines give the restic error. |
-| A job on a local repository fails with `read-only file system`, `repository_path_denied` or `repository_read_only` | On Linux the service can write a local repository only below a repository root. The path is outside the roots, or the installed unit does not list the root yet. | Add the root to `/etc/restichub-agent-repository-roots.txt` and run `sudo restichub-agent install-service`. See [A local repository on Linux](/restichub/guides/add-a-repository/#a-local-repository-on-linux). |
+| A job on a local repository fails with `read-only file system`, `repository_path_denied` or `repository_read_only` | On Linux the service can write a local repository only below a repository root. The path is outside the roots, or the installed unit does not list the root yet. | Add the root to `/etc/restichub-agent-repository-roots.txt` and run `sudo restichub-agent install-service`. See [A local repository on Linux](/restichub/getting-started/add-a-repository/#a-local-repository-on-linux). |
 | The job failed with `stalled` | restic made no progress for too long. | Check the backup source and the network to the repository. See [Stall timeout](/restichub/concepts/job-lifecycle/#stall-timeout). |
 | The job failed with `agent_lost` | The host went offline during the job. | Check the host. The control plane marks a possible stale lock. |
 | The job failed with `compile_failed` | The profile does not fit the host any more. | Open the profile and read the warnings. |
@@ -59,6 +59,6 @@ Open the job, and read the reason under its title and the log of the failed step
 
 | Symptom | Cause | Action |
 |---|---|---|
-| No email arrives | The SMTP server of the control plane is not set or refuses the message. | Select "Send test" on the channel. See [SMTP server](/restichub/operations/alert-configuration/#smtp-server). |
-| The control plane refuses a webhook channel | The address is outside the allow-list. | See [Webhook allow-list](/restichub/operations/alert-configuration/#webhook-allow-list). |
-| A link in a message opens a wrong address | The public origin of the control plane is not set. | See [Public origin](/restichub/operations/alert-configuration/#public-origin). |
+| No email arrives | The SMTP server of the control plane is not set or refuses the message. | Select "Send test" on the channel. See [SMTP server](/restichub/guides/alerts/#smtp-server). |
+| The control plane refuses a webhook channel | The address is outside the allow-list. | See [Webhook allow-list](/restichub/guides/alerts/#webhook-allow-list). |
+| A link in a message opens a wrong address | The public origin of the control plane is not set. | See [Public origin](/restichub/guides/alerts/#public-origin). |
