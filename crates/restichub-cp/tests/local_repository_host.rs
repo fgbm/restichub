@@ -211,7 +211,7 @@ async fn ac_rp_07_a_plan_of_a_local_repository_runs_on_its_host() {
         )
         .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
-    assert_field(&body, "agent_id", "plan_on_other_host");
+    assert_field(&body, "agent_id", "not_repository_host");
 
     let plan = env.create_plan(profile, host.id, repository).await;
     let (status, body) = env
@@ -223,7 +223,7 @@ async fn ac_rp_07_a_plan_of_a_local_repository_runs_on_its_host() {
         )
         .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
-    assert_field(&body, "agent_id", "plan_on_other_host");
+    assert_field(&body, "agent_id", "not_repository_host");
 
     // A remote repository takes a plan on any host.
     let remote = env.create_rest_repository(host.id, "user", "secret").await;
@@ -264,7 +264,7 @@ async fn ac_rp_07_a_plan_save_waits_for_a_concurrent_repository_host_change() {
     };
     let ((status, body), ()) = tokio::join!(save, commit);
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
-    assert_field(&body, "agent_id", "plan_on_other_host");
+    assert_field(&body, "agent_id", "not_repository_host");
 
     let (status, body) = env.call(&env.admin, "GET", "/api/v1/plans", None).await;
     assert_eq!(status, StatusCode::OK, "{body}");

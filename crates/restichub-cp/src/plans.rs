@@ -19,9 +19,7 @@ use restichub_db::agents::{self as agents_repo};
 use restichub_db::audit::{AuditAction, diff};
 use restichub_db::plans::{self as repo, Plan, PlanCursor, PlanPage};
 use restichub_db::profiles::{self as profiles_repo};
-use restichub_db::{
-    AgentId, AgentStatus, BackendKind, MissedRunPolicy, PlanId, ProfileId, RepositoryId,
-};
+use restichub_db::{AgentId, AgentStatus, MissedRunPolicy, PlanId, ProfileId, RepositoryId};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use time::Duration;
@@ -67,7 +65,9 @@ pub struct CreatePlanRequest {
     pub name: String,
     pub profile_id: String,
     pub agent_id: String,
-    pub repository_id: String,
+    /// The repository that the plan backs up into (ADR-0047).
+    #[serde(default)]
+    pub repository_id: Option<String>,
     pub cron: String,
     /// An IANA name, such as `Europe/Berlin`, validated before the write.
     pub time_zone: String,
@@ -90,7 +90,9 @@ pub struct UpdatePlanRequest {
     pub name: Option<String>,
     pub profile_id: String,
     pub agent_id: String,
-    pub repository_id: String,
+    /// The repository that the plan backs up into (ADR-0047). An absent value is refused.
+    #[serde(default)]
+    pub repository_id: Option<String>,
     pub cron: String,
     pub time_zone: String,
     pub missed_run_policy: MissedRunPolicy,
@@ -315,7 +317,7 @@ pub async fn create_plan(
         name: Some(body.name),
         profile_id: &body.profile_id,
         agent_id: &body.agent_id,
-        repository_id: &body.repository_id,
+        repository_id: body.repository_id.as_deref(),
         cron: &body.cron,
         time_zone: &body.time_zone,
         missed_run_policy: body.missed_run_policy,
@@ -409,7 +411,7 @@ pub async fn update_plan(
         name: body.name.or(Some(current.name.clone())),
         profile_id: &body.profile_id,
         agent_id: &body.agent_id,
-        repository_id: &body.repository_id,
+        repository_id: body.repository_id.as_deref(),
         cron: &body.cron,
         time_zone: &body.time_zone,
         missed_run_policy: body.missed_run_policy,
@@ -655,7 +657,7 @@ struct PlanPayload<'a> {
     name: Option<String>,
     profile_id: &'a str,
     agent_id: &'a str,
-    repository_id: &'a str,
+    repository_id: Option<&'a str>,
     cron: &'a str,
     time_zone: &'a str,
     missed_run_policy: MissedRunPolicy,
@@ -666,11 +668,14 @@ fn validate_input(payload: PlanPayload<'_>) -> Result<PlanInput, ApiError> {
     let name = crate::validation::validate_record_name("name", &payload.name.unwrap_or_default())?;
     let profile_id = parse_id("profile_id", payload.profile_id, ProfileId::from_uuid)?;
     let agent_id = parse_id("agent_id", payload.agent_id, AgentId::from_uuid)?;
-    let repository_id = parse_id(
-        "repository_id",
-        payload.repository_id,
-        RepositoryId::from_uuid,
-    )?;
+    // The plan always names its repository, so a request without one is refused here (ADR-0047).
+    let Some(repository_id) = payload
+        .repository_id
+        .filter(|value| !value.trim().is_empty())
+    else {
+        return Err(ApiError::invalid_field("repository_id", Reason::Empty));
+    };
+    let repository_id = parse_id("repository_id", repository_id, RepositoryId::from_uuid)?;
     let cron = payload.cron.trim().to_owned();
     let time_zone = payload.time_zone.trim().to_owned();
     // A schedule that the cron parser refuses names the fields here, so the handler and the preview
@@ -762,11 +767,9 @@ async fn check_references(
     else {
         return Err(ApiError::invalid_field("repository_id", Reason::Unknown));
     };
-    // A local repository lives on the disk of its repository host, so a plan of it runs there only.
-    if repository.backend == BackendKind::Local && repository.maintenance_agent_id != Some(agent_id)
-    {
-        return Err(ApiError::invalid_field("agent_id", Reason::PlanOnOtherHost));
-    }
+    // A local repository lives on the disk of its repository host, so a plan of it runs there only
+    // (ADR-0046, ADR-0047).
+    crate::jobs::ensure_repository_host(&repository, agent_id)?;
     // The stored profile must compile for the operating system of the agent (FR-PF-05). The compile
     // refuses a missing path for that operating system with a field error.
     crate::profiles::compile_for_agent(&profile, repository_id, &agent, now)?;

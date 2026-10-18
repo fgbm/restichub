@@ -319,6 +319,39 @@ async fn ac_sc_11_the_plan_create_validates_the_schedule_and_the_references() {
     db.cleanup().await;
 }
 
+/// ADR-0047: the plan always names its repository, so a request without one is refused.
+#[tokio::test]
+async fn adr_0047_a_plan_without_a_repository_is_refused() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant_with_key(db.database(), "plan-empty-repo").await;
+    let app = app_with_kek(db.database());
+    let cookie = seed_session(db.database(), tenant, "operator", "operator").await;
+    let (repository_id, profile_id, agent_id) = plan_fixture(db.database(), tenant).await;
+
+    for value in [Value::Null, json!("")] {
+        let mut body = plan_body("no-repository", &profile_id, &agent_id, &repository_id);
+        if value.is_null() {
+            body.as_object_mut()
+                .expect("an object")
+                .remove("repository_id");
+        } else {
+            body["repository_id"] = value.clone();
+        }
+        let (status, _, problem) = send(
+            &app,
+            request("POST", "/api/v1/plans", Some(&cookie), Some(body)),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{value}: {problem}");
+        assert_eq!(problem["field"], "repository_id", "{problem}");
+        assert_eq!(problem["reason"], "empty", "{problem}");
+    }
+
+    db.cleanup().await;
+}
+
 #[tokio::test]
 async fn the_next_runs_preview_returns_the_fire_times() {
     let Some(db) = common::test_db().await else {
