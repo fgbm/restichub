@@ -79,8 +79,8 @@ pub struct PreviewRequest {
     pub retention: Option<Retention>,
     #[serde(default)]
     pub check: Option<CheckOptions>,
-    /// The parameters that the profile declares (FR-PF-09). A caller without the profile write
-    /// right sends no fields, and the stored profile gives them.
+    /// A caller without the profile write right sends no fields, and the stored profile gives them
+    /// (FR-PF-09).
     #[serde(default)]
     pub parameters: Vec<ParameterDefRequest>,
     /// Accepted only as an empty list, so an old client keeps working; use `scripts` instead
