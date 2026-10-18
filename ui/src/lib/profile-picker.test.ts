@@ -47,6 +47,7 @@ describe('the profile picker options', () => {
 				value: 'p1',
 				label: 'pg-dump',
 				description: ['/var/backups/pg', '7 d · 2 wk'],
+				detail: ['/var/backups/pg'],
 				search: ['/var/backups/pg']
 			}
 		]);
@@ -69,8 +70,13 @@ describe('the profile picker options', () => {
 			'/var/backups/pg',
 			'7 d · 2 wk'
 		]);
+		expect(option.detail).toEqual([
+			'/var/backups/pg',
+			{ tag: '2 parameters', icon: 'braces' }
+		]);
 		// A profile without a parameter shows no chip: an empty field does not show.
 		expect(profileOptions([profile()])[0].description).toEqual(['/var/backups/pg', '7 d · 2 wk']);
+		expect(profileOptions([profile()])[0].detail).toEqual(['/var/backups/pg']);
 	});
 
 	it('fr_pf_10_finds_a_profile_by_the_name_of_a_parameter', () => {

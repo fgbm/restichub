@@ -2043,6 +2043,8 @@ export const ru: Record<MessageKey, string> = {
 	'pe.commands.noPaths': 'Задайте пути, чтобы увидеть команды.',
 	'pe.commands.noRepository':
 		'Репозиторий не выбран, поэтому в командах нет адреса. Выберите репозиторий.',
+	'pe.commands.unsavedTag':
+		'В командах тег restichub-profile-new. Сохранённый профиль покажет тег со своим идентификатором.',
 	'pe.save.plans':
 		'Планов с этим профилем: {count}. Новые настройки подействуют на их следующий запуск.',
 	'pe.save.readonly': 'Ваша роль не позволяет менять профиль.',

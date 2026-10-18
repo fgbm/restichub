@@ -1032,7 +1032,7 @@ export interface paths {
         put?: never;
         /**
          * Previews a profile draft for one target agent.
-         * @description The steps and the command lines agree with the command that the agent runs. The draft is not stored. Secrets are masked (AC-PF-01).
+         * @description The steps and the command lines agree with the command that the agent runs. The draft is not stored. Secrets are masked (AC-PF-01). A caller without the profile write right receives the preview of the stored profile that `profile_id` names, and its draft fields are ignored. A caller without the script write right receives the stored scripts and its draft scripts are ignored.
          */
         post: operations["preview_profile"];
         delete?: never;
@@ -3044,7 +3044,8 @@ export interface components {
          * @description The body of the draft preview (FR-PF-04, AC-PF-01).
          *
          *     The profile fields describe a draft: the server validates them as a create request, stores
-         *     nothing and checks no name uniqueness.
+         *     nothing and checks no name uniqueness. A caller without the profile write right sends the
+         *     identifiers only, and the server compiles the stored profile.
          */
         PreviewRequest: {
             /** @description The identifier of the registered agent that supplies the target facts. */
@@ -3052,13 +3053,19 @@ export interface components {
             check?: components["schemas"]["CheckOptions"] | null;
             exclude_files?: string[];
             excludes?: string[];
-            /** @description Free text of 1 to 100 characters. Unique in the tenant, ignoring the letter case. Holds no control or format character. */
-            name: string;
+            /**
+             * @description Free text of 0 to 100 characters. An unsaved profile has no name, so the preview accepts an
+             *     empty value and checks no uniqueness. Holds no control or format character.
+             */
+            name?: string;
             options?: components["schemas"]["BackupOptions"];
             /** @description What the draft offers to its hosts (FR-PF-09). At most 64. */
             parameters?: components["schemas"]["ParameterDefRequest"][];
             paths?: components["schemas"]["ProfilePaths"];
-            /** @description The stored profile that the draft edits. Absent for a new profile. */
+            /**
+             * @description The stored profile that the draft edits. Required for a caller without the profile write
+             *     right: the preview then compiles the stored profile.
+             */
             profile_id?: string | null;
             /**
              * @description The repository of the commands. Absent uses the repository of the first plan of
@@ -3068,8 +3075,9 @@ export interface components {
             repository_id?: string | null;
             retention?: components["schemas"]["Retention"] | null;
             /**
-             * @description Scripts from the control plane, in the order they run in their phase (FR-HK-09). Only an
-             *     Admin can set them.
+             * @description Scripts from the control plane, in the order they run in their phase (FR-HK-09). The
+             *     preview accepts them from a caller with the script write right only; another caller gets
+             *     the stored scripts (FR-HK-12).
              */
             scripts?: components["schemas"]["ScriptDef"][];
             tags?: string[];

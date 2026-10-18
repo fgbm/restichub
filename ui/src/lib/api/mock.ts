@@ -2527,7 +2527,11 @@ export class MockApiService {
 	async previewProfile(request: PreviewRequest): Promise<PreviewResponse> {
 		const agent = this.agents.find((item) => item.id === request.agent_id);
 		if (!agent) throw problemError('invalid_argument', 'agent_id', 'unknown');
-		const paths = pathsForOs(request, agent.os);
+		// The server ignores the draft of a caller without the profile write right and compiles
+		// the stored profile, so a request without paths previews the stored settings.
+		const stored = this.profiles.find((item) => item.id === request.profile_id);
+		const settings = request.paths ? request : (stored ?? request);
+		const paths = pathsForOs(settings, agent.os);
 		if (paths.length === 0) {
 			// The compiler refuses a target without a path for its operating system.
 			throw problemError('invalid_argument', 'paths', 'empty');
@@ -2545,14 +2549,14 @@ export class MockApiService {
 			found === null
 				? []
 				: [{ name: 'RESTIC_REPOSITORY', value: 's3:https://s3.example.net/backups-prod' }];
-		const options = request.options;
+		const options = settings.options;
 		const backup = [
 			'restic',
 			...prefix,
 			'backup',
 			...(options?.one_file_system ? ['--one-file-system'] : []),
-			...(request.tags ?? []).map((tag) => `--tag=${tag}`),
-			...(request.excludes ?? []).map((pattern) => `--exclude=${pattern}`),
+			...(settings.tags ?? []).map((tag) => `--tag=${tag}`),
+			...(settings.excludes ?? []).map((pattern) => `--exclude=${pattern}`),
 			'--',
 			...paths
 		].join(' ');
@@ -2569,7 +2573,7 @@ export class MockApiService {
 				]
 			}
 		];
-		const retention = request.retention;
+		const retention = settings.retention;
 		if (retention) {
 			const keep = [
 				retention.keep_last ? `--keep-last=${retention.keep_last}` : '',
@@ -2591,7 +2595,7 @@ export class MockApiService {
 				});
 			}
 		}
-		if (request.check) {
+		if (settings.check) {
 			steps.push({
 				kind: 'check',
 				maintenance: true,

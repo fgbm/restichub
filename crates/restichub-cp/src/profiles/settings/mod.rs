@@ -402,103 +402,6 @@ pub struct PlanWarning {
     pub reason: String,
 }
 
-/// The body of the draft preview (FR-PF-04, AC-PF-01).
-///
-/// The profile fields describe a draft: the server validates them as a create request, stores
-/// nothing and checks no name uniqueness.
-#[derive(Debug, Deserialize, ToSchema)]
-#[serde(deny_unknown_fields)]
-pub struct PreviewRequest {
-    /// The identifier of the registered agent that supplies the target facts.
-    pub agent_id: String,
-    /// The repository of the commands. Absent uses the repository of the first plan of
-    /// `profile_id` on this agent, then of the first plan of `profile_id`, and no repository when
-    /// the draft holds no stored profile or plan (ADR-0047).
-    #[serde(default)]
-    pub repository_id: Option<String>,
-    /// The stored profile that the draft edits. Absent for a new profile.
-    #[serde(default)]
-    pub profile_id: Option<String>,
-    /// Free text of 1 to 100 characters. Unique in the tenant, ignoring the letter case. Holds no control or format character.
-    #[schema(max_length = 100)]
-    pub name: String,
-    #[serde(default)]
-    pub paths: ProfilePaths,
-    #[serde(default)]
-    pub excludes: Vec<String>,
-    #[serde(default)]
-    pub exclude_files: Vec<String>,
-    #[serde(default)]
-    pub tags: Vec<String>,
-    #[serde(default)]
-    pub options: BackupOptions,
-    /// Scripts from the control plane, in the order they run in their phase (FR-HK-09). Only an
-    /// Admin can set them.
-    #[serde(default)]
-    pub scripts: Vec<ScriptDef>,
-    #[serde(default)]
-    pub retention: Option<Retention>,
-    #[serde(default)]
-    pub check: Option<CheckOptions>,
-    /// What the draft offers to its hosts (FR-PF-09). At most 64.
-    #[serde(default)]
-    #[schema(max_items = 64)]
-    pub parameters: Vec<ParameterDefRequest>,
-    /// Accepted only as an empty list, so an old client keeps working; use `scripts` instead
-    /// (ADR-0040).
-    #[serde(default)]
-    #[schema(ignore)]
-    pub hooks: Option<Vec<serde_json::Value>>,
-}
-
-impl From<PreviewRequest> for CreateProfileRequest {
-    fn from(body: PreviewRequest) -> Self {
-        Self {
-            name: body.name,
-            paths: body.paths,
-            excludes: body.excludes,
-            exclude_files: body.exclude_files,
-            tags: body.tags,
-            options: body.options,
-            scripts: body.scripts,
-            retention: body.retention,
-            check: body.check,
-            parameters: body.parameters,
-            hooks: body.hooks,
-        }
-    }
-}
-
-/// One environment variable of a previewed step. A secret value is masked (AC-PF-01).
-#[derive(Debug, Serialize, ToSchema)]
-pub struct PreviewEnvView {
-    pub name: String,
-    pub value: String,
-}
-
-/// One previewed step: the kind, the maintenance flag, the command line and the environment
-/// (FR-PF-04, AC-PF-01).
-#[derive(Debug, Serialize, ToSchema)]
-pub struct PreviewStepView {
-    /// The step kind, for example `backup`, `forget`, `prune`, `check` or `script`.
-    pub kind: String,
-    /// True for `forget`, `prune` and `check` (FR-RP-08).
-    pub maintenance: bool,
-    /// Rendered argv with masked secrets.
-    pub command: String,
-    /// Process variables with masked secrets.
-    pub environment: Vec<PreviewEnvView>,
-}
-
-/// The preview of a profile draft for one target agent (FR-PF-04).
-#[derive(Debug, Serialize, ToSchema)]
-pub struct PreviewResponse {
-    /// Null when the draft names no repository and its stored profile has no plan, so the steps
-    /// carry no repository.
-    pub repository_id: Option<String>,
-    pub steps: Vec<PreviewStepView>,
-}
-
 impl TryFrom<&Profile> for ProfileView {
     type Error = ApiError;
 
@@ -681,9 +584,9 @@ impl ValidatedProfile {
             excludes: self.excludes.clone(),
             exclude_files: self.exclude_files.clone(),
             tags: self.tags.clone(),
-            // The profile has no identifier before the first save, so this tag only satisfies the
-            // compile check. The stored profile gets its own tag in `compiler_profile_from_row`.
-            profile_tag: Some(format!("{RESERVED_TAG_PREFIX}profile-validation")),
+            // An unsaved profile has no identifier, so the preview shows a tag that no stored
+            // profile can hold. The reserved prefix keeps it out of the tags of a user.
+            profile_tag: Some(UNSAVED_PROFILE_TAG.to_owned()),
             options: CompilerBackupOptions {
                 use_fs_snapshot: self.options.use_fs_snapshot,
                 one_file_system: self.options.one_file_system,
@@ -719,6 +622,12 @@ pub fn profile_tag(id: restichub_db::ProfileId) -> String {
 
 /// The prefix of the tags that only the control plane sets. A user tag may not start with it.
 pub const RESERVED_TAG_PREFIX: &str = "restichub-";
+
+/// The tag that the preview of an unsaved profile shows (FR-PF-04, FR-RP-08).
+///
+/// The reserved prefix keeps the value out of the tags of a user, and no stored profile can hold
+/// it, because [`profile_tag`] always ends with an identifier.
+pub const UNSAVED_PROFILE_TAG: &str = "restichub-profile-new";
 
 /// The stored profile as the compiler input (FR-PF-04).
 pub fn compiler_profile_from_row(profile: &Profile) -> Result<CompilerProfile, ApiError> {
