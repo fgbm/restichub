@@ -236,6 +236,12 @@
 	const missing = $derived(
 		declared.filter((definition) => missingValue(definition, planParameterValues, hostParameters))
 	);
+	// A refusal of the server names the parameters of its own check, for example a value of another
+	// kind, so the section shows that names too (FR-PF-11).
+	const serverMissing = $derived(
+		formProblem?.code === 'parameter_missing' ? (formProblem.parameters ?? []).join(', ') : null
+	);
+
 	const blockedSave = $derived(
 		missing.length > 0 ? t('pl.param.missingBlocked', { name: missing[0].name }) : null
 	);
@@ -730,7 +736,13 @@
 				{t('pl.param.missingHint', { host: hostName })}
 			</Alert>
 		{/if}
-		{#if fieldError(formProblem, 'parameters')}
+		{#if serverMissing}
+			<Alert
+				variant="inline"
+				tone="danger"
+				title={t('pl.param.missingTitle', { name: serverMissing })}
+			/>
+		{:else if fieldError(formProblem, 'parameters')}
 			<Alert variant="inline" tone="danger" title={fieldError(formProblem, 'parameters') ?? ''} />
 		{/if}
 		{#if declared.length === 0}
