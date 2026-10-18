@@ -30,7 +30,30 @@ describe('RecordPicker', () => {
 		expect(field()).toHaveTextContent('user-profiles');
 		expect(field()).toHaveTextContent('· test-s3-yandex');
 		expect(field()).toHaveAccessibleName('Profile user-profiles');
-		expect(field()).toHaveAccessibleDescription('· test-s3-yandex');
+		expect(field()).toHaveAccessibleDescription('test-s3-yandex');
+	});
+
+	it('keeps the label, the separator and the parts of the closed field on one row', () => {
+		const profiles: RecordOption[] = [
+			{
+				value: 'p1',
+				label: 'db-nightly',
+				description: ['/srv +1', { tag: '4 parameters' }],
+				detail: ['/srv +1', { tag: '4 parameters' }]
+			}
+		];
+		render(RecordPicker, { props: { label: 'Profile', options: profiles, value: 'p1' } });
+
+		const value = screen.getByText('db-nightly', { selector: '.rh-record__value' });
+		const line = field().querySelector<HTMLElement>('.record-line');
+		// The field is the flex row: a wrapper around the parts is an inline box, and the flex line
+		// inside it drops below the value.
+		expect(line?.parentElement).toBe(field());
+		expect(value.nextElementSibling).toHaveClass('rh-record__sep');
+		expect(line?.previousElementSibling).toHaveClass('rh-record__sep');
+		expect(line?.querySelector('.badge')).not.toBeNull();
+		expect(field()).toHaveTextContent(/db-nightly\s*·\s*\/srv \+1\s*4 parameters/);
+		expect(field()).toHaveAccessibleDescription(/\/srv \+1.*4 parameters/);
 	});
 
 	it('finds an option by its secondary text and selects it', async () => {

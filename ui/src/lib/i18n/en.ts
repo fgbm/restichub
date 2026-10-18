@@ -239,7 +239,7 @@ export const en = {
 
 	// Users
 	'users.title': 'Users',
-	'users.description': 'Members of the organization {name} and their roles.',
+	'users.description': 'A user of the organization {name} has one role.',
 	'users.user': 'User',
 	'users.searchPlaceholder': 'Search users',
 	'users.filters': 'User filters',
@@ -289,7 +289,8 @@ export const en = {
 
 	// Platform users (installation-wide accounts)
 	'platformUsers.title': 'Users',
-	'platformUsers.description': 'Installation accounts and their memberships in the organizations.',
+	'platformUsers.description':
+		'A platform user is an installation account with memberships in organizations.',
 	'platformUsers.create': 'Create user',
 	'platformUsers.createTitle': 'Create an installation account',
 	'platformUsers.username': 'User name',
@@ -436,7 +437,7 @@ export const en = {
 
 	// Hosts
 	'hosts.title': 'Hosts',
-	'hosts.description': 'Every computer with a ResticHub agent in the organization.',
+	'hosts.description': 'A host is a computer of the organization with the ResticHub agent.',
 	'hosts.add': 'Add host',
 	'hosts.addFirst': 'Add the first host',
 	'hosts.addTitle': 'Add a host',
@@ -1716,7 +1717,7 @@ export const en = {
 	'nav.jobTemplates': 'Job templates',
 	'scriptTemplates.title': 'Script templates',
 	'scriptTemplates.description':
-		'Ready scripts with declared parameters. A profile gets a copy of a template.',
+		'A script template is a ready script with declared parameters. A profile gets a copy of the template.',
 	'scriptTemplates.add': 'Add template',
 	'scriptTemplates.addFirst': 'Add the first template',
 	'scriptTemplates.emptyTitle': 'No template yet',

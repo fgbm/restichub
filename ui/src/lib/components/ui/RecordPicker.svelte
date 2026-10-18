@@ -162,9 +162,8 @@
 				{/if}
 				<span class="rh-record__value" id={valueId}>{closedText}</span>
 				{#if detailParts}
-					<span class="rh-record__detail" id={detailId}>
-						· <RecordLine parts={detailParts} />
-					</span>
+					<span class="rh-record__sep" aria-hidden="true">·</span>
+					<RecordLine parts={detailParts} id={detailId} />
 				{/if}
 			{/if}
 			<span class="rh-select-wrap__icon"><Icon name="chevron-down" /></span>
@@ -274,7 +273,8 @@
 	}
 
 	.rh-record__value,
-	.rh-record__detail {
+	.rh-record__sep,
+	:global(.rh-record__field) :global(.record-line) {
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
@@ -285,9 +285,15 @@
 		max-width: 60%;
 	}
 
-	.rh-record__detail {
-		min-width: 0;
+	.rh-record__sep {
+		flex: none;
 		color: var(--rh-color-text-muted);
+	}
+
+	/* The closed field is one row, so the parts must be items of its flex box and not of a wrapper
+	   that puts them below the label. The parts cut at the end and keep a chip in view. */
+	:global(.rh-record__field) :global(.record-line) {
+		flex: 0 1 auto;
 	}
 
 	.rh-record__placeholder {

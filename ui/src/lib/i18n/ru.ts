@@ -245,7 +245,7 @@ export const ru: Record<MessageKey, string> = {
 
 	// Users
 	'users.title': 'Пользователи',
-	'users.description': 'Участники организации {name} и их роли.',
+	'users.description': 'Пользователь организации {name} имеет одну роль.',
 	'users.user': 'Пользователь',
 	'users.searchPlaceholder': 'Поиск пользователей',
 	'users.filters': 'Фильтры пользователей',
@@ -295,7 +295,8 @@ export const ru: Record<MessageKey, string> = {
 
 	// Platform users (installation-wide accounts)
 	'platformUsers.title': 'Пользователи',
-	'platformUsers.description': 'Учётные записи установки и их членство в организациях.',
+	'platformUsers.description':
+		'Пользователь платформы — учётная запись установки с членством в организациях.',
 	'platformUsers.create': 'Создать пользователя',
 	'platformUsers.createTitle': 'Создание учётной записи установки',
 	'platformUsers.username': 'Имя пользователя',
@@ -442,7 +443,7 @@ export const ru: Record<MessageKey, string> = {
 
 	// Hosts
 	'hosts.title': 'Хосты',
-	'hosts.description': 'Все компьютеры организации с агентом ResticHub.',
+	'hosts.description': 'Хост — компьютер организации с агентом ResticHub.',
 	'hosts.add': 'Добавить хост',
 	'hosts.addFirst': 'Добавить первый хост',
 	'hosts.addTitle': 'Добавить хост',
@@ -1721,7 +1722,7 @@ export const ru: Record<MessageKey, string> = {
 	'nav.jobTemplates': 'Шаблоны заданий',
 	'scriptTemplates.title': 'Шаблоны скриптов',
 	'scriptTemplates.description':
-		'Готовые скрипты с описанными параметрами. Профиль получает копию шаблона.',
+		'Шаблон скрипта — готовый скрипт с описанными параметрами. Профиль получает копию шаблона.',
 	'scriptTemplates.add': 'Добавить шаблон',
 	'scriptTemplates.addFirst': 'Добавить первый шаблон',
 	'scriptTemplates.emptyTitle': 'Шаблонов пока нет',
