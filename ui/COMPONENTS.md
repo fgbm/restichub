@@ -168,7 +168,7 @@ To keep the filters in the query string, use `queryFilters(keys)` from `$lib/sto
 
 ## RecordPicker
 
-`RecordPicker` (`$lib/components/ui`) is the field that selects one record when the name of the record is not sufficient, for example a profile and its repository. Each option has two lines: the label, and a muted secondary line with texts and small tag chips. The closed field shows the label and the first part of the secondary line, for example "user-profiles · test-s3-yandex". The open list has a search field at the top. The search finds the label, each part of the secondary line and each `search` text, and it ignores the case of the letters.
+`RecordPicker` (`$lib/components/ui`) is the field that selects one record when the name of the record is not sufficient, for example a profile and its repository. Each option has two lines: the label, and a muted secondary line with texts and small tag chips. The closed field shows the label and one detail on one line, for example "user-profiles · test-s3-yandex". The open list has a search field at the top. The search finds the label, each part of the secondary line and each `search` text, and it ignores the case of the letters.
 
 | Property                                   | Function                                                                                                       |
 | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
@@ -187,7 +187,7 @@ An option can also have these properties:
 
 - `dot`: a status dot before the label, `success`, `warning` or `neutral`. Set `state` too, because a color is never the only sign.
 - `state`: the state in words at the right of the option. The selected option shows a check mark in its place.
-- `detail`: the text after the label in the closed field. By default, it is the first part of the secondary line.
+- `detail`: the content after the label in the closed field: a text, or the parts of the secondary line, so a chip stays a chip. It stays on the line of the label and cuts at the end. By default, it is the first part of the secondary line.
 - `search`: extra texts for the search, which the option does not show, for example each path of a profile.
 - `disabled` and `reason`: an option that the person cannot select. It stays in the list, dimmed, and the reason shows below it, for example "Repository local-fs is on fs-01". Do not hide an option that the person expects to find.
 
