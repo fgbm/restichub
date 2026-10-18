@@ -162,9 +162,7 @@ describe('Organization user page', () => {
 		render(OrgUserPage, { userId: 'u_02' });
 		await screen.findByRole('heading', { level: 1, name: 'Ivan Egorkin' });
 		// The sentence of the organization user list is the subtitle of the record.
-		expect(
-			screen.getByText('Members of the organization acme and their roles.')
-		).toBeInTheDocument();
+		expect(screen.getByText('A user of the organization acme has one role.')).toBeInTheDocument();
 		const header = document.querySelector<HTMLElement>('.page-header__actions') as HTMLElement;
 		expect(within(header).getByRole('button', { name: 'Reset password' })).toBeInTheDocument();
 		expect(within(header).queryByRole('button', { name: /More actions/ })).toBeNull();
