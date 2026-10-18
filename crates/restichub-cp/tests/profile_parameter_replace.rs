@@ -175,7 +175,8 @@ async fn fr_pf_11_a_replace_refuses_two_kinds_of_one_name() {
     db.cleanup().await;
 }
 
-/// FR-PF-12: the audit of a replace names the values that moved, and never their text.
+/// FR-PF-12: the audit of a replace names the values that moved and the ones that the successor
+/// shadowed, and never their text. FR-PF-11: a value of the successor of another kind is refused.
 #[tokio::test]
 async fn fr_pf_12_a_replace_names_the_values_that_moved() {
     let Some(db) = common::test_db().await else {
@@ -201,6 +202,7 @@ async fn fr_pf_12_a_replace_names_the_values_that_moved() {
     seed_plan(db.database(), tenant, "nightly", profile, old, repository).await;
     let hook = seed_secret(db.database(), tenant, "pg.password").await;
     let canary = "CANARY-moved-1";
+    let kept = "CANARY-kept-2";
     store_values(
         &db,
         tenant,
@@ -209,6 +211,9 @@ async fn fr_pf_12_a_replace_names_the_values_that_moved() {
         Some(("pg_password", hook)),
     )
     .await;
+    // The successor already holds the name `pg_dir`, so the move drops the value of the old record
+    // and keeps the value of the successor.
+    store_values(&db, tenant, new, Some(("pg_dir", kept)), None).await;
 
     let (status, _, moved) = send(
         &app,
@@ -227,17 +232,51 @@ async fn fr_pf_12_a_replace_names_the_values_that_moved() {
     let values = diff["new"]["parameter_values"]
         .as_array()
         .expect("the moved values");
-    assert_eq!(values.len(), 2, "{diff}");
-    assert_eq!(values[0]["name"], "pg_dir", "{diff}");
-    assert_eq!(values[0]["kind"], "text", "{diff}");
-    assert_eq!(values[0]["value"], "<set>", "{diff}");
-    assert_eq!(values[1]["name"], "pg_password", "{diff}");
-    assert_eq!(values[1]["kind"], "secret", "{diff}");
-    assert_eq!(values[1]["reference"], hook.to_string(), "{diff}");
+    assert_eq!(values.len(), 1, "{diff}");
+    assert_eq!(values[0]["name"], "pg_password", "{diff}");
+    assert_eq!(values[0]["kind"], "secret", "{diff}");
+    assert_eq!(values[0]["reference"], hook.to_string(), "{diff}");
+    let dropped = diff["new"]["parameter_values_dropped"]
+        .as_array()
+        .expect("the dropped values");
+    assert_eq!(dropped.len(), 1, "{diff}");
+    assert_eq!(dropped[0]["name"], "pg_dir", "{diff}");
+    assert_eq!(dropped[0]["kind"], "text", "{diff}");
+    assert_eq!(dropped[0]["value"], "<set>", "{diff}");
+    assert!(dropped[0]["reference"].is_null(), "{diff}");
     assert!(
         !diff.to_string().contains(canary),
         "the audit holds no value"
     );
+    assert!(!diff.to_string().contains(kept), "the audit holds no value");
+
+    // A value of the successor of another kind than the declaration counts as missing for the plans
+    // that move, so the replace is refused and nothing moves (FR-PF-11).
+    let (old_kind, new_kind) = duplicate_pair(&db, tenant).await;
+    let text = seed_profile(db.database(), tenant, "text-kind").await;
+    declare(
+        &db,
+        tenant,
+        text,
+        json!([{"name": "pg_dir", "kind": "text"}]),
+    )
+    .await;
+    seed_plan(db.database(), tenant, "kind", text, old_kind, repository).await;
+    store_values(&db, tenant, new_kind, None, Some(("pg_dir", hook))).await;
+    let (status, _, problem) = send(
+        &app,
+        request(
+            "POST",
+            &format!("/api/v1/agents/{new_kind}/replace"),
+            Some(&cookie),
+            Some(json!({"old_agent_id": old_kind.to_string()})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
+    assert_eq!(problem["field"], "old_agent_id");
+    assert_eq!(problem["reason"], "parameter_kind_mismatch");
+    assert_eq!(problem["parameters"], json!(["pg_dir"]));
 
     db.cleanup().await;
 }

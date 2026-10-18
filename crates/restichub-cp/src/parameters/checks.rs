@@ -8,16 +8,20 @@
 //! incomplete plan to dispatch.
 //!
 //! The advisory lock comes before every row lock, and it serializes the writers of the tenant, so
-//! the checks below read the rows of the other writers without a share lock. The order of the row
-//! locks after the advisory lock is this one, and no path takes them in the other order:
+//! the checks below read the rows of the other writers without a share lock. After the advisory
+//! lock a plan save takes its row locks in this order, and no path takes them in the other order:
 //!
-//! - a plan save: plan, profile, host, repository;
-//! - a host values change: host, then the profiles of the plans of the host;
-//! - a profile save: the profile only.
+//! - the plan row of an update or a delete, with `FOR UPDATE`;
+//! - the repository row, with `FOR UPDATE`;
+//! - a key-share lock on the profile row and on the agent row, which the foreign key of the plans
+//!   row takes at its write.
 //!
-//! The repository row keeps its update lock, because ADR-0046 binds a local repository to its host
-//! and the repository write takes that lock first. Two writers of this invariant wait for the
-//! advisory lock, so no row lock of the invariant forms a cycle.
+//! The repository comes before the agent because the paths outside this invariant take it first:
+//! the restore path and the queue lock the repository row and then the agent row, and the replace of
+//! a host record follows them (FR-ID-11). The repository row keeps its update lock, because
+//! ADR-0046 binds a local repository to its host and the repository write takes that lock first.
+//! Two writers of this invariant wait for the advisory lock, so no row lock of the invariant forms
+//! a cycle.
 
 use restichub_db::parameters as repo;
 use restichub_db::{AgentId, ParameterKind, ProfileId};
@@ -146,7 +150,9 @@ fn kind_of(definitions: &[ParameterDef], name: &str) -> ParameterKind {
 ///
 /// The move gives the plans of the old record the successor, and the values of the successor then
 /// serve their profiles too. The check runs after the move, so the plans of the successor supply
-/// the declarations of both records.
+/// the declarations of both records. A value of the successor that no profile of the host declares
+/// keeps its row, so the declarations must also agree with the values themselves: a name of the
+/// other kind counts as missing for the plans that move (FR-PF-11, ADR-0047).
 ///
 /// # Errors
 ///
@@ -155,6 +161,7 @@ pub async fn check_kinds_after_move(
     tx: &mut restichub_db::TenantTx<'_>,
     agent_id: AgentId,
 ) -> Result<(), ApiError> {
+    let values = repo::agent_values(tx, agent_id).await?;
     let mut checked: Vec<ProfileId> = Vec::new();
     for plan in plans_repo::list_by_agent(tx, agent_id).await? {
         if checked.contains(&plan.profile_id) {
@@ -174,6 +181,14 @@ pub async fn check_kinds_after_move(
             &definitions,
         )
         .await?;
+        let mismatched = parameters::kind_mismatches(&definitions, &values);
+        if !mismatched.is_empty() {
+            return Err(ApiError::parameters(
+                "old_agent_id",
+                Reason::ParameterKindMismatch,
+                mismatched,
+            ));
+        }
     }
     Ok(())
 }

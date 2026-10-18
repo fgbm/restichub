@@ -394,8 +394,9 @@ pub struct Replaced {
     pub plans: u64,
     pub repositories: u64,
     pub queued_jobs: u64,
-    /// The count of the rows that came from the old record (FR-PF-10).
-    pub parameter_values: u64,
+    /// The values that came from the old record, and the ones that the successor already held
+    /// (FR-PF-10, FR-PF-12).
+    pub parameter_values: crate::parameters::MovedValues,
 }
 
 /// How a replacement ended: done, or refused for a reason the caller maps to a status.
@@ -424,6 +425,16 @@ pub async fn replace(
     now: OffsetDateTime,
     online_window: time::Duration,
 ) -> Result<ReplaceOutcome, DbError> {
+    // The replace writes the maintenance agent of these repository rows. The restore path and the
+    // queue take a repository row before an agent row, so this order cannot deadlock with them
+    // (FR-ID-11, ADR-0046).
+    sqlx::query(
+        "SELECT 1 FROM repositories WHERE maintenance_agent_id = $1 ORDER BY id FOR UPDATE",
+    )
+    .bind(old)
+    .fetch_all(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
     let paired: Option<(Option<OffsetDateTime>,)> = sqlx::query_as(
         "SELECT o.last_seen_at FROM agents n JOIN agents o ON o.tenant_id = n.tenant_id \
          WHERE n.id = $1 AND o.id = $2 AND n.id <> o.id \
@@ -479,13 +490,13 @@ pub async fn replace(
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
-    let parameter_values = crate::parameters::move_agent_values(tx, old, new).await?;
+    let moved_values = crate::parameters::move_agent_values(tx, old, new).await?;
     revoke(tx, old, actor, now).await?;
     Ok(ReplaceOutcome::Replaced(Replaced {
         plans,
         repositories,
         queued_jobs,
-        parameter_values,
+        parameter_values: moved_values,
     }))
 }
 

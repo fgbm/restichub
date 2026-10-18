@@ -475,8 +475,9 @@ async fn fr_hk_12_a_script_of_an_operator_draft_is_ignored() {
 }
 
 /// AC-PF-10: a Viewer draft fills no template of the stored profile, so the host value of a parameter
-/// that only the draft reads appears in no command; a value that the stored profile puts into a path
-/// is part of the command, and the reader sees it (FR-PF-12, ADR-0047).
+/// that only the draft reads appears in no command. A host value reaches the reader only through a
+/// plan of the stored profile on the requested host, and then a value that the stored profile puts
+/// into a path is part of the command (FR-PF-12, ADR-0047).
 #[tokio::test]
 async fn ac_pf_10_a_reader_draft_shows_no_parameter_value() {
     let Some(db) = common::test_db().await else {
@@ -538,7 +539,9 @@ async fn ac_pf_10_a_reader_draft_shows_no_parameter_value() {
     );
     assert!(!text.contains("{{param"), "{preview}");
 
-    // The stored profile puts the value into the path of its own accord, so the command holds it.
+    // The stored profile puts the value into the path of its own accord. Without a plan of the
+    // profile on the requested host, the reader gets the placeholder of the text default and no
+    // host value.
     let planned = create_profile(
         &app,
         &admin,
@@ -550,6 +553,53 @@ async fn ac_pf_10_a_reader_draft_shows_no_parameter_value() {
     )
     .await;
     let planned_id = planned["id"].as_str().expect("the identifier").to_owned();
+    let (status, _, preview) = send(
+        &app,
+        request(
+            "POST",
+            "/api/v1/profiles/preview",
+            Some(&viewer),
+            Some(json!({
+                "agent_id": agent.to_string(),
+                "profile_id": planned_id,
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    let text = preview.to_string();
+    assert!(
+        !text.contains(canary),
+        "no plan of the profile runs on the host: {preview}"
+    );
+    assert!(
+        !text.contains("/default"),
+        "the reader reads no text default: {preview}"
+    );
+
+    // A plan of the profile on the requested host gives the host value to the reader: the stored
+    // path is part of the command of that plan.
+    let repository = repository_fixture(db.database(), tenant).await;
+    let (status, _, plan) = send(
+        &app,
+        request(
+            "POST",
+            "/api/v1/plans",
+            Some(&admin),
+            Some(json!({
+                "name": "planned-nightly",
+                "profile_id": planned_id,
+                "agent_id": agent.to_string(),
+                "repository_id": repository,
+                "cron": "0 2 * * *",
+                "time_zone": "UTC",
+                "missed_run_policy": "run_all",
+                "parameter_values": [],
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{plan}");
     let (status, _, preview) = send(
         &app,
         request(

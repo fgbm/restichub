@@ -22,7 +22,7 @@ use utoipa::ToSchema;
 use crate::context::{Operation, RequestContext};
 use crate::error::ApiError;
 use crate::json::ApiJson;
-use crate::parameters::ParameterDefRequest;
+use crate::parameters::{ParameterDef, ParameterDefRequest, ParameterDefView};
 use crate::scripts::ScriptDef;
 use crate::server::AppState;
 use crate::validation::Reason;
@@ -148,7 +148,7 @@ pub struct PreviewResponse {
     post,
     path = "/api/v1/profiles/preview",
     summary = "Previews a profile draft for one target agent.",
-    description = "The steps and the command lines agree with the command that the agent runs. The draft is not stored. Secrets are masked (AC-PF-01). A caller without the profile write right receives the preview of the stored profile that `profile_id` names, and its draft fields are ignored. A caller without the script write right receives the stored scripts and its draft scripts are ignored.",
+    description = "The steps and the command lines agree with the command that the agent runs. The draft is not stored. Secrets are masked (AC-PF-01). A caller without the profile write right receives the preview of the stored profile that `profile_id` names, and its draft fields are ignored. A caller without the script write right receives the stored scripts and its draft scripts are ignored. A caller without the script read right receives the parameter values of the requested host only when a plan of the stored profile runs there.",
     security(("cookie" = []), ("bearer" = [])),
     request_body = PreviewRequest,
     responses(
@@ -216,17 +216,39 @@ pub async fn preview_profile(
         (None, Some(stored)) => crate::parameters::from_row(&stored.parameters)?,
         (None, None) => Vec::new(),
     };
-    let plan_values = match profile_id {
+    let may_read_text = crate::parameters::may_read_text(&context);
+    let chosen_plan = match profile_id {
         Some(profile_id) => {
-            let plan = planned_plan(&mut tx, profile_id, agent_id, repository.as_ref()).await?;
-            match plan {
-                Some(plan) => restichub_db::parameters::plan_values(&mut tx, plan.id).await?,
-                None => Vec::new(),
-            }
+            planned_plan(
+                &mut tx,
+                profile_id,
+                agent_id,
+                repository.as_ref(),
+                may_read_text,
+            )
+            .await?
         }
+        None => None,
+    };
+    let plan_values = match &chosen_plan {
+        Some(plan) => restichub_db::parameters::plan_values(&mut tx, plan.id).await?,
         None => Vec::new(),
     };
-    let host_values = restichub_db::parameters::agent_values(&mut tx, agent_id).await?;
+    // A host has a value for each of its profiles, so a reader without the script read right gets
+    // the values of the requested host only through a plan of the profile that runs there. Any
+    // other host would show the values of parameters that this profile never uses (FR-PF-12).
+    let host_values = if may_read_text || chosen_plan.is_some() {
+        restichub_db::parameters::agent_values(&mut tx, agent_id).await?
+    } else {
+        Vec::new()
+    };
+    // This reader gets no text default either: a default becomes the empty placeholder that the
+    // profile view shows (FR-PF-12).
+    let definitions = if may_read_text {
+        definitions
+    } else {
+        placeholder_defaults(definitions)
+    };
     let parameters = crate::parameters::resolve(&definitions, &plan_values, &host_values);
     let compiler_profile = match (draft.as_ref(), stored.as_ref()) {
         (Some(draft), _) => {
@@ -322,12 +344,14 @@ async fn planned_repository(
 ///
 /// The preview names an agent and, when the caller gives one, a repository. The plan of this
 /// profile that runs on the agent with that repository supplies the overrides; without such a plan
-/// the host values and the defaults apply.
+/// the host values and the defaults apply. `any_host` lets a writer fall back to the plan of another
+/// host, so its overrides still show in the commands of the draft.
 async fn planned_plan(
     tx: &mut restichub_db::TenantTx<'_>,
     profile_id: ProfileId,
     agent_id: AgentId,
     repository: Option<&Repository>,
+    any_host: bool,
 ) -> Result<Option<plans_repo::Plan>, ApiError> {
     let plans = plans_repo::list_by_profile(tx, profile_id).await?;
     let chosen = plans
@@ -338,13 +362,25 @@ async fn planned_plan(
         })
         .or_else(|| plans.iter().find(|plan| plan.agent_id == agent_id))
         .or_else(|| {
-            repository.and_then(|repository| {
+            repository.filter(|_| any_host).and_then(|repository| {
                 plans
                     .iter()
                     .find(|plan| plan.repository_id == repository.id)
             })
         });
     Ok(chosen.cloned())
+}
+
+/// The declarations as a reader without the script read right sees a text default: as an empty
+/// placeholder (FR-PF-12).
+fn placeholder_defaults(definitions: Vec<ParameterDef>) -> Vec<ParameterDef> {
+    definitions
+        .into_iter()
+        .map(|definition| ParameterDef {
+            default_value: ParameterDefView::of(&definition, false).default_value,
+            ..definition
+        })
+        .collect()
 }
 
 /// The scripts of the stored profile of the draft, or none when the draft has no stored profile

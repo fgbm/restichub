@@ -465,6 +465,71 @@ async fn adr_0047_an_operator_keeps_no_secret_override_of_a_plan() {
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
 
+    // A host secret value of a name that only a host holds, without an override of a plan, is the
+    // choice of an Admin as well: a removal or a kind change away from `secret` takes its use away.
+    let host_profile = create_profile(
+        &app,
+        &admin,
+        json!({
+            "name": "host-secret",
+            "paths": {"all": ["/data"]},
+            "parameters": [
+                {"name": "pg_user", "kind": "text"},
+                {"name": "backup_key", "kind": "secret"},
+            ],
+        }),
+    )
+    .await;
+    let backup_key = create_secret(&app, &admin, "backup-key", "CANARY-secret-2").await;
+    let (status, body) = create_plan(
+        &app,
+        &admin,
+        "host-nightly",
+        &host_profile,
+        agent,
+        &repository,
+        json!([{"name": "pg_user", "kind": "text", "value": "postgres"}]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let (status, body) = put_host_values(
+        &app,
+        &admin,
+        agent,
+        json!([
+            {"name": "pg_user", "kind": "text", "value": "postgres"},
+            {"name": "pg_password", "kind": "secret", "secret_id": secret},
+            {"name": "backup_key", "kind": "secret", "secret_id": backup_key},
+        ]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = update_profile(
+        &app,
+        &operator,
+        &host_profile,
+        json!({
+            "paths": {"all": ["/data"]},
+            "parameters": [{"name": "pg_user", "kind": "text"}],
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    let (status, body) = update_profile(
+        &app,
+        &operator,
+        &host_profile,
+        json!({
+            "paths": {"all": ["/data"]},
+            "parameters": [
+                {"name": "pg_user", "kind": "text"},
+                {"name": "backup_key", "kind": "text"},
+            ],
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+
     // The Admin removes the declaration, and the audit names the plan and the reference that went.
     let (status, body) = update_profile(&app, &admin, &profile, without_secret).await;
     assert_eq!(status, StatusCode::OK, "{body}");

@@ -427,14 +427,6 @@ pub async fn replace_agent(
     // The advisory lock serializes the move with every write that can change what the plans of the
     // tenant need (FR-PF-11, FR-ID-11).
     tx.lock(crate::parameters::PARAMETERS_LOCK).await?;
-    // The values that the move takes to the successor. A name that the successor already holds
-    // keeps its own value, so the move drops the value of the old record of that name.
-    let before = restichub_db::parameters::agent_values(&mut tx, old_id).await?;
-    let held = restichub_db::parameters::agent_values(&mut tx, new_id).await?;
-    let moved_values: Vec<restichub_db::parameters::ParameterValue> = before
-        .into_iter()
-        .filter(|value| !held.iter().any(|other| other.name == value.name))
-        .collect();
     let moved = match repo::replace(
         &mut tx,
         new_id,
@@ -479,8 +471,17 @@ pub async fn replace_agent(
             "plans_moved": moved.plans,
             "repositories_moved": moved.repositories,
             "queued_jobs_moved": moved.queued_jobs,
-            "parameter_values_moved": moved.parameter_values,
-            "parameter_values": crate::parameters::audit_values(&moved_values, None),
+            "parameter_values_moved": moved.parameter_values.moved.len(),
+            "parameter_values": crate::parameters::audit_values(
+                &moved.parameter_values.moved,
+                None,
+            ),
+            // A name that the successor already holds keeps its own value, so the move drops the
+            // value of the old record of that name (FR-PF-12).
+            "parameter_values_dropped": crate::parameters::audit_values(
+                &moved.parameter_values.dropped,
+                None,
+            ),
         })),
         &[],
     ));
