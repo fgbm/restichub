@@ -71,6 +71,8 @@ pub enum Reason {
     OutOfRange,
     NotRepositoryHost,
     PlanOnOtherHost,
+    /// A local path has the format of another operating system than the host (FR-RP-10).
+    PathOnOtherOs,
 }
 
 impl Reason {
@@ -97,6 +99,7 @@ impl Reason {
             Self::OutOfRange => "out_of_range",
             Self::NotRepositoryHost => "not_repository_host",
             Self::PlanOnOtherHost => "plan_on_other_host",
+            Self::PathOnOtherOs => "path_on_other_os",
         }
     }
 }

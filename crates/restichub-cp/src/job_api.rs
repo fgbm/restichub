@@ -74,6 +74,7 @@ impl From<JobSortKey> for JobSort {
 
 /// Query parameters of the job list (FR-SC-09, FR-UI-01).
 #[derive(Debug, Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 #[serde(deny_unknown_fields)]
 pub struct JobListQuery {
     pub cursor: Option<String>,

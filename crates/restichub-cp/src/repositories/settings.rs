@@ -642,6 +642,28 @@ pub(super) async fn ensure_agent(
     Ok(())
 }
 
+/// Refuses a local path whose format does not fit the operating system of the host: a drive path
+/// is for a Windows host, a path from `/` is for every other host (FR-RP-10).
+pub(super) async fn ensure_path_fits_host(
+    tx: &mut restichub_db::TenantTx<'_>,
+    local_path: Option<&str>,
+    agent: Option<AgentId>,
+) -> Result<(), ApiError> {
+    let (Some(path), Some(agent)) = (local_path, agent) else {
+        return Ok(());
+    };
+    let Some(host) = agents_repo::get(tx, agent).await? else {
+        return Ok(());
+    };
+    if path.starts_with('/') == (host.os == "windows") {
+        return Err(ApiError::invalid_field(
+            "backend.path",
+            Reason::PathOnOtherOs,
+        ));
+    }
+    Ok(())
+}
+
 /// The diff value of a repository change. It never holds a secret value.
 pub(super) fn created_diff(name: &str, backend: &ValidatedBackend) -> serde_json::Value {
     json!({

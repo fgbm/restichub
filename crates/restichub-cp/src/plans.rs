@@ -41,6 +41,7 @@ const DEFAULT_PREVIEW_RUNS: usize = 5;
 
 /// Query parameters of the list endpoint (FR-SC-01).
 #[derive(Debug, Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 #[serde(deny_unknown_fields)]
 pub struct PlanListQuery {
     pub cursor: Option<String>,
@@ -49,6 +50,7 @@ pub struct PlanListQuery {
 
 /// Query parameters of the next-runs preview (FR-SC-01).
 #[derive(Debug, Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 #[serde(deny_unknown_fields)]
 pub struct NextRunsQuery {
     pub count: Option<usize>,

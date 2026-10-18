@@ -3773,32 +3773,32 @@ export interface operations {
     };
     list_agents: {
         parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                status: ("active" | "revoked") | null;
-                cursor: string | null;
-                limit: number | null;
+            query?: {
+                status?: "active" | "revoked";
+                cursor?: string;
+                limit?: number;
                 /** @description The first row of a numbered page, at most 10000. Do not combine with `cursor`. */
-                offset: number | null;
+                offset?: number;
                 /** @description A part of the host name or of a label, in any case; at most 200 characters. */
-                q: string | null;
+                q?: string;
                 /** @description Comma-separated, at most 50 values in each list: `online`, `offline`, `waiting`, `revoked`. */
-                state: string | null;
+                state?: string;
                 /** @description Comma-separated operating systems. */
-                os: string | null;
+                os?: string;
                 /** @description Comma-separated, for example `0.4.1,0.4.2`. */
-                agent_version: string | null;
+                agent_version?: string;
                 /** @description Comma-separated; a host with one of them matches. */
-                label: string | null;
-                server_scripts: ("enabled" | "disabled") | null;
+                label?: string;
+                server_scripts?: "enabled" | "disabled";
                 /** @description Default: `created_at`. A cursor takes only the default order. */
-                sort: ("created_at" | "hostname" | "last_seen_at" | "agent_version" | "os") | null;
+                sort?: "created_at" | "hostname" | "last_seen_at" | "agent_version" | "os";
                 /** @description Default: `desc`. */
-                order: ("asc" | "desc") | null;
+                order?: "asc" | "desc";
                 /** @description Adds the state counts and the filter values to the response. */
-                facets: boolean | null;
+                facets?: boolean;
             };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -4237,21 +4237,21 @@ export interface operations {
     };
     list_alerts: {
         parameters: {
-            query?: never;
-            header?: never;
-            path: {
+            query?: {
                 /** @description `open` (default), `resolved` or `all`. */
-                status: ("open" | "resolved" | "all") | null;
+                status?: "open" | "resolved" | "all";
                 /** @description Comma-separated, for example `job_failed,agent_offline`. */
-                kind: string | null;
+                kind?: string;
                 /** @description Matches the host, the plan or the repository name; at most 200 characters. */
-                q: string | null;
+                q?: string;
                 /** @description Not with `offset`. */
-                cursor: string | null;
+                cursor?: string;
                 /** @description Skipped alerts, in `0..=10000`. Not with `cursor`. */
-                offset: number | null;
-                limit: number | null;
+                offset?: number;
+                limit?: number;
             };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -4433,32 +4433,30 @@ export interface operations {
     };
     list_tenant_audit: {
         parameters: {
-            query?: never;
-            header?: never;
-            path: {
+            query?: {
                 /** @description Start of the time range in RFC 3339. */
-                from: string | null;
+                from?: string;
                 /** @description End of the time range in RFC 3339. */
-                to: string | null;
-                action: string | null;
-                actor_type: string | null;
+                to?: string;
+                action?: string;
+                actor_type?: string;
                 /** @description Needs `actor_type`. */
-                actor_id: string | null;
-                object_type: string | null;
-                object_id: string | null;
-                /** @description Used by the platform list. */
-                tenant_id: string | null;
+                actor_id?: string;
+                object_type?: string;
+                object_id?: string;
                 /**
                  * @description A part of the action code, the object name or the actor name, in any case; at most 200
                  *     characters.
                  */
-                q: string | null;
+                q?: string;
                 /** @description Not with `offset`. */
-                cursor: string | null;
+                cursor?: string;
                 /** @description Skipped records, in `0..=10000`. Not with `cursor`. */
-                offset: number | null;
-                limit: number | null;
+                offset?: number;
+                limit?: number;
             };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -4818,17 +4816,17 @@ export interface operations {
     };
     list_enrollment_tokens: {
         parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                cursor: string | null;
-                limit: number | null;
+            query?: {
+                cursor?: string;
+                limit?: number;
                 /**
                  * @description `true` lists only the tokens that can still enroll a host: not used, not revoked and not
                  *     expired.
                  */
-                pending: boolean | null;
+                pending?: boolean;
             };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -5384,43 +5382,43 @@ export interface operations {
     };
     list_jobs: {
         parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                cursor: string | null;
-                limit: number | null;
+            query?: {
+                cursor?: string;
+                limit?: number;
                 /** @description The first row of a numbered page, at most 10000. Do not combine with `cursor`. */
-                offset: number | null;
+                offset?: number;
                 /** @description Comma-separated identifiers. Each list holds at most 50 values. */
-                plan_id: string | null;
+                plan_id?: string;
                 /** @description Comma-separated identifiers. */
-                repository_id: string | null;
+                repository_id?: string;
                 /** @description Comma-separated identifiers. */
-                agent_id: string | null;
+                agent_id?: string;
                 /** @description Comma-separated, for example `backup,check`. */
-                kind: string | null;
-                status: components["schemas"]["JobStatus"] | null;
+                kind?: string;
+                status?: components["schemas"]["JobStatus"];
                 /**
                  * @description A state tab. `failed` leaves out the cancelled jobs; `succeeded` leaves out the jobs with
                  *     warnings.
                  */
-                group: ("running" | "failed" | "succeeded" | "succeeded_with_warnings") | null;
+                group?: "running" | "failed" | "succeeded" | "succeeded_with_warnings";
                 /** @description A part of the plan, host or repository name, in any case; at most 200 characters. */
-                q: string | null;
+                q?: string;
                 /** @description In RFC 3339: the first creation time that the list holds. */
-                from: string | null;
+                from?: string;
                 /** @description In RFC 3339: the last creation time that the list holds. Not before `from`. */
-                to: string | null;
+                to?: string;
                 /**
                  * @description Default: `created_at`. A cursor takes only the default order. `duration` puts an unfinished
                  *     job last.
                  */
-                sort: ("created_at" | "started_at" | "finished_at" | "duration" | "status" | "plan" | "host") | null;
+                sort?: "created_at" | "started_at" | "finished_at" | "duration" | "status" | "plan" | "host";
                 /** @description Default: `desc`. */
-                order: ("asc" | "desc") | null;
+                order?: "asc" | "desc";
                 /** @description Adds the state tab totals to the response. */
-                counts: boolean | null;
+                counts?: boolean;
             };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -5583,23 +5581,24 @@ export interface operations {
     };
     get_job_logs: {
         parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description The identifier of the job. */
-                id: string;
+            query?: {
                 /**
                  * @description The number of the last line that the client holds. The page starts after it. The default
                  *     is 0, the start of the log.
                  */
-                after_seq: number | null;
+                after_seq?: number;
                 /** @description The most lines in the page, from 1 to 2000. The default is 500. */
-                limit: number | null;
+                limit?: number;
                 /**
                  * @description Reads the lines of one step only, for example `script-0` (FR-HK-11). The default is every
                  *     line of the job. Use an empty value for the lines of the job itself.
                  */
-                step_id: string | null;
+                step_id?: string;
+            };
+            header?: never;
+            path: {
+                /** @description The identifier of the job. */
+                id: string;
             };
             cookie?: never;
         };
@@ -6008,12 +6007,12 @@ export interface operations {
     };
     list_plans: {
         parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                cursor: string | null;
-                limit: number | null;
+            query?: {
+                cursor?: string;
+                limit?: number;
             };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -6330,12 +6329,13 @@ export interface operations {
     };
     next_runs: {
         parameters: {
-            query?: never;
+            query?: {
+                count?: number;
+            };
             header?: never;
             path: {
                 /** @description The identifier of the plan. */
                 id: string;
-                count: number | null;
             };
             cookie?: never;
         };
@@ -6458,32 +6458,32 @@ export interface operations {
     };
     list_platform_audit: {
         parameters: {
-            query?: never;
-            header?: never;
-            path: {
+            query?: {
                 /** @description Start of the time range in RFC 3339. */
-                from: string | null;
+                from?: string;
                 /** @description End of the time range in RFC 3339. */
-                to: string | null;
-                action: string | null;
-                actor_type: string | null;
+                to?: string;
+                action?: string;
+                actor_type?: string;
                 /** @description Needs `actor_type`. */
-                actor_id: string | null;
-                object_type: string | null;
-                object_id: string | null;
+                actor_id?: string;
+                object_type?: string;
+                object_id?: string;
                 /** @description Used by the platform list. */
-                tenant_id: string | null;
+                tenant_id?: string;
                 /**
                  * @description A part of the action code, the object name or the actor name, in any case; at most 200
                  *     characters.
                  */
-                q: string | null;
+                q?: string;
                 /** @description Not with `offset`. */
-                cursor: string | null;
+                cursor?: string;
                 /** @description Skipped records, in `0..=10000`. Not with `cursor`. */
-                offset: number | null;
-                limit: number | null;
+                offset?: number;
+                limit?: number;
             };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -6577,14 +6577,14 @@ export interface operations {
     };
     list_tenants: {
         parameters: {
-            query?: never;
-            header?: never;
-            path: {
+            query?: {
                 /** @description `active`, `suspended` or `deleted`. */
-                status: string | null;
-                cursor: string | null;
-                limit: number | null;
+                status?: string;
+                cursor?: string;
+                limit?: number;
             };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -7401,12 +7401,12 @@ export interface operations {
     };
     list_profiles: {
         parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                cursor: string | null;
-                limit: number | null;
+            query?: {
+                cursor?: string;
+                limit?: number;
             };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -8181,13 +8181,14 @@ export interface operations {
     };
     get_ls: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Identifier that the POST of the page returned. The call needs it. */
+                job?: string;
+            };
             header?: never;
             path: {
                 /** @description The identifier of the repository. */
                 id: string;
-                /** @description Identifier that the POST of the page returned. The call needs it. */
-                job: string | null;
             };
             cookie?: never;
         };
@@ -8580,17 +8581,18 @@ export interface operations {
     };
     get_snapshots: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Identifier that an earlier POST returned. Without it the call returns the newest stored list. */
+                job?: string;
+                /** @description Keep the snapshots made at this time or later, in RFC 3339. The control plane applies it. */
+                from?: string;
+                /** @description Keep the snapshots made at this time or earlier, in RFC 3339. The control plane applies it. */
+                to?: string;
+            };
             header?: never;
             path: {
                 /** @description The identifier of the repository. */
                 id: string;
-                /** @description Identifier that an earlier POST returned. Without it the call returns the newest stored list. */
-                job: string | null;
-                /** @description Keep the snapshots made at this time or later, in RFC 3339. The control plane applies it. */
-                from: string | null;
-                /** @description Keep the snapshots made at this time or earlier, in RFC 3339. The control plane applies it. */
-                to: string | null;
             };
             cookie?: never;
         };

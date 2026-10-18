@@ -72,6 +72,59 @@ async fn the_openapi_document_holds_the_routes() -> Result<(), Box<dyn std::erro
 }
 
 #[tokio::test]
+async fn a_path_parameter_is_in_its_route_template() -> Result<(), Box<dyn std::error::Error>> {
+    let response = app()?
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/openapi.json")
+                .body(Body::empty())?,
+        )
+        .await?;
+    let document = body_json(response).await?;
+    let paths = document
+        .get("paths")
+        .and_then(Value::as_object)
+        .expect("the document holds paths");
+    for (path, item) in paths {
+        for (method, operation) in item.as_object().into_iter().flatten() {
+            let parameters = operation
+                .get("parameters")
+                .and_then(Value::as_array)
+                .map(Vec::as_slice)
+                .unwrap_or_default();
+            for parameter in parameters {
+                let name = parameter
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .expect("a name");
+                let place = parameter
+                    .get("in")
+                    .and_then(Value::as_str)
+                    .expect("a place");
+                let in_template = path.contains(&format!("{{{name}}}"));
+                assert_eq!(
+                    place == "path",
+                    in_template,
+                    "{method} {path}: the parameter `{name}` is documented as `in: {place}`"
+                );
+            }
+        }
+    }
+    let audit = &paths["/api/v1/audit"]["get"]["parameters"];
+    let names: Vec<&str> = audit
+        .as_array()
+        .expect("the audit parameters")
+        .iter()
+        .filter_map(|parameter| parameter.get("name").and_then(Value::as_str))
+        .collect();
+    assert!(
+        !names.contains(&"tenant_id"),
+        "the tenant route ignores tenant_id: {names:?}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn an_unknown_api_route_is_a_problem() -> Result<(), Box<dyn std::error::Error>> {
     let response = app()?
         .oneshot(Request::builder().uri("/api/v1/nope").body(Body::empty())?)

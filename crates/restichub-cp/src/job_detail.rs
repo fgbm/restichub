@@ -329,6 +329,7 @@ pub async fn get_job(
 
 /// Query parameters of the log endpoint.
 #[derive(Debug, Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 #[serde(deny_unknown_fields)]
 pub struct LogQuery {
     /// The number of the last line that the client holds. The page starts after it. The default
