@@ -287,8 +287,6 @@ async fn fr_rp_08_a_template_in_the_host_filter_is_refused() {
         return;
     };
     let env = Env::start(db, test_queue()).await;
-    let agent = env.connect_agent("host-a").await;
-    let repository = env.create_repository(agent.id, "pw").await;
     let (status, problem): (StatusCode, Value) = env
         .call(
             &env.admin,
@@ -296,7 +294,6 @@ async fn fr_rp_08_a_template_in_the_host_filter_is_refused() {
             "/api/v1/profiles",
             Some(json!({
                 "name": "templated",
-                "repository_id": repository.to_string(),
                 "paths": {"all": ["/srv"]},
                 "retention": {"keep_last": 1, "filter": {"hosts": ["{{hostname}}"]}},
             })),

@@ -5,24 +5,13 @@
 mod common;
 
 use axum::http::StatusCode;
-use restichub_db::TenantId;
 use serde_json::{Value, json};
 
-use common::{
-    app_with_kek, create_tenant_with_key, request, seed_repository, seed_secret, seed_session, send,
-};
+use common::{app_with_kek, create_tenant_with_key, request, seed_session, send};
 
-async fn repository_fixture(db: &restichub_db::Database, tenant: TenantId) -> String {
-    let secret = seed_secret(db, tenant, "profile.password").await;
-    seed_repository(db, tenant, "profile-repo", secret)
-        .await
-        .to_string()
-}
-
-fn body(name: &str, repository_id: &str, options: Value) -> Value {
+fn body(name: &str, options: Value) -> Value {
     json!({
         "name": name,
-        "repository_id": repository_id,
         "paths": {"all": ["/srv"]},
         "options": options,
     })
@@ -37,7 +26,6 @@ async fn ac_ag_12_a_profile_stores_its_job_limits() {
     let tenant = create_tenant_with_key(db.database(), "acme").await;
     let app = app_with_kek(db.database());
     let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
-    let repository_id = repository_fixture(db.database(), tenant).await;
 
     let (status, _, created) = send(
         &app,
@@ -45,7 +33,7 @@ async fn ac_ag_12_a_profile_stores_its_job_limits() {
             "POST",
             "/api/v1/profiles",
             Some(&cookie),
-            Some(body("defaults", &repository_id, json!({}))),
+            Some(body("defaults", json!({}))),
         ),
     )
     .await;
@@ -62,7 +50,6 @@ async fn ac_ag_12_a_profile_stores_its_job_limits() {
             Some(&cookie),
             Some(body(
                 "limited",
-                &repository_id,
                 json!({
                     "stall_timeout_minutes": 120,
                     "max_duration_minutes": 1440,
@@ -100,7 +87,6 @@ async fn ac_ag_12_the_save_refuses_a_job_limit_out_of_range() {
     let tenant = create_tenant_with_key(db.database(), "acme").await;
     let app = app_with_kek(db.database());
     let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
-    let repository_id = repository_fixture(db.database(), tenant).await;
 
     for (options, field) in [
         (
@@ -126,7 +112,7 @@ async fn ac_ag_12_the_save_refuses_a_job_limit_out_of_range() {
                 "POST",
                 "/api/v1/profiles",
                 Some(&cookie),
-                Some(body("bad-limit", &repository_id, options)),
+                Some(body("bad-limit", options)),
             ),
         )
         .await;
@@ -146,7 +132,6 @@ async fn ac_ag_12_an_update_without_limit_fields_keeps_the_stored_limits() {
     let tenant = create_tenant_with_key(db.database(), "acme").await;
     let app = app_with_kek(db.database());
     let cookie = seed_session(db.database(), tenant, "admin", "admin").await;
-    let repository_id = repository_fixture(db.database(), tenant).await;
 
     let (status, _, created) = send(
         &app,
@@ -156,7 +141,6 @@ async fn ac_ag_12_an_update_without_limit_fields_keeps_the_stored_limits() {
             Some(&cookie),
             Some(body(
                 "kept",
-                &repository_id,
                 json!({"stall_timeout_minutes": 120, "max_duration_minutes": 0}),
             )),
         ),
@@ -171,11 +155,7 @@ async fn ac_ag_12_an_update_without_limit_fields_keeps_the_stored_limits() {
             "PATCH",
             &format!("/api/v1/profiles/{id}"),
             Some(&cookie),
-            Some(body(
-                "kept",
-                &repository_id,
-                json!({"exclude_caches": true}),
-            )),
+            Some(body("kept", json!({"exclude_caches": true}))),
         ),
     )
     .await;

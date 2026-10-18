@@ -29,6 +29,19 @@ async fn initialized_repository(env: &Env, agent: AgentId) -> Uuid {
     repository
 }
 
+/// A local repository of its own host and an initialized one, so a plan of it stays on that host.
+async fn initialized_local_repository(env: &Env, agent: AgentId) -> Uuid {
+    let repository = env.create_repository(agent, "pw").await;
+    let mut tx = env.scoped().await;
+    sqlx::query("UPDATE repositories SET initialized = true WHERE id = $1")
+        .bind(repository)
+        .execute(&mut *tx)
+        .await
+        .expect("cannot mark the repository initialized");
+    tx.commit().await.expect("cannot commit the mark");
+    repository
+}
+
 async fn run_retention(env: &Env, repository: Uuid) -> (StatusCode, Value) {
     env.call(
         &env.operator,
@@ -54,10 +67,9 @@ fn argv(job: &Job, step: &Step) -> Vec<String> {
         .to_vec()
 }
 
-async fn create_profile_body(env: &Env, repository: Uuid, extra: Value) -> (StatusCode, Value) {
+async fn create_profile_body(env: &Env, extra: Value) -> (StatusCode, Value) {
     let mut body = json!({
         "name": format!("profile-{}", Uuid::now_v7()),
-        "repository_id": repository.to_string(),
         "paths": {"all": ["/srv"]},
     });
     for (key, value) in extra.as_object().expect("the extra fields") {
@@ -73,8 +85,6 @@ async fn fr_rp_08_a_reserved_tag_is_refused() {
         return;
     };
     let env = Env::start(db, test_queue()).await;
-    let agent = env.connect_agent("reserved-host").await;
-    let repository = env.create_repository(agent.id, "pw").await;
 
     let cases = [
         ("tags", json!({"tags": ["restichub-profile-x"]})),
@@ -89,12 +99,12 @@ async fn fr_rp_08_a_reserved_tag_is_refused() {
         ),
     ];
     for (field, extra) in cases {
-        let (status, problem) = create_profile_body(&env, repository, extra).await;
+        let (status, problem) = create_profile_body(&env, extra).await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
         assert_eq!(problem["field"], field, "{problem}");
         assert_eq!(problem["reason"], "reserved", "{problem}");
     }
-    let (status, problem) = create_profile_body(&env, repository, json!({"tags": ["daily"]})).await;
+    let (status, problem) = create_profile_body(&env, json!({"tags": ["daily"]})).await;
     assert_eq!(status, StatusCode::CREATED, "{problem}");
     env.db.cleanup().await;
 }
@@ -133,6 +143,120 @@ async fn fr_rp_08_the_profile_filter_narrows_the_forget_step() {
         "the profile tag and the filter tags form one AND list: {args:?}"
     );
     assert!(args.contains(&"--path=/srv".to_owned()), "{args:?}");
+    env.db.cleanup().await;
+}
+
+/// ADR-0047: one profile backs up into two repositories, so each maintenance job carries the
+/// forget step of the profile for its own repository (AC-RP-13).
+#[tokio::test]
+async fn ac_rp_13_profile_in_two_repositories_gets_forget_in_each() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let mut first_maintenance = env.connect_agent("first-maintenance").await;
+    let mut second_maintenance = env.connect_agent("second-maintenance").await;
+    let first = initialized_local_repository(&env, first_maintenance.id).await;
+    let second = initialized_local_repository(&env, second_maintenance.id).await;
+    let profile = env
+        .create_profile(json!({"retention": {"keep_last": 2}}))
+        .await;
+    env.create_plan(profile, first_maintenance.id, first).await;
+    env.create_plan(profile, second_maintenance.id, second)
+        .await;
+
+    let (status, queued) = run_retention(&env, first).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{queued}");
+    env.pass().await;
+    let signed = first_maintenance.job().await;
+    let job = env.verify(&signed, &first_maintenance).await;
+    let forgets = forget_steps(&job);
+    assert_eq!(forgets.len(), 1, "one forget step for the profile");
+    assert!(
+        argv(&job, forgets[0]).contains(&format!("--tag=restichub-profile-{profile}")),
+        "the step filters on the profile tag"
+    );
+
+    let (status, queued) = run_retention(&env, second).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{queued}");
+    env.pass().await;
+    let signed = second_maintenance.job().await;
+    let job = env.verify(&signed, &second_maintenance).await;
+    let forgets = forget_steps(&job);
+    assert_eq!(
+        forgets.len(),
+        1,
+        "the other repository gets its own forget step"
+    );
+    assert!(
+        argv(&job, forgets[0]).contains(&format!("--tag=restichub-profile-{profile}")),
+        "the step filters on the profile tag"
+    );
+    env.db.cleanup().await;
+}
+
+/// ADR-0047: the forget step of one repository takes the facts of an agent of a plan of this
+/// repository only, so the host filter of the profile cannot select a host of another repository.
+#[tokio::test]
+async fn ac_rp_13_the_forget_of_one_repository_takes_no_agent_of_another() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let mut maintenance = env.connect_agent("maintenance-host").await;
+    let mut elsewhere = env.connect_agent("other-repository-host").await;
+    let repository = initialized_local_repository(&env, maintenance.id).await;
+    let other = initialized_local_repository(&env, elsewhere.id).await;
+    // The filter names the host of the plan in the other repository only.
+    let filtered = env
+        .create_profile(json!({
+            "retention": {"keep_last": 2, "filter": {"hosts": ["other-repository-host"]}}
+        }))
+        .await;
+    env.create_plan(filtered, maintenance.id, repository).await;
+    env.create_plan(filtered, elsewhere.id, other).await;
+    let here = env
+        .create_profile(json!({"retention": {"keep_last": 1}}))
+        .await;
+    env.create_plan(here, maintenance.id, repository).await;
+
+    let (status, queued) = run_retention(&env, repository).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{queued}");
+    env.pass().await;
+    let signed = maintenance.job().await;
+    let job = env.verify(&signed, &maintenance).await;
+    let forgets = forget_steps(&job);
+    assert_eq!(
+        forgets.len(),
+        1,
+        "one step, from the plan of this repository"
+    );
+    let args = argv(&job, forgets[0]);
+    assert!(
+        args.contains(&format!("--tag=restichub-profile-{here}")),
+        "the step takes the profile of this repository: {args:?}"
+    );
+    assert!(
+        !args.contains(&"--host=other-repository-host".to_owned()),
+        "the step never takes the host of another repository: {args:?}"
+    );
+
+    let (status, queued) = run_retention(&env, other).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{queued}");
+    env.pass().await;
+    let signed = elsewhere.job().await;
+    let job = env.verify(&signed, &elsewhere).await;
+    let forgets = forget_steps(&job);
+    assert_eq!(forgets.len(), 1, "its own repository gets the step");
+    let args = argv(&job, forgets[0]);
+    assert!(
+        args.contains(&format!("--tag=restichub-profile-{filtered}")),
+        "the step takes the filtered profile: {args:?}"
+    );
+    assert!(
+        args.contains(&"--host=other-repository-host".to_owned()),
+        "the step takes the host of a plan of this repository: {args:?}"
+    );
     env.db.cleanup().await;
 }
 

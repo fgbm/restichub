@@ -341,12 +341,9 @@ async fn ac_hk_12_only_an_admin_changes_the_scripts_of_a_profile_and_a_viewer_re
         return;
     };
     let env = Env::start(db, test_queue()).await;
-    let agent = env.connect_agent_trusting("host-a", true, bash()).await;
-    let repository = env.create_repository(agent.id, "pw").await;
     let body = |scripts: Value, name: &str| {
         json!({
             "name": name,
-            "repository_id": repository.to_string(),
             "paths": {"all": ["/srv"]},
             "scripts": scripts,
         })
@@ -473,8 +470,6 @@ async fn adr_0017_a_script_variable_takes_a_hook_secret_only() {
         return;
     };
     let env = Env::start(db, test_queue()).await;
-    let agent = env.connect_agent_trusting("host-a", true, bash()).await;
-    let repository = env.create_repository(agent.id, "pw").await;
     let other = create_secret(&env, "repo.key", "repository_password").await;
     let missing = uuid::Uuid::new_v4().to_string();
     for value in [other, missing] {
@@ -485,7 +480,6 @@ async fn adr_0017_a_script_variable_takes_a_hook_secret_only() {
                 "/api/v1/profiles",
                 Some(json!({
                     "name": "bad",
-                    "repository_id": repository.to_string(),
                     "paths": {"all": ["/srv"]},
                     "scripts": [script("dump", "before", json!([
                         {"name": "PGPASSWORD", "kind": "secret_ref", "value": value}
@@ -506,8 +500,6 @@ async fn fr_hk_09_a_broken_script_is_refused_with_its_field() {
         return;
     };
     let env = Env::start(db, test_queue()).await;
-    let agent = env.connect_agent_trusting("host-a", true, bash()).await;
-    let repository = env.create_repository(agent.id, "pw").await;
     let cases = [
         (json!({"body": "  "}), "scripts[0].body"),
         (json!({"body": "x".repeat(65 * 1024)}), "scripts[0].body"),
@@ -537,7 +529,6 @@ async fn fr_hk_09_a_broken_script_is_refused_with_its_field() {
                 "/api/v1/profiles",
                 Some(json!({
                     "name": "bad",
-                    "repository_id": repository.to_string(),
                     "paths": {"all": ["/srv"]},
                     "scripts": [broken],
                 })),

@@ -203,7 +203,6 @@ async fn ac_pr_04_a_redelivery_sends_the_same_signed_bytes_after_a_profile_edit(
             &format!("/api/v1/profiles/{}", w.profile),
             Some(json!({
                 "name": "edited",
-                "repository_id": w.repository.to_string(),
                 "paths": {"all": ["/changed"]},
             })),
         )

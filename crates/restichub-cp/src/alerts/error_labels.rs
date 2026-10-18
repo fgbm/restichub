@@ -129,8 +129,8 @@ pub(super) const LABELS: &[(&str, &str, &str)] = &[
     ),
     (
         "repository_changed",
-        "the profile uses another repository",
-        "профиль использует другой репозиторий",
+        "the plan uses another repository",
+        "план использует другой репозиторий",
     ),
     (
         "agent_facts_invalid",
