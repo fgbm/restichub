@@ -13,12 +13,15 @@ const mocks = vi.hoisted(() => ({
 	pushToast: vi.fn()
 }));
 
+const session = vi.hoisted(() => ({ role: 'admin' }));
+
 vi.mock('#lib/stores/session.svelte.ts', () => ({
 	getSession: () => ({
-		user: { id: 'u_01', username: 'admin', display_name: 'Anna', role: 'admin' },
+		user: { id: 'u_01', username: 'admin', display_name: 'Anna', role: session.role },
 		tenant: { id: 't_01', name: 'acme' },
-		role: 'admin'
-	})
+		role: session.role
+	}),
+	hasRole: (...roles: string[]) => roles.includes(session.role)
 }));
 
 vi.mock('#lib/stores/toasts.svelte.ts', () => ({ pushToast: mocks.pushToast }));
@@ -47,6 +50,7 @@ const RULES = [
 describe('the alert rule settings', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		session.role = 'admin';
 		mocks.listAlertRules.mockResolvedValue(RULES);
 		mocks.updateAlertRules.mockImplementation(
 			async (request: { items: typeof RULES }) => request.items
@@ -92,4 +96,22 @@ describe('the alert rule settings', () => {
 		});
 		expect(mocks.pushToast).toHaveBeenCalledWith('success', 'The rules are saved.');
 	});
+
+	// The UI hides what the API refuses: an Admin changes the rules (ADR-0036, AC-AU-02).
+	it.each(['operator', 'viewer'] as const)(
+		'ac_au_02_shows_the_rules_to_a_%s_without_a_way_to_change_them',
+		async (role) => {
+			const user = userEvent.setup();
+			session.role = role;
+			render(Rules);
+
+			await screen.findByText('Backup overdue');
+			expect(screen.queryByRole('button', { name: 'Save rules' })).toBeNull();
+			const send = document.querySelector<HTMLElement>('#rule-job_warnings') as HTMLElement;
+			expect(send).toBeDisabled();
+			expect(document.querySelector('#rule-agent_offline-minutes')).toBeDisabled();
+			await user.click(send);
+			expect(send).toHaveAttribute('aria-checked', 'false');
+		}
+	);
 });

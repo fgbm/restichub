@@ -42,7 +42,7 @@ const TEXT_QUEUE: usize = 64;
 
 /// The depth for a step whose lines can be as long as a document. The queue holds at most this
 /// many documents in memory.
-const DOCUMENT_QUEUE: usize = 2;
+pub(crate) const DOCUMENT_QUEUE: usize = 2;
 
 /// The most current files that one progress message carries.
 const MAX_CURRENT_FILES: usize = 10;
@@ -477,6 +477,50 @@ fn node(message: &Value) -> Node {
         atime: timestamp(message, "atime"),
         ctime: timestamp(message, "ctime"),
         link_target: text(message, "linktarget"),
+    }
+}
+
+/// True when a page names a symbolic link, so the agent reads the tree object for the targets.
+pub(crate) fn has_symlink(page: &LsPage) -> bool {
+    page.nodes
+        .iter()
+        .any(|node| NodeType::try_from(node.r#type) == Ok(NodeType::Symlink))
+}
+
+/// Fills the target of each symbolic link of a page from the tree object of the listed directory.
+///
+/// `restic ls --json` names the type of a link but not its target; the tree object of the directory
+/// holds the `linktarget` of each node (FR-RS-02). A node matches its tree entry by the full path,
+/// because a recursive listing also holds the links of the subdirectories. A node that the tree does
+/// not name keeps an empty target.
+pub(crate) fn fill_link_targets(page: &mut LsPage, directory: &str, tree: &[u8]) {
+    let Ok(document) = serde_json::from_slice::<Value>(tree) else {
+        return;
+    };
+    let Some(nodes) = document.get("nodes").and_then(Value::as_array) else {
+        return;
+    };
+    let directory = directory.trim_end_matches('/');
+    for node in &mut page.nodes {
+        if NodeType::try_from(node.r#type) != Ok(NodeType::Symlink) || !node.link_target.is_empty()
+        {
+            continue;
+        }
+        let path = node.path.trim_end_matches('/');
+        let target = nodes.iter().find(|entry| {
+            entry.get("type").and_then(Value::as_str) == Some("symlink")
+                && entry
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .is_some_and(|name| {
+                        path.strip_prefix(directory)
+                            .and_then(|rest| rest.strip_prefix('/'))
+                            == Some(name)
+                    })
+        });
+        if let Some(target) = target {
+            node.link_target = text(target, "linktarget");
+        }
     }
 }
 

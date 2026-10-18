@@ -207,6 +207,74 @@ fn fr_ag_08_the_reader_bounds_the_line_length() {
 }
 
 #[test]
+fn fr_rs_02_a_link_target_comes_from_the_tree_object_of_the_directory() {
+    use restichub_proto::agent::v1::{LsPage, Node, NodeType};
+
+    let node = |name: &str, kind: NodeType| Node {
+        name: name.to_owned(),
+        r#type: kind as i32,
+        path: format!("/data/{name}"),
+        permissions: "Lrwxrwxrwx".to_owned(),
+        ..Node::default()
+    };
+    let mut page = LsPage {
+        nodes: vec![
+            node("current", NodeType::Symlink),
+            node("docs", NodeType::Dir),
+            node("old", NodeType::Symlink),
+        ],
+        last: true,
+    };
+    assert!(super::has_symlink(&page));
+
+    let tree = br#"{"nodes":[{"name":"current","type":"symlink","linktarget":"docs"},{"name":"docs","type":"dir"}]}"#;
+    super::fill_link_targets(&mut page, "/data", tree);
+    assert_eq!(page.nodes[0].link_target, "docs");
+    assert_eq!(page.nodes[1].link_target, "", "a directory has no target");
+    assert_eq!(
+        page.nodes[2].link_target, "",
+        "a link that the tree does not name keeps an empty target"
+    );
+
+    // A tree that the agent cannot read changes nothing.
+    super::fill_link_targets(&mut page, "/data", br#"{"nodes":"#);
+    assert_eq!(page.nodes[0].link_target, "docs");
+
+    let plain = LsPage {
+        nodes: vec![node("docs", NodeType::Dir)],
+        last: true,
+    };
+    assert!(
+        !super::has_symlink(&plain),
+        "a page without a link reads no tree"
+    );
+}
+
+#[test]
+fn fr_rs_02_a_recursive_page_matches_a_link_target_by_the_full_path() {
+    use restichub_proto::agent::v1::{LsPage, Node, NodeType};
+
+    let link = |path: &str| Node {
+        name: "current".to_owned(),
+        r#type: NodeType::Symlink as i32,
+        path: path.to_owned(),
+        ..Node::default()
+    };
+    let mut page = LsPage {
+        nodes: vec![link("/data/current"), link("/data/sub/current")],
+        last: true,
+    };
+
+    let tree = br#"{"nodes":[{"name":"current","type":"symlink","linktarget":"docs"}]}"#;
+    super::fill_link_targets(&mut page, "/data", tree);
+    assert_eq!(page.nodes[0].link_target, "docs");
+    assert_eq!(
+        page.nodes[1].link_target, "",
+        "a link of a subdirectory takes no target of the listed directory"
+    );
+}
+
+#[test]
 fn fr_ag_08_the_reader_stops_when_the_consumer_stops() {
     let data = b"a\nb\nc\n";
     let mut count = 0;

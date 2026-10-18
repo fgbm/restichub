@@ -31,12 +31,16 @@
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { t, tChannelError, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
+	import { hasRole } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
 	const FIELDS = ['name', 'kind', 'recipients', 'url'];
 	// The server takes at most 20 recipients and keeps these characters out of the SMTP envelope.
 	const MAX_RECIPIENTS = 20;
 	const ADDRESS = /^[^\s@<>,;"]+@[^\s@<>,;"]+$/;
+
+	// A tenant Admin manages the channels (ADR-0036, operation `channels_read` and `channels_write`).
+	const canWrite = $derived(hasRole('admin', 'platform_admin'));
 
 	let channels = $state<NotificationChannel[]>([]);
 	let emailConfigured = $state(true);
@@ -348,7 +352,9 @@
 	count={loading ? undefined : channels.length}
 >
 	{#snippet actions()}
-		<Button variant="primary" icon="plus" onclick={openCreate}>{t('channels.add')}</Button>
+		{#if canWrite}
+			<Button variant="primary" icon="plus" onclick={openCreate}>{t('channels.add')}</Button>
+		{/if}
 	{/snippet}
 
 	{#if !emailConfigured}
@@ -363,9 +369,9 @@
 		icon={(channel) => iconOf(channelState(channel))}
 		pill={(channel) => pillOf(channelState(channel))}
 		title={(channel) => channel.name}
-		onOpen={openEdit}
+		onOpen={canWrite ? openEdit : undefined}
 		{meta}
-		actions={actionsFor}
+		actions={canWrite ? actionsFor : undefined}
 		moreLabel={(channel) => t('channels.moreActions', { name: channel.name })}
 		{loading}
 		{error}
@@ -376,7 +382,9 @@
 		emptyDescription={t('channels.emptyDescription')}
 	>
 		{#snippet emptyActions()}
-			<Button variant="primary" onclick={openCreate}>{t('channels.addFirst')}</Button>
+			{#if canWrite}
+				<Button variant="primary" onclick={openCreate}>{t('channels.addFirst')}</Button>
+			{/if}
 		{/snippet}
 		{#snippet toolbar()}
 			<FilterBar

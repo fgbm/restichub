@@ -6,6 +6,7 @@
 	import { Alert, Button, Panel, Skeleton, Switch, TextField } from '#lib/components/ui/index.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
+	import { hasRole } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 
 	interface Row {
@@ -15,6 +16,9 @@
 		minutes: string;
 		hasThreshold: boolean;
 	}
+
+	// An Admin changes the rules of the organization (ADR-0036, operation `alerts_write`).
+	const canWrite = $derived(hasRole('admin', 'platform_admin'));
 
 	let rows = $state<Row[]>([]);
 	let loading = $state(true);
@@ -82,9 +86,11 @@
 
 <SettingsLayout title={t('rules.title')} description={t('rules.description')}>
 	{#snippet actions()}
-		<Button variant="primary" loading={saving} disabled={loading} onclick={save}>
-			{t('rules.save')}
-		</Button>
+		{#if canWrite}
+			<Button variant="primary" loading={saving} disabled={loading} onclick={save}>
+				{t('rules.save')}
+			</Button>
+		{/if}
 	{/snippet}
 
 	{#if error}
@@ -108,13 +114,18 @@
 									id={`rule-${row.kind}-minutes`}
 									label={t('rules.threshold')}
 									inputmode="numeric"
-									disabled={!row.enabled}
+									disabled={!canWrite || !row.enabled}
 									error={fieldError(problem, 'threshold_minutes')}
 									bind:value={row.minutes}
 								/>
 							</div>
 						{/if}
-						<Switch id={`rule-${row.kind}`} label={t('rules.send')} bind:checked={row.enabled} />
+						<Switch
+							id={`rule-${row.kind}`}
+							label={t('rules.send')}
+							disabled={!canWrite}
+							bind:checked={row.enabled}
+						/>
 					</li>
 				{/each}
 			</ul>

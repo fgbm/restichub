@@ -144,6 +144,174 @@ async fn ac_rs_02_a_later_page_skips_the_earlier_entries_and_the_last_page_ends_
     );
 }
 
+/// FR-RS-02: `restic ls --json` names a link but gives no target. The agent reads the tree object
+/// of the listed directory for it, so the row shows "name → target".
+#[tokio::test(flavor = "multi_thread")]
+async fn fr_rs_02_a_symlink_page_reads_the_target_from_the_tree_of_the_directory() {
+    let fixture = Fixture::new("ls-link-target");
+    let jobs = program_jobs(&fixture.dir);
+    script_stdout(
+        &fixture.path,
+        "ls",
+        concat!(
+            r#"{"name":"d","type":"dir","path":"/data","uid":1,"gid":1,"mode":2147484157,"permissions":"drwxr-xr-x","message_type":"node","struct_type":"node"}"#,
+            "\n",
+            r#"{"name":"current","type":"symlink","path":"/data/current","uid":1,"gid":1,"mode":134218239,"permissions":"Lrwxrwxrwx","message_type":"node","struct_type":"node"}"#,
+            "\n",
+            r#"{"name":"docs","type":"dir","path":"/data/docs","uid":1,"gid":1,"mode":2147484157,"permissions":"drwxr-xr-x","message_type":"node","struct_type":"node"}"#,
+            "\n",
+        ),
+    );
+    script_stdout(
+        &fixture.path,
+        "cat",
+        concat!(
+            r#"{"nodes":[{"name":"current","type":"symlink","mode":134218239,"linktarget":"docs"},"#,
+            r#"{"name":"docs","type":"dir","mode":2147484157}]}"#,
+            "\n",
+        ),
+    );
+
+    let result = run(
+        &jobs,
+        &fixture.job(
+            "job-ls-link",
+            vec![ls_step("repo-1", "0123abcd", "/data", 0, 1_000)],
+        ),
+    )
+    .await;
+
+    assert_eq!(result.result().outcome, JobStatus::Succeeded as i32);
+    let Some(Output::LsPage(page)) = result.step("ls").output.clone() else {
+        panic!("the ls step must give a page: {}", result.log_text());
+    };
+    let link = page
+        .nodes
+        .iter()
+        .find(|node| node.name == "current")
+        .expect("the page holds the link");
+    assert_eq!(link.link_target, "docs");
+    assert_eq!(
+        fixture.argv(),
+        vec![
+            "ls --json -- 0123abcd /data".to_owned(),
+            "cat tree -- 0123abcd:/data".to_owned(),
+        ],
+        "the agent reads the tree of the listed directory"
+    );
+}
+
+/// FR-RS-02: a tree that restic cannot read leaves the link in the page without a target, and the
+/// step stays a success.
+#[tokio::test(flavor = "multi_thread")]
+async fn fr_rs_02_a_page_keeps_a_link_without_a_target_when_the_tree_fails() {
+    let fixture = Fixture::new("ls-link-target-failure");
+    let jobs = program_jobs(&fixture.dir);
+    script_stdout(
+        &fixture.path,
+        "ls",
+        concat!(
+            r#"{"name":"current","type":"symlink","path":"/data/current","uid":1,"gid":1,"mode":134218239,"permissions":"Lrwxrwxrwx","message_type":"node","struct_type":"node"}"#,
+            "\n",
+        ),
+    );
+    script_stdout(&fixture.path, "cat", "path data: not found\n");
+    script_code(&fixture.path, "cat", 1);
+
+    let result = run(
+        &jobs,
+        &fixture.job(
+            "job-ls-link-failure",
+            vec![ls_step("repo-1", "0123abcd", "/data", 0, 1_000)],
+        ),
+    )
+    .await;
+
+    assert_eq!(result.result().outcome, JobStatus::Succeeded as i32);
+    let Some(Output::LsPage(page)) = result.step("ls").output.clone() else {
+        panic!("the ls step must give a page: {}", result.log_text());
+    };
+    assert_eq!(page.nodes[0].name, "current");
+    assert_eq!(page.nodes[0].link_target, "");
+}
+
+/// ADR-0039: the read of the tree object spends the rest of the budget of the step, so a slow
+/// `cat tree` never runs past the limit of the step, and the page keeps its links without targets.
+#[tokio::test(flavor = "multi_thread")]
+async fn fr_rs_02_a_slow_tree_read_takes_the_rest_of_the_step_budget() {
+    let fixture = Fixture::new("ls-link-slow-tree");
+    let jobs = program_jobs(&fixture.dir);
+    script_stdout(
+        &fixture.path,
+        "ls",
+        concat!(
+            "#sleep 2000\n",
+            r#"{"name":"current","type":"symlink","path":"/data/current","uid":1,"gid":1,"mode":134218239,"permissions":"Lrwxrwxrwx","message_type":"node","struct_type":"node"}"#,
+            "\n",
+        ),
+    );
+    // The tree would take thirty seconds to print, nine times the timeout of the step.
+    script_stdout(&fixture.path, "cat", "#sleep 30000\n");
+    let mut job = fixture.job(
+        "job-ls-slow-tree",
+        vec![ls_step("repo-1", "0123abcd", "/data", 0, 1_000)],
+    );
+    job.timeout_seconds = 3;
+
+    let started = Instant::now();
+    let result = run(&jobs, &job).await;
+    let elapsed = started.elapsed();
+
+    assert_eq!(result.result().outcome, JobStatus::Succeeded as i32);
+    let Some(Output::LsPage(page)) = result.step("ls").output.clone() else {
+        panic!("the ls step must give a page: {}", result.log_text());
+    };
+    assert_eq!(page.nodes[0].name, "current");
+    assert_eq!(page.nodes[0].link_target, "");
+    assert!(
+        elapsed < Duration::from_secs(4),
+        "the step must end within its own budget, took {elapsed:?}"
+    );
+}
+
+/// ADR-0039: a listing that its maximum duration stopped reads no tree object, so the agent starts
+/// no second restic process after the step used its budget.
+#[tokio::test(flavor = "multi_thread")]
+async fn fr_rs_02_a_listing_stopped_by_its_limit_reads_no_tree_object() {
+    let fixture = Fixture::new("ls-link-stopped");
+    let jobs = program_jobs(&fixture.dir);
+    script_stdout(
+        &fixture.path,
+        "ls",
+        concat!(
+            r#"{"name":"current","type":"symlink","path":"/data/current","uid":1,"gid":1,"mode":134218239,"permissions":"Lrwxrwxrwx","message_type":"node","struct_type":"node"}"#,
+            "\n#sleep 5000\n",
+        ),
+    );
+    let mut job = fixture.job(
+        "job-ls-stopped",
+        vec![ls_step("repo-1", "0123abcd", "/data", 0, 1_000)],
+    );
+    job.timeout_seconds = 1;
+
+    let result = run(&jobs, &job).await;
+
+    assert_eq!(result.step("ls").status, StepStatus::Failed as i32);
+    assert_eq!(
+        result
+            .step("ls")
+            .error
+            .as_ref()
+            .map(|error| error.code.as_str()),
+        Some("step_max_duration")
+    );
+    assert_eq!(
+        fixture.argv(),
+        vec!["ls --json -- 0123abcd /data".to_owned()],
+        "the agent reads no tree object after the limit stopped the listing"
+    );
+}
+
 /// FR-RS-02: the root is `/`, because restic lists the whole tree without a directory.
 #[tokio::test(flavor = "multi_thread")]
 async fn fr_rs_02_the_root_listing_names_the_root_directory() {

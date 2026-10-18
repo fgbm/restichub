@@ -1,6 +1,7 @@
 /*
  * The channel settings create an email channel and a webhook, show the signing secret one time
- * only, test a channel and delete it (FR-MN-04, AC-MN-06, AC-MN-08).
+ * only, test a channel and delete it (FR-MN-04, AC-MN-06, AC-MN-08). A role below Admin gets no
+ * channel action, because the API refuses every channel operation of that role (AC-AU-02).
  */
 import { render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
@@ -17,12 +18,15 @@ const mocks = vi.hoisted(() => ({
 	pushToast: vi.fn()
 }));
 
+const session = vi.hoisted(() => ({ role: 'admin' }));
+
 vi.mock('#lib/stores/session.svelte.ts', () => ({
 	getSession: () => ({
-		user: { id: 'u_01', username: 'admin', display_name: 'Anna', role: 'admin' },
+		user: { id: 'u_01', username: 'admin', display_name: 'Anna', role: session.role },
 		tenant: { id: 't_01', name: 'acme' },
-		role: 'admin'
-	})
+		role: session.role
+	}),
+	hasRole: (...roles: string[]) => roles.includes(session.role)
 }));
 
 vi.mock('#lib/stores/toasts.svelte.ts', () => ({ pushToast: mocks.pushToast }));
@@ -65,6 +69,7 @@ function list(items: unknown[], emailConfigured = true) {
 describe('the channel settings', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		session.role = 'admin';
 	});
 
 	it('lists a channel with its target', async () => {
@@ -244,5 +249,54 @@ describe('the channel settings', () => {
 		render(Channels);
 		await user.click(await screen.findByRole('button', { name: 'ops-mail' }));
 		expect(await screen.findByRole('dialog')).toBeInTheDocument();
+	});
+
+	// The UI hides what the API refuses: a tenant Admin manages the channels (ADR-0036, AC-AU-02).
+	it.each(['operator', 'viewer'] as const)(
+		'ac_au_02_hides_the_add_button_from_a_%s_when_the_api_refuses_the_list',
+		async (role) => {
+			session.role = role;
+			mocks.listChannels.mockRejectedValue(
+				new ApiError({
+					status: 403,
+					code: 'forbidden',
+					title: 'You do not have permission for this operation.'
+				})
+			);
+			render(Channels);
+
+			expect(
+				await screen.findByText(/You do not have permission for this operation/)
+			).toBeInTheDocument();
+			expect(screen.queryByRole('button', { name: 'Add channel' })).toBeNull();
+		}
+	);
+
+	it.each(['operator', 'viewer'] as const)(
+		'ac_au_02_hides_every_channel_action_from_a_%s',
+		async (role) => {
+			const user = userEvent.setup();
+			session.role = role;
+			mocks.listChannels.mockResolvedValue(list([channel()]));
+			render(Channels);
+
+			await screen.findByText('ops-mail');
+			expect(screen.queryByRole('button', { name: 'Add channel' })).toBeNull();
+			expect(screen.queryByRole('button', { name: 'Send test' })).toBeNull();
+			expect(screen.queryByRole('button', { name: 'Disable' })).toBeNull();
+			expect(screen.queryByRole('button', { name: 'More actions for ops-mail' })).toBeNull();
+			// The name of a channel opens its form, which saves: a read-only role gets no form.
+			await user.click(screen.getByText('ops-mail'));
+			expect(screen.queryByRole('dialog')).toBeNull();
+		}
+	);
+
+	it('shows the add button to a platform admin', async () => {
+		session.role = 'platform_admin';
+		mocks.listChannels.mockResolvedValue(list([]));
+		render(Channels);
+
+		await screen.findByText('No channels yet');
+		expect(screen.getAllByRole('button', { name: 'Add channel' })[0]).toBeInTheDocument();
 	});
 });

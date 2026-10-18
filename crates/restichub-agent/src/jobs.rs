@@ -59,6 +59,7 @@ use crate::scripts::ScriptStore;
 mod command_text;
 mod link_check;
 mod log;
+mod ls_tree;
 mod outcome;
 mod phases;
 mod runner;
