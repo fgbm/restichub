@@ -70,10 +70,7 @@ describe('the profile picker options', () => {
 			'/var/backups/pg',
 			'7 d · 2 wk'
 		]);
-		expect(option.detail).toEqual([
-			'/var/backups/pg',
-			{ tag: '2 parameters', icon: 'braces' }
-		]);
+		expect(option.detail).toEqual(['/var/backups/pg', { tag: '2 parameters', icon: 'braces' }]);
 		// A profile without a parameter shows no chip: an empty field does not show.
 		expect(profileOptions([profile()])[0].description).toEqual(['/var/backups/pg', '7 d · 2 wk']);
 		expect(profileOptions([profile()])[0].detail).toEqual(['/var/backups/pg']);
