@@ -940,10 +940,10 @@ async fn ac_hk_11_the_log_api_returns_the_lines_of_one_step() {
     env.db.cleanup().await;
 }
 
-/// AC-PF-09: a secret parameter reaches the agent as a secret value, and a text parameter as a value
+/// AC-PF-10: a secret parameter reaches the agent as a secret value, and a text parameter as a value
 /// that the agent masks (FR-PF-10, FR-PF-12).
 #[tokio::test]
-async fn ac_pf_09_a_parameter_of_a_script_variable_reaches_the_agent() {
+async fn ac_pf_10_a_parameter_of_a_script_variable_reaches_the_agent() {
     let Some(db) = common::test_db().await else {
         return;
     };
