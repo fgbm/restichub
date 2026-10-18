@@ -14,15 +14,20 @@ const RETENTION: [keyof NonNullable<Profile['retention']>, MessageKey][] = [
 	['keep_yearly', 'profiles.short.yearly']
 ];
 
-/** The first path of a profile and the count of its paths, or null when it has none. */
-export function profilePaths(profile: ProfileRef): { first: string; total: number } | null {
+/** Every path of a profile, in the order that the editor shows them. */
+export function profilePathList(profile: ProfileRef): string[] {
 	const paths = profile.paths;
-	const all = [
+	return [
 		...(paths?.all ?? []),
 		...(paths?.windows ?? []),
 		...(paths?.linux ?? []),
 		...(paths?.macos ?? [])
 	];
+}
+
+/** The first path of a profile and the count of its paths, or null when it has none. */
+export function profilePaths(profile: ProfileRef): { first: string; total: number } | null {
+	const all = profilePathList(profile);
 	return all.length > 0 ? { first: all[0], total: all.length } : null;
 }
 
@@ -60,7 +65,9 @@ export function profileOptions(profiles: readonly ProfileRef[]): RecordOption[] 
 	return profiles.map((profile) => ({
 		value: profile.id,
 		label: profile.name,
-		description: profileDescription(profile)
+		description: profileDescription(profile),
+		// The line shows the first path only, but the search finds each of them.
+		search: profilePathList(profile)
 	}));
 }
 

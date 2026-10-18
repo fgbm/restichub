@@ -31,14 +31,21 @@ const profile = (overrides: Record<string, unknown> = {}) => ({
 describe('the profile picker options', () => {
 	it('gives each profile its path and its retention', () => {
 		expect(profileOptions([profile()])).toEqual([
-			{ value: 'p1', label: 'pg-dump', description: ['/var/backups/pg', '7 d · 2 wk'] }
+			{
+				value: 'p1',
+				label: 'pg-dump',
+				description: ['/var/backups/pg', '7 d · 2 wk'],
+				search: ['/var/backups/pg']
+			}
 		]);
 	});
 
-	it('counts the other paths of the profile', () => {
+	it('counts the other paths of the profile and finds each of them', () => {
 		const paths = { all: ['/srv'], windows: [], linux: ['/etc'], macos: [] };
+		const option = profileOptions([profile({ paths })])[0];
 		expect(profilePathText(profile({ paths }))).toBe('/srv +1');
-		expect(profileDescription(profile({ paths }))?.[0]).toBe('/srv +1');
+		expect(option.description?.[0]).toBe('/srv +1');
+		expect(option.search).toEqual(['/srv', '/etc']);
 	});
 
 	it('leaves a part that the profile does not hold out of the line', () => {

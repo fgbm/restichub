@@ -11,23 +11,6 @@ async function signIn(page: Page): Promise<void> {
 	await expect(page.getByRole('navigation', { name: 'Primary navigation' })).toBeVisible();
 }
 
-// A profile needs a repository. The mock holds no repository, so the test creates one first.
-async function createRepository(page: Page): Promise<void> {
-	await page
-		.getByRole('navigation', { name: 'Primary navigation' })
-		.getByRole('link', { name: 'Repositories', exact: true })
-		.click();
-	await page.getByRole('button', { name: 'Add repository' }).click();
-	await page.locator('#repo-name').fill('s3-prod');
-	await page.locator('#repo-endpoint').fill('https://s3.example.net');
-	await page.locator('#repo-bucket').fill('backups-prod');
-	await page.locator('#repo-password').fill('repo-password');
-	await page.locator('#repo-s3-access-key').fill('access-key');
-	await page.locator('#repo-s3-secret-key').fill('secret-key');
-	await page.getByRole('button', { name: 'Save', exact: true }).click();
-	await expect(page.getByText('The repository is created.')).toBeVisible();
-}
-
 async function openProfiles(page: Page): Promise<void> {
 	await page
 		.getByRole('navigation', { name: 'Primary navigation' })
@@ -41,7 +24,6 @@ test('the profiles screen creates, previews, edits and deletes a profile', async
 	// One host reports its facts, so the preview has a target.
 	await page.addInitScript(() => localStorage.setItem('restichub.mock.agents', 'sample'));
 	await signIn(page);
-	await createRepository(page);
 
 	await openProfiles(page);
 	await expect(page.getByRole('heading', { level: 1, name: 'Profiles' })).toBeVisible();
@@ -111,7 +93,6 @@ test('the profile name is the only link of the item and a copy opens a new profi
 }) => {
 	await page.addInitScript(() => localStorage.setItem('restichub.mock.profiles', 'sample'));
 	await signIn(page);
-	await createRepository(page);
 	await openProfiles(page);
 	await expect(page.getByRole('link', { name: 'web-daily' })).toBeVisible();
 
@@ -135,7 +116,6 @@ test('editing a profile keeps the retention fields', async ({ page }) => {
 	// The sample profile holds a keep-yearly rule and a snapshot filter.
 	await page.addInitScript(() => localStorage.setItem('restichub.mock.profiles', 'sample'));
 	await signIn(page);
-	await createRepository(page);
 	await openProfiles(page);
 	await page.getByRole('link', { name: 'web-daily' }).click();
 
@@ -158,7 +138,6 @@ test('editing a profile keeps the retention fields', async ({ page }) => {
 
 test('the limits section creates and edits a profile with the job limits', async ({ page }) => {
 	await signIn(page);
-	await createRepository(page);
 	await openProfiles(page);
 	await page.getByRole('button', { name: 'Add profile' }).click();
 

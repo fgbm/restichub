@@ -11,7 +11,8 @@ async function signIn(page: Page): Promise<void> {
 	await expect(page.getByRole('navigation', { name: 'Primary navigation' })).toBeVisible();
 }
 
-// A plan needs a profile and a host. The mock starts empty, so the test asks for the samples.
+// A plan needs a profile, a repository and a host. The mock starts empty, so the test asks for the
+// samples.
 async function seed(page: Page): Promise<void> {
 	await page.addInitScript(() => {
 		localStorage.setItem('restichub.mock.agents', 'sample');
@@ -37,13 +38,18 @@ test('the plans screen creates and deletes a plan', async ({ page }) => {
 	await expect(page.getByRole('heading', { level: 1, name: 'New plan' })).toBeVisible();
 	await expect(page).toHaveTitle(`New plan · ResticHub`);
 	await page.locator('#plan-name').fill('nightly-web');
-	// The profile field shows where each profile writes and finds a profile by its repository.
+	// The profile field finds a profile by its path and shows the first path (ADR-0047).
 	await page.locator('#plan-profile').click();
-	await page.getByRole('combobox', { name: 'Find: Profile' }).fill('offsite');
+	await page.getByRole('combobox', { name: 'Find: Profile' }).fill('/etc');
 	const option = page.getByRole('option', { name: 'web-daily' });
-	await expect(option).toContainText('offsite-s3');
+	await expect(option).toContainText('/srv +1');
 	await option.click();
-	await expect(page.locator('#plan-profile')).toContainText('web-daily · offsite-s3');
+	await expect(page.locator('#plan-profile')).toContainText('web-daily · /srv +1');
+	// The repository field names the storage, its kind and its location.
+	await pickRecord(page, page.locator('#plan-repository'), 'offsite-s3');
+	await expect(page.locator('#plan-repository')).toContainText(
+		'offsite-s3 · S3 · s3.eu.example.net/restichub-offsite'
+	);
 	await pickRecord(page, page.locator('#plan-agent'), 'win-fs01');
 	await page.locator('#plan-cron').fill('0 2 * * *');
 	await page.locator('#plan-time-zone').fill('Europe/Berlin');
@@ -52,6 +58,9 @@ test('the plans screen creates and deletes a plan', async ({ page }) => {
 	await expect(page.getByText('The plan is created.')).toBeVisible();
 	await expect(page.getByRole('heading', { level: 1, name: 'Plans' })).toBeVisible();
 	await expect(page.getByText('nightly-web')).toBeVisible();
+	// Line 2 holds the host, the profile, the repository and the schedule.
+	const item = page.getByRole('list', { name: 'Plans' }).locator('li.item').first();
+	await expect(item).toContainText('win-fs01 · web-daily · offsite-s3');
 	// Line 2 shows the schedule as a phrase; the cron expression is in its tooltip.
 	await expect(page.getByText('every day at 02:00')).toHaveAttribute(
 		'title',

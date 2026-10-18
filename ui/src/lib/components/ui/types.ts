@@ -22,6 +22,8 @@ export interface RecordOption extends SelectOption {
 	disabled?: boolean;
 	/** Why the option cannot be selected; it shows below the option. */
 	reason?: string;
+	/** Extra texts that the search finds, which the option does not show. */
+	search?: string[];
 }
 
 export type RecordDot = 'success' | 'warning' | 'neutral';
