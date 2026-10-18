@@ -24,7 +24,9 @@ use super::log::JobLog;
 use super::watchdog::{StepLimits, Watchdog};
 use super::{Jobs, lock};
 use crate::exec::JobChild;
-use crate::output::{Accepted, Collector, Line, OutputKind, Pipe, spawn_reader};
+use crate::output::{
+    Accepted, Collector, Line, OutputKind, Pipe, fill_link_targets, has_symlink, spawn_reader,
+};
 use crate::scrub::Scrubber;
 
 /// How often the agent checks the restic child for its exit.
@@ -291,7 +293,7 @@ fn collector_for(step: &Step, kind: OutputKind, job_id: &str) -> Collector {
 }
 
 /// The priority that a step asks for (FR-AG-15).
-fn priority_of(step: &Step) -> ProcessPriority {
+pub(super) fn priority_of(step: &Step) -> ProcessPriority {
     let value = match step.kind.as_ref() {
         Some(step::Kind::Backup(backup)) => backup.priority,
         Some(step::Kind::Check(check)) => check.priority,
@@ -560,6 +562,16 @@ impl Jobs {
             outcome.error = Some(StepError::ReadOnly);
         }
         outcome.output = output.collector.finish();
+        // `restic ls --json` names a link but not its target, so a page that holds one reads the
+        // tree object of the directory (FR-RS-02).
+        if matches!(step.kind, Some(step::Kind::Ls(_)))
+            && let Some(step_result::Output::LsPage(page)) = outcome.output.as_mut()
+            && has_symlink(page)
+            && !cancel.is_cancelled()
+            && let Some(tree) = self.ls_tree(validated, step, cancel, limits.max, log).await
+        {
+            fill_link_targets(page, &tree);
+        }
         outcome
     }
 
@@ -612,6 +624,25 @@ fn clean_path(location: &str) -> String {
     match components(PathFlavor::Posix, location) {
         Some(parts) => format!("/{}", parts.join("/")),
         None => location.to_owned(),
+    }
+}
+
+/// The exit code of the child of a step, once it exited. `None` while it runs or when this process
+/// started no child.
+pub(super) fn reap(cancel: &CancelHandle) -> Option<i32> {
+    let mut slot = lock(&cancel.child);
+    let child = slot.as_mut()?;
+    match child.try_wait() {
+        Ok(Some(status)) => {
+            *slot = None;
+            Some(status.code().unwrap_or(-1))
+        }
+        Ok(None) => None,
+        Err(error) => {
+            tracing::warn!(%error, "cannot wait for restic");
+            *slot = None;
+            Some(-1)
+        }
     }
 }
 

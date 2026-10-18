@@ -19,7 +19,7 @@ use super::command_text::command_line_text;
 use super::log::JobLog;
 use super::runner::{
     CancelHandle, DRAIN_TIMEOUT, LINES_PER_TURN, LimitStop, POLL_INTERVAL, StepOutcome, interrupt,
-    kill_tree,
+    kill_tree, reap,
 };
 use super::{Jobs, lock};
 use crate::output::{Line, MAX_LINE, Pipe, spawn_reader};
@@ -367,24 +367,6 @@ fn cannot_check_text(detail: &str) -> String {
 
 fn cannot_check(detail: &str) -> StepOutcome {
     StepOutcome::not_started_because(&cannot_check_text(detail))
-}
-
-/// The exit code of the listing child, once it exited.
-fn reap(cancel: &CancelHandle) -> Option<i32> {
-    let mut slot = lock(&cancel.child);
-    let child = slot.as_mut()?;
-    match child.try_wait() {
-        Ok(Some(status)) => {
-            *slot = None;
-            Some(status.code().unwrap_or(-1))
-        }
-        Ok(None) => None,
-        Err(error) => {
-            tracing::warn!(%error, "cannot wait for restic");
-            *slot = None;
-            Some(-1)
-        }
-    }
 }
 
 /// Waits for a blocking task, but no longer than the cancel and the deadline allow. A file system

@@ -16,7 +16,7 @@ use std::time::{Duration, SystemTime};
 use common::*;
 use restichub_agent::jobs::Jobs;
 use restichub_proto::agent::v1::{
-    JobStatus, OverwriteMode, RestoreStep, StepStatus, step, step_result::Output,
+    JobStatus, NodeType, OverwriteMode, RestoreStep, StepStatus, step, step_result::Output,
 };
 
 const PASSWORD: &str = "CANARY-restore-real-password";
@@ -41,6 +41,16 @@ fn write(path: &Path, bytes: &[u8]) {
 
 /// Initializes a repository and backs up a small tree through the agent of the source host.
 async fn backed_up(name: &str, files: &[(&str, &[u8])]) -> Option<(Source, String)> {
+    backed_up_with(name, files, &[]).await
+}
+
+/// Initializes a repository and backs up a small tree of files and symbolic links through the agent
+/// of the source host.
+async fn backed_up_with(
+    name: &str,
+    files: &[(&str, &[u8])],
+    links: &[(&str, &str)],
+) -> Option<(Source, String)> {
     let restic = real_restic_or_skip()?;
     let source = Source {
         restic,
@@ -51,6 +61,13 @@ async fn backed_up(name: &str, files: &[(&str, &[u8])]) -> Option<(Source, Strin
     for (relative, bytes) in files {
         write(&source.data.join(relative), bytes);
     }
+    #[cfg(unix)]
+    for (relative, target) in links {
+        std::os::unix::fs::symlink(target, source.data.join(relative))
+            .expect("cannot create the link");
+    }
+    #[cfg(not(unix))]
+    let _ = links;
     let access = access("repo-1", &source.repository, PASSWORD);
     let data = source.data.to_string_lossy().into_owned();
     let jobs = real_jobs(&source.agent_a, &source.restic);
@@ -606,4 +623,42 @@ async fn ac_rs_04_a_dry_run_changes_no_file() {
         result.log_text()
     );
     assert!(!missing.exists() || tree(&missing, &source.data).is_empty());
+}
+
+/// FR-RS-02: the page of a directory of the snapshot gives the target of a symbolic link.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn fr_rs_02_a_symlink_page_gives_the_target_of_the_link() {
+    let Some((source, snapshot)) =
+        backed_up_with("ls-link", &[("docs/a.txt", b"a")], &[("current", "docs")]).await
+    else {
+        return;
+    };
+    let jobs = real_jobs(&source.agent_a, &source.restic);
+    let path = source.data.to_string_lossy().into_owned();
+    let job = job(
+        "job-ls-link",
+        vec![access("repo-1", &source.repository, PASSWORD)],
+        vec![ls_step("repo-1", &snapshot, &path, 0, 100)],
+    );
+    let result = run(&jobs, &job).await;
+    assert_eq!(
+        result.result().outcome,
+        JobStatus::Succeeded as i32,
+        "{}",
+        result.log_text()
+    );
+    let Some(Output::LsPage(page)) = result.step("ls").output.clone() else {
+        panic!("the ls step must give a page: {}", result.log_text());
+    };
+    let link = page
+        .nodes
+        .iter()
+        .find(|node| node.name == "current")
+        .expect("the page holds the link");
+    assert_eq!(
+        NodeType::try_from(link.r#type).ok(),
+        Some(NodeType::Symlink)
+    );
+    assert_eq!(link.link_target, "docs");
 }

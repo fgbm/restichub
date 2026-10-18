@@ -250,6 +250,36 @@ pub fn build_command(validated: &ValidatedJob, step: &Step) -> Result<CommandLin
     })
 }
 
+/// Builds the companion command of an `ls` step: the tree object of the listed directory.
+///
+/// `restic ls --json` names a symbolic link but gives no target, and `restic cat tree` prints the
+/// tree object with the `linktarget` of each node (FR-RS-02).
+///
+/// # Errors
+///
+/// Returns [`ArgError::UnknownStep`] for a step that is not `ls` and
+/// [`ArgError::UnknownRepository`] for a step whose repository the job does not hold.
+pub fn build_ls_tree_command(
+    validated: &ValidatedJob,
+    step: &Step,
+) -> Result<CommandLine, ArgError> {
+    let Some(step::Kind::Ls(ls)) = step.kind.as_ref() else {
+        return Err(ArgError::UnknownStep);
+    };
+    let repository = validated
+        .repository(&ls.repository_id)
+        .ok_or(ArgError::UnknownRepository)?;
+    let mut args = vec!["cat".to_owned(), "tree".to_owned()];
+    // `restic cat tree` needs an absolute path, and the `ls` step reads `/` for an empty path.
+    let path = if ls.path.is_empty() { "/" } else { &ls.path };
+    positional(&mut args, &[format!("{}:{}", ls.snapshot_id, path)]);
+    Ok(CommandLine {
+        program: "restic".to_owned(),
+        args,
+        env: repository_env(repository),
+    })
+}
+
 /// Masks every environment value except an explicit safe list, and masks the
 /// userinfo of `RESTIC_REPOSITORY` (AC-PF-01).
 pub fn mask_secrets(line: &mut CommandLine) {
@@ -414,12 +444,12 @@ fn overwrite_value(mode: OverwriteMode) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use restichub_proto::agent::v1::{
-        BackupStep, ForgetStep, HookPhase, Job, RepositoryAccess, RestCredentials,
+        BackupStep, ForgetStep, HookPhase, Job, LsStep, RepositoryAccess, RestCredentials,
         ScriptFailurePolicy, ScriptInterpreter, ScriptStep, SnapshotsFilter, Step, UnlockStep,
         repository_access::BackendCredentials, step,
     };
 
-    use super::{ArgError, MASK, build_command, is_safe_env, mask_secrets};
+    use super::{ArgError, MASK, build_command, build_ls_tree_command, is_safe_env, mask_secrets};
     use crate::job::ValidatedJob;
 
     const BAD_OPTION: &str = "--password-command=cmd /c calc";
@@ -610,6 +640,62 @@ mod tests {
         assert_eq!(
             line.args(),
             ["backup", "--json", "--exclude=*.tmp", "--", "/srv"]
+        );
+    }
+
+    fn ls_step(path: &str) -> Step {
+        Step {
+            step_id: "ls".to_owned(),
+            kind: Some(step::Kind::Ls(LsStep {
+                snapshot_id: "0123abcd".to_owned(),
+                path: path.to_owned(),
+                repository_id: "repo-1".to_owned(),
+                ..LsStep::default()
+            })),
+            ..Step::default()
+        }
+    }
+
+    #[test]
+    fn fr_rs_02_the_link_targets_read_the_tree_of_the_listed_directory() {
+        let step = ls_step("/srv/lab-ui");
+        let job = validated(step.clone());
+        let line = match build_ls_tree_command(&job, &step) {
+            Ok(value) => value,
+            Err(error) => panic!("{error:?}"),
+        };
+        assert_eq!(line.args(), ["cat", "tree", "--", "0123abcd:/srv/lab-ui"]);
+        assert_eq!(
+            line.clone().with_json().args(),
+            line.args(),
+            "cat prints its object as JSON without the flag"
+        );
+
+        let root = ls_step("");
+        let job = validated(root.clone());
+        let line = match build_ls_tree_command(&job, &root) {
+            Ok(value) => value,
+            Err(error) => panic!("{error:?}"),
+        };
+        assert_eq!(line.args(), ["cat", "tree", "--", "0123abcd:/"]);
+    }
+
+    #[test]
+    fn the_link_targets_need_an_ls_step_of_a_known_repository() {
+        let unlock_step = unlock();
+        let job = validated(unlock_step.clone());
+        assert_eq!(
+            build_ls_tree_command(&job, &unlock_step),
+            Err(ArgError::UnknownStep)
+        );
+        let mut step = ls_step("/srv");
+        if let Some(step::Kind::Ls(ls)) = &mut step.kind {
+            ls.repository_id = "repo-9".to_owned();
+        }
+        let job = validated(ls_step("/srv"));
+        assert_eq!(
+            build_ls_tree_command(&job, &step),
+            Err(ArgError::UnknownRepository)
         );
     }
 
