@@ -380,3 +380,42 @@ async fn a_profile_that_no_longer_compiles_fails_the_job_with_a_typed_reason() {
     assert!(agent.try_job(Duration::from_millis(300)).await.is_none());
     env.db.cleanup().await;
 }
+
+/// FR-PF-11: the job builder checks the values again and ends the job with `config_error`.
+#[tokio::test]
+async fn ac_pf_06_a_job_without_a_required_parameter_ends_with_config_error() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let mut agent = env.connect_agent("parameter-host").await;
+    let repository = env.create_repository(agent.id, "pw").await;
+    let profile = env
+        .create_profile(json!({
+            "paths": {"all": ["/data/{{param.pg_dir}}"]},
+            "parameters": [{"name": "pg_dir", "kind": "text", "default_value": "/srv/pg"}],
+        }))
+        .await;
+    let plan = env.create_plan(profile, agent.id, repository).await;
+    let job = env.run_plan(plan).await;
+
+    // The value goes away after the job was queued: the plan keeps nothing to back up.
+    let mut tx = env.scoped().await;
+    sqlx::query(
+        "UPDATE profiles SET parameters = '[{\"name\": \"pg_dir\", \"kind\": \"text\", \
+         \"required\": true}]'::jsonb WHERE id = $1",
+    )
+    .bind(profile)
+    .execute(&mut *tx)
+    .await
+    .expect("cannot update the profile");
+    tx.commit().await.expect("cannot commit the update");
+    env.pass().await;
+
+    let body = env.job(job).await;
+    assert_eq!(body["status"], "failed");
+    assert_eq!(body["result_code"], "config_error");
+    assert_eq!(body["result_message"], "parameter_missing");
+    assert!(agent.try_job(Duration::from_millis(300)).await.is_none());
+    env.db.cleanup().await;
+}

@@ -283,7 +283,7 @@ pub struct CreateProfileRequest {
     /// Absent when the profile runs no verification step.
     #[serde(default)]
     pub check: Option<CheckOptions>,
-    /// The parameters that the profile declares (FR-PF-09). At most 64.
+    /// What the profile offers to its hosts (FR-PF-09). At most 64.
     #[serde(default)]
     #[schema(max_items = 64)]
     pub parameters: Vec<ParameterDef>,
@@ -343,7 +343,7 @@ pub struct ProfileView {
     pub scripts: Vec<ScriptDef>,
     pub retention: Option<Retention>,
     pub check: Option<CheckOptions>,
-    /// The declared parameters (FR-PF-09). For a Viewer, a text default is empty with the flag
+    /// What the profile declares (FR-PF-09). For a Viewer, a text default is empty with the flag
     /// `hidden` (FR-PF-12).
     pub parameters: Vec<ParameterDefView>,
     /// In RFC 3339.

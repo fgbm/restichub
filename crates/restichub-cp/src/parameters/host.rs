@@ -36,11 +36,11 @@ use crate::validation::Reason;
 #[derive(Debug, Serialize, ToSchema)]
 pub struct ParameterValueView {
     pub kind: ParameterKind,
-    /// The text value. Null for a secret and for a reader without the right to see it.
+    /// The text as the reader sees it; null for a secret and for a hidden text.
     pub value: Option<String>,
     /// The identifier of the secret of a secret parameter.
     pub secret_id: Option<String>,
-    /// The name of that secret, which is not a secret.
+    /// What the referenced secret is called; a name is not a secret.
     pub secret_name: Option<String>,
 }
 
@@ -51,13 +51,13 @@ pub struct HostParameterView {
     pub kind: ParameterKind,
     /// True when a profile of the plans of this host requires the parameter.
     pub required: bool,
-    /// The default value of a text parameter. Null for a secret, when no profile declares a default
+    /// What a text parameter falls back to. Null for a secret, when no profile declares a value
     /// and when the reader may not see it.
     pub default_value: Option<String>,
     pub description: Option<String>,
     /// The profiles of the plans of this host that declare the parameter.
     pub needed_by: Vec<String>,
-    /// The value on the host. Null when the host holds none.
+    /// What the host holds for this parameter. Null when it holds none.
     pub value: Option<ParameterValueView>,
     /// True for a value that no profile of the plans of this host declares.
     pub unused: bool,
@@ -65,7 +65,8 @@ pub struct HostParameterView {
     pub hidden: bool,
 }
 
-/// The parameter table of a host (FR-PF-10).
+/// What the page of a host shows: the values that it holds and the parameters of the profiles of
+/// its plans (FR-PF-10).
 #[derive(Debug, Serialize, ToSchema)]
 pub struct HostParametersResponse {
     pub agent_id: String,

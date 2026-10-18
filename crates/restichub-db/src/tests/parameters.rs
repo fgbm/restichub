@@ -12,7 +12,7 @@ async fn db_the_parameters_of_a_profile_are_an_array() -> TestResult {
     let (tenant_a, _) = two_tenants(db.database()).await?;
     seed_tenant(db.database(), tenant_a).await?;
 
-    // A new profile starts with no parameter.
+    // A profile that never set a parameter holds an empty array, not null.
     let mut tx = db.database().begin_tenant(tenant_a).await?;
     let stored: (serde_json::Value,) =
         sqlx::query_as("SELECT parameters FROM profiles WHERE tenant_id = $1")

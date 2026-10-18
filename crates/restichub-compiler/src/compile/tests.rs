@@ -99,6 +99,175 @@ fn validated(plan: &Plan, repository: &RepositoryAccess) -> ValidatedJob {
     }
 }
 
+/// A target with one text parameter and one secret parameter (FR-PF-10).
+fn parameter_target() -> TargetFacts {
+    let mut target = target();
+    target.parameters.insert(
+        "pg_dir".to_owned(),
+        crate::target::ParameterValue::Text("/srv/pg".to_owned()),
+    );
+    target.parameters.insert(
+        "pg_password".to_owned(),
+        crate::target::ParameterValue::Secret("0192a1e0-0000-7000-8000-000000000001".to_owned()),
+    );
+    target
+}
+
+fn backup_step(plan: &Plan) -> restichub_proto::agent::v1::BackupStep {
+    for planned in &plan.steps {
+        if let Some(step::Kind::Backup(backup)) = &planned.step.kind {
+            return backup.clone();
+        }
+    }
+    panic!("no backup step");
+}
+
+#[test]
+fn ac_pf_08_the_plan_value_expands_in_the_path_the_exclude_and_the_tag() {
+    let mut profile = profile();
+    profile.paths.all = vec!["{{param.pg_dir}}/data".to_owned()];
+    profile.excludes = vec!["{{param.pg_dir}}/tmp".to_owned()];
+    profile.exclude_files = vec!["{{param.pg_dir}}/exclude.txt".to_owned()];
+    profile.tags = vec!["dir-{{param.pg_dir}}".to_owned()];
+    // The target carries the value that the control plane resolved for this plan, so the compiler
+    // writes the value of the plan and not the one of the host (FR-PF-10).
+    let backup = backup_step(&plan(&profile, &parameter_target()));
+    assert_eq!(backup.paths, vec!["/srv/pg/data".to_owned()]);
+    assert_eq!(backup.excludes, vec!["/srv/pg/tmp".to_owned()]);
+    assert_eq!(backup.exclude_files, vec!["/srv/pg/exclude.txt".to_owned()]);
+    assert_eq!(
+        backup.tags,
+        vec!["dir-/srv/pg".to_owned(), PROFILE_TAG.to_owned()]
+    );
+}
+
+#[test]
+fn ac_pf_09_a_secret_parameter_never_expands() {
+    let mut profile = profile();
+    for (index, field) in ["path", "exclude", "exclude_file", "tag"]
+        .iter()
+        .enumerate()
+    {
+        let mut profile_at = profile.clone();
+        let value = "{{param.pg_password}}".to_owned();
+        match index {
+            0 => profile_at.paths.all = vec![value.clone()],
+            1 => profile_at.excludes = vec![value.clone()],
+            2 => profile_at.exclude_files = vec![value.clone()],
+            _ => profile_at.tags = vec![value.clone()],
+        }
+        let error = compile(&profile_at, Some(REPOSITORY_ID), &parameter_target())
+            .expect_err("a secret cannot expand");
+        assert!(
+            matches!(error, CompileError::SecretParameterInTemplate { .. }),
+            "{field}: {error:?}"
+        );
+    }
+    // The profile itself stays unchanged by the loop.
+    profile.paths.all = vec!["/srv".to_owned()];
+    assert!(compile(&profile, Some(REPOSITORY_ID), &parameter_target()).is_ok());
+}
+
+#[test]
+fn adr_0047_a_parameter_does_not_expand_in_the_retention_or_the_check() {
+    let mut profile = profile();
+    profile.retention = Some(Retention {
+        keep_within: "{{param.pg_dir}}".to_owned(),
+        ..Retention::default()
+    });
+    let error = compile(&profile, Some(REPOSITORY_ID), &parameter_target())
+        .expect_err("the retention expands no parameter");
+    assert!(
+        matches!(
+            error,
+            CompileError::ParameterNotAllowed {
+                ref field,
+                ..
+            } if field.as_str() == "retention.keep_within"
+        ),
+        "{error:?}"
+    );
+
+    let mut tagged = profile.clone();
+    tagged.retention = Some(Retention {
+        keep_last: 3,
+        keep_tags: vec!["{{param.pg_dir}}".to_owned()],
+        ..Retention::default()
+    });
+    let error = compile(&tagged, Some(REPOSITORY_ID), &parameter_target())
+        .expect_err("a keep tag expands no parameter");
+    assert!(matches!(error, CompileError::ParameterNotAllowed { .. }));
+
+    let mut checking = profile.clone();
+    checking.retention = None;
+    checking.check = Some(CheckOptions {
+        read_data_subset: "{{param.pg_dir}}".to_owned(),
+    });
+    let error = compile(&checking, Some(REPOSITORY_ID), &parameter_target())
+        .expect_err("the check expands no parameter");
+    assert!(matches!(
+        error,
+        CompileError::ParameterNotAllowed {
+            ref field,
+            ..
+        } if field.as_str() == "check.read_data_subset"
+    ));
+}
+
+#[test]
+fn ac_pf_10_a_parameter_without_a_value_is_missing() {
+    let mut profile = profile();
+    profile.paths.all = vec!["{{param.pg_data_dir}}".to_owned()];
+    let error = compile(&profile, Some(REPOSITORY_ID), &parameter_target())
+        .expect_err("the profile declares no pg_data_dir");
+    assert!(
+        matches!(
+            error,
+            CompileError::MissingParameter { ref name, .. } if name == "pg_data_dir"
+        ),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn ac_pf_09_a_text_parameter_of_a_script_variable_is_a_masked_value() {
+    let mut profile = profile();
+    let mut dump = script("dump", HookPhase::Before);
+    dump.env = vec![
+        crate::script::ScriptEnvRef {
+            name: "PGDIR".to_owned(),
+            value: crate::script::ScriptEnvValue::Parameter("pg_dir".to_owned()),
+        },
+        crate::script::ScriptEnvRef {
+            name: "PGPASSWORD".to_owned(),
+            value: crate::script::ScriptEnvValue::Parameter("pg_password".to_owned()),
+        },
+    ];
+    profile.scripts = vec![dump];
+    let mut target = parameter_target();
+    target.server_scripts = crate::script::ServerScripts {
+        enabled: true,
+        interpreters: vec![crate::script::ScriptInterpreter::Bash],
+    };
+    let plan = plan(&profile, &target);
+    let env = match &plan.steps[0].step.kind {
+        Some(step::Kind::Script(script)) => script.env.clone(),
+        other => panic!("unexpected step {other:?}"),
+    };
+    // A text value is no secret, but the agent masks it in the log (FR-PF-12).
+    assert!(matches!(
+        &env[0].value,
+        Some(restichub_proto::agent::v1::script_env::Value::MaskedValue(value))
+            if value == "/srv/pg"
+    ));
+    // A secret parameter keeps the reference, so the job builder resolves it (ADR-0017).
+    assert!(matches!(
+        &env[1].value,
+        Some(restichub_proto::agent::v1::script_env::Value::SecretValue(value))
+            if value == "0192a1e0-0000-7000-8000-000000000001"
+    ));
+}
+
 fn backup_paths(plan: &Plan) -> Vec<String> {
     for planned in &plan.steps {
         if let Some(step::Kind::Backup(backup)) = &planned.step.kind {

@@ -346,3 +346,79 @@ async fn ac_id_09_replace_moves_plans_and_maintenance_references_and_revokes_the
     );
     db.cleanup().await;
 }
+
+/// FR-ID-11: a replace moves the parameter values of the host with its plans (FR-PF-10).
+#[tokio::test]
+async fn ac_pf_10_a_replace_moves_the_parameter_values_of_the_host() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = env(&db, "params").await;
+    let old = enroll_new(&db, &env, "MINDCORE", Some(MACHINE)).await;
+    let new = enroll_new(&db, &env, "MINDCORE", Some(MACHINE)).await;
+
+    let (status, _, _) = send(
+        &env.api,
+        request(
+            "PUT",
+            &format!("/api/v1/agents/{old}/parameters"),
+            Some(&env.cookie),
+            Some(json!({
+                "parameters": [{"name": "pg_dir", "kind": "text", "value": "/srv/pg"}],
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, _, moved) = send(
+        &env.api,
+        request(
+            "POST",
+            &format!("/api/v1/agents/{new}/replace"),
+            Some(&env.cookie),
+            Some(json!({"old_agent_id": old.to_string()})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{moved}");
+
+    let (status, _, table) = send(
+        &env.api,
+        request(
+            "GET",
+            &format!("/api/v1/agents/{new}/parameters"),
+            Some(&env.cookie),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{table}");
+    let moved_row = table["parameters"]
+        .as_array()
+        .expect("the table")
+        .iter()
+        .find(|row| row["name"] == "pg_dir")
+        .expect("the moved value");
+    assert_eq!(moved_row["value"]["value"], "/srv/pg");
+    assert_eq!(moved_row["unused"], true);
+
+    let (status, _, old_table) = send(
+        &env.api,
+        request(
+            "GET",
+            &format!("/api/v1/agents/{old}/parameters"),
+            Some(&env.cookie),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{old_table}");
+    assert_eq!(
+        old_table["parameters"].as_array().expect("the table").len(),
+        0,
+        "{old_table}"
+    );
+
+    db.cleanup().await;
+}

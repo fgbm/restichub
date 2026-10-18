@@ -951,8 +951,8 @@ pub enum SecretUsageKind {
     Channel,
     Profile,
     JobTemplate,
-    /// A parameter value of a host (FR-PF-10).
+    /// A value on a machine that the tenant enrolled (FR-PF-10).
     Host,
-    /// A parameter value of a plan (FR-PF-10).
+    /// A value that overrides the value of the host for one plan (FR-PF-10).
     Plan,
 }

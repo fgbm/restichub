@@ -70,7 +70,7 @@ pub struct ParameterDef {
 pub struct ParameterValueDef {
     pub name: String,
     pub kind: ParameterKind,
-    /// The value of a `text` parameter, 1 to 4096 characters.
+    /// A text of 1 to 4096 characters, for a `text` parameter.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
     /// The identifier of a secret of the purpose `hook_secret`, for a `secret` parameter.
@@ -86,7 +86,7 @@ pub struct ParameterDefView {
     pub name: String,
     pub kind: ParameterKind,
     pub required: bool,
-    /// The default value of a text parameter. For a Viewer it is empty with the flag `hidden`.
+    /// What a text parameter falls back to. Empty with the flag `hidden` for a Viewer.
     pub default_value: Option<String>,
     pub description: Option<String>,
     /// True when the server hid the default value from this reader (FR-PF-12).
@@ -119,7 +119,7 @@ impl ParameterDefView {
 pub struct PlanParameterValueView {
     pub name: String,
     pub kind: ParameterKind,
-    /// The text value. Empty with the flag `hidden` for a Viewer.
+    /// The text as the reader sees it: empty with the flag `hidden` for a Viewer (FR-PF-12).
     pub value: Option<String>,
     /// The identifier of the secret of a secret parameter.
     pub secret_id: Option<String>,

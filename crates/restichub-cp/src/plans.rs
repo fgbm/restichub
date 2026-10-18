@@ -738,7 +738,7 @@ struct PlanInput {
     missed_run_policy: MissedRunPolicy,
     enabled: bool,
     rpo_seconds: Option<i32>,
-    /// The overrides of the plan (FR-PF-10).
+    /// What this plan sets instead of the values on the host (FR-PF-10).
     parameter_values: Vec<restichub_db::parameters::ParameterValue>,
 }
 
@@ -886,11 +886,8 @@ async fn check_references(
     crate::parameters::check_declared_values(&definitions, plan_values, "parameter_values")?;
     crate::parameters::check_secret_values(tx, plan_values, "parameter_values").await?;
     let host_values = restichub_db::parameters::agent_values(tx, agent_id).await?;
-    let resolved = parameters::resolve(&definitions, plan_values, &host_values);
-    // The stored profile must compile for the operating system of the agent (FR-PF-05). The compile
-    // refuses a missing path for that operating system and a parameter that has no value with a
-    // field error.
-    crate::profiles::compile_for_agent(&profile, repository_id, &agent, resolved, now)?;
+    // The value check runs before the compile, so the refusal names every parameter that a source
+    // misses (FR-PF-11, AC-PF-06).
     let missing = parameters::missing_required(&definitions, plan_values, &host_values);
     if !missing.is_empty() {
         return Err(ApiError::parameters(
@@ -899,6 +896,11 @@ async fn check_references(
             missing,
         ));
     }
+    let resolved = parameters::resolve(&definitions, plan_values, &host_values);
+    // The stored profile must compile for the operating system of the agent (FR-PF-05). The compile
+    // refuses a missing path for that operating system and a parameter that has no value with a
+    // field error.
+    crate::profiles::compile_for_agent(&profile, repository_id, &agent, resolved, now)?;
     Ok(())
 }
 

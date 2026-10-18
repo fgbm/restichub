@@ -594,7 +594,10 @@ impl IntoResponse for ApiError {
             request_id: String::new(),
             field: self.field,
             reason: self.reason.map(|reason| reason.as_str().to_owned()),
-            blockers: self.records.as_mut().and_then(|records| records.blockers.take()),
+            blockers: self
+                .records
+                .as_mut()
+                .and_then(|records| records.blockers.take()),
             parameters: self
                 .records
                 .as_mut()
@@ -640,7 +643,7 @@ pub struct ProblemBody {
     /// `parameter_missing_in_plans` set it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub blockers: Option<Blockers>,
-    /// The names of the parameters that the request lacks. Only `parameter_missing` and
+    /// The names that a `parameter_missing` refusal lists. Only `parameter_missing` and
     /// `parameter_kind_mismatch` set it (FR-PF-11).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parameters: Option<Vec<String>>,

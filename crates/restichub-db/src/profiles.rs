@@ -49,7 +49,7 @@ pub struct Profile {
     pub check_options: Option<Value>,
     /// Definitions as a JSON array (FR-HK-09).
     pub scripts: Value,
-    /// The declarations of the parameters, as a JSON array (FR-PF-09).
+    /// A JSON array of declarations that the compiler and the save check read (FR-PF-09).
     pub parameters: Value,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
@@ -107,7 +107,7 @@ pub struct NewProfile<'a> {
     pub retention: Option<Value>,
     pub check_options: Option<Value>,
     pub scripts: Value,
-    /// The declarations of the parameters, as a JSON array (FR-PF-09).
+    /// A JSON array of declarations that the compiler and the save check read (FR-PF-09).
     pub parameters: Value,
     /// Absent for an API token actor.
     pub created_by: Option<UserId>,
@@ -135,7 +135,7 @@ pub struct ProfileUpdate<'a> {
     pub retention: Option<Value>,
     pub check_options: Option<Value>,
     pub scripts: Value,
-    /// The declarations of the parameters, as a JSON array (FR-PF-09).
+    /// A JSON array of declarations that the compiler and the save check read (FR-PF-09).
     pub parameters: Value,
 }
 

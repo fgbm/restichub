@@ -49,7 +49,7 @@ pub enum Operation {
     ApiTokensWrite,
     AgentsRead,
     AgentsWrite,
-    /// The parameter values of a host (FR-PF-10).
+    /// Changes the values that the profiles of a host read (FR-PF-10).
     AgentParametersWrite,
     EnrollmentTokensRead,
     EnrollmentTokensWrite,

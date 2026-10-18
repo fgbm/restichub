@@ -414,7 +414,7 @@ pub struct Replaced {
     pub plans: u64,
     pub repositories: u64,
     pub queued_jobs: u64,
-    /// The parameter values of the old record (FR-PF-10).
+    /// The count of the rows that came from the old record (FR-PF-10).
     pub parameter_values: u64,
 }
 

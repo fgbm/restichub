@@ -134,6 +134,7 @@ pub fn write_body(
         ("PATCH", "/api/v1/agents/{id}") => Some(json!({"hostname": "matrix-host"})),
         ("POST", "/api/v1/agents/{id}/reenroll") => Some(json!({})),
         ("POST", "/api/v1/agents/{id}/replace") => Some(json!({"old_agent_id": agent_id})),
+        ("PUT", "/api/v1/agents/{id}/parameters") => Some(json!({"parameters": []})),
         ("POST", "/api/v1/secrets") => Some(json!({
             "name": format!("matrix-secret-{index}"),
             "purpose": "repository_password",
