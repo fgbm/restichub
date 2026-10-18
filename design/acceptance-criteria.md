@@ -128,7 +128,7 @@ Each automated test refers to its criterion ID in its name or in a comment.
 
 | ID | Requirement | Criterion | Method |
 |---|---|---|---|
-| AC-PF-01 | FR-PF-04 | Open the preview of a plan. **Expected:** the steps and the command line agree with the command that the agent ran (compare with the job log). Secrets and parameter values are masked. | A |
+| AC-PF-01 | FR-PF-04 | Open the preview of a plan. **Expected:** the steps and the command line agree with the command that the agent ran (compare with the job log). Secrets and parameter values are masked. A Viewer sees the commands of the stored profile, with the script bodies and the string values hidden. | A |
 | AC-PF-02 | FR-PF-05 | Save a profile with one error. Test each error: incorrect cron, a script without the trust mode, VSS for a Linux agent, option not available in the installed restic. **Expected:** the UI does not save the profile. The error points to the field. | A |
 | AC-PF-03 | FR-PF-03 | A profile uses `{{hostname}}`, `{{os}}`, `{{agent.label.env}}` and the date on 3 agents. **Expected:** each agent gets its own values. | A |
 | AC-PF-04 | FR-PF-02 (1.0) | A chain of `extends` with three levels. **Expected:** the result agrees with the documented merge rules (table-driven test). The CP rejects the cycle A→B→A and shows the chain. | A |

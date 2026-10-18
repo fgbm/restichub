@@ -15,6 +15,15 @@ A value differs from one host to another: a mount point in a path, a database na
 
 ## Decision
 
+### The preview of a profile
+
+- One route, `POST /api/v1/profiles/preview`, previews a profile for one agent. The route `POST /api/v1/profiles/{id}/preview` is removed.
+- The server compiles the draft of a person with the profile write right, and stores nothing. A compile error points to the draft field (AC-PF-02).
+- The server compiles the stored profile for a person without that right. This person sends the identifiers only: `agent_id`, `repository_id` and `profile_id`, and `profile_id` is required. The server ignores the draft fields of this person, so a template in the draft cannot show a host value.
+- The script bodies and the string values stay hidden in the response of a person without the script read right.
+- An unsaved profile shows the placeholder tag `restichub-profile-new` in the commands. The saved profile shows the tag with its own identifier. The user interface says that the tag changes on save.
+- The route takes the body limit of the profile create (FR-HK-09).
+
 ### The plan holds the repository
 
 - A profile says what to back up and how to back it up. It holds the paths, the excludes, the tags, the backup options, the scripts, the retention, the check options and the limits. A profile has no repository.
