@@ -137,7 +137,7 @@ A process that leaves the process group, for example with `setsid` or `nohup`, i
 
 If the agent restarts while a job with a script runs, the agent does not run the job again. It answers with the final result `interrupted`, because a script may not run twice. A job that already finished returns its stored result, also after you turned the mode off.
 
-On Linux, the service of the agent runs with `ProtectSystem=strict`. A script can write only to the cache directory, the configuration directory and the restore roots. To allow another path, add a drop-in file:
+On Linux, the service of the agent runs with `ProtectSystem=strict`. A script can write only to the cache directory, the configuration directory and the restore directories. To allow another path, add a drop-in file:
 
 ```ini
 # systemctl edit restichub-agent

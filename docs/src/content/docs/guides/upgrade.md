@@ -148,7 +148,7 @@ Upgrade the agents only after the new control plane works.
 - The Windows service restarts after each failure, after 5, 30 and then 60 seconds. It does not restart after the exit code 78, as on Linux.
 - A Windows service with an identity that another account could change does not start. It writes the cause to the event log `ResticHub`, and `status` shows it. Before this release such a service connected, and each job failed with "restic did not start".
 - The Windows service writes its log to rotated files in `%ProgramData%\ResticHub\Agent-logs` and to the event log `ResticHub`. See [Agent logs](/restichub/reference/agent-logs/).
-- Before a restore into a directory that is not empty, the agent checks the paths that the restore writes. A link that leads out of the target stops the restore step. A file with more than one name also stops it. Remove the link, or restore into an empty directory. See [Restore roots](/restichub/guides/restore/#restore-roots).
+- Before a restore into a directory that is not empty, the agent checks the paths that the restore writes. A link that leads out of the target stops the restore step. A file with more than one name also stops it. Remove the link, or restore into an empty directory. See [Restore directories](/restichub/guides/restore/#restore-directories).
 
 ### Windows hosts that need a new registration
 
@@ -189,6 +189,6 @@ Do these steps on each Linux host that keeps a local repository:
 5. If you moved a repository, open it in "Repositories" and enter the new path in the field "Path".
 6. Start "Test access" for each local repository. The result must be "The repository is ready.".
 
-A repository root cannot be `/`, a system directory such as `/etc` or `/usr`, or a directory of the agent. A restore root and a repository root cannot hold each other, except the restore root `/`. `install-service` stops with a message that names the line.
+A repository root cannot be `/`, a system directory such as `/etc` or `/usr`, or a directory of the agent. A restore directory and a repository root cannot hold each other, except the restore directory `/`. `install-service` stops with a message that names the line.
 
-With the restore root `/`, an in-place restore below `/home` or `/root` now fails with `read-only file system`. A restore root `/home` or `/root` does not change this, and `install-service` now refuses such a root. Use a directory below it that root owns. Restore to another root, for example `/var/lib/restichub-restore`, and copy the files to their place. See [Restore roots](/restichub/guides/restore/#restore-roots).
+With the restore directory `/`, an in-place restore below `/home` or `/root` now fails with `read-only file system`. A restore directory `/home` or `/root` does not change this, and `install-service` now refuses such a directory. Use a directory below it that root owns. Restore to another directory, for example `/var/lib/restichub-restore`, and copy the files to their place. See [Restore directories](/restichub/guides/restore/#restore-directories).

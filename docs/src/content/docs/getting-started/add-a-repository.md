@@ -76,7 +76,7 @@ The unit sets `ProtectHome=read-only`. The service reads a backup source below `
 
 Do not put a local repository inside the directory of another local repository. The agent does not refuse it, but restic then finds the files of the second repository among the files of the first one.
 
-The repository roots are not restore roots. A restore never writes into a repository root, also with the restore root `/`. `install-service` refuses a restore root and a repository root when one holds the other. See [Restore roots](/restichub/guides/restore/#restore-roots).
+The repository roots are not restore directories. A restore never writes into a repository root, also with the restore directory `/`. `install-service` refuses a restore directory and a repository root when one holds the other. See [Restore directories](/restichub/guides/restore/#restore-directories).
 
 On Windows the service has no such sandbox. A local repository can use any path that the service account can write, and the agent does not read the repository roots file.
 

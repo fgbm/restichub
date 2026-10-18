@@ -51,7 +51,7 @@ Open the job, and read the reason under its title and the log of the failed step
 
 | Symptom | Cause | Action |
 |---|---|---|
-| The restore failed with `restore_target_denied` | The target path is outside the restore roots of the host. | Select a path inside a restore root, or add a root. See [Restore roots](/restichub/guides/restore/#restore-roots). |
+| The restore failed with `restore_target_denied` | The target path is outside the restore directories of the host. | Select a path inside a restore directory, or add a directory. See [Restore directories](/restichub/guides/restore/#restore-directories). |
 | The snapshot tree does not open, `agent_capability_missing` | The agent is too old for the restore. | Upgrade the agent. |
 | The list of snapshots is empty | The repository has no snapshot, or the filters hide them. | Select "Reset" above the list. |
 

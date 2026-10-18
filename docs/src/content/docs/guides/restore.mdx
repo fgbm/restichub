@@ -15,7 +15,7 @@ The data of a restore goes from the repository to the target agent. It does not 
 - The agent that you select must be online.
 - The agent must announce the capability `restore-v1`. This capability is in the agent packages that include the Restore screen. An agent without it can list snapshots, but the control plane refuses the file tree and the restore with the reason `agent_capability_missing`. Update the agent package to fix this.
 - A repository with a local path accepts its repository host only. The data stays on that host, and the restore writes to that host.
-- The target path must lie inside a restore root of the agent (see [Restore roots](#restore-roots)).
+- The target path must lie inside a restore directory of the agent (see [Restore directories](#restore-directories)).
 
 ## List the snapshots
 
@@ -49,13 +49,13 @@ One person can send 60 list and page requests in one minute. Each control plane 
 1. Select the files and directories that you need in the tree. If you select nothing, the restore uses the whole snapshot.
 2. Click **Restore…**.
 3. Select the target host ("Target host"). The default is the host of the snapshot when that host is active. Otherwise it is the maintenance host of the repository.
-4. Check the target path. The screen suggests a new folder in the first restore root of the agent, for example `/var/lib/restichub-restore/a1b2c3d4`. The path must be absolute and must lie inside a restore root. On a Windows host, the path has the Windows format, for example `C:\ProgramData\ResticHub-Restore\a1b2c3d4`. The button at the end of the field returns the suggested path. If the agent has more than one restore root, click a root below the field to use it.
+4. Check the target path. The screen suggests a new folder in the first restore directory of the agent, for example `/var/lib/restichub-restore/a1b2c3d4`. The path must be absolute and must lie inside a restore directory. On a Windows host, the path has the Windows format, for example `C:\ProgramData\ResticHub-Restore\a1b2c3d4`. The button at the end of the field returns the suggested path. If the agent has more than one restore directory, click a directory below the field to use it.
 5. If you selected no path, you can enter paths to exclude. Use restic patterns, one pattern on each line.
 6. Select what to do with a file that exists in the target. For "Replace every file", the screen shows a warning.
 7. Read the summary at the right side of the dialog. In a narrow window, the summary is below the fields.
 8. Click **Start restore**. The screen opens the job.
 
-<Screen name="restore-dialog" alt="The restore dialog with the target host, the target path and the restore roots" />
+<Screen name="restore-dialog" alt="The restore dialog with the target host, the target path and the restore directories" />
 
 The job detail shows the block "Restore parameters". The block names the snapshot, the target host and path, the paths, the overwrite mode, and the verify and dry run settings. The detail also shows the progress while the restore runs. After it ends, the detail shows how many files and bytes the agent restored and how many it skipped.
 
@@ -72,32 +72,32 @@ restic does not accept an include list and an exclude list in one restore. The s
 
 The screen escapes the characters `*`, `?` and `[` in a path that you select, so the path matches itself only. A snapshot is selected by its identifier. The screen and the API do not accept `latest`, because it can change between two reads.
 
-## Restore roots
+## Restore directories
 
-The agent runs as root on Linux and as LocalSystem on Windows. It restores only below a *restore root*. Only root or Administrators set the roots on the host. The control plane and the jobs cannot change them.
+The agent runs as root on Linux and as LocalSystem on Windows. It restores only below a *restore directory*. A host has one restore directory by default. An administrator can add more directories, for example for a second disk. Only root or an Administrator sets the directories on the host, and the control plane and the jobs cannot change them.
 
-| System | Default root |
+| System | Default directory |
 |---|---|
 | Linux | `/var/lib/restichub-restore` |
 | Windows | `C:\ProgramData\ResticHub-Restore` |
 
-`install-service` creates the default root with access for the service account only. The agent reports its roots to the control plane. The screen suggests the first root, and the control plane refuses a target outside the roots with HTTP 409 `restore_target_denied`. The agent checks the target again and has the last word. It rejects the job with the reason `restore_target_denied`.
+`install-service` creates the default directory with access for the service account only. The agent reports its directories to the control plane. The screen suggests the first directory, and the control plane refuses a target outside the directories with HTTP 409 `restore_target_denied`. The agent checks the target again and has the last word. It rejects the job with the reason `restore_target_denied`.
 
-To add a root, write one absolute path on each line of the file `/etc/restichub-agent-restore-roots.txt` (Windows: `C:\ProgramData\ResticHub\Agent-restore-roots.txt`). A line that starts with `#` is a comment. On Linux the agent ignores a line with a quotation mark, a backslash, `%`, a space or a control character. The agent logs a warning for such a line and for a line that is not an absolute path. `install-service` refuses these lines and names the line number. Only root or Administrators can own and write the file. The agent ignores a file that another account can change. Create each root directory, then run `restichub-agent install-service` again. The command adds the roots to `ReadWritePaths` of the systemd unit. Without this step, systemd keeps the root read-only and the restore fails. On Linux the agent writes a warning to the log at each start for a root that the installed unit cannot write.
+To add a directory, write one absolute path on each line of the file `/etc/restichub-agent-restore-roots.txt` (Windows: `C:\ProgramData\ResticHub\Agent-restore-roots.txt`). A line that starts with `#` is a comment. On Linux the agent ignores a line with a quotation mark, a backslash, `%`, a space or a control character. The agent logs a warning for such a line and for a line that is not an absolute path. `install-service` refuses these lines and names the line number. Only root or Administrators can own and write the file. The agent ignores a file that another account can change. Create each directory, then run `restichub-agent install-service` again. The command adds the directories to `ReadWritePaths` of the systemd unit. Without this step, systemd keeps the directory read-only and the restore fails. On Linux the agent writes a warning to the log at each start for a directory that the installed unit cannot write.
 
-Local repositories on Linux have their own roots file, `/etc/restichub-agent-repository-roots.txt`, with the same rules. A repository root is not a restore root. A restore never writes into a repository root, and `install-service` refuses a restore root and a repository root when one holds the other. The restore root `/` stays allowed. See [A local repository on Linux](/restichub/getting-started/add-a-repository/#a-local-repository-on-linux).
+Local repositories on Linux have their own roots file, `/etc/restichub-agent-repository-roots.txt`, with the same rules. A repository root is not a restore directory. A restore never writes into a repository root, and `install-service` refuses a restore directory and a repository root when one holds the other. The restore directory `/` stays allowed. See [A local repository on Linux](/restichub/getting-started/add-a-repository/#a-local-repository-on-linux).
 
-A root must be writable only by root or Administrators. The root and each existing parent directory must belong to root or Administrators. No group or other account may write there. The agent ignores a root that does not follow this rule and logs a warning, and `install-service` refuses it. Such an account could replace a directory with a link and lead a restore out of the root.
+A restore directory must be writable only by root or Administrators. The directory and each existing parent directory must belong to root or Administrators. No group or other account may write there. The agent ignores a directory that does not follow this rule and logs a warning, and `install-service` refuses it. Such an account could replace a directory with a link and lead a restore out of the restore directory.
 
-A root of `/` allows a restore to any other directory, for example `/srv/data`. A file of the agent, a parent of one and a path inside one stay refused. The target `/` is not possible, because it holds the files of the agent. Set the root `/` only when you want this. The screen shows a warning for a system path such as `/etc`. The root `/` does not make `/home`, `/root` and `/run/user` writable, because the unit sets `ProtectHome=read-only`. A restore root `/home` or `/root` does not change this, because systemd keeps these directories read-only. Thus the agent ignores such a root and logs a warning, and `install-service` refuses it and names the line number. Use a directory below it that root owns. Also an in-place restore below `/home` or `/root` is not possible. Restore to another root, for example the default root, and copy the files to their place.
+The restore directory `/` allows a restore to any other directory, for example `/srv/data`. A file of the agent, a parent of one and a path inside one stay refused. The target `/` is not possible, because it holds the files of the agent. Set the restore directory `/` only when you want this. The screen shows a warning for a system path such as `/etc`. The restore directory `/` does not make `/home`, `/root` and `/run/user` writable, because the unit sets `ProtectHome=read-only`. A restore directory `/home` or `/root` does not change this, because systemd keeps these directories read-only. Thus the agent ignores such a directory and logs a warning, and `install-service` refuses it and names the line number. Use a directory below it that root owns. Also an in-place restore below `/home` or `/root` is not possible. Restore to another directory, for example the default directory, and copy the files to their place.
 
-The agent always refuses a target that is, holds or lies inside its own files. These are the configuration directory, the cache directory, and the directory of the agent and restic binaries. It follows symbolic links first. A root of `/` does not change this rule.
+The agent always refuses a target that is, holds or lies inside its own files. These are the configuration directory, the cache directory, and the directory of the agent and restic binaries. It follows symbolic links first. The restore directory `/` does not change this rule.
 
 On Windows, right before restic starts, the agent also looks at the paths that the restore writes. It lists the snapshot and checks each selected file and folder in the target, and each parent folder of it inside the target. A symbolic link or a junction on such a path must lead to a place inside the target. A file on such a path must have no other name (hard link). If not, the restore step fails and names the path. The reason is that restic on Windows writes a file through a file link. An earlier restore or a local user can leave such a link. A link on another path, for example in a folder that the restore does not select, does not stop the restore. Remove the link, or restore into an empty directory. A dry run and a restore into an empty or new directory skip this check. The check obeys the cancel and the time limit of the step. A restore that writes more than 1,000,000 entries into a directory that is not empty fails. Then narrow the includes or restore into an empty directory. Linux needs no such check: restic on Linux replaces a link with the file or the folder of the snapshot.
 
-### The default root of an earlier version
+### The default directory of an earlier version
 
-An earlier agent for Windows used `C:\ProgramData\ResticHub\Restore` as the default root. That directory lies in the tree of the agent, where the agent sets the access of each directory itself. The agent no longer uses it as a default root. It does not move or change the data in it. A restore to that directory fails with the reason `restore_target_denied`, until you add the root again. Restore to the new default root, or write the old path on one line of the file `C:\ProgramData\ResticHub\Agent-restore-roots.txt`.
+An earlier agent for Windows used `C:\ProgramData\ResticHub\Restore` as the default directory. That directory lies in the tree of the agent, where the agent sets the access of each directory itself. The agent no longer uses it as a default directory. It does not move or change the data in it. A restore to that directory fails with the reason `restore_target_denied`, until you add the directory again. Restore to the new default directory, or write the old path on one line of the file `C:\ProgramData\ResticHub\Agent-restore-roots.txt`.
 
 ## API
 
@@ -109,9 +109,9 @@ An earlier agent for Windows used `C:\ProgramData\ResticHub\Restore` as the defa
 | `GET /api/v1/repositories/{id}/ls` | Operator | Reads the page of a job (`job`). |
 | `POST /api/v1/repositories/{id}/restore` | Operator | Starts a restore and returns the job. |
 
-A restore and a tree page need a snapshot identifier of 8 to 64 lower-case hexadecimal characters. A restore with `dry_run` and `verify` together gives HTTP 400. An offline agent gives HTTP 409 `agent_offline`. An agent that is too old gives HTTP 409 `agent_capability_missing`. A target outside the roots of the agent gives HTTP 409 `restore_target_denied`. A repository of another organization gives HTTP 404.
+A restore and a tree page need a snapshot identifier of 8 to 64 lower-case hexadecimal characters. A restore with `dry_run` and `verify` together gives HTTP 400. An offline agent gives HTTP 409 `agent_offline`. An agent that is too old gives HTTP 409 `agent_capability_missing`. A target outside the directories of the agent gives HTTP 409 `restore_target_denied`. A repository of another organization gives HTTP 404.
 
-`GET /api/v1/agents` lists the `restore_roots` of each agent.
+`GET /api/v1/agents` lists the restore directories of each agent in the field `restore_roots`.
 
 ## Related
 

@@ -20,7 +20,7 @@ The control plane tells a host what to do. The host keeps its own limits. This p
 - The agent checks the signature, the addressee, the expiry time and the replay journal. A job that fails a check does not run.
 - The agent runs a script only when the local trust mode is on. Only root or an Administrator can turn the mode on. A job cannot change it.
 - If the mode is off, the agent refuses a job with a script. The reason is `server_scripts_disabled`.
-- A restore writes only below the restore roots of the host.
+- A restore writes only below a restore directory of the host.
 - The agent does not store the secrets of a job.
 
 ## What the signature does not stop
@@ -30,5 +30,5 @@ The signature protects the job on the network. It does not stop a person who con
 ## Related
 
 - [Server scripts](/restichub/guides/scripts/)
-- [Restore roots](/restichub/guides/restore/#restore-roots)
+- [Restore directories](/restichub/guides/restore/#restore-directories)
 - [Job signing key compromise](/restichub/operations/job-signing-key-compromise/)

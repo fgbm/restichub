@@ -10,7 +10,7 @@ flowchart TB
     trust[Is the local trust mode on?]
     script[The script runs as root or LocalSystem]
     refuse[The agent refuses the job]
-    roots[A restore writes only below the restore roots]
+    roots[A restore writes only inside a restore directory]
   end
   admin --> sign
   sign ==>|signed job over mTLS| verify

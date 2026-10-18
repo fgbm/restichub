@@ -80,13 +80,13 @@ test('a restore asks for the target, warns about a system path and opens the job
 	const dialog = page.getByRole('dialog');
 	await expect(dialog.getByRole('region', { name: 'Summary' })).toContainText('Selected paths: 1');
 	await pickRecord(page, dialog.locator('#restore-agent'), 'srv-db-01');
-	// The target starts as a folder in the restore root that the host reports.
+	// The target starts as a folder in the restore directory that the host reports.
 	await expect(dialog.getByLabel('Target path')).toHaveValue(
 		/^\/var\/lib\/restichub-restore\/[0-9a-f]{8}$/
 	);
 	await dialog.getByLabel('Target path').fill('/etc');
 	// One message for a path outside the roots; the system warning stays away.
-	await expect(dialog.getByText(/This path is outside the restore roots/)).toBeVisible();
+	await expect(dialog.getByText(/This path is outside the restore directories/)).toBeVisible();
 	await expect(dialog.getByText('System path', { exact: true })).toHaveCount(0);
 	await dialog.getByLabel('Target path').fill('relative');
 	await expect(dialog.getByText('Enter an absolute path.')).toBeVisible();
