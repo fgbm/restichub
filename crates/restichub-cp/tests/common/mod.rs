@@ -596,6 +596,43 @@ pub async fn seed_profile(db: &Database, tenant: TenantId, name: &str) -> restic
     id
 }
 
+/// Inserts an active agent row of a tenant with explicit facts and returns its identifier.
+pub async fn seed_agent_full(
+    db: &Database,
+    tenant: TenantId,
+    hostname: &str,
+    os: &str,
+    restic_version: &str,
+    labels: &[String],
+) -> restichub_db::AgentId {
+    let mut serial = vec![0_u8; 16];
+    getrandom::fill(&mut serial).expect("cannot read random bytes");
+    let mut tx = db
+        .begin_tenant(tenant)
+        .await
+        .expect("cannot begin the transaction");
+    let id = restichub_db::agents::create(
+        &mut tx,
+        &restichub_db::agents::NewAgent {
+            id: restichub_db::AgentId::new(),
+            hostname,
+            os,
+            arch: "amd64",
+            agent_version: "0.1.0",
+            restic_version,
+            labels,
+            certificate_serial: &serial,
+            certificate_expires_at: OffsetDateTime::now_utc() + time::Duration::days(30),
+            last_seen_at: None,
+            machine_id_hash: None,
+        },
+    )
+    .await
+    .expect("cannot create the agent");
+    tx.commit().await.expect("cannot commit the agent");
+    id
+}
+
 /// Inserts an active agent row of a tenant and returns its identifier.
 ///
 /// The enrollment exchange (#48) creates the row in production; a test seeds it directly.

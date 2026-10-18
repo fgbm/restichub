@@ -712,7 +712,7 @@ pub const ROUTES: &[Route] = &[
         access: Access::Protected(Operation::ProfilesRead),
         handler: || {
             routes!(crate::profiles::preview_profile)
-                .layer(axum::extract::DefaultBodyLimit::max(BODY_LIMIT))
+                .layer(axum::extract::DefaultBodyLimit::max(SCRIPT_BODY_LIMIT))
         },
     },
     Route {
