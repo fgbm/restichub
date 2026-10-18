@@ -272,10 +272,11 @@ pub async fn update_profile(
     script_secrets::check_script_secrets(&mut tx, &validated.scripts).await?;
     // A name cannot have two kinds on one host, because the host holds one value for each name
     // (ADR-0047).
-    for agent_id in plans_of_profile_agents(&mut tx, profile_id).await? {
+    let hosts = plans_of_profile_agents(&mut tx, profile_id).await?;
+    for agent_id in &hosts {
         crate::parameters::check_kinds_of_host(
             &mut tx,
-            agent_id,
+            *agent_id,
             profile_id,
             None,
             "parameters",
@@ -286,13 +287,17 @@ pub async fn update_profile(
     // A parameter that left the profile takes the overrides of its name with it; a rename is a new
     // parameter (owner decision, ADR-0047). The host values stay.
     let removed = removed_parameters(&current, &validated)?;
+    let names: Vec<&str> = removed
+        .iter()
+        .map(|definition| definition.name.as_str())
+        .collect();
     let overrides = restichub_db::parameters::values_of_profile_plans(&mut tx, profile_id).await?;
     let dropped: Vec<(
         restichub_db::PlanId,
         restichub_db::parameters::ParameterValue,
     )> = overrides
         .into_iter()
-        .filter(|(_, value)| removed.contains(&value.name))
+        .filter(|(_, value)| names.contains(&value.name.as_str()))
         .collect();
     // A dropped override of the kind `secret` is the credential that a script receives, so only an
     // Admin removes it (ADR-0047).
@@ -302,7 +307,17 @@ pub async fn update_profile(
     {
         context.authorize(Operation::ParameterSecretWrite)?;
     }
-    for name in &removed {
+    // A declaration that leaves the profile, or that stops being a `secret`, stops the use of the
+    // secret value of the name on every host of the profile, so only an Admin does it (ADR-0047).
+    let secret_names: Vec<&str> = removed
+        .iter()
+        .filter(|definition| definition.kind == restichub_db::ParameterKind::Secret)
+        .map(|definition| definition.name.as_str())
+        .collect();
+    if host_holds_secret(&mut tx, &hosts, &secret_names).await? {
+        context.authorize(Operation::ParameterSecretWrite)?;
+    }
+    for name in &names {
         restichub_db::parameters::delete_profile_name(&mut tx, profile_id, name).await?;
     }
     repo::update(&mut tx, profile_id, &validated.update())
@@ -586,17 +601,19 @@ async fn plans_of_profile_agents(
     Ok(agents)
 }
 
-/// The names of the parameters that the update removes from the profile, or whose kind changes
+/// The declarations of the stored profile that the update removes, or whose kind changes
 /// (ADR-0047).
 ///
 /// An override of a removed name has no meaning, and an override of the other kind does not count.
+/// The returned declaration is the old one: its kind decides whether a value of the name is a
+/// secret.
 fn removed_parameters(
     current: &repo::Profile,
     validated: &settings::ValidatedProfile,
-) -> Result<Vec<String>, ApiError> {
+) -> Result<Vec<crate::parameters::ParameterDef>, ApiError> {
     let before = crate::parameters::from_row(&current.parameters)?;
     Ok(before
-        .iter()
+        .into_iter()
         .filter(|old| {
             validated
                 .parameters
@@ -604,8 +621,31 @@ fn removed_parameters(
                 .find(|new| new.name == old.name)
                 .is_none_or(|new| new.kind != old.kind)
         })
-        .map(|definition| definition.name.clone())
         .collect())
+}
+
+/// True when a host of the profile holds a secret value for one of the names (ADR-0047).
+///
+/// The caller holds the advisory lock, so a change of the host values waits for this transaction
+/// (FR-PF-11).
+async fn host_holds_secret(
+    tx: &mut restichub_db::TenantTx<'_>,
+    hosts: &[restichub_db::AgentId],
+    names: &[&str],
+) -> Result<bool, ApiError> {
+    if names.is_empty() {
+        return Ok(false);
+    }
+    for agent_id in hosts {
+        let values = restichub_db::parameters::agent_values(tx, *agent_id).await?;
+        if values.iter().any(|value| {
+            value.kind == restichub_db::ParameterKind::Secret
+                && names.contains(&value.name.as_str())
+        }) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// The plans of the profile that no longer compile for the facts of their agent (FR-SC-11).

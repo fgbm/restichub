@@ -63,6 +63,7 @@ A value differs from one host to another: a mount point in a path, a database na
 - A preview, a job detail and an audit diff mask the parameter values. The audit keeps the names and the identifiers of the secrets only (FR-PF-12).
 - A value in a path, an exclude or a tag is part of the restic command and of the snapshot. Each role that sees jobs and snapshots sees it, and the user interface says so.
 - Only an Admin sets, changes or removes a `secret` value on a host or in a plan: it chooses the credential that a script receives. An Operator sets the `text` values.
+- The delete of a plan removes the values of the plan with it. The role that may delete a plan may do it. The rule of the Admin covers the values of a host or of a plan that stays. It covers the setting, the change and the removal of a secret value.
 - `ScriptEnv.masked_value` is a new field, and an agent that does not know it rejects the message. The agent announces the capability `script-masked-value` in `AgentHello.capabilities`, and the control plane keeps the capabilities of the live connection only (ADR-0034). The builder sends such a value as `secret_value` to an agent without the capability: an older agent masks a secret value the same way.
 - Labels stay separate. The enrollment sets the labels, and a plan selector uses them (FR-SC-11).
 

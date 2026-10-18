@@ -219,34 +219,58 @@ pub async fn delete_profile_name(
     Ok(result.rows_affected())
 }
 
+/// What [`move_agent_values`] did with the values of the old record.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MovedValues {
+    /// Values that the successor holds now.
+    pub moved: Vec<ParameterValue>,
+    /// The rows of the old record that the successor already held by name, so the move dropped them.
+    pub dropped: Vec<ParameterValue>,
+}
+
 /// Moves the values of a replaced host record to its successor (FR-ID-11).
 ///
 /// A value that the successor already holds wins: the record that the operator keeps has the newer
-/// value. The caller runs the move in the transaction of the replacement.
+/// value. The caller runs the move in the transaction of the replacement, and gets the dropped rows
+/// for the audit, because the delete removes them (FR-PF-12).
 pub async fn move_agent_values(
     tx: &mut TenantTx<'_>,
     from: AgentId,
     to: AgentId,
-) -> Result<u64, DbError> {
-    let moved = sqlx::query(
+) -> Result<MovedValues, DbError> {
+    let moved = sqlx::query_as::<_, ValueRow>(
         "INSERT INTO agent_parameter_values \
          (tenant_id, agent_id, name, kind, value, secret_id, updated_at, updated_by) \
          SELECT tenant_id, $1, name, kind, value, secret_id, updated_at, updated_by \
          FROM agent_parameter_values WHERE agent_id = $2 \
-         ON CONFLICT (tenant_id, agent_id, name) DO NOTHING",
+         ON CONFLICT (tenant_id, agent_id, name) DO NOTHING \
+         RETURNING name, kind, value, secret_id",
     )
     .bind(to)
     .bind(from)
-    .execute(tx.as_conn())
+    .fetch_all(tx.as_conn())
     .await
-    .map_err(DbError::Query)?
-    .rows_affected();
-    sqlx::query("DELETE FROM agent_parameter_values WHERE agent_id = $1")
-        .bind(from)
-        .execute(tx.as_conn())
-        .await
-        .map_err(DbError::Query)?;
-    Ok(moved)
+    .map_err(DbError::Query)?;
+    // The delete removes the rows that came to the successor too, so a row whose name the insert
+    // copied stays a moved value and only the others are dropped.
+    let copied: Vec<String> = moved.iter().map(|row| row.name.clone()).collect();
+    let remaining = sqlx::query_as::<_, ValueRow>(
+        "DELETE FROM agent_parameter_values WHERE agent_id = $1 \
+         RETURNING name, kind, value, secret_id",
+    )
+    .bind(from)
+    .fetch_all(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    let dropped: Vec<ParameterValue> = remaining
+        .into_iter()
+        .filter(|row| !copied.contains(&row.name))
+        .map(ParameterValue::from)
+        .collect();
+    Ok(MovedValues {
+        moved: moved.into_iter().map(ParameterValue::from).collect(),
+        dropped,
+    })
 }
 
 #[derive(sqlx::FromRow)]
