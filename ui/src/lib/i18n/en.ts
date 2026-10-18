@@ -399,6 +399,8 @@ export const en = {
 	'secrets.usage.profile': 'Profile',
 	'secrets.usage.channel': 'Channel',
 	'secrets.usage.jobTemplate': 'Job template',
+	'secrets.usage.host': 'Host',
+	'secrets.usage.plan': 'Plan',
 	'secrets.replace': 'Replace value',
 	'secrets.replaceFor': 'Replace the value of {name}',
 	'secrets.moreActions': 'More actions for {name}',
@@ -1229,6 +1231,7 @@ export const en = {
 	'deleteBlocked.kind.job_template': 'Job template',
 	'deleteBlocked.kind.plan': 'Plan',
 	'deleteBlocked.kind.job': 'Job',
+	'deleteBlocked.kind.host': 'Host',
 	'error.internal_error':
 		'The control plane has an internal problem. Try again later. If the problem stays, ask the administrator to read the log.',
 	'error.network': 'The control plane did not answer. Check the network and try again.',
@@ -1560,6 +1563,7 @@ export const en = {
 	'reason.too_long': 'This value is too long.',
 	'reason.invalid_character': 'This value holds a character that is not allowed.',
 	'reason.reserved': 'This value is reserved.',
+	'reason.duplicate': 'This name repeats another one in the list.',
 	'reason.not_in_future': 'The time must be in the future.',
 	'reason.too_far_in_future': 'The time is too far in the future.',
 	'reason.invalid_format': 'The format is not valid.',
@@ -1577,6 +1581,16 @@ export const en = {
 		'The path format does not fit the system of the host. Use a path from "/" on Linux and macOS, and a drive path such as C:\\backup on Windows.',
 	'reason.plan_on_other_host':
 		'A plan of the repository runs on another host. A local repository works on its own host only.',
+	'reason.parameter_missing':
+		'A required parameter has no value. Set it on the host or in the plan.',
+	'reason.parameter_missing_in_plans':
+		'A plan of this profile loses a required parameter value. Set the value on the host first.',
+	'reason.parameter_kind_mismatch':
+		'The kind of the value differs from the kind that the profile declares for the name.',
+	'reason.parameter_secret_in_template':
+		'A secret parameter cannot go into a path, an exclude or a tag, because the command line shows it.',
+	'reason.parameter_not_allowed':
+		'A parameter cannot go into the retention or the check settings, because one maintenance job serves every host.',
 	'scripts.title': 'Scripts',
 	'scripts.description':
 		'Scripts run on the host as the agent account. They run before and after the backup, in the order of the lists. Each script is a step of the job with its own log.',
@@ -2219,6 +2233,14 @@ export const en = {
 	'secrets.count.jobTemplate.few': '{n} job templates',
 	'secrets.count.jobTemplate.many': '{n} job templates',
 	'secrets.count.jobTemplate.other': '{n} job templates',
+	'secrets.count.host.one': '{n} host',
+	'secrets.count.host.few': '{n} hosts',
+	'secrets.count.host.many': '{n} hosts',
+	'secrets.count.host.other': '{n} hosts',
+	'secrets.count.plan.one': '{n} plan',
+	'secrets.count.plan.few': '{n} plans',
+	'secrets.count.plan.many': '{n} plans',
+	'secrets.count.plan.other': '{n} plans',
 	'tokens.tab.valid': 'Valid',
 	'tokens.tab.ended': 'Expired and revoked',
 	'tokens.sort.name': 'Name',

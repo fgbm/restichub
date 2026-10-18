@@ -49,9 +49,11 @@ A value differs from one host to another: a mount point in a path, a database na
 - The replace of a host record (FR-ID-11) moves the host values with the plans and the labels.
 - The control plane refuses the delete of a secret that a host value or a plan value references.
 - A Viewer does not see `text` values on hosts and plans, as with the string script variables (FR-HK-12).
-- The control plane sends the value of a parameter in a script variable as a secret value, and the agent masks it in the logs.
-- Previews, job details and audit diffs mask the parameter values. The audit keeps the names and the identifiers of the secrets only (FR-PF-12).
-- A value in a path or a tag is visible in the snapshot. The user interface says so.
+- The control plane sends a `text` value in a script variable as a masked value, and a `secret` value as the value of its secret. The agent masks both in the logs.
+- A preview, a job detail and an audit diff mask the parameter values. The audit keeps the names and the identifiers of the secrets only (FR-PF-12).
+- A value in a path, an exclude or a tag is part of the restic command and of the snapshot. Each role that sees jobs and snapshots sees it, and the user interface says so.
+- Only an Admin sets, changes or removes a `secret` value on a host or in a plan: it chooses the credential that a script receives. An Operator sets the `text` values.
+- `ScriptEnv.masked_value` is a new field, and an agent that does not know it rejects the message. The agent announces the capability `script-masked-value` in `AgentHello.capabilities`, and the control plane keeps the capabilities of the live connection only (ADR-0034). The builder sends such a value as `secret_value` to an agent without the capability: an older agent masks a secret value the same way.
 - Labels stay separate. The enrollment sets the labels, and a plan selector uses them (FR-SC-11).
 
 ## Consequences

@@ -278,7 +278,7 @@ export type ScriptEnv = components['schemas']['ScriptEnvDef'];
 /** A script of a profile or of a job template (FR-HK-09). */
 export type ScriptDef = components['schemas']['ScriptDef'];
 
-export type ScriptParameterKind = components['schemas']['ParameterKind'];
+export type ScriptParameterKind = components['schemas']['TemplateParameterKind'];
 
 /** A declared parameter of a script template. It becomes an environment variable. */
 export type ScriptTemplateParameter = components['schemas']['ScriptTemplateParameter'];

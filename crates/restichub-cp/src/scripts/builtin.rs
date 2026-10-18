@@ -5,7 +5,7 @@
 //! variable, never inside the text of the script.
 
 use super::templates::{
-    JobTemplateView, ParameterKind, ScriptTemplateParameter, ScriptTemplateView,
+    JobTemplateView, ScriptTemplateParameter, ScriptTemplateView, TemplateParameterKind,
 };
 use super::{EnvKind, FailurePolicy, Interpreter, ScriptDef, ScriptEnvDef};
 use crate::profiles::HookPhase;
@@ -21,7 +21,7 @@ struct Builtin {
     parameters: &'static [(
         &'static str,
         &'static str,
-        ParameterKind,
+        TemplateParameterKind,
         Option<&'static str>,
     )],
     body: &'static str,
@@ -115,7 +115,7 @@ Invoke-Expression $env:COMMAND
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 "#;
 
-use ParameterKind::{Integer, SecretRef, String as Text};
+use TemplateParameterKind::{Integer, SecretRef, String as Text};
 
 const BUILTINS: &[Builtin] = &[
     Builtin {
@@ -379,12 +379,12 @@ fn script_of(slug: &str, overrides: &[(&str, &str)]) -> Option<ScriptDef> {
                 .unwrap_or_default();
             ScriptEnvDef {
                 name: parameter.name.clone(),
-                kind: if parameter.kind == ParameterKind::SecretRef {
+                kind: if parameter.kind == TemplateParameterKind::SecretRef {
                     EnvKind::SecretRef
                 } else {
                     EnvKind::String
                 },
-                value: if parameter.kind == ParameterKind::SecretRef {
+                value: if parameter.kind == TemplateParameterKind::SecretRef {
                     String::new()
                 } else {
                     value
@@ -477,7 +477,7 @@ mod tests {
             for parameter in &template.parameters {
                 assert!(is_script_env_name(&parameter.name), "{}", parameter.name);
                 assert!(names.insert(parameter.name.clone()));
-                if parameter.kind == ParameterKind::SecretRef {
+                if parameter.kind == TemplateParameterKind::SecretRef {
                     assert!(parameter.default_value.is_none());
                 }
             }
@@ -485,7 +485,7 @@ mod tests {
             for parameter in template
                 .parameters
                 .iter()
-                .filter(|parameter| parameter.kind == ParameterKind::SecretRef)
+                .filter(|parameter| parameter.kind == TemplateParameterKind::SecretRef)
             {
                 assert!(!template.body.contains(&format!("={}", parameter.name)));
             }

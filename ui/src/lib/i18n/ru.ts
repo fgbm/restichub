@@ -407,6 +407,8 @@ export const ru: Record<MessageKey, string> = {
 	'secrets.usage.profile': 'Профиль',
 	'secrets.usage.channel': 'Канал',
 	'secrets.usage.jobTemplate': 'Шаблон задания',
+	'secrets.usage.host': 'Хост',
+	'secrets.usage.plan': 'План',
 	'secrets.replace': 'Заменить значение',
 	'secrets.replaceFor': 'Заменить значение: {name}',
 	'secrets.moreActions': 'Другие действия: {name}',
@@ -1237,6 +1239,7 @@ export const ru: Record<MessageKey, string> = {
 	'deleteBlocked.kind.job_template': 'Шаблон задания',
 	'deleteBlocked.kind.plan': 'План',
 	'deleteBlocked.kind.job': 'Задание',
+	'deleteBlocked.kind.host': 'Хост',
 	'error.internal_error':
 		'В сервере управления внутренняя проблема. Повторите позже. Если проблема остаётся, попросите администратора прочитать журнал сервера.',
 	'error.network': 'Сервер управления не ответил. Проверьте сеть и повторите.',
@@ -1567,6 +1570,7 @@ export const ru: Record<MessageKey, string> = {
 	'reason.too_long': 'Значение слишком длинное.',
 	'reason.invalid_character': 'Значение содержит недопустимый символ.',
 	'reason.reserved': 'Значение зарезервировано.',
+	'reason.duplicate': 'Это имя повторяет другое имя в списке.',
 	'reason.not_in_future': 'Время должно быть в будущем.',
 	'reason.too_far_in_future': 'Время слишком далеко в будущем.',
 	'reason.invalid_format': 'Неверный формат.',
@@ -1584,6 +1588,16 @@ export const ru: Record<MessageKey, string> = {
 		'Формат пути не подходит системе хоста. На Linux и macOS укажите путь от «/», на Windows — путь с буквой диска, например C:\\backup.',
 	'reason.plan_on_other_host':
 		'План репозитория выполняется на другом хосте. Локальный репозиторий работает только на своём хосте.',
+	'reason.parameter_missing':
+		'У обязательного параметра нет значения. Задайте его на хосте или в плане.',
+	'reason.parameter_missing_in_plans':
+		'План этого профиля теряет значение обязательного параметра. Сначала задайте значение на хосте.',
+	'reason.parameter_kind_mismatch':
+		'Вид значения не совпадает с видом, который профиль объявляет для этого имени.',
+	'reason.parameter_secret_in_template':
+		'Секретный параметр нельзя подставить в путь, исключение или тег: значение видно в командной строке.',
+	'reason.parameter_not_allowed':
+		'Параметр нельзя подставить в настройки хранения или проверки: одно задание обслуживания работает для всех хостов.',
 	'scripts.title': 'Скрипты',
 	'scripts.description':
 		'Скрипты выполняются на хосте от имени агента. Они запускаются до и после резервного копирования в порядке списков. Каждый скрипт — отдельный шаг задания со своим журналом.',
@@ -2227,6 +2241,14 @@ export const ru: Record<MessageKey, string> = {
 	'secrets.count.jobTemplate.few': '{n} шаблона задания',
 	'secrets.count.jobTemplate.many': '{n} шаблонов задания',
 	'secrets.count.jobTemplate.other': '{n} шаблона задания',
+	'secrets.count.host.one': '{n} хост',
+	'secrets.count.host.few': '{n} хоста',
+	'secrets.count.host.many': '{n} хостов',
+	'secrets.count.host.other': '{n} хоста',
+	'secrets.count.plan.one': '{n} план',
+	'secrets.count.plan.few': '{n} плана',
+	'secrets.count.plan.many': '{n} планов',
+	'secrets.count.plan.other': '{n} плана',
 	'tokens.tab.valid': 'Действующие',
 	'tokens.tab.ended': 'Истёкшие и отозванные',
 	'tokens.sort.name': 'Имя',

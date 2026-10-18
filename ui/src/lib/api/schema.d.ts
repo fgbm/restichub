@@ -2128,7 +2128,7 @@ export interface components {
             name: string;
             options?: components["schemas"]["BackupOptions"];
             /** @description What the profile offers to its hosts (FR-PF-09). At most 64. */
-            parameters?: components["schemas"]["ParameterDef"][];
+            parameters?: components["schemas"]["ParameterDefRequest"][];
             paths?: components["schemas"]["ProfilePaths"];
             retention?: components["schemas"]["Retention"] | null;
             /**
@@ -2819,8 +2819,8 @@ export interface components {
          * @enum {string}
          */
         OverwriteMode: "always" | "if-changed" | "if-newer" | "never";
-        /** @description The declaration of one parameter of a profile (FR-PF-09). */
-        ParameterDef: {
+        /** @description The declaration of one parameter in a profile request (FR-PF-09). */
+        ParameterDefRequest: {
             /** @description A text parameter only. A secret default would give one password to every host (ADR-0047). */
             default_value?: string | null;
             /** @description At most 200 characters. */
@@ -2863,7 +2863,7 @@ export interface components {
             name: string;
             /** @description The identifier of a secret of the purpose `hook_secret`, for a `secret` parameter. */
             secret_id?: string | null;
-            /** @description A text of 1 to 4096 characters, for a `text` parameter. */
+            /** @description A text of 1 to 4096 bytes, for a `text` parameter. */
             value?: string | null;
         };
         /** @description The value of one parameter on a host (FR-PF-12). */
@@ -3402,7 +3402,7 @@ export interface components {
             /** @description Shown in the form. 1 to 64 characters. */
             label: string;
             name: string;
-            type: components["schemas"]["ParameterKind"];
+            type: components["schemas"]["TemplateParameterKind"];
         };
         /** @description A script template, built-in or of the tenant. */
         ScriptTemplateView: {
@@ -3673,6 +3673,14 @@ export interface components {
             count: number;
         };
         /**
+         * @description The type of a script template parameter. The value becomes an environment variable of the script.
+         *
+         *     The name is separate from the kind of a profile parameter (ADR-0047), so the two enums keep two
+         *     schemas.
+         * @enum {string}
+         */
+        TemplateParameterKind: "string" | "secret_ref" | "integer" | "boolean";
+        /**
          * @description The tenancy mode of the installation (ADR-0024).
          *
          *     The mode changes the API surface and the user interface. It never changes the storage model.
@@ -3787,7 +3795,7 @@ export interface components {
             name?: string | null;
             options?: components["schemas"]["BackupOptions"];
             /** @description Replaces the whole list (FR-PF-09). */
-            parameters?: components["schemas"]["ParameterDef"][];
+            parameters?: components["schemas"]["ParameterDefRequest"][];
             paths?: components["schemas"]["ProfilePaths"];
             retention?: components["schemas"]["Retention"] | null;
             /** @description Replaces the whole list. Only an Admin can change it (FR-HK-12). */

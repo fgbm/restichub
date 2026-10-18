@@ -38,6 +38,8 @@ function href(blocker: Blocker): string {
 			return resolve('/(app)/settings/notifications/channels');
 		case 'job_template':
 			return resolve('/(app)/settings/scripts/jobs/[id]', params);
+		case 'host':
+			return resolve('/(app)/hosts/[id]', params);
 	}
 }
 

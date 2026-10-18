@@ -37,10 +37,13 @@ use crate::validation::Reason;
 /// The most parameters that a script template declares.
 const MAX_PARAMETERS: usize = 32;
 
-/// The type of a template parameter. The value becomes an environment variable of the script.
+/// The type of a script template parameter. The value becomes an environment variable of the script.
+///
+/// The name is separate from the kind of a profile parameter (ADR-0047), so the two enums keep two
+/// schemas.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum ParameterKind {
+pub enum TemplateParameterKind {
     String,
     /// The user picks a secret of the purpose `hook_secret`.
     SecretRef,
@@ -48,7 +51,7 @@ pub enum ParameterKind {
     Boolean,
 }
 
-impl ParameterKind {
+impl TemplateParameterKind {
     fn is_valid_default(self, value: &str) -> bool {
         match self {
             Self::String => !has_forbidden(value),
@@ -67,7 +70,7 @@ pub struct ScriptTemplateParameter {
     /// Shown in the form. 1 to 64 characters.
     pub label: String,
     #[serde(rename = "type")]
-    pub kind: ParameterKind,
+    pub kind: TemplateParameterKind,
     /// Fills the form. A secret reference has none.
     #[serde(default, rename = "default", skip_serializing_if = "Option::is_none")]
     pub default_value: Option<String>,
