@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
 // The parameter of a profile: the host stores a value, the plan reads it, and the plan saves with
 // its own overrides (FR-PF-09 to FR-PF-12, AC-PF-06, AC-PF-08, ADR-0047). The mock holds the
@@ -20,6 +20,17 @@ async function sample(page: Page): Promise<void> {
 }
 
 const nav = (page: Page) => page.getByRole('navigation', { name: 'Primary navigation' });
+
+/** The bottom edge of the first line of a field, in the coordinates of the window. */
+async function caretBottom(field: Locator): Promise<number> {
+	return field.evaluate((node) => {
+		const style = getComputedStyle(node);
+		const line = parseFloat(style.lineHeight) || 20;
+		const border = parseFloat(style.borderTopWidth) || 0;
+		const padding = parseFloat(style.paddingTop) || 0;
+		return node.getBoundingClientRect().top + border + padding + line;
+	});
+}
 
 test('ac_pf_06_a_host_value_reaches_the_plan_and_the_plan_saves', async ({ page }) => {
 	await sample(page);
@@ -140,6 +151,105 @@ test('fr_pf_03_the_path_field_lists_the_variables_and_inserts_one', async ({
 	// The parameter table counts the new use in the path.
 	const parameters = page.locator('[data-section="parameters"]');
 	await expect(parameters.getByRole('cell', { name: '1 path' })).toBeVisible();
+});
+
+test('fr_pf_03_the_list_draws_above_the_page_of_a_switched_off_section', async ({ page }) => {
+	await sample(page);
+	await signIn(page);
+
+	await nav(page).getByRole('link', { name: 'Profiles', exact: true }).click();
+	await page.getByRole('link', { name: 'db-nightly' }).click();
+	await page.getByRole('button', { name: 'Expand all', exact: true }).click();
+
+	// The section is off, so its body is dimmed. The list must not take the dimming, and the next
+	// section must not paint over it.
+	const section = page.locator('[data-section="excludes"]');
+	const toggle = section.getByRole('switch', { name: 'Turn on the section "Exclusions"' });
+	await expect(toggle).toHaveAttribute('aria-checked', 'false');
+	await expect(section.locator('.section__body--off')).toBeVisible();
+
+	const field = page.locator('#profile-excludes');
+	await field.scrollIntoViewIfNeeded();
+	await field.click();
+	await page.keyboard.type('{{');
+	const list = page.getByRole('listbox', { name: 'Variables' });
+	await expect(list).toBeVisible();
+
+	// The list is a child of the body, so it is outside the dimmed section.
+	expect(await list.evaluate((node) => node.closest('[data-section]') === null)).toBe(true);
+
+	// The field still names the portaled list, and only the list has that id.
+	const controls = await field.getAttribute('aria-controls');
+	expect(await page.evaluate((id) => document.querySelectorAll(`#${id}`).length, controls)).toBe(1);
+	expect(
+		await page.evaluate((id) => document.getElementById(id)?.getAttribute('role'), controls)
+	).toBe('listbox');
+
+	// The opacity of the list and of each ancestor is 1, so the section does not show through it.
+	const opacity = await list.evaluate((node) => {
+		const values: number[] = [];
+		for (let element: Element | null = node; element; element = element.parentElement) {
+			values.push(Number(getComputedStyle(element).opacity));
+		}
+		return values;
+	});
+	expect(opacity.length).toBeGreaterThan(2);
+	expect(opacity.every((value) => value === 1)).toBe(true);
+
+	// The list keeps the width of the field.
+	const fieldBox = await field.boundingBox();
+	const listBox = await list.boundingBox();
+	expect(Math.abs((listBox?.width ?? 0) - (fieldBox?.width ?? 0))).toBeLessThanOrEqual(1);
+
+	// The list hangs at the line of the caret, below it or above it when the window has no room.
+	const caret = await caretBottom(field);
+	const below = Math.abs((listBox?.y ?? 0) - caret);
+	const above = Math.abs((listBox?.y ?? 0) + (listBox?.height ?? 0) - caret);
+	expect(Math.min(below, above)).toBeLessThanOrEqual(3);
+
+	// No later section paints over the last option of the list.
+	const last = list.getByRole('option').last();
+	await last.scrollIntoViewIfNeeded();
+	const onTop = await last.evaluate((option) => {
+		const rect = option.getBoundingClientRect();
+		const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+		return hit !== null && (hit === option || option.contains(hit));
+	});
+	expect(onTop).toBe(true);
+});
+
+test('fr_pf_03_the_list_stays_in_the_window_of_a_narrow_page', async ({ page }) => {
+	await page.setViewportSize({ width: 360, height: 640 });
+	await sample(page);
+	await signIn(page);
+
+	await nav(page).getByRole('link', { name: 'Profiles', exact: true }).click();
+	await page.getByRole('link', { name: 'db-nightly' }).click();
+	await page.getByRole('button', { name: 'Expand all', exact: true }).click();
+
+	// The caret line is at the bottom of the window, so the list flips above it. The scroll comes
+	// after the click, because a click of the runner puts the field in the middle of the window.
+	const field = page.locator('#profile-excludes');
+	await field.click();
+	await field.evaluate((node) => {
+		const box = node.getBoundingClientRect();
+		window.scrollBy(0, box.top - (window.innerHeight - 120));
+	});
+	await page.keyboard.type('{{');
+	const list = page.getByRole('listbox', { name: 'Variables' });
+	await expect(list).toBeVisible();
+
+	const listBox = await list.boundingBox();
+	const fieldBox = await field.boundingBox();
+	expect(Math.abs((listBox?.width ?? 0) - (fieldBox?.width ?? 0))).toBeLessThanOrEqual(1);
+	// The list stays inside the window.
+	expect(listBox?.x ?? -1).toBeGreaterThanOrEqual(0);
+	expect((listBox?.x ?? 0) + (listBox?.width ?? 0)).toBeLessThanOrEqual(360);
+	expect(listBox?.y ?? -1).toBeGreaterThanOrEqual(0);
+	expect((listBox?.y ?? 0) + (listBox?.height ?? 0)).toBeLessThanOrEqual(640);
+	// The list hangs above the line of the caret.
+	const caret = await caretBottom(field);
+	expect((listBox?.y ?? 0) + (listBox?.height ?? 0)).toBeLessThanOrEqual(caret);
 });
 
 test('the closed pickers of a plan keep the label and the parts on one row', async ({ page }) => {

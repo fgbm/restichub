@@ -103,4 +103,22 @@ describe('the list of variables in the tag input', () => {
 		expect(screen.getByRole('button', { name: 'Remove db-{{pg' })).toBeInTheDocument();
 		expect(field.value).toBe('');
 	});
+
+	it('fr_pf_03_the_list_leaves_the_field_so_a_section_cannot_dim_it', async () => {
+		const user = userEvent.setup();
+		const { container } = render(VariableTags, {
+			label: 'Tags',
+			parameters: source.parameters,
+			labels: source.labels,
+			ondeclare: vi.fn(),
+			value: []
+		});
+		container.style.opacity = '0.55';
+		const field = screen.getByLabelText('Tags') as HTMLInputElement;
+		await typeAtEnd(user, field, 'db-{{pg');
+
+		const list = listbox() as HTMLElement;
+		expect(container.contains(list)).toBe(false);
+		expect(list.parentElement?.parentElement?.parentElement).toBe(document.body);
+	});
 });

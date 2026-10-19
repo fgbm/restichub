@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { VariableOption, VariableSource } from '#lib/variables.ts';
 	import { caretExpression, insertVariable, variableGroups } from '#lib/variables.ts';
-	import VariableList from './VariableList.svelte';
+	import VariablePopover from './VariablePopover.svelte';
 	import TagInput from './ui/TagInput.svelte';
 
 	let {
@@ -33,14 +33,13 @@
 	const listId = $derived(`${fieldId}-list`);
 
 	let wrapper = $state<HTMLDivElement | null>(null);
-	let popover = $state<HTMLDivElement | null>(null);
+	let panel = $state<HTMLDivElement | null>(null);
 	let input = $state<HTMLInputElement | null>(null);
 	let open = $state(false);
 	let typed = $state('');
 	let start = $state(0);
 	let dismissed = $state(false);
 	let active = $state(-1);
-	let top = $state(0);
 
 	const source = $derived({ parameters, labels });
 	const groups = $derived(open ? variableGroups(typed, source) : []);
@@ -50,22 +49,20 @@
 	const total = $derived(
 		variableGroups('', source).reduce((count, group) => count + group.options.length, 0)
 	);
-
-	$effect(() => {
-		void top;
-		if (popover) popover.style.top = `${top}px`;
+	// The tags field is one row, so the list hangs below the whole field. The rect reads the field
+	// when the floating layer asks, so a scroll moves the list.
+	const anchor = $derived.by(() => {
+		const element = input;
+		return {
+			getBoundingClientRect() {
+				const box = (element?.closest('.tags') ?? element)?.getBoundingClientRect();
+				return box ? new DOMRect(box.left, box.bottom, box.width, 0) : new DOMRect();
+			}
+		};
 	});
 
 	function firstEnabled(list: readonly VariableOption[]): number {
 		return list.findIndex((option) => !option.disabled);
-	}
-
-	// The tags field is one row, so the list opens below the whole field, as for a one-line input.
-	function fieldBottom(element: HTMLInputElement): number {
-		const box = element.closest('.tags') ?? element;
-		const outer = wrapper?.getBoundingClientRect();
-		if (!outer) return 0;
-		return box.getBoundingClientRect().bottom - outer.top + 6;
 	}
 
 	function update(element: HTMLInputElement): void {
@@ -85,7 +82,6 @@
 		typed = context.typed;
 		open = true;
 		active = firstEnabled(variableGroups(typed, source).flatMap((group) => group.options));
-		top = fieldBottom(element);
 	}
 
 	function move(step: number): void {
@@ -150,7 +146,7 @@
 
 	function onfocusout(event: FocusEvent): void {
 		const next = event.relatedTarget as Node | null;
-		if (next && wrapper?.contains(next)) return;
+		if (next && (wrapper?.contains(next) || panel?.contains(next))) return;
 		open = false;
 	}
 
@@ -180,29 +176,18 @@
 		bind:value
 		listbox={{ id: listId, expanded: open, activeId }}
 	/>
-	{#if open}
-		<div class="popover" bind:this={popover}>
-			<VariableList
-				id={listId}
-				{groups}
-				{activeOption}
-				{typed}
-				{total}
-				onpick={choose}
-				ondeclare={declare}
-			/>
-		</div>
-	{/if}
+	<VariablePopover
+		{open}
+		id={listId}
+		{anchor}
+		{groups}
+		{activeOption}
+		{typed}
+		{total}
+		owner={wrapper}
+		onpick={choose}
+		ondeclare={declare}
+		onclose={() => (open = false)}
+		bind:panel
+	/>
 </div>
-
-<style>
-	.variable-tags {
-		position: relative;
-	}
-
-	.popover {
-		position: absolute;
-		right: 0;
-		left: 0;
-	}
-</style>
