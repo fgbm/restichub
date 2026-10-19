@@ -53,11 +53,8 @@ A parameter of the type "Secret" never expands. The restic command line is visib
 | Exclusions | yes | yes |
 | Exclude file on the host | yes | yes |
 | Tags | yes | yes |
-| Retention rules: keep within, keep tags, filter tags, filter paths | yes | no |
-| Retention rules: filter hosts | no | no |
-| Repository check: read-data subset | yes | no |
 
-A parameter does not expand in the retention or the check, because one maintenance step serves every host of the repository. The control plane refuses it with `parameter_not_allowed`. The filter hosts accept no variable, because the step of one host has no single host name.
+A parameter does not expand in the retention or the check, because one maintenance step serves every host of the repository. The control plane refuses it with `parameter_not_allowed`.
 
 A value in a path, an exclusion or a tag is part of the restic command and of the snapshot. Each role that sees jobs and snapshots sees it.
 
