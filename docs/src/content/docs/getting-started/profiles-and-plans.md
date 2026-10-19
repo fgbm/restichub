@@ -26,7 +26,7 @@ Result: the list shows the profile, and the side panel "The result" shows a summ
 
 1. Open the screen "Plans" and select "Add plan".
 2. In the section "Basics", enter a name in "Plan".
-3. In the section "What to back up", select the profile in "Profile", the repository in "Repository" and the host in "Host".
+3. In the section "What to back up", select "Profile", "Repository" and "Host".
 4. In the section "Schedule", set the "Cron expression" and the "Time zone". You can also select a preset: "Hourly", "Daily at 02:00" or "Sundays at 03:00". The switch "Run on schedule" stays on.
 5. In the section "Recovery point objective", enter the hours after which the backup is overdue. This step is optional. The default is the schedule interval plus a margin. See [Recovery point objective](/restichub/guides/alerts/#recovery-point-objective).
 6. Select "Save".
