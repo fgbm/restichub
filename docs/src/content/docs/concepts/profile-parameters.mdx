@@ -1,0 +1,108 @@
+---
+title: Profile parameters
+description: What a profile parameter is, where its value comes from, where it applies, and how ResticHub hides a value.
+---
+
+import Screen from '../../../components/Screen.astro';
+
+A profile parameter is a named value that a profile declares and a host sets. A plan can override the value of a host. The profile uses the value in a path, an exclude, a tag or a script variable.
+
+For example, three hosts keep the dump of a database in a different directory. One profile declares the parameter `pg_dir`. Each host sets its own directory, and the three plans use the same profile.
+
+## The fields of a parameter
+
+| Field | Meaning |
+|---|---|
+| Parameter | The name. A lower-case letter, then lower-case letters, digits and underscores, at most 64 characters. The name is unique in the profile. |
+| Type | "Text" or "Secret". |
+| Required | A saved plan must have a value for a required parameter. |
+| Default | The value when the plan and the host set none. Only a text parameter has a default value. |
+| Description | An optional text of at most 200 characters. The plan page and the host page show it. |
+
+<Screen name="profile-parameters" alt="The section Parameters of a profile with a text parameter, a secret parameter and a parameter with a default value" />
+
+A text value has 1 to 4096 bytes. A profile declares at most 64 parameters. A parameter of the type "Secret" has no default value, because one default would give the same password to every host.
+
+## Where a value comes from
+
+A host holds values by name. Every profile of the host reads them. A plan can override a value. The control plane resolves a value in this order:
+
+1. The value of the plan.
+2. The value of the host.
+3. The default value of the profile.
+
+The section "Profile parameters" of the plan page shows the value and its source: "plan", "host", "default" or "not set". The section "Parameter values" of the host page shows the values of the host and the profiles that need each parameter.
+
+A host keeps a value that no profile declares. The host page marks it "No profile needs it", and you can delete it.
+
+## Where a parameter applies
+
+A text parameter expands as `{{param.<name>}}` in these fields of the profile:
+
+- The paths, for each system.
+- The exclusions.
+- The exclude file on the host.
+- The tags.
+
+A parameter does not expand in the retention rules or in the check. The control plane runs one maintenance step for the whole repository, so a value of one host has no meaning there. The control plane refuses a parameter in these fields with `parameter_not_allowed`.
+
+An optional parameter without a default value gives an empty string. An empty path or tag is not valid. Thus a profile that uses such a parameter in a path or a tag does not save, with the code `parameter_needs_default`.
+
+The [Template variables](/restichub/reference/variables/) page shows the syntax of every variable.
+
+## A secret parameter
+
+A secret value is a reference to a stored secret of the purpose `hook_secret`. The control plane stores no secret text in the value.
+
+A secret parameter never expands in a path, an exclude or a tag. The command line of restic is visible in the process list of the host, so a credential there would leak. The control plane refuses the save with `parameter_secret_in_template`.
+
+A script variable of the kind "Profile parameter" names a parameter. The control plane sends a text value to the agent as a masked value, and the agent hides it in the log of the script. A secret value reaches the script as the value of its secret. See [Server scripts](/restichub/guides/scripts/).
+
+A value in a path, an exclude or a tag is part of the restic command and of the snapshot. Each role that sees jobs and snapshots sees it. Keep a credential out of these fields.
+
+## Who sets a value
+
+| Role | Right |
+|---|---|
+| Admin | Set, change and remove a text value and a secret value. |
+| Operator | Set, change and remove a text value. A secret value gives HTTP 403. |
+| Viewer | Read the names and the types. A text value stays hidden. |
+
+Only an Admin deletes a plan that holds a secret value, because the delete removes the value. A Viewer sees the name of a secret and not the secret.
+
+The audit log records each change of a value. The record holds the name of the parameter, its type and the identifier of a secret. It holds no value.
+
+## Each saved plan has its values
+
+The control plane refuses a write that leaves a plan without a required parameter:
+
+| Refusal | When |
+|---|---|
+| `parameter_missing` | A plan save has no value for a required parameter. |
+| `parameter_missing_in_plans` | A profile save or a change of the host values leaves a plan without a value. |
+| `parameter_kind_mismatch` | A value has another type than the declaration. A value of the wrong type counts as missing. |
+
+The job builder checks the values again. A job without a value ends with the result `config_error`.
+
+## Remove a parameter
+
+A profile save that removes a parameter deletes the values of the plans of the profile. The values of the hosts stay, and the host page marks them "No profile needs it". The editor asks for a confirmation and lists the plans with a value. Only an Admin removes a parameter that a host holds as a secret value.
+
+A rename is a new parameter. The new name has no value, and the values of the old name stay on the hosts as unused.
+
+## API
+
+| Method and path | Function |
+|---|---|
+| `GET /api/v1/agents/{id}/parameters` | The values of a host and the parameters of the profiles of its plans. |
+| `PUT /api/v1/agents/{id}/parameters` | Replaces the values of a host in one transaction. |
+| `POST /api/v1/profiles`, `PATCH /api/v1/profiles/{id}` | The field `parameters` holds the declarations. |
+| `POST /api/v1/plans`, `PATCH /api/v1/plans/{id}` | The field `parameter_values` holds the overrides of the plan. |
+
+## Related pages
+
+- [Profiles](/restichub/concepts/profiles/)
+- [Plans](/restichub/concepts/plans/)
+- [Template variables](/restichub/reference/variables/)
+- [Set parameter values](/restichub/guides/profile-parameters/)
+- [Server scripts](/restichub/guides/scripts/)

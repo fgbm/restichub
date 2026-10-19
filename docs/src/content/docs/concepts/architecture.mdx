@@ -33,8 +33,9 @@ The control plane never opens a connection to a host. The reverse proxy does not
 | Term | Meaning |
 |---|---|
 | Tenant | An isolated organization in one installation. |
-| Profile | A backup definition: repository, paths, excludes, retention, scripts. |
-| Plan | A profile assigned to agents, with a schedule. |
+| Profile | A backup definition: paths, exclusions, options, retention and scripts. A profile declares parameters but holds no repository. |
+| Plan | A profile, a host and a repository with a schedule. |
+| Profile parameter | A named value that a profile declares. A host or a plan sets the value. |
 | Job | One run of a plan or a manual operation. |
 | Step | One command in a job, for example `backup` or `forget`. |
 | Server script | A script that you write in the web interface. The agent runs it on a trusted host before or after the backup. |

@@ -693,6 +693,17 @@ function makePlans(): Plan[] {
 /// The sample values of the host srv-db-01: the secrets of the profile db-nightly and one value
 /// that no profile declares (FR-PF-10, FR-PF-12).
 function makeAgentParameterValues(): Map<string, ParameterValueDef[]> {
+	if (docsMode()) {
+		return new Map([
+			[
+				'2',
+				[
+					{ name: 'pg_dir', kind: 'text', value: '/srv/pgdata' },
+					{ name: 'pg_password', kind: 'secret', secret_id: 's_db' }
+				] satisfies ParameterValueDef[]
+			]
+		]);
+	}
 	if (
 		typeof localStorage === 'undefined' ||
 		localStorage.getItem(SAMPLE_PROFILES_KEY) !== 'sample' ||

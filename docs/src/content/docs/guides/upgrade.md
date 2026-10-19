@@ -129,13 +129,29 @@ Upgrade the agents only after the new control plane works.
 ### Control plane
 
 - Make the backup of the database as the PostgreSQL superuser of the stack, as [Back up the control plane](/restichub/operations/back-up-the-control-plane/#back-up-the-database) shows. The command of the 0.1.0-rc.4 documentation, `pg_dump -U restichub_owner`, does not work. The tables have row-level security, so the dump stops with `query would be affected by row-level security policy`.
-- Seven database migrations (0049 to 0055) run at the first start. They add the indexes and the fields of the lists, and the password reset of a platform account. They also add the user name of a rest-server and the stream state of a host. A blank email of an account becomes no email. The last migration replaces the unique keys of the names.
+- Nine database migrations (0049 to 0057) run at the first start. The migrations 0049 to 0055 add the indexes and the fields of the lists, and the password reset of a platform account. They also add the user name of a rest-server and the stream state of a host. A blank email of an account becomes no email. The migration 0055 replaces the unique keys of the names. The migrations 0056 and 0057 move the repository to the plan and add the profile parameters. See the sections below.
 - Names may now contain any text. The name of a profile, a plan or an alert channel is 1 to 100 characters, with any letters, spaces and emoji. It is unique in the tenant, and the letter case does not matter. The names that you made before stay valid.
 - The comparison of names uses the function `lower()` of PostgreSQL, so it follows the `LC_CTYPE` of the database. The reference stack uses `en_US.utf8`. With the locale `C`, only the ASCII letters fold. Then the names "Ночной" and "НОЧНОЙ" can both exist.
 - One location holds one repository. The control plane refuses a new or changed repository with the location of another repository of the tenant. It does not delete a duplicate that exists. It logs a warning, and the list of repositories shows the mark "Shared location". Delete the duplicate records in ResticHub. A delete never deletes restic data. See [Add a repository](/restichub/getting-started/add-a-repository/).
 - A local repository is bound to its host. The control plane refuses a job of a local repository on another host with the reason `not_repository_host`. If several hosts used one shared network disk (NFS or SMB) as a local repository, move this repository to rest-server or SFTP. To find and correct the old plans, see [Repositories saved before this rule](/restichub/getting-started/add-a-repository/#repositories-saved-before-this-rule).
 - For each REST server repository with a password, enter the user name of the account in the field "User name". See [User name of a rest-server](/restichub/reference/agent-version-compatibility/#user-name-of-a-rest-server).
 - Scripts and other API clients get new error codes. A refused delete returns a code with the reason instead of `conflict`, for example `repository_in_use` or `profile_in_use`. A new local repository needs `maintenance_agent_id`. A taken user name or email returns `username_taken` or `email_taken`. See [Status and reason codes](/restichub/reference/status-codes/).
+
+### The repository in the plan
+
+- The plan holds the repository, and a profile holds none. The migration 0056 moves the repository of each profile to its plans. A profile without a plan loses its repository, and the next plan of the profile selects one. The plan page shows no notice of the move.
+- A plan of a local repository on another host is refused with the field `agent_id` and the reason `not_repository_host`. The control plane also refuses the delete of a repository that a plan uses, with the code `repository_in_use` and the plans in `blockers`.
+- The plans of a repository share its retention. The retention task gives one `forget` step for each distinct profile of the plans of the repository. The step takes the facts of an agent from the plans of this profile in this repository only.
+- `POST /api/v1/profiles` and `PATCH /api/v1/profiles/{id}` accept no `repository_id`. A request with the field is refused as an unknown field. The profile view holds no `repository_id`.
+- `POST /api/v1/plans` and `PATCH /api/v1/plans/{id}` require `repository_id`. A missing or an empty value gives `400` with the field `repository_id` and the reason `empty`.
+- The route `POST /api/v1/profiles/{id}/preview` is removed. Use `POST /api/v1/profiles/preview` with `agent_id` and an optional `repository_id`. A person without the profile write right also sends `profile_id`, and the server compiles the stored profile.
+
+### Profile parameters
+
+- A profile declares parameters. A host holds the values, and a plan can override a value. The profile editor has the section "Parameters", the host page the section "Parameter values", and the plan page the section "Profile parameters". The migration 0057 adds the declarations and the values. An existing profile declares no parameter, so no plan changes.
+- A script variable has a new kind, "Profile parameter". The value of a text parameter reaches the agent as a masked value. An agent of an older package receives it as a secret value and masks it in the same way. See [Agent and control plane versions](/restichub/reference/agent-version-compatibility/#masked-script-values).
+- Only an Admin sets, changes or removes a secret parameter value. An Operator sets the text values. Only an Admin deletes a plan that holds a secret value.
+- A save that leaves a plan without a required parameter gives `400` with `parameter_missing` or `parameter_missing_in_plans`. See [Status and reason codes](/restichub/reference/status-codes/#refused-parameter-values).
 
 ### All agents
 

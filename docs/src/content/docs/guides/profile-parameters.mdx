@@ -1,0 +1,108 @@
+---
+title: Set parameter values
+description: Declare a profile parameter, set its value on a host, and override the value in a plan.
+---
+
+import Screen from '../../../components/Screen.astro';
+
+A [profile parameter](/restichub/concepts/profile-parameters/) holds a value that differs from one host to another, for example a mount point. This page shows how to declare a parameter and how to give it a value. An Admin or an Operator does these steps. Only an Admin sets a secret value.
+
+## Before you start
+
+- A profile exists. See [Create a profile and a plan](/restichub/getting-started/profiles-and-plans/).
+- The host has the status "Online".
+- For a secret value, a secret of the purpose `hook_secret` exists. See [Server scripts](/restichub/guides/scripts/#parameters-and-secrets).
+
+## Declare a parameter
+
+1. Open the profile and find the section "Parameters".
+2. Select "Add parameter". The table gets an empty row.
+3. Enter the name in "Parameter". Use a lower-case letter, then lower-case letters, digits and underscores, for example `pg_dir`.
+4. Select the "Type": "Text" or "Secret".
+5. Switch on "Required" when a plan must have a value.
+6. For a text parameter, enter the "Default" value. This step is optional.
+7. Enter a "Description". This step is optional.
+8. Select "Save".
+
+Result: the row shows the parameter, the number of places that use it, and the type.
+
+A secret parameter shows "Not set" in the column "Default". A default secret would give one password to every host.
+
+You can also declare a parameter from a path. Type `{{` and the name in a path field. The hint under the field says "The parameter … is not declared." Select "Declare". The editor adds a row of the type "Text" with "Required" on. Change the row if the parameter needs another type.
+
+## Use the parameter in the profile
+
+1. Open the profile.
+2. Enter the variable in a path, an exclusion, an exclude file or a tag, for example `/srv/{{param.pg_dir}}`.
+3. Select "Save".
+
+The profile editor lists the variables when you type `{{`. The group "Profile parameters" holds the declared parameters, and the group "Host variables" holds the other variables. See [Template variables](/restichub/reference/variables/).
+
+A secret parameter stays in the list with the reason why it cannot go into a path or a tag. A secret that you type by hand gives an error under the field, and the server refuses the save.
+
+## Set a value in a plan
+
+The control plane does not save a plan that has no value for a required parameter.
+
+1. Open the plan and find the section "Profile parameters".
+2. Select "Set for this plan" in the row of the parameter.
+3. Enter the value, or select a secret for a secret parameter.
+4. Select "Set".
+5. Select "Save".
+
+Result: the row shows the value and the source "plan".
+
+<Screen name="plan-parameters" alt="The section Profile parameters of a plan with the values of the plan, of the host and of the default" />
+
+## Set a value on the host
+
+The host page lists the parameters of the profiles of the plans of the host. Thus the plan must exist before you set a value on the host.
+
+1. Open "Hosts" and select the name of the host.
+2. Find the section "Parameter values".
+3. Enter the value in the field "Value", or select a secret for a secret parameter.
+4. Select "Save the values".
+
+<Screen name="host-parameters" alt="The section Parameter values of a host with a text value, a secret and a default value" />
+
+Result: each plan of the host reads the value. A warning above the table names a plan that would stay without a required value, and the control plane refuses that change.
+
+A Viewer sees the names of the parameters and the name of each secret. A text value stays hidden.
+
+## Move a plan value to the host
+
+1. Set the value on the host. See the section above.
+2. Open the plan and find the section "Profile parameters".
+3. Select "Remove the plan value" in the row.
+4. Select "Save".
+
+Result: the row shows the value of the host and the source "host".
+
+## Remove a value or a parameter
+
+- To remove a value of a host, select the delete icon in the row of the parameter, then select "Save the values". A required parameter without another value stops the save.
+- To remove a value of a plan, select "Remove the plan value", then select "Save".
+- To remove a parameter, select the delete icon in the row of the parameter in the profile, then select "Save". The editor lists the plans that lose their value for the parameter, and it asks for a confirmation.
+
+A removed parameter keeps its values on the hosts, and the host page marks them "No profile needs it". Only an Admin removes a parameter that a host holds as a secret value.
+
+## Refusals
+
+| Message or code | Cause | Action |
+|---|---|---|
+| "The plan cannot be saved: the parameter … has no value." | A required parameter has no value in the plan and on the host. | Set the value in the plan or on the host. |
+| "The profile is not saved: plans would stay without the required parameter …" | A new required parameter or a removed value leaves a plan without a value. | Set the value in these plans, then save the profile again. |
+| "The values are not saved: plans would stay without the required parameter …" | A change of the host values leaves a plan without a value. | Set the value in these plans, then save the values again. |
+| "Only an Admin sets a secret value." | An Operator selects a secret. | Ask an Admin. |
+| `parameter_kind_mismatch` | A value has another type than the declaration. | Change the value or the declaration. |
+| `parameter_not_declared` | The variable names a parameter that the profile does not declare. | Declare the parameter. |
+| `parameter_needs_default` | An optional parameter without a default value stands in a path or a tag. | Switch on "Required" or enter a default value. |
+| `parameter_secret_in_template` | A secret parameter stands in a path, an exclude or a tag. | Use the parameter in a script variable. |
+| `parameter_not_allowed` | A parameter stands in a retention or check field. | Remove the variable from that field. |
+
+## Related pages
+
+- [Profile parameters](/restichub/concepts/profile-parameters/)
+- [Template variables](/restichub/reference/variables/)
+- [Profiles](/restichub/concepts/profiles/)
+- [Plans](/restichub/concepts/plans/)

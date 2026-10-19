@@ -97,9 +97,17 @@ The time limit is in seconds. An empty value means one hour. The longest limit i
 
 ### Parameters and secrets
 
-A script reads its parameters as environment variables. A parameter is plain text or a secret.
+A script reads its parameters as environment variables. A parameter has one of three kinds:
 
-For a secret, select a stored secret of the purpose `hook_secret`. Select **New secret** to create one. The control plane reads the value only when it sends the job, and writes the audit record `secret_delivered`. The agent masks the value in the log of the script. The value never goes into an argument or a file.
+| Kind | Value |
+|---|---|
+| Text | A text that you type in the profile. |
+| Secret | A stored secret of the purpose `hook_secret`. |
+| Profile parameter | The value of a parameter that the profile declares. A host sets the value, and a plan can override it. See [Profile parameters](/restichub/concepts/profile-parameters/). |
+
+For a secret, select a stored secret. Select **New secret** to create one. The control plane reads the value only when it sends the job, and writes the audit record `secret_delivered`. The agent masks the value in the log of the script. The value never goes into an argument or a file.
+
+For a profile parameter, select the parameter in the field "Parameter". The list shows the kind and the description of each parameter, and the search finds a parameter by its name or its description. A name that the profile does not declare gives the error "The parameter … is not declared in the profile". The control plane sends a text value as a masked value, so the agent hides it in the log of the script. A secret value reaches the script as the value of its secret. The value of a parameter is not in the text of the script, so a stored script does not change when a value changes.
 
 ## Templates
 
@@ -156,6 +164,7 @@ The job detail lists every script in order before the job runs. Each step shows 
 | Action | When |
 |---|---|
 | `profile_create`, `profile_update` | A profile changes. The record holds the name, the phase and the hash of each script, and the names of the parameters. |
+| `agent_parameters_update` | The parameter values of a host change. The record holds the names of the parameters, their kinds and the identifiers of the secrets. It holds no value. |
 | `script_template_create`, `script_template_update`, `script_template_delete` | A script template changes. |
 | `job_template_create`, `job_template_update`, `job_template_delete` | A job template changes. |
 | `profile_hooks_removed` | A migration drops the hooks of a profile. The record holds the profile name, and the identifier and the phase of each hook. |
@@ -171,4 +180,6 @@ No record holds the text of a script or the value of a parameter.
 | Read scripts and templates | yes | yes | no |
 | Change the scripts of a profile | yes | no | no |
 | Change a template | yes | no | no |
+| Set a text parameter value on a host or in a plan | yes | yes | no |
+| Set, change or remove a secret parameter value | yes | no | no |
 | Run a plan | yes | yes | no |

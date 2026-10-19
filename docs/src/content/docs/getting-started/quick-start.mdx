@@ -71,7 +71,7 @@ The time budget does not include these preparations:
 
 7. **Create a profile (3 min).** On the screen "Profiles", select "Add profile" and enter these values:
 
-   - "Main": a name in "Profile", and the new repository in "Repository".
+   - "Main": a name in "Profile".
    - "What to back up": a directory in "All systems", for example `/etc`.
    - "Retention": the preset "Standard".
 
@@ -80,7 +80,7 @@ The time budget does not include these preparations:
 8. **Create a plan (2 min).** On the screen "Plans", select "Add plan" and enter these values:
 
    - "Basics": a name in "Plan".
-   - "What to back up": the new profile in "Profile", and the host in "Host".
+   - "What to back up": the new profile in "Profile", the new repository in "Repository", and the host in "Host".
    - "Schedule": the preset "Daily at 02:00".
 
    Result: after "Save", the plan is in the list. See [Create a profile and a plan](/restichub/getting-started/profiles-and-plans/).
@@ -96,7 +96,7 @@ The time budget does not include these preparations:
 
 This check is outside the time budget. It takes about 3 minutes.
 
-1. Open "Restore", and select the repository.
+1. Open "Restore", and select the repository in the field at the top of the page. The field shows the name, the backend kind and the location of each repository.
 2. Select the new snapshot, and select one file in the tree.
 3. Select "Restore…". The dialog proposes the host and a "Target path" in the restore directory, for example `/var/lib/restichub-restore/a1b2c3d4`.
 4. Select "Start restore".

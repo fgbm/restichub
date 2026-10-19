@@ -4,6 +4,7 @@
  * The built-in templates agree in name and in shape with the ones the control plane ships. The mock
  * keeps a smaller set of them, with shorter scripts.
  */
+import { docsMode } from './mock-docs';
 import type {
 	CreateJobTemplateRequest,
 	CreateScriptTemplateRequest,
@@ -261,6 +262,30 @@ export class MockScripts {
 	constructor() {
 		const sample =
 			typeof localStorage !== 'undefined' && localStorage.getItem(SAMPLE_KEY) === 'sample';
+		// The documentation frames show a secret parameter value, and the secret panel of a frame
+		// names it. The demo installation therefore needs a stored secret in docs mode.
+		if (docsMode()) {
+			this.secrets = [
+				{
+					id: 's_db',
+					name: 'db.password',
+					purpose: 'hook_secret',
+					created_at: now(),
+					updated_at: now(),
+					created_by: 'u_01',
+					used_by: [{ kind: 'host', id: '2', name: 'db-01' }]
+				},
+				{
+					id: 's_s3',
+					name: 's3-main.password',
+					purpose: 'repository_password',
+					created_at: now(),
+					updated_at: now(),
+					created_by: 'u_01',
+					used_by: [{ kind: 'repository', id: 'r_1', name: 's3-main' }]
+				}
+			];
+		}
 		if (sample) {
 			this.secrets = [
 				{

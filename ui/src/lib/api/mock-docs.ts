@@ -159,7 +159,8 @@ export function docsProfiles(): Profile[] {
 		paths: Profile['paths'],
 		excludes: string[],
 		tags: string[],
-		options = OPTIONS
+		options = OPTIONS,
+		parameters: Profile['parameters'] = []
 	): Profile => ({
 		id,
 		name,
@@ -169,7 +170,7 @@ export function docsProfiles(): Profile[] {
 		tags,
 		options,
 		scripts: [],
-		parameters: [],
+		parameters,
 		retention: RETENTION,
 		check: { read_data_subset: '5%' },
 		created_at: iso(DAY * 19),
@@ -188,9 +189,41 @@ export function docsProfiles(): Profile[] {
 		profile(
 			'p_2',
 			'postgres-dumps',
-			{ all: ['/var/backups/postgres'], windows: [], linux: ['/etc/postgresql'], macos: [] },
+			{
+				all: ['/var/backups/{{param.pg_dir}}'],
+				windows: [],
+				linux: ['/etc/postgresql'],
+				macos: []
+			},
 			[],
-			['database']
+			['database', '{{param.pg_env}}'],
+			OPTIONS,
+			[
+				{
+					name: 'pg_dir',
+					kind: 'text',
+					required: true,
+					default_value: null,
+					description: 'Directory of the database dumps',
+					hidden: false
+				},
+				{
+					name: 'pg_password',
+					kind: 'secret',
+					required: true,
+					default_value: null,
+					description: 'Password of the dump account',
+					hidden: false
+				},
+				{
+					name: 'pg_env',
+					kind: 'text',
+					required: false,
+					default_value: 'prod',
+					description: 'Environment tag of the snapshot',
+					hidden: false
+				}
+			]
 		),
 		profile(
 			'p_3',
@@ -233,7 +266,7 @@ export function docsPlans(nextFireTime: (cron: string, timeZone: string) => stri
 		created_at: iso(DAY * 18),
 		updated_at: iso(DAY * 2 + 31)
 	});
-	return [
+	const result: Plan[] = [
 		plan(
 			'pl_1',
 			'file-shares-nightly',
@@ -262,6 +295,19 @@ export function docsPlans(nextFireTime: (cron: string, timeZone: string) => stri
 			318
 		)
 	];
+	const planValues: Plan['parameter_values'] = [
+		{
+			name: 'pg_dir',
+			kind: 'text',
+			value: '/var/backups/postgres',
+			secret_id: null,
+			secret_name: null,
+			hidden: false
+		}
+	];
+	return result.map((item) =>
+		item.id === 'pl_2' ? { ...item, parameter_values: planValues } : item
+	);
 }
 
 const FAILED_JOB = '0199e120-74e9-7a3d-b16c-e8f2d4a5c906';

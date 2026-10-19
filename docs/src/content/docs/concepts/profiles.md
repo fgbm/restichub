@@ -3,15 +3,16 @@ title: Profiles
 description: What a profile holds, the sections of the profile editor, and the retention rules.
 ---
 
-A profile is the definition of a backup: what to copy, what to skip, how to run restic and which snapshots to keep. A [plan](/restichub/concepts/plans/) assigns a profile to a host with a schedule. The profile belongs to one [repository](/restichub/concepts/repositories/).
+A profile is the definition of a backup: what to copy, what to skip, how to run restic and which snapshots to keep. A [plan](/restichub/concepts/plans/) binds a profile to a host and a [repository](/restichub/concepts/repositories/) with a schedule. A profile holds no repository, so one profile serves many hosts and many repositories.
 
 ## Editor sections
 
-The profile editor is one page. Select "Add profile" on the "Profiles" screen, or select the name of a profile. The menu "…" of a profile row holds only "Make a copy" and "Delete profile". Each section shows its state ("On", "Off" or "Needs attention") and a short summary. You can switch a section on or off, and you can use "Expand all" and "Collapse all". The side panel shows "The result": a live summary of the profile. The "Restic commands" button at the top of the page opens a side panel. It shows the restic commands that the profile produces for the selected OS and has a "Copy" button. The button is available when the profile has paths. The bar at the bottom of the page shows "No changes" or "The changes are not saved", "Cancel" and "Save". When the profile has plans, the bar tells how many plans use it. The new settings apply to their next run.
+The profile editor is one page. Select "Add profile" on the "Profiles" screen, or select the name of a profile. The menu "…" of a profile row holds only "Make a copy" and "Delete profile". Each section shows its state ("On", "Off" or "Needs attention") and a short summary. You can switch a section on or off, and you can use "Expand all" and "Collapse all". The side panel shows "The result": a live summary of the profile. The "Restic commands" button at the top of the page opens a side panel. It shows the restic commands that the profile produces for the selected host and repository, and it has a "Copy" button. The button is available when the profile has paths. The bar at the bottom of the page shows "No changes" or "The changes are not saved", "Cancel" and "Save". When the profile has plans, the bar tells how many plans use it. The new settings apply to their next run.
 
 | Section | What you set |
 |---|---|
-| Main | The name of the profile and its repository. The name is how you find the profile in the list and in plans. A name is any text of 1 to 100 characters, with letters of any script, spaces and emoji. It is unique in the tenant, and the letter case does not matter. |
+| Main | The name of the profile. The name is how you find the profile in the list and in plans. A name is any text of 1 to 100 characters, with letters of any script, spaces and emoji. It is unique in the tenant, and the letter case does not matter. |
+| Parameters | The names and the kinds of the values that a host or a plan sets, for example a mount point or a password. See [Profile parameters](/restichub/concepts/profile-parameters/). |
 | What to back up | One path in each line. The paths for "All systems" apply on every host. The other paths apply only on their own system (Windows, Linux or macOS). |
 | Exclusions | Patterns such as `*.tmp`, or paths. One entry in each line. Under "More" you can give a file on the host with a list of patterns ("Exclude list file on the host"). |
 | Tags | The tags of the snapshots of this profile. The retention rules and the searches use them. Type a tag and press Enter, or separate tags with a comma or a space. Each tag becomes a chip. Select the cross on a chip to remove the tag. |
@@ -23,7 +24,9 @@ The profile editor is one page. Select "Add profile" on the "Profiles" screen, o
 
 A profile has no hooks. Use [server scripts](/restichub/guides/scripts/) to run a command on the host before or after a backup.
 
-Only the [maintenance host](/restichub/concepts/repositories/) of the repository runs the `forget` and `prune` steps.
+The paths, the exclusions, the exclude files and the tags hold variables such as `{{hostname}}` and `{{param.<name>}}`. The profile editor lists them when you type `{{`. See [Template variables](/restichub/reference/variables/).
+
+Only the [maintenance host](/restichub/concepts/repositories/) of a repository runs the `forget` and `prune` steps of that repository.
 
 ## Retention rules
 

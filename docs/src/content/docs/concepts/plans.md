@@ -1,27 +1,32 @@
 ---
 title: Plans
-description: Assign a profile to a host with a schedule.
+description: Assign a profile to a host and a repository with a schedule.
 ---
 
-A plan assigns one profile to one agent with a schedule. The control plane keeps the schedule and creates the jobs. The agent holds no schedule.
+A plan binds one profile to one agent and one repository with a schedule. The control plane keeps the schedule and creates the jobs. The agent holds no schedule.
 
 ## Plan fields
 
 | Field | Meaning |
 |---|---|
 | Name | The name of the plan. It is any text of 1 to 100 characters. It is unique in the tenant, and the letter case does not matter. A new plan gets the name `<host> | <profile>` until you type a name. |
-| Profile | The backup definition that the control plane compiles for each job. The field shows the repository of each profile and the backend kind. For a local repository, it also shows the repository host. The search finds a profile by its name or by its repository. |
+| Profile | The backup definition that the control plane compiles for each job. The field shows the first path and the number of parameters of each profile. The search finds a profile by its name, by a path or by a parameter. |
+| Repository | The repository that receives the snapshots of the plan. The field shows the backend kind and the location. For a local repository, it also shows the repository host. The search finds a repository by its name or its location. |
 | Host | The agent that runs the plan. |
 | Cron expression | Five fields: minute, hour, day of month, month, day of week. |
 | Time zone | An IANA name, for example `Europe/Berlin`. |
 | Missed runs | The rule for a fire time that the control plane missed. |
 | Run on schedule | The switch in the header of the section **Schedule**. When it is off, the scheduler creates no job for the plan, and the plan shows the pill **Disabled** next to its name. **Run now** still starts a job, and the alerts about a missed backup and the recovery point stay silent. |
 
-The profile and the agent belong to the same tenant. The control plane compiles the stored profile for the operating system of the agent before it writes the plan. A profile without a path for that operating system is refused.
+The profile, the repository and the agent belong to the same tenant. The control plane compiles the stored profile for the operating system of the agent before it writes the plan. A profile without a path for that operating system is refused. The plans of a repository block the delete of the repository.
+
+## Profile parameters
+
+A plan can override a value that the profile declares. The section "Profile parameters" shows each parameter with the value that applies and its source: "plan", "host" or "default". The control plane resolves a value in this order: the plan, then the host, then the default value. A saved plan has a value for each required parameter. See [Profile parameters](/restichub/concepts/profile-parameters/).
 
 ## A local repository
 
-The path of a local repository exists on the repository host only. A plan of a profile that writes to a local repository therefore runs on the repository host only. The plan page offers only this host, and it selects the host when you select the profile. The page does not change the host of a stored plan by itself. If a stored plan runs on another host, the field "Host" shows an error until you select the repository host. The control plane refuses another host with the reason `not_repository_host` on the field "Host". It also refuses a profile change to a local repository while a plan of the profile runs on another host. See [A local repository](/restichub/getting-started/add-a-repository/#a-local-repository).
+The path of a local repository exists on the repository host only. A plan that writes to a local repository therefore runs on the repository host only (ADR-0046). The plan page offers only this host. When you select a local repository, the page selects its host and locks the field "Host". The page does not change the host of a stored plan by itself. If a stored plan runs on another host, the field "Host" shows an error until you select the repository host. The control plane refuses another host with the reason `not_repository_host` on the field "Host". See [A local repository](/restichub/getting-started/add-a-repository/#a-local-repository).
 
 ## Schedule
 
@@ -59,8 +64,11 @@ The action Run now queues one job for the plan at once. The job follows the same
 
 | Role | Right |
 |---|---|
-| Admin, Operator | Create, change, delete and run a plan. |
+| Admin, Operator | Create, change, delete and run a plan. An Operator sets the text parameter values. |
+| Admin | Set, change or remove a secret parameter value. Delete a plan that holds a secret value. |
 | Viewer | Read a plan and preview a schedule. |
+
+A Viewer sees the names of the parameters of a plan, not the text values.
 
 ## API
 

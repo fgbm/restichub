@@ -19,7 +19,7 @@ All lists work in the same way:
 
 ## What the interface remembers
 
-The interface keeps your view in the browser and shows it again on your next visit. A list keeps the tab, the filters, the sort order and the page size. The Restore page keeps the repository. A record page keeps which sections are closed, for each kind of page. The restic commands panel keeps the operating system. A link with parameters always opens with its own parameters. "Reset" clears the kept filters of a list. The interface does not keep the search text, the page number, the values of a form or any secret. The kept view stays in one browser and does not follow you to another browser. A person who signs in to the same browser sees only the view that belongs to that person and to the organization.
+The interface keeps your view in the browser and shows it again on your next visit. A list keeps the tab, the filters, the sort order and the page size. The Restore page keeps the repository. A record page keeps which sections are closed, for each kind of page. The restic commands panel keeps the host and the repository. A link always opens with the filters and the values that its own address holds. "Reset" clears the kept filters of a list. The interface does not keep the search text, the page number, the values of a form or any secret. The kept view stays in one browser and does not follow you to another browser. A person who signs in to the same browser sees only the view that belongs to that person and to the organization.
 
 ## Record pages
 
@@ -45,13 +45,13 @@ The list shows the repositories of the organization. Select a name to change the
 
 ## Profiles
 
-A profile tells what to back up, where, and how long to keep the snapshots. See [Profiles](/restichub/concepts/profiles/).
+A profile tells what to back up and how, and how long to keep the snapshots. The plan selects the repository. A profile can declare parameters, and a host or a plan sets their values. See [Profiles](/restichub/concepts/profiles/) and [Profile parameters](/restichub/concepts/profile-parameters/).
 
 <Screen name="profiles-list" alt="The list of profiles" />
 
 ## Plans
 
-A plan runs a profile on a host by a schedule. See [Plans](/restichub/concepts/plans/).
+A plan runs a profile on a host and writes to a repository, by a schedule. See [Plans](/restichub/concepts/plans/).
 
 <Screen name="plans-list" alt="The list of plans" />
 

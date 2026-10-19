@@ -37,6 +37,14 @@ async function openSnapshot(page: Page, text: Text): Promise<void> {
 	await tick(page, () => child.isVisible());
 }
 
+/** Opens one section of a record editor, if it is closed, and brings it into the frame. */
+async function revealSection(page: Page, section: string, title: string): Promise<void> {
+	const root = page.locator(section);
+	const toggle = root.locator('button.section__toggle', { hasText: title });
+	if ((await toggle.getAttribute('aria-expanded')) === 'false') await toggle.click();
+	await root.evaluate((element) => element.scrollIntoView({ block: 'center' }));
+}
+
 function openSnapshotName(text: Text): RegExp {
 	return new RegExp(`^${text('restore.openSnapshot').replace('{id}', '')}`);
 }
@@ -60,6 +68,13 @@ const frames: Frame[] = [
 	{ name: 'overview', path: '/' },
 	{ name: 'hosts-list-online', path: '/hosts' },
 	{
+		name: 'host-parameters',
+		path: '/hosts/2',
+		act: async (page, text) => {
+			await revealSection(page, '#parameters', text('hp.section.parameters'));
+		}
+	},
+	{
 		name: 'hosts-add-command',
 		path: '/hosts',
 		act: async (page, text) => {
@@ -72,8 +87,22 @@ const frames: Frame[] = [
 	{ name: 'repository-new', path: '/repositories/new' },
 	{ name: 'profiles-list', path: '/profiles' },
 	{ name: 'profile-editor', path: '/profiles/p_1' },
+	{
+		name: 'profile-parameters',
+		path: '/profiles/p_2',
+		act: async (page, text) => {
+			await revealSection(page, '[data-section="parameters"]', text('pe.section.parameters'));
+		}
+	},
 	{ name: 'plans-list', path: '/plans' },
 	{ name: 'plan-page', path: '/plans/pl_1' },
+	{
+		name: 'plan-parameters',
+		path: '/plans/pl_2',
+		act: async (page, text) => {
+			await revealSection(page, '[data-section="parameters"]', text('pl.section.parameters'));
+		}
+	},
 	{ name: 'jobs-list', path: '/jobs', full: true },
 	{ name: 'job-detail', path: '/jobs/0199e035-2b7c-7e91-85d6-4a0f9c3b1e05' },
 	{ name: 'restore-snapshot', path: '/restore', act: openSnapshot },
@@ -108,12 +137,13 @@ async function prepare(
 		[lang, theme, data]
 	);
 	// The pinned image maps system-ui to a CJK font with one weight, so the frames would lose
-	// the bold text. Liberation has every weight that the UI uses.
+	// the bold text. Liberation has every weight that the UI uses. A focused field draws a blinking
+	// caret, and its phase depends on the machine, so the caret is invisible in a frame.
 	await page.addInitScript(() =>
 		document.addEventListener('DOMContentLoaded', () => {
 			const style = document.createElement('style');
 			style.textContent =
-				":root { --rh-font-sans: 'Liberation Sans', sans-serif; --rh-font-mono: 'Liberation Mono', monospace; }";
+				":root { --rh-font-sans: 'Liberation Sans', sans-serif; --rh-font-mono: 'Liberation Mono', monospace; } input, textarea { caret-color: transparent; }";
 			document.head.append(style);
 		})
 	);

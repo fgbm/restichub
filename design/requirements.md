@@ -60,7 +60,7 @@ Each requirement has an ID. Acceptance criteria refer to these IDs. See [accepta
 |---|---|---|
 | Platform Admin | Installation | Creates, suspends and deletes tenants. Sets quotas. Reads the platform audit log. |
 | Admin | Tenant | All tenant operations, including users, agent revocation and installation. |
-| Operator | Tenant | Profiles, plans, manual runs, cancellation, restore. |
+| Operator | Tenant | Profiles, plans, the text parameter values of hosts and plans, manual runs, cancellation, restore. |
 | Viewer | Tenant | Read only, including the tenant audit log. |
 
 A user can be a member of more than one tenant. In the MVP a role applies to the full tenant. In 1.0 a role can apply to agent groups and repositories.

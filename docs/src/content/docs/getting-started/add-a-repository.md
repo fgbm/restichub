@@ -116,7 +116,7 @@ A local path exists on the disk of one host only. Thus a local repository is bou
 
 - You must select the repository host when you create the repository. The control plane refuses a local repository without a host.
 - Every job of the repository runs on the repository host. This includes the backups of the plans, `forget`, `prune`, `check` and `unlock`. It also includes the initialization, the test of the access, the snapshot list, the tree pages and the restore.
-- A plan of a profile that writes to the repository runs on the repository host only. The plan page offers only this host. See [Plans](/restichub/concepts/plans/#a-local-repository).
+- A plan that writes to the repository runs on the repository host only. The plan page offers only this host. See [Plans](/restichub/concepts/plans/#a-local-repository).
 - A restore from the repository writes to the repository host only, because restic reads the repository on that host.
 - Before the initialization, you can change the repository host. The control plane refuses the change while a plan of the repository runs on the old host. Move or delete the plan first.
 - After the initialization, the repository host cannot change, like the path. The snapshots are on the disk of this host. The page shows the field locked with the reason, and the API refuses the change with the code `repository_host_locked`.
@@ -135,14 +135,14 @@ ResticHub cannot move an initialized local repository to another host. When the 
 
 To keep the old snapshots on a new host:
 
-1. Delete the repository in ResticHub. Move or delete its profiles first. The restic data on the disk stays.
+1. Delete the repository in ResticHub. Move or delete its plans first. The restic data on the disk stays.
 2. If the data moved to a new host, add it again as a new local repository on the new host. Use the same repository password.
 3. Select "Test access". The test finds the existing repository and marks it initialized.
 
 To keep the plans and the data at the same path:
 
-1. Add a new local repository with the same path on the new host. Add a new profile that writes to it.
-2. Open each plan of the old profile. Select the new profile and the new host in one change, then save.
+1. Add a new local repository with the same path on the new host.
+2. Open each plan of the old profile. Select the new repository and the new host in one change, then save.
 3. On the new repository, select "Test access". The test finds the existing repository and marks it initialized.
 4. Delete the old repository and the old profile.
 
@@ -166,7 +166,7 @@ To correct a repository:
 
 ## Delete a repository
 
-Delete a repository from the menu "…" of the repository row in the list "Repositories". First delete or change each profile that uses the repository. The control plane also refuses the delete while a job of the repository is active.
+Delete a repository from the menu "…" of the repository row in the list "Repositories". First move or delete each plan that writes to the repository, because the plans block the delete with the code `repository_in_use`. The control plane also refuses the delete while a job of the repository is active.
 
 The delete removes the repository record and its stored secrets from ResticHub. It never deletes the restic data in the backend or on the disk. ResticHub sends no job to the host for the delete. Keep the repository password: ResticHub removes its copy, and you need the password to add the repository again.
 
