@@ -8,6 +8,7 @@
 import { render, screen, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { loadRepository, saveRepository } from '#lib/restore-repository.ts';
 import { agent, listing, repository, snapshot } from './restore-fixtures';
 import Restore from './+page.svelte';
 
@@ -65,6 +66,7 @@ vi.mock('#lib/api/index.ts', async (importOriginal) => {
 
 beforeEach(() => {
 	session.role = 'operator';
+	localStorage.clear();
 	vi.clearAllMocks();
 	route.url = new URL('http://localhost/restore');
 	mocks.listRepositories.mockResolvedValue([repository]);
@@ -74,6 +76,18 @@ beforeEach(() => {
 		listing('done', [snapshot('a1b2c3d4', 'nas-backup'), snapshot('b2c3d4e5', 'ws-anna')])
 	);
 });
+
+const localRepository = {
+	...repository,
+	id: 'r_2',
+	name: 'nas-local',
+	backend: { kind: 'local', path: '/srv/restic/nas' }
+};
+
+// jsdom has no layout, so the floating layer keeps the open list hidden and a role query does not
+// find its elements by name.
+const option = (name: string) =>
+	screen.getByText(name, { selector: '.rh-record__option-label' }).closest('[role="option"]')!;
 
 describe('Restore page', () => {
 	it('fr_rs_01_lists_the_stored_snapshots_and_filters_them_on_the_page_without_a_new_job', async () => {
@@ -283,5 +297,61 @@ describe('Restore page', () => {
 		expect(await screen.findByText('No repository to restore from')).toBeVisible();
 		await user.click(screen.getByRole('button', { name: 'Open repositories' }));
 		expect(mocks.goto).toHaveBeenCalledWith('/(app)/repositories');
+	});
+
+	it('fr_rs_01_the_repository_field_names_the_kind_and_the_location', async () => {
+		const user = userEvent.setup();
+		mocks.listRepositories.mockResolvedValue([repository, localRepository]);
+		render(Restore);
+		const field = await screen.findByRole('combobox', { name: /^Repository/ });
+		expect(field).toHaveTextContent('offsite-s3');
+		expect(field).toHaveTextContent('S3 · s3.example.net/b');
+
+		await user.click(field);
+		const search = await screen.findByPlaceholderText('Name or location');
+		expect(search).toHaveAttribute('aria-label', 'Find: Repository');
+		expect(option('nas-local')).toHaveTextContent(
+			/Local\s*·\s*\/srv\/restic\/nas\s*·\s*host nas-backup/
+		);
+		expect(screen.getByText('2 repositories')).toBeInTheDocument();
+		expect(screen.getByText('↑↓ move · Enter select · Esc close')).toBeInTheDocument();
+	});
+
+	it('fr_rs_01_a_chosen_repository_reloads_the_list_and_the_address', async () => {
+		const user = userEvent.setup();
+		mocks.listRepositories.mockResolvedValue([repository, localRepository]);
+		mocks.getSnapshots.mockImplementation((id: string) =>
+			Promise.resolve(
+				id === 'r_2'
+					? listing('done', [snapshot('c3d4e5f6', 'ws-anna')])
+					: listing('done', [snapshot('a1b2c3d4', 'nas-backup')])
+			)
+		);
+		render(Restore);
+		await screen.findByRole('link', { name: /^Open snapshot a1b2c3d4/ });
+
+		await user.click(screen.getByRole('combobox', { name: /^Repository/ }));
+		await user.click(option('nas-local'));
+
+		expect(await screen.findByRole('link', { name: /^Open snapshot c3d4e5f6/ })).toBeVisible();
+		expect(screen.queryByRole('link', { name: /^Open snapshot a1b2c3d4/ })).toBeNull();
+		expect(mocks.getSnapshots).toHaveBeenLastCalledWith('r_2');
+		await waitFor(() =>
+			expect(mocks.goto).toHaveBeenCalledWith('/(app)/restore?repository=r_2', {
+				replace: true,
+				reset: false
+			})
+		);
+		expect(loadRepository()).toBe('r_2');
+	});
+
+	it('ac_ui_09_the_page_opens_the_kept_repository', async () => {
+		saveRepository('r_2');
+		mocks.listRepositories.mockResolvedValue([repository, localRepository]);
+		render(Restore);
+		const field = await screen.findByRole('combobox', { name: /^Repository/ });
+		expect(field).toHaveTextContent('nas-local');
+		expect(mocks.getSnapshots).toHaveBeenCalledWith('r_2');
+		expect(loadRepository()).toBe('r_2');
 	});
 });

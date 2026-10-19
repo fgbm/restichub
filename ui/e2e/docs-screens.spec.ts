@@ -23,7 +23,8 @@ interface Frame {
 }
 
 async function openSnapshot(page: Page, text: Text): Promise<void> {
-	await page.getByRole('combobox', { name: text('restore.repository') }).selectOption('r_2');
+	await page.getByRole('combobox', { name: text('restore.repository') }).click();
+	await page.getByRole('listbox').getByRole('option', { name: 'local-nas', exact: true }).click();
 	const snapshot = page.getByRole('link', { name: openSnapshotName(text) }).first();
 	await tick(page, () => snapshot.isVisible());
 	await snapshot.click();
