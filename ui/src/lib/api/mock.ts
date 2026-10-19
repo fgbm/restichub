@@ -307,7 +307,8 @@ function makeAgents(): Agent[] {
 		agent('2', 'srv-db-01', 'linux', 'amd64', '0.4.2', 26, {
 			expiresInMinutes: 2 * 24 * 60,
 			rotatedMinutesAgo: null,
-			labels: ['prod', 'db']
+			// A label with `=` names a `{{agent.label.<key>}}` variable (FR-PF-03).
+			labels: ['env=prod', 'role=db']
 		}),
 		agent('3', 'win-dc01', 'windows', 'amd64', '0.4.1', 60, {
 			versionStatus: 'update_available',

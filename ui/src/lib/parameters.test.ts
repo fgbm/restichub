@@ -6,6 +6,8 @@
 import { describe, expect, it } from 'vitest';
 import type { ApiProblem } from '#lib/api/index.ts';
 import {
+	canWriteSecret,
+	isParameterName,
 	kindLabel,
 	missingValue,
 	overridingPlans,
@@ -56,6 +58,24 @@ describe('the name of a parameter', () => {
 		expect(parameterNameError('p'.repeat(65))).not.toBeNull();
 		// An empty row is a row that the person did not fill yet, so it has no error.
 		expect(parameterNameError('')).toBeNull();
+	});
+
+	it('fr_pf_09_accepts_a_name_only_by_the_rule_of_the_server', () => {
+		expect(isParameterName('pg_host')).toBe(true);
+		expect(isParameterName('a')).toBe(true);
+		expect(isParameterName('')).toBe(false);
+		expect(isParameterName('Pg')).toBe(false);
+		expect(isParameterName('1pg')).toBe(false);
+		expect(isParameterName('pg-host')).toBe(false);
+		expect(isParameterName('p'.repeat(65))).toBe(false);
+	});
+
+	it('adr_0047_gives_a_secret_value_to_the_admin_role_and_the_roles_above_it', () => {
+		expect(canWriteSecret('admin')).toBe(true);
+		expect(canWriteSecret('platform_admin')).toBe(true);
+		expect(canWriteSecret('operator')).toBe(false);
+		expect(canWriteSecret('viewer')).toBe(false);
+		expect(canWriteSecret(null)).toBe(false);
 	});
 
 	it('fr_pf_09_shows_the_kind_and_the_count_of_a_profile', () => {

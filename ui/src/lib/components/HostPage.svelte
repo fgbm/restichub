@@ -46,7 +46,7 @@
 	import type { SummaryState } from '#lib/profile-form.ts';
 	import { osFamily } from '#lib/host-picker.ts';
 	import { enableCommand } from '#lib/scripts.ts';
-	import { kindLabel, parameterCount, plansRefusal } from '#lib/parameters.ts';
+	import { canWriteSecret, kindLabel, parameterCount, plansRefusal } from '#lib/parameters.ts';
 	import type { PlansRefusal } from '#lib/parameters.ts';
 	import { plural } from '#lib/list-format.ts';
 	import { onEvent } from '#lib/stores/events.svelte.ts';
@@ -101,9 +101,10 @@
 	const jobsHref = $derived(`${resolve('/(app)/jobs')}?agent_id=${encodeURIComponent(hostId)}`);
 	const restoreHref = $derived(`${resolve('/(app)/restore')}?target=${encodeURIComponent(hostId)}`);
 	const canWrite = $derived(getSession()?.role === 'admin');
-	// An Operator sets the text values; only an Admin changes a secret value (ADR-0047).
+	// An Operator sets the text values; the role that the server needs decides the secret value
+	// (ADR-0047).
 	const canSetText = $derived(['admin', 'operator'].includes(getSession()?.role ?? ''));
-	const canSetSecret = $derived(getSession()?.role === 'admin');
+	const canSetSecret = $derived(canWriteSecret(getSession()?.role));
 	const active = $derived(agent?.status === 'active');
 	const olderDuplicate = $derived(
 		agent?.possible_duplicate_of?.is_older && active ? agent.possible_duplicate_of : null

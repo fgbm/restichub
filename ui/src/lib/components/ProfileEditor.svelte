@@ -26,7 +26,8 @@
 	import RetentionEditor from './RetentionEditor.svelte';
 	import RichText from './RichText.svelte';
 	import ScriptsEditor from './ScriptsEditor.svelte';
-	import TagInput from './ui/TagInput.svelte';
+	import VariableTags from './VariableTags.svelte';
+	import VariableTextarea from './VariableTextarea.svelte';
 	import { RecordPage, SummaryPanel } from './layout/index.ts';
 	import {
 		Alert,
@@ -36,7 +37,6 @@
 		ConfirmDialog,
 		DataTable,
 		Disclosure,
-		Field,
 		Icon,
 		Select,
 		SidePanel,
@@ -61,12 +61,14 @@
 	} from '#lib/profile-form.ts';
 	import type { ProfileDraft, ProfileParameterDraft, SummaryKey } from '#lib/profile-form.ts';
 	import {
+		isParameterName,
 		overridingPlans,
 		parameterNameError,
 		plansRefusal,
 		undeclaredNames,
 		usageText
 	} from '#lib/parameters.ts';
+	import { hostLabels, secretReference } from '#lib/variables.ts';
 	import { rememberSections } from '#lib/section-state.svelte.ts';
 	import { loadPreference, savePreference } from '#lib/stores/ui-preferences.svelte.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
@@ -281,11 +283,35 @@
 	const declaredNames = $derived(
 		draft.parameters.map((parameter) => parameter.name.trim()).filter((name) => name !== '')
 	);
+	const listParameters = $derived(declaredParameters(draft));
+	// The keys of the label variables come from the hosts of the plans of the profile. A copy or a
+	// new profile has no plans, so the list offers the typed key only.
+	const planHosts = $derived.by(() => {
+		if (!existing) return [];
+		const ids = new Set(
+			plans.filter((plan) => plan.profile_id === existing?.id).map((plan) => plan.agent_id)
+		);
+		return agents.filter((agent) => ids.has(agent.id));
+	});
+	const hostLabelKeys = $derived(hostLabels(planHosts));
+	const secretNames = $derived(
+		draft.parameters
+			.filter((parameter) => parameter.kind === 'secret')
+			.map((parameter) => parameter.name.trim())
+			.filter((name) => name !== '')
+	);
 
 	// A reference that the draft does not declare gets a hint under its field, and the person
 	// declares it there; nothing is declared automatically (FR-PF-10).
 	function undeclaredIn(text: string): string[] {
 		return undeclaredNames(splitLines(text), declaredNames);
+	}
+
+	// A secret never goes into a path or a tag, because restic shows its arguments (FR-AG-06). The
+	// server refuses the save; the field says it as soon as the reference is complete (AC-PF-09).
+	function secretReferenceIn(text: string): string | undefined {
+		const name = secretReference(text, secretNames);
+		return name ? t('pe.vars.secretError', { name }) : undefined;
 	}
 
 	function declareParameter(name: string): void {
@@ -475,9 +501,13 @@
 	{#each names as name (name)}
 		<p class="hint">
 			<span>{t('pe.param.notDeclared', { name })}</span>
-			<Button size="sm" variant="ghost" onclick={() => declareParameter(name)}>
-				{t('pe.param.declare')}
-			</Button>
+			<!-- The server refuses a name that its rule does not allow, so the button shows only
+			     for a valid one (FR-PF-09). The list under the field applies the same rule. -->
+			{#if isParameterName(name)}
+				<Button size="sm" variant="ghost" onclick={() => declareParameter(name)}>
+					{t('pe.param.declare')}
+				</Button>
+			{/if}
 		</p>
 	{/each}
 {/snippet}
@@ -642,54 +672,54 @@
 		bind:open={open.paths}
 	>
 		<p class="lead">{t('pe.paths.lead')}</p>
-		<Field
+		<VariableTextarea
+			id="profile-paths-all"
 			label={t('profiles.pathsAll')}
-			error={fieldError(formProblem, 'paths.all')}
-			for="profile-paths-all"
-		>
-			<textarea
-				id="profile-paths-all"
-				class="rh-textarea rh-input--mono"
-				rows="2"
-				bind:value={draft.pathsAll}></textarea>
-		</Field>
+			help={t('pe.vars.help')}
+			error={fieldError(formProblem, 'paths.all') ?? secretReferenceIn(draft.pathsAll)}
+			rows={2}
+			parameters={listParameters}
+			labels={hostLabelKeys}
+			ondeclare={declareParameter}
+			bind:value={draft.pathsAll}
+		/>
 		{@render parameterHint(undeclaredIn(draft.pathsAll))}
 		<div class="grid3">
-			<Field
+			<VariableTextarea
+				id="profile-paths-windows"
 				label={t('profiles.pathsWindows')}
-				error={fieldError(formProblem, 'paths.windows')}
-				for="profile-paths-windows"
-			>
-				<textarea
-					id="profile-paths-windows"
-					class="rh-textarea rh-input--mono"
-					rows="3"
-					bind:value={draft.pathsWindows}></textarea>
-			</Field>
+				help={t('pe.vars.help')}
+				error={fieldError(formProblem, 'paths.windows') ?? secretReferenceIn(draft.pathsWindows)}
+				rows={3}
+				parameters={listParameters}
+				labels={hostLabelKeys}
+				ondeclare={declareParameter}
+				bind:value={draft.pathsWindows}
+			/>
 			{@render parameterHint(undeclaredIn(draft.pathsWindows))}
-			<Field
+			<VariableTextarea
+				id="profile-paths-linux"
 				label={t('profiles.pathsLinux')}
-				error={fieldError(formProblem, 'paths.linux')}
-				for="profile-paths-linux"
-			>
-				<textarea
-					id="profile-paths-linux"
-					class="rh-textarea rh-input--mono"
-					rows="3"
-					bind:value={draft.pathsLinux}></textarea>
-			</Field>
+				help={t('pe.vars.help')}
+				error={fieldError(formProblem, 'paths.linux') ?? secretReferenceIn(draft.pathsLinux)}
+				rows={3}
+				parameters={listParameters}
+				labels={hostLabelKeys}
+				ondeclare={declareParameter}
+				bind:value={draft.pathsLinux}
+			/>
 			{@render parameterHint(undeclaredIn(draft.pathsLinux))}
-			<Field
+			<VariableTextarea
+				id="profile-paths-macos"
 				label={t('profiles.pathsMacos')}
-				error={fieldError(formProblem, 'paths.macos')}
-				for="profile-paths-macos"
-			>
-				<textarea
-					id="profile-paths-macos"
-					class="rh-textarea rh-input--mono"
-					rows="3"
-					bind:value={draft.pathsMacos}></textarea>
-			</Field>
+				help={t('pe.vars.help')}
+				error={fieldError(formProblem, 'paths.macos') ?? secretReferenceIn(draft.pathsMacos)}
+				rows={3}
+				parameters={listParameters}
+				labels={hostLabelKeys}
+				ondeclare={declareParameter}
+				bind:value={draft.pathsMacos}
+			/>
 			{@render parameterHint(undeclaredIn(draft.pathsMacos))}
 		</div>
 	</ProfileSection>
@@ -704,32 +734,30 @@
 		bind:open={open.excludes}
 	>
 		<p class="lead">{t('pe.excludes.lead')}</p>
-		<Field
+		<VariableTextarea
+			id="profile-excludes"
 			label={t('profiles.excludes')}
 			help={t('pe.excludes.patternsHelp')}
-			error={fieldError(formProblem, 'excludes')}
-			for="profile-excludes"
-		>
-			<textarea
-				id="profile-excludes"
-				class="rh-textarea rh-input--mono"
-				rows="4"
-				bind:value={draft.excludes}></textarea>
-		</Field>
+			error={fieldError(formProblem, 'excludes') ?? secretReferenceIn(draft.excludes)}
+			rows={4}
+			parameters={listParameters}
+			labels={hostLabelKeys}
+			ondeclare={declareParameter}
+			bind:value={draft.excludes}
+		/>
 		{@render parameterHint(undeclaredIn(draft.excludes))}
 		<Disclosure label={t('pe.excludes.more')} bind:open={excludeListOpen}>
-			<Field
+			<VariableTextarea
+				id="profile-exclude-files"
 				label={t('profiles.excludeFiles')}
 				help={t('pe.excludes.filesHelp')}
-				error={fieldError(formProblem, 'exclude_files')}
-				for="profile-exclude-files"
-			>
-				<textarea
-					id="profile-exclude-files"
-					class="rh-textarea rh-input--mono"
-					rows="3"
-					bind:value={draft.excludeFiles}></textarea>
-			</Field>
+				error={fieldError(formProblem, 'exclude_files') ?? secretReferenceIn(draft.excludeFiles)}
+				rows={3}
+				parameters={listParameters}
+				labels={hostLabelKeys}
+				ondeclare={declareParameter}
+				bind:value={draft.excludeFiles}
+			/>
 			{@render parameterHint(undeclaredIn(draft.excludeFiles))}
 		</Disclosure>
 	</ProfileSection>
@@ -744,13 +772,16 @@
 		bind:open={open.tags}
 	>
 		<p class="lead">{t('pe.tags.lead')}</p>
-		<TagInput
+		<VariableTags
 			id="profile-tags"
 			label={t('profiles.tags')}
 			help={t('pe.tags.help')}
 			placeholder={t('pe.tags.placeholder')}
 			max={MAX_TAGS}
-			error={fieldError(formProblem, 'tags')}
+			error={fieldError(formProblem, 'tags') ?? secretReferenceIn(draft.tags.join('\n'))}
+			parameters={listParameters}
+			labels={hostLabelKeys}
+			ondeclare={declareParameter}
 			bind:value={draft.tags}
 		/>
 		{@render parameterHint(undeclaredIn(draft.tags.join('\n')))}

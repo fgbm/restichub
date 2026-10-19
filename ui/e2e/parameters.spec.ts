@@ -80,6 +80,66 @@ test('ac_pf_07_a_new_required_parameter_names_the_plans_that_it_blocks', async (
 	await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeEnabled();
 });
 
+test('fr_pf_03_the_path_field_lists_the_variables_and_inserts_one', async ({
+	page,
+	browserName
+}) => {
+	await sample(page);
+	await signIn(page);
+
+	await nav(page).getByRole('link', { name: 'Profiles', exact: true }).click();
+	await page.getByRole('link', { name: 'db-nightly' }).click();
+	await page.getByRole('button', { name: 'Expand all', exact: true }).click();
+
+	// Two braces open the list at the caret, and the typed text filters it.
+	const field = page.locator('#profile-paths-all');
+	await field.click();
+	await field.evaluate((node: HTMLTextAreaElement) =>
+		node.setSelectionRange(node.value.length, node.value.length)
+	);
+	await page.keyboard.type('{{pg');
+	const list = page.getByRole('listbox', { name: 'Variables' });
+	await expect(list).toBeVisible();
+	await expect(list).toContainText('3 of 10');
+
+	// The secret stays in the list, cannot be inserted, and the arrows skip it.
+	const secret = list.getByRole('option', { name: /pg_password/ });
+	await expect(secret).toHaveAttribute('aria-disabled', 'true');
+	await expect(secret).toContainText('A secret cannot go into a path or a tag.');
+
+	// Enter writes the name with the closing braces and puts the caret after them.
+	await page.keyboard.press('ArrowDown');
+	await page.keyboard.press('Enter');
+	await expect(field).toHaveValue('/var/backups/postgres{{param.pg_host}}');
+	await expect(list).toHaveCount(0);
+	expect(await field.evaluate((node: HTMLTextAreaElement) => node.selectionStart)).toBe(
+		'/var/backups/postgres{{param.pg_host}}'.length
+	);
+
+	// The insertion is one edit: a browser with a native text command undoes it in one step.
+	if (browserName === 'chromium') {
+		await page.keyboard.press('Control+z');
+		await expect(field).toHaveValue('/var/backups/postgres{{pg');
+		await page.keyboard.press('Control+Shift+z');
+		await expect(field).toHaveValue('/var/backups/postgres{{param.pg_host}}');
+	}
+
+	// The tag input belongs to the list while it is open: the first Enter inserts, the second
+	// one adds the chip, so the variable stays part of one tag.
+	const tags = page.locator('#profile-tags');
+	await tags.click();
+	await page.keyboard.type('db-{{pg');
+	await expect(page.getByRole('listbox', { name: 'Variables' })).toBeVisible();
+	await page.keyboard.press('Enter');
+	await expect(tags).toHaveValue('db-{{param.pg_dir}}');
+	await page.keyboard.press('Enter');
+	await expect(page.getByRole('button', { name: 'Remove db-{{param.pg_dir}}' })).toBeVisible();
+
+	// The parameter table counts the new use in the path.
+	const parameters = page.locator('[data-section="parameters"]');
+	await expect(parameters.getByRole('cell', { name: '1 path' })).toBeVisible();
+});
+
 test('the closed pickers of a plan keep the label and the parts on one row', async ({ page }) => {
 	await sample(page);
 	await signIn(page);

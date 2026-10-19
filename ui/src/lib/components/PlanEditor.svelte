@@ -52,7 +52,13 @@
 	import { rememberSections } from '#lib/section-state.svelte.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
-	import { kindLabel, missingValue, parameterCount, resolveValue } from '#lib/parameters.ts';
+	import {
+		canWriteSecret,
+		kindLabel,
+		missingValue,
+		parameterCount,
+		resolveValue
+	} from '#lib/parameters.ts';
 	import type { ResolvedValue, ValueSource } from '#lib/parameters.ts';
 	import { plural } from '#lib/list-format.ts';
 
@@ -188,7 +194,7 @@
 
 	const profile = $derived(profiles.find((item) => item.id === profileId));
 	const declared = $derived(profile?.parameters ?? []);
-	const canSetSecret = $derived(getSession()?.role === 'admin');
+	const canSetSecret = $derived(canWriteSecret(getSession()?.role));
 	const secretOptions = $derived<SelectOption[]>([
 		{ value: '', label: t('scripts.parameter.selectSecret') },
 		...secrets.map((secret) => ({ value: secret.id, label: secret.name }))
