@@ -5,6 +5,7 @@
 	import { page } from '$app/state';
 	import { ApiError, service } from '#lib/api/index.ts';
 	import type { Agent, Repository, SnapshotItem, SnapshotsView } from '#lib/api/index.ts';
+	import RepositoryPicker from '#lib/components/RepositoryPicker.svelte';
 	import RestoreDialog from '#lib/components/RestoreDialog.svelte';
 	import { Page } from '#lib/components/layout/index.ts';
 	import {
@@ -13,10 +14,9 @@
 		EmptyState,
 		FilterBar,
 		ListView,
-		Select,
 		Skeleton
 	} from '#lib/components/ui/index.ts';
-	import type { FilterFacet, ListMeta, SelectOption } from '#lib/components/ui/index.ts';
+	import type { FilterFacet, ListMeta } from '#lib/components/ui/index.ts';
 	import { formatLocalTime, relativeTime } from '#lib/format.ts';
 	import { dayHeading, size } from '#lib/list-format.ts';
 	import { ENTITY_ICONS } from '#lib/vocabulary.ts';
@@ -42,6 +42,7 @@
 	const opened = query.get('snapshot') ?? '';
 
 	let repositories = $state<Repository[]>([]);
+	let agents = $state<Agent[]>([]);
 	let profiles = $state(new Map<string, string>());
 	let repositoryId = $state(query.get('repository') ?? '');
 	let filters = $state<RestoreFilters>(filtersFromQuery(query));
@@ -56,9 +57,6 @@
 	let addressTimer: ReturnType<typeof setTimeout> | undefined;
 
 	const canRestore = $derived(['admin', 'operator'].includes(getSession()?.role ?? ''));
-	const repositoryOptions = $derived<SelectOption[]>(
-		repositories.map((item) => ({ value: item.id, label: item.name }))
-	);
 	const snapshots = $derived(view?.state === 'done' ? view.snapshots : []);
 	const matching = $derived(
 		[...applyFilters(snapshots, filters, Date.now())].sort(
@@ -87,7 +85,6 @@
 		];
 	}
 
-	let agents = $state<Agent[]>([]);
 	let restoreOpen = $state(false);
 	let restoreTarget = $state<SnapshotItem | null>(null);
 	const restoreRepository = $derived(repositories.find((item) => item.id === repositoryId));
@@ -225,11 +222,13 @@
 	onMount(() => {
 		void (async () => {
 			try {
-				const [allRepositories, allProfiles] = await Promise.all([
+				const [allRepositories, allAgents, allProfiles] = await Promise.all([
 					service.listRepositories(),
+					service.listAgents().catch(() => []),
 					service.listProfiles().catch(() => [])
 				]);
 				repositories = allRepositories.filter((item) => item.initialized);
+				agents = allAgents;
 				profiles = new Map(allProfiles.map((item) => [item.id, item.name]));
 				const kept = loadRepository();
 				const picked = pickRepository(repositories, repositoryId, kept);
@@ -268,10 +267,11 @@
 	{#snippet context()}
 		{#if canRestore && repositories.length > 0}
 			<div class="repository">
-				<label for="restore-repository">{t('restore.repositoryLabel')}</label>
-				<Select
+				<RepositoryPicker
 					id="restore-repository"
-					options={repositoryOptions}
+					label={t('restore.repositoryLabel')}
+					{repositories}
+					{agents}
 					bind:value={repositoryId}
 					onchange={changeRepository}
 				/>
@@ -415,17 +415,11 @@
 
 <style>
 	.repository {
-		display: flex;
-		align-items: center;
-		gap: var(--rh-space-2);
+		width: min(26rem, 100%);
 	}
 
 	.repository :global(.rh-field) {
-		flex: 1 1 auto;
-	}
-
-	.repository :global(.rh-select) {
-		min-width: 12rem;
+		min-width: 0;
 	}
 
 	.notices {

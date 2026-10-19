@@ -95,16 +95,18 @@ test('ac_ui_04 ac_ui_05 ac_ui_06 the Jobs list keeps the view and a link wins', 
 test('ac_ui_09 the Restore page keeps the repository', async ({ page }) => {
 	await signIn(page);
 	await open(page, 'Restore');
-	const select = page.locator('#restore-repository');
+	const picker = page.locator('#restore-repository');
 	// The page chose the first repository by itself: that is a kept choice too.
-	await expect(select).toHaveValue('r_1');
+	await expect(picker).toContainText('offsite-s3');
 	expect(await page.evaluate(() => JSON.stringify({ ...localStorage }))).toContain(
 		'restore.repository'
 	);
-	await select.selectOption('r_2');
+	await picker.click();
+	await page.getByRole('listbox').getByRole('option', { name: 'nas-local', exact: true }).click();
+	await expect(page).toHaveURL(/repository=r_2/);
 	await open(page, 'Jobs');
 	await open(page, 'Restore');
-	await expect(select).toHaveValue('r_2');
+	await expect(picker).toContainText('nas-local');
 });
 
 test('ac_ui_10 a section of the profile editor stays closed in the next record', async ({
