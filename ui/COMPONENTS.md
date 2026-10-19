@@ -208,8 +208,6 @@ An option can also have these properties:
 
 A host facet of a list uses `withHosts` from `$lib/host-picker.ts`. It gives each value the host name and the same secondary line, and it puts the revoked hosts at the end. Set `search: true` on the facet.
 
-`RepositoryPicker` (`$lib/components`) is a `RecordPicker` for a repository. Use it for each field that selects a repository, for example the plan repository, the repository of the commands panel and the repository of a restore. An option shows the name, a chip with the backend kind and the location. For a local path, it also shows the host that holds it. An option that no agent initialized stays in the list with the reason, because a plan cannot back up into it (FR-RP-02). The search finds the name, the kind, the location and the host. `repositoryOptions` and `repositoryDescription` in `$lib/repository-picker.ts` give the option and the secondary line, and `withRepositories` gives repository facet values the same name and secondary line.
-
 ## Forms
 
 `SecretDialog` (`$lib/components`) creates a secret of the purpose `hook_secret` and gives it to `oncreated`. The script editor uses it for a secret variable, and the host page for a secret parameter value. Do not copy its fields into another dialog.
