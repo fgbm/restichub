@@ -22,17 +22,18 @@ use utoipa::ToSchema;
 use crate::context::{Operation, RequestContext};
 use crate::error::ApiError;
 use crate::json::ApiJson;
+use crate::parameters::{ParameterDef, ParameterDefRequest, ParameterDefView};
 use crate::scripts::ScriptDef;
 use crate::server::AppState;
 use crate::validation::Reason;
 
 use super::settings::{
-    BackupOptions, CheckOptions, CreateProfileRequest, ProfilePaths, Retention, ValidatedProfile,
-    profile_tag, reject_hooks, validate_profile,
+    BackupOptions, CheckOptions, CreateProfileRequest, ProfilePaths, Retention, profile_tag,
+    validate_draft,
 };
 use super::{
     compile_error_to_api, compiler_profile_from_row, parse_agent_id, preview_error_to_api,
-    repository_access, script_secrets, target_facts,
+    repository_access, script_secrets, target_facts_with,
 };
 
 /// The body of the draft preview (FR-PF-04, AC-PF-01).
@@ -78,6 +79,10 @@ pub struct PreviewRequest {
     pub retention: Option<Retention>,
     #[serde(default)]
     pub check: Option<CheckOptions>,
+    /// A caller without the profile write right sends no fields, and the stored profile gives them
+    /// (FR-PF-09).
+    #[serde(default)]
+    pub parameters: Vec<ParameterDefRequest>,
     /// Accepted only as an empty list, so an old client keeps working; use `scripts` instead
     /// (ADR-0040).
     #[serde(default)]
@@ -97,6 +102,7 @@ impl From<PreviewRequest> for CreateProfileRequest {
             scripts: body.scripts,
             retention: body.retention,
             check: body.check,
+            parameters: body.parameters,
             hooks: body.hooks,
         }
     }
@@ -142,7 +148,7 @@ pub struct PreviewResponse {
     post,
     path = "/api/v1/profiles/preview",
     summary = "Previews a profile draft for one target agent.",
-    description = "The steps and the command lines agree with the command that the agent runs. The draft is not stored. Secrets are masked (AC-PF-01). A caller without the profile write right receives the preview of the stored profile that `profile_id` names, and its draft fields are ignored. A caller without the script write right receives the stored scripts and its draft scripts are ignored.",
+    description = "The steps and the command lines agree with the command that the agent runs. The draft is not stored. Secrets are masked (AC-PF-01). A caller without the profile write right receives the preview of the stored profile that `profile_id` names, and its draft fields are ignored. A caller without the script write right receives the stored scripts and its draft scripts are ignored. A caller without the script read right receives the parameter values of the requested host only when a plan of the stored profile runs there.",
     security(("cookie" = []), ("bearer" = [])),
     request_body = PreviewRequest,
     responses(
@@ -202,6 +208,48 @@ pub async fn preview_profile(
         Some(value) => Some(named_repository(&mut tx, value).await?),
         None => planned_repository(&mut tx, profile_id, agent_id).await?,
     };
+    // The preview shows the value that the job of the chosen plan runs with: the plan, then the
+    // host, then the default (FR-PF-10, AC-PF-08). A new draft has no plan, so the host values and
+    // the defaults apply.
+    let definitions = match (draft.as_ref(), stored.as_ref()) {
+        (Some(draft), _) => draft.parameters.clone(),
+        (None, Some(stored)) => crate::parameters::from_row(&stored.parameters)?,
+        (None, None) => Vec::new(),
+    };
+    let may_read_text = crate::parameters::may_read_text(&context);
+    let chosen_plan = match profile_id {
+        Some(profile_id) => {
+            planned_plan(
+                &mut tx,
+                profile_id,
+                agent_id,
+                repository.as_ref(),
+                may_read_text,
+            )
+            .await?
+        }
+        None => None,
+    };
+    let plan_values = match &chosen_plan {
+        Some(plan) => restichub_db::parameters::plan_values(&mut tx, plan.id).await?,
+        None => Vec::new(),
+    };
+    // A host has a value for each of its profiles, so a reader without the script read right gets
+    // the values of the requested host only through a plan of the profile that runs there. Any
+    // other host would show the values of parameters that this profile never uses (FR-PF-12).
+    let host_values = if may_read_text || chosen_plan.is_some() {
+        restichub_db::parameters::agent_values(&mut tx, agent_id).await?
+    } else {
+        Vec::new()
+    };
+    // This reader gets no text default either: a default becomes the empty placeholder that the
+    // profile view shows (FR-PF-12).
+    let definitions = if may_read_text {
+        definitions
+    } else {
+        placeholder_defaults(definitions)
+    };
+    let parameters = crate::parameters::resolve(&definitions, &plan_values, &host_values);
     let compiler_profile = match (draft.as_ref(), stored.as_ref()) {
         (Some(draft), _) => {
             let mut compiler_profile = draft.to_compiler_profile();
@@ -216,7 +264,7 @@ pub async fn preview_profile(
     };
     tx.commit().await?;
 
-    let target = target_facts(&agent, state.auth().clock.now())?;
+    let target = target_facts_with(&agent, state.auth().clock.now(), parameters)?;
     let repository_id = repository
         .as_ref()
         .map(|repository| repository.id.to_string());
@@ -292,23 +340,47 @@ async fn planned_repository(
     Ok(Some(repository))
 }
 
-/// Validates a preview draft and returns the normalized settings (FR-PF-04).
+/// The plan whose values and repository the preview shows (FR-PF-10).
 ///
-/// A new profile has no name until the first save, so an empty name is not a draft error.
-fn validate_draft(body: CreateProfileRequest) -> Result<ValidatedProfile, ApiError> {
-    reject_hooks(body.hooks.as_deref())?;
-    let name = (!body.name.trim().is_empty()).then_some(body.name);
-    validate_profile(
-        name,
-        body.paths,
-        body.excludes,
-        body.exclude_files,
-        body.tags,
-        body.options,
-        body.scripts,
-        body.retention,
-        body.check,
-    )
+/// The preview names an agent and, when the caller gives one, a repository. The plan of this
+/// profile that runs on the agent with that repository supplies the overrides; without such a plan
+/// the host values and the defaults apply. `any_host` lets a writer fall back to the plan of another
+/// host, so its overrides still show in the commands of the draft.
+async fn planned_plan(
+    tx: &mut restichub_db::TenantTx<'_>,
+    profile_id: ProfileId,
+    agent_id: AgentId,
+    repository: Option<&Repository>,
+    any_host: bool,
+) -> Result<Option<plans_repo::Plan>, ApiError> {
+    let plans = plans_repo::list_by_profile(tx, profile_id).await?;
+    let chosen = plans
+        .iter()
+        .find(|plan| {
+            plan.agent_id == agent_id
+                && repository.is_none_or(|repository| plan.repository_id == repository.id)
+        })
+        .or_else(|| plans.iter().find(|plan| plan.agent_id == agent_id))
+        .or_else(|| {
+            repository.filter(|_| any_host).and_then(|repository| {
+                plans
+                    .iter()
+                    .find(|plan| plan.repository_id == repository.id)
+            })
+        });
+    Ok(chosen.cloned())
+}
+
+/// The declarations as a reader without the script read right sees a text default: as an empty
+/// placeholder (FR-PF-12).
+fn placeholder_defaults(definitions: Vec<ParameterDef>) -> Vec<ParameterDef> {
+    definitions
+        .into_iter()
+        .map(|definition| ParameterDef {
+            default_value: ParameterDefView::of(&definition, false).default_value,
+            ..definition
+        })
+        .collect()
 }
 
 /// The scripts of the stored profile of the draft, or none when the draft has no stored profile

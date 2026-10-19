@@ -2,8 +2,11 @@ import type { Profile } from '#lib/api/index.ts';
 import type { FilterOption, RecordOption, RecordPart } from '#lib/components/ui/index.ts';
 import { t } from '#lib/i18n/index.ts';
 import type { MessageKey } from '#lib/i18n/index.ts';
+import { parameterChip } from '#lib/parameters.ts';
 
-type ProfileRef = Pick<Profile, 'id' | 'name' | 'paths' | 'retention'>;
+type ProfileRef = Pick<Profile, 'id' | 'name' | 'paths' | 'retention'> & {
+	parameters?: Profile['parameters'];
+};
 
 const RETENTION: [keyof NonNullable<Profile['retention']>, MessageKey][] = [
 	['keep_last', 'profiles.short.last'],
@@ -51,24 +54,41 @@ export function profileRetention(profile: ProfileRef): string {
 	return parts.join(' · ');
 }
 
+/** The names of the declared parameters, for the search of a profile (FR-PF-09). */
+export function profileParameterNames(profile: ProfileRef): string[] {
+	return (profile.parameters ?? []).map((parameter) => parameter.name);
+}
+
 /**
- * The secondary line of a profile: its path and its retention. A profile has no repository
- * (ADR-0047); the parameters join this line in the next part of the change.
+ * The secondary line of a profile: the count of its parameters, its path and its retention. A
+ * profile has no repository (ADR-0047).
  */
 export function profileDescription(profile: ProfileRef): RecordPart[] {
-	return [profilePathText(profile), profileRetention(profile)].filter(
-		(part): part is string => part !== ''
-	);
+	const chip = parameterChip(profile.parameters ?? []);
+	return [
+		...(chip ? [{ tag: chip, icon: 'braces' as const }] : []),
+		...[profilePathText(profile), profileRetention(profile)].filter(
+			(part): part is string => part !== ''
+		)
+	];
 }
 
 export function profileOptions(profiles: readonly ProfileRef[]): RecordOption[] {
-	return profiles.map((profile) => ({
-		value: profile.id,
-		label: profile.name,
-		description: profileDescription(profile),
-		// The line shows the first path only, but the search finds each of them.
-		search: profilePathList(profile)
-	}));
+	return profiles.map((profile) => {
+		const chip = parameterChip(profile.parameters ?? []);
+		return {
+			value: profile.id,
+			label: profile.name,
+			description: profileDescription(profile),
+			// The closed field shows the first path and the count of the parameters (ADR-0047).
+			detail: [
+				...(profilePathText(profile) ? [profilePathText(profile)] : []),
+				...(chip ? [{ tag: chip, icon: 'braces' as const }] : [])
+			],
+			// The line shows the first path only, but the search finds each of them and each name.
+			search: [...profilePathList(profile), ...profileParameterNames(profile)]
+		};
+	});
 }
 
 /** Gives profile facet values the profile name and its secondary line. */

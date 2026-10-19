@@ -37,6 +37,8 @@ import type {
 	CreateUserRequest,
 	CreatePlatformUserRequest,
 	EnrollmentToken,
+	HostParameters,
+	ParameterValueDef,
 	ReplaceAgentResponse,
 	EnrollmentTokenCreated,
 	EnrollmentTokenQuery,
@@ -141,6 +143,10 @@ export interface ApiService {
 	reenrollAgent(id: string): Promise<EnrollmentTokenCreated>;
 	/** Moves the plans of the old duplicate record to this host and revokes the old record. */
 	replaceAgent(id: string, oldAgentId: string): Promise<ReplaceAgentResponse>;
+	/** The values on a host and the parameters of the profiles of its plans (FR-PF-10). */
+	getAgentParameters(id: string): Promise<HostParameters>;
+	/** Replaces the whole set of values on a host (FR-PF-10, FR-PF-11). */
+	replaceAgentParameters(id: string, parameters: ParameterValueDef[]): Promise<HostParameters>;
 
 	/** One-time enrollment tokens (FR-ID-01). */
 	listEnrollmentTokens(query?: EnrollmentTokenQuery): Promise<EnrollmentToken[]>;
@@ -341,6 +347,9 @@ const httpService: ApiService = {
 	reenrollAgent: (id) => api.post<EnrollmentTokenCreated>(endpoints.agents.reenroll(id), {}),
 	replaceAgent: (id, oldAgentId) =>
 		api.post<ReplaceAgentResponse>(endpoints.agents.replace(id), { old_agent_id: oldAgentId }),
+	getAgentParameters: (id) => api.get<HostParameters>(endpoints.agents.parameters(id)),
+	replaceAgentParameters: (id, parameters) =>
+		api.put<HostParameters>(endpoints.agents.parameters(id), { parameters }),
 
 	listEnrollmentTokens: (query = {}) =>
 		allPages<EnrollmentToken>(endpoints.enrollmentTokens.list, {

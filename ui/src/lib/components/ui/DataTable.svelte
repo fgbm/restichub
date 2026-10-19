@@ -21,6 +21,7 @@
 		rowSelected,
 		onRowOpen,
 		detailTitle,
+		rowNote,
 		actions,
 		moreLabel,
 		mode = 'client',
@@ -56,6 +57,11 @@
 		onRowOpen?: (row: T) => void;
 		/** The row opens a built-in side panel with every column, under this title. */
 		detailTitle?: (row: T) => string;
+		/**
+		 * A caption row under the row of the record, across the full width of the table, for
+		 * example the description of a parameter.
+		 */
+		rowNote?: Snippet<[T]>;
 		/** The row actions. One or two show as icon buttons, three or more as one "…" menu. */
 		actions?: (row: T) => RowAction[];
 		/** The accessible name of the "…" button of a row. */
@@ -343,6 +349,13 @@
 								</td>
 							{/if}
 						</tr>
+						{#if rowNote}
+							<tr class="table__note-row">
+								<td colspan={columnCount} class="table__note-cell">
+									{@render rowNote(row)}
+								</td>
+							</tr>
+						{/if}
 					{/each}
 				{/if}
 			</tbody>
@@ -420,6 +433,16 @@
 		color: var(--rh-color-text-muted);
 		font-size: var(--rh-font-size-sm);
 		text-align: left;
+	}
+
+	.table__note-cell {
+		padding-top: 0;
+		color: var(--rh-color-text-muted);
+		font-size: var(--rh-font-size-sm);
+	}
+
+	tbody tr.table__note-row:hover {
+		background-color: transparent;
 	}
 
 	th {

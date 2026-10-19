@@ -85,7 +85,7 @@ impl fmt::Debug for ScriptEnv {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let value = match &self.value {
             Some(script_env::Value::StringValue(value)) => value.as_str(),
-            Some(script_env::Value::SecretValue(_)) => MASK,
+            Some(script_env::Value::SecretValue(_) | script_env::Value::MaskedValue(_)) => MASK,
             None => "",
         };
         formatter
@@ -116,6 +116,7 @@ impl fmt::Debug for script_env::Value {
         match self {
             Self::StringValue(value) => formatter.debug_tuple("StringValue").field(value).finish(),
             Self::SecretValue(_) => formatter.debug_tuple("SecretValue").field(&MASK).finish(),
+            Self::MaskedValue(_) => formatter.debug_tuple("MaskedValue").field(&MASK).finish(),
         }
     }
 }

@@ -45,6 +45,7 @@ The save bar is a strip below the sections column. It is at the bottom edge of t
 - Without changes, the bar shows "No changes" and "Save" is disabled. The text is the accessible description of "Save" (UI principles 5.5).
 - `create`: a new record. "Save" stays enabled before the first change.
 - `readonly`: the reason why the person cannot save, for example the role. The bar shows the reason and no buttons.
+- `blocked`: the reason why the server would refuse the form as it is now, for example a required parameter without a value. The bar shows the reason, and "Save" is disabled (UI principles 5.5).
 - `note`: a short fact after the state, for example the number of plans that use the profile.
 - `saving` and `oncancel`: the progress of the save and the action of "Cancel".
 
@@ -60,24 +61,24 @@ The save bar is a strip below the sections column. It is at the bottom edge of t
 
 `ListView` (`$lib/components/ui`) is the list of the entities: hosts, jobs, plans, repositories, profiles, snapshots, alerts, audit events, channels, users, tokens, secrets, templates and organizations. Each item has two lines. Use `DataTable` only for tabular data.
 
-| Property                        | Function                                                                                                                                                   |
-| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `items`, `itemKey`, `label`     | The items, the key of an item and the accessible name of the list.                                                                                         |
-| `icon(item)`                    | `ListIcon`: `{ name, tone?, spin?, label? }`. The icon is in a fixed column at the left. Only the `danger`, `warning` and `running` tones color it.        |
-| `title(item)`, `titleMono`      | The name in bold. A long name is cut with an ellipsis, and a tooltip shows the full name.                                                                  |
-| `href(item)`                    | The resolved address of the record page. The name is the only link of the item. The remaining part of the item is not clickable.                           |
-| `onOpen(item)`                  | For an entity without a record page. The name opens a side panel.                                                                                          |
-| `titleLabel(item)`              | The accessible name of the name, when the name is too short, for example the time of a snapshot.                                                           |
-| `pill(item)`                    | `ListPill` or `null`: `{ tone, label, full? }`. Return a pill only for a state that is not usual.                                                          |
-| `meta(item)`                    | `ListMeta[]`: the fields of line 2 in the sequence of their priority. A field is a text or `{ text, mono?, time?, title? }`. An empty field does not show. |
-| `aside(item)`                   | A number in a right-aligned column of 96 px, for example a duration or a size.                                                                             |
-| `actions(item)`, `moreLabel`    | `RowAction[]` as in `DataTable`. One or two actions are icon buttons. Three or more actions are in one "…" menu.                                           |
-| `groupBy(item)`                 | The heading of the group of the item, for example the day. Sort the items by the group.                                                                    |
-| `mode`, `page`, `pageSize`, …   | The pages, as in `DataTable`.                                                                                                                              |
-| `filtered`, `onReset`           | When a filter applies, an empty list shows "Nothing found" and a "Reset filters" button.                                                                   |
-| `emptyTitle`, `emptyActions`, … | The first-run state of an empty list, with the primary action.                                                                                             |
-| `toolbar`                       | A snippet above the list. Put the `FilterBar` in it.                                                                                                       |
-| `flush`                         | For a list in a panel body.                                                                                                                                |
+| Property                        | Function                                                                                                                                                                                                                                               |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `items`, `itemKey`, `label`     | The items, the key of an item and the accessible name of the list.                                                                                                                                                                                     |
+| `icon(item)`                    | `ListIcon`: `{ name, tone?, spin?, label? }`. The icon is in a fixed column at the left. Only the `danger`, `warning` and `running` tones color it.                                                                                                    |
+| `title(item)`, `titleMono`      | The name in bold. A long name is cut with an ellipsis, and a tooltip shows the full name.                                                                                                                                                              |
+| `href(item)`                    | The resolved address of the record page. The name is the only link of the item. The remaining part of the item is not clickable.                                                                                                                       |
+| `onOpen(item)`                  | For an entity without a record page. The name opens a side panel.                                                                                                                                                                                      |
+| `titleLabel(item)`              | The accessible name of the name, when the name is too short, for example the time of a snapshot.                                                                                                                                                       |
+| `pill(item)`                    | `ListPill` or `null`: `{ tone, label, full? }`. Return a pill only for a state that is not usual.                                                                                                                                                      |
+| `meta(item)`                    | `ListMeta[]`: the fields of line 2 in the sequence of their priority. A field is a text or `{ text, mono?, time?, title?, icon? }`. A field with an `icon` shows as a neutral chip, for example the count of parameters. An empty field does not show. |
+| `aside(item)`                   | A number in a right-aligned column of 96 px, for example a duration or a size.                                                                                                                                                                         |
+| `actions(item)`, `moreLabel`    | `RowAction[]` as in `DataTable`. One or two actions are icon buttons. Three or more actions are in one "…" menu.                                                                                                                                       |
+| `groupBy(item)`                 | The heading of the group of the item, for example the day. Sort the items by the group.                                                                                                                                                                |
+| `mode`, `page`, `pageSize`, …   | The pages, as in `DataTable`.                                                                                                                                                                                                                          |
+| `filtered`, `onReset`           | When a filter applies, an empty list shows "Nothing found" and a "Reset filters" button.                                                                                                                                                               |
+| `emptyTitle`, `emptyActions`, … | The first-run state of an empty list, with the primary action.                                                                                                                                                                                         |
+| `toolbar`                       | A snippet above the list. Put the `FilterBar` in it.                                                                                                                                                                                                   |
+| `flush`                         | For a list in a panel body.                                                                                                                                                                                                                            |
 
 When the list is narrower than 560 px, line 2 shows only the first two fields. The number of `aside` goes to the end of line 2.
 
@@ -103,6 +104,7 @@ When the list is narrower than 560 px, line 2 shows only the first two fields. T
 | `toolbar`                                          | A snippet above the table. Put the `FilterBar` in it.                                                                                                                                                                                                                         |
 | `loading`, `error`, `empty*`                       | The states of the table.                                                                                                                                                                                                                                                      |
 | `flush`                                            | For a table in a panel body.                                                                                                                                                                                                                                                  |
+| `rowNote`                                          | A snippet under the row of the record, across the full width of the table, for example the description of a parameter.                                                                                                                                                        |
 
 The footer shows "Showing X to Y of Z", the page size and the page numbers. It shows the first page, the last page and the pages next to the current page. A list has no "Load more" button (UI principles 2.14). To keep the page and the page size in the query string, add the `page` and `size` keys to `queryFilters`.
 
@@ -114,6 +116,10 @@ Column options (`TableColumn`):
 - `nowrap`, `align`, `mono`, `hideNarrow`, `sortable`, `value`, `cell`, `badge` and `render` are as in the older table.
 
 Do not put a link to another entity in a cell. Do not put a status text below a `StatusPill`. The lint rule `ui/no-row-actions-snippet` reports the older `rowActions` snippet.
+
+## Parameter tables
+
+The parameters of a profile (`ProfileEditor`) and the values of a host (`HostPage`) are `DataTable` tables: a parameter is tabular data (UI principles 2.13). The kinds, the required flag and the default value are columns; the description of a parameter is a `rowNote` across the table. A name follows the rule of the server (`$lib/parameters.ts`), and the column "Where it is used" counts the `{{param.<name>}}` references of the draft. The values of a host are one set: the section saves the whole set, and a row that no profile needs carries the remove action. The parameters of a profile on the plan page show the effective value and its source (plan, host, default, not set) in two columns, and the actions change the value of the plan or open the host page.
 
 ## FilterBar
 
@@ -162,7 +168,7 @@ To keep the filters in the query string, use `queryFilters(keys)` from `$lib/sto
 
 ## RecordPicker
 
-`RecordPicker` (`$lib/components/ui`) is the field that selects one record when the name of the record is not sufficient, for example a profile and its repository. Each option has two lines: the label, and a muted secondary line with texts and small tag chips. The closed field shows the label and the first part of the secondary line, for example "user-profiles · test-s3-yandex". The open list has a search field at the top. The search finds the label, each part of the secondary line and each `search` text, and it ignores the case of the letters.
+`RecordPicker` (`$lib/components/ui`) is the field that selects one record when the name of the record is not sufficient, for example a profile and its repository. Each option has two lines: the label, and a muted secondary line with texts and small tag chips. The closed field shows the label and one detail on one line, for example "user-profiles · test-s3-yandex". The open list has a search field at the top. The search finds the label, each part of the secondary line and each `search` text, and it ignores the case of the letters.
 
 | Property                                   | Function                                                                                                       |
 | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
@@ -181,7 +187,7 @@ An option can also have these properties:
 
 - `dot`: a status dot before the label, `success`, `warning` or `neutral`. Set `state` too, because a color is never the only sign.
 - `state`: the state in words at the right of the option. The selected option shows a check mark in its place.
-- `detail`: the text after the label in the closed field. By default, it is the first part of the secondary line.
+- `detail`: the content after the label in the closed field: a text, or the parts of the secondary line, so a chip stays a chip. It stays on the line of the label and cuts at the end. By default, it is the first part of the secondary line.
 - `search`: extra texts for the search, which the option does not show, for example each path of a profile.
 - `disabled` and `reason`: an option that the person cannot select. It stays in the list, dimmed, and the reason shows below it, for example "Repository local-fs is on fs-01". Do not hide an option that the person expects to find.
 
@@ -198,9 +204,13 @@ An option can also have these properties:
 
 `HostPicker` (`$lib/components`) is a `RecordPicker` for a host. Use it for each field that selects a host, for example the plan host, the repository host and the target host of a restore. An option shows the status dot, the host name and the state in words, for example "Offline · 3 h ago". The secondary line shows the OS, the architecture and the labels as chips. It does not show the agent version. The search finds the host name, the OS and the labels. The closed field shows the host name, the OS family and the state. The `reason(host)` property gives the reason why a host cannot be selected. For example, a plan of a local repository runs only on the repository host. Revoked hosts are at the end of the list.
 
+`ProfilePicker` shows the count of the declared parameters as the first part of the secondary line and in the closed field, next to the first path (ADR-0047). `profileParameterNames` gives the names that its search finds.
+
 A host facet of a list uses `withHosts` from `$lib/host-picker.ts`. It gives each value the host name and the same secondary line, and it puts the revoked hosts at the end. Set `search: true` on the facet.
 
 ## Forms
+
+`SecretDialog` (`$lib/components`) creates a secret of the purpose `hook_secret` and gives it to `oncreated`. The script editor uses it for a secret variable, and the host page for a secret parameter value. Do not copy its fields into another dialog.
 
 `NewPasswordField` (`$lib/components/ui`) is the field for each new password. Use it for the initial setup, a new user, a password reset and the grant of the Platform Admin right. Below the field, it shows the password rule of the server from `$lib/password-policy.ts` and the progress, for example "6 of 12 characters" (UI principles 5.1). The text is in the danger tone after the person leaves the field or after a submit attempt (`submitted`). A value that is too long shows the danger tone at once. An `error` from the server replaces the text.
 

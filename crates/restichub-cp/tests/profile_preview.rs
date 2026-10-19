@@ -474,6 +474,154 @@ async fn fr_hk_12_a_script_of_an_operator_draft_is_ignored() {
     db.cleanup().await;
 }
 
+/// AC-PF-10: a Viewer draft fills no template of the stored profile, so the host value of a parameter
+/// that only the draft reads appears in no command. A host value reaches the reader only through a
+/// plan of the stored profile on the requested host, and then a value that the stored profile puts
+/// into a path is part of the command (FR-PF-12, ADR-0047).
+#[tokio::test]
+async fn ac_pf_10_a_reader_draft_shows_no_parameter_value() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant_with_key(db.database(), "acme").await;
+    let app = app_with_kek(db.database());
+    let admin = seed_session(db.database(), tenant, "admin", "admin").await;
+    let viewer = seed_session(db.database(), tenant, "viewer", "viewer").await;
+    let agent = seed_agent_full(db.database(), tenant, "params-host", "linux", "0.19.0", &[]).await;
+    let canary = "CANARY-host-value-1";
+    let stored = create_profile(
+        &app,
+        &admin,
+        json!({
+            "name": "plain",
+            "paths": {"all": ["/srv/stored"]},
+            "parameters": [{"name": "pg_dir", "kind": "text"}],
+        }),
+    )
+    .await;
+    let stored_id = stored["id"].as_str().expect("the identifier").to_owned();
+    let (status, _, body) = send(
+        &app,
+        request(
+            "PUT",
+            &format!("/api/v1/agents/{agent}/parameters"),
+            Some(&admin),
+            Some(json!({"parameters": [
+                {"name": "pg_dir", "kind": "text", "value": canary},
+            ]})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // The draft of the Viewer puts the parameter into a path, and the stored profile does not.
+    let (status, _, preview) = send(
+        &app,
+        request(
+            "POST",
+            "/api/v1/profiles/preview",
+            Some(&viewer),
+            Some(json!({
+                "agent_id": agent.to_string(),
+                "profile_id": stored_id,
+                "paths": {"all": ["/srv/{{param.pg_dir}}"]},
+                "parameters": [{"name": "pg_dir", "kind": "text"}],
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    let text = preview.to_string();
+    assert!(text.contains("/srv/stored"), "{preview}");
+    assert!(
+        !text.contains(canary),
+        "the draft read the host value: {preview}"
+    );
+    assert!(!text.contains("{{param"), "{preview}");
+
+    // The stored profile puts the value into the path of its own accord. Without a plan of the
+    // profile on the requested host, the reader gets the placeholder of the text default and no
+    // host value.
+    let planned = create_profile(
+        &app,
+        &admin,
+        json!({
+            "name": "planned",
+            "paths": {"all": ["/srv/{{param.pg_dir}}"]},
+            "parameters": [{"name": "pg_dir", "kind": "text", "default_value": "/default"}],
+        }),
+    )
+    .await;
+    let planned_id = planned["id"].as_str().expect("the identifier").to_owned();
+    let (status, _, preview) = send(
+        &app,
+        request(
+            "POST",
+            "/api/v1/profiles/preview",
+            Some(&viewer),
+            Some(json!({
+                "agent_id": agent.to_string(),
+                "profile_id": planned_id,
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    let text = preview.to_string();
+    assert!(
+        !text.contains(canary),
+        "no plan of the profile runs on the host: {preview}"
+    );
+    assert!(
+        !text.contains("/default"),
+        "the reader reads no text default: {preview}"
+    );
+
+    // A plan of the profile on the requested host gives the host value to the reader: the stored
+    // path is part of the command of that plan.
+    let repository = repository_fixture(db.database(), tenant).await;
+    let (status, _, plan) = send(
+        &app,
+        request(
+            "POST",
+            "/api/v1/plans",
+            Some(&admin),
+            Some(json!({
+                "name": "planned-nightly",
+                "profile_id": planned_id,
+                "agent_id": agent.to_string(),
+                "repository_id": repository,
+                "cron": "0 2 * * *",
+                "time_zone": "UTC",
+                "missed_run_policy": "run_all",
+                "parameter_values": [],
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{plan}");
+    let (status, _, preview) = send(
+        &app,
+        request(
+            "POST",
+            "/api/v1/profiles/preview",
+            Some(&viewer),
+            Some(json!({
+                "agent_id": agent.to_string(),
+                "profile_id": planned_id,
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    assert!(
+        preview.to_string().contains(canary),
+        "the stored path is part of the command: {preview}"
+    );
+
+    db.cleanup().await;
+}
+
 /// AC-PF-01: the preview takes a body that is as large as a profile create, and refuses a body that
 /// is larger (FR-PF-05, FR-HK-09).
 #[tokio::test]
@@ -1201,6 +1349,79 @@ async fn an_unparsable_restic_version_is_refused() {
     assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
     assert_eq!(problem["field"], "agent_id");
     assert_eq!(problem["reason"], "incompatible");
+
+    db.cleanup().await;
+}
+
+/// AC-PF-10: the preview of a stored profile shows the name of a script variable that names a
+/// parameter and masks the value of that parameter (FR-PF-12, ADR-0047).
+#[tokio::test]
+async fn ac_pf_10_the_preview_masks_the_value_of_a_parameter_variable() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant_with_key(db.database(), "acme").await;
+    let app = app_with_kek(db.database());
+    let admin = seed_session(db.database(), tenant, "admin", "admin").await;
+    let viewer = seed_session(db.database(), tenant, "viewer", "viewer").await;
+    let agent = seed_agent_full(db.database(), tenant, "script-host", "linux", "0.19.0", &[]).await;
+    trust_scripts(&db, tenant, agent).await;
+    let canary = "CANARY-script-value-1";
+    let profile = create_profile(
+        &app,
+        &admin,
+        json!({
+            "name": "with-parameter",
+            "paths": {"all": ["/srv"]},
+            "parameters": [{"name": "pg_dir", "kind": "text"}],
+            "scripts": [script("echo dump", json!([
+                {"name": "PGDIR", "kind": "parameter", "value": "pg_dir"}
+            ]))],
+        }),
+    )
+    .await;
+    let profile_id = profile["id"].as_str().expect("the identifier").to_owned();
+    let (status, _, body) = send(
+        &app,
+        request(
+            "PUT",
+            &format!("/api/v1/agents/{agent}/parameters"),
+            Some(&admin),
+            Some(json!({"parameters": [
+                {"name": "pg_dir", "kind": "text", "value": canary},
+            ]})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let (status, _, preview) = send(
+        &app,
+        request(
+            "POST",
+            "/api/v1/profiles/preview",
+            Some(&viewer),
+            Some(json!({
+                "agent_id": agent.to_string(),
+                "profile_id": profile_id,
+            })),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    let steps = preview["steps"].as_array().expect("the steps");
+    assert!(
+        steps.iter().any(|step| step["kind"]
+            .as_str()
+            .is_some_and(|kind| kind.starts_with("script"))),
+        "{preview}"
+    );
+    let text = preview.to_string();
+    assert!(text.contains("PGDIR"), "{preview}");
+    assert!(
+        !text.contains(canary),
+        "the preview shows the value: {preview}"
+    );
 
     db.cleanup().await;
 }

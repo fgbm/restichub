@@ -3,7 +3,7 @@
  */
 import { render, screen, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Profiles from './+page.svelte';
 
 const mocks = vi.hoisted(() => ({
@@ -38,6 +38,12 @@ vi.mock('#lib/api/index.ts', async (importOriginal) => {
 			deleteProfile: mocks.deleteProfile
 		}
 	};
+});
+
+// A dialog that a test leaves open keeps `pointer-events: none` on the body, which stops the
+// next test from a click.
+afterEach(() => {
+	document.body.style.pointerEvents = '';
 });
 
 beforeEach(() => {
@@ -151,5 +157,50 @@ describe('Profiles list', () => {
 		expect(await within(dialog).findByRole('link', { name: 'Late plan' })).toBeInTheDocument();
 		expect(within(dialog).getByRole('alert')).toHaveTextContent('Plans use this profile.');
 		expect(within(dialog).getByRole('button', { name: 'Delete profile' })).toBeDisabled();
+	});
+});
+
+describe('the count of the parameters of a profile (FR-PF-09, ADR-0047)', () => {
+	it('puts the count in a chip before the first field of line 2', async () => {
+		mocks.listProfiles.mockResolvedValue([
+			{
+				id: 'p_1',
+				name: 'db-nightly',
+				tags: [],
+				retention: null,
+				paths: { all: ['/srv/db'] },
+				parameters: [
+					{
+						name: 'pg_dir',
+						kind: 'text',
+						required: true,
+						default_value: '/var/backups/pg',
+						description: null,
+						hidden: false
+					}
+				],
+				updated_at: '2026-10-01T00:00:00Z'
+			},
+			{
+				id: 'p_2',
+				name: 'files',
+				tags: [],
+				retention: null,
+				paths: { all: ['/srv/files'] },
+				parameters: [],
+				updated_at: '2026-10-01T00:00:00Z'
+			}
+		]);
+		mocks.listPlans.mockResolvedValue([]);
+		render(Profiles);
+		await screen.findByRole('link', { name: 'db-nightly' });
+
+		const chip = screen.getByText('1 parameter');
+		expect(chip.closest('.item__chip')).not.toBeNull();
+		expect(chip.closest('.item__chip')?.getAttribute('title')).toBe(
+			'The profile declares parameters'
+		);
+		// A profile without a parameter shows no chip.
+		expect(screen.queryByText('0 parameters')).not.toBeInTheDocument();
 	});
 });

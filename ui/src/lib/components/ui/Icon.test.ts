@@ -44,6 +44,6 @@ describe('Icon', () => {
 	it('matches the mockup sprite', () => {
 		const sprite = readFileSync(join(process.cwd(), 'mockups', 'icons.svg'), 'utf8');
 		expect(icons).toEqual(parseSprite(sprite));
-		expect(Object.keys(icons)).toHaveLength(103);
+		expect(Object.keys(icons)).toHaveLength(104);
 	});
 });

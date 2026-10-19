@@ -1,9 +1,14 @@
 <script lang="ts">
-	import { ApiError, fieldError, service } from '#lib/api/index.ts';
-	import type { Agent, JobTemplate, ScriptTemplate, Secret } from '#lib/api/index.ts';
+	import { fieldError } from '#lib/api/index.ts';
+	import type {
+		Agent,
+		JobTemplate,
+		ProfileParameter,
+		ScriptTemplate,
+		Secret
+	} from '#lib/api/index.ts';
 	import { Alert, Badge, Button, CopyField, Dialog, TextField } from '#lib/components/ui/index.ts';
-	import PasswordField from '#lib/components/ui/PasswordField.svelte';
-	import { t, tErrorCode } from '#lib/i18n/index.ts';
+	import { t } from '#lib/i18n/index.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 	import type { ApiProblem } from '#lib/api/index.ts';
 	import {
@@ -20,6 +25,7 @@
 	} from '#lib/scripts.ts';
 	import type { Group, ScriptDraft } from '#lib/scripts.ts';
 	import ScriptCard from './ScriptCard.svelte';
+	import SecretDialog from './SecretDialog.svelte';
 
 	let {
 		scripts = $bindable([]),
@@ -27,6 +33,7 @@
 		jobTemplates = [],
 		secrets = $bindable([]),
 		targets = [],
+		parameters,
 		readonly = false,
 		problem = null,
 		framed = true
@@ -37,6 +44,8 @@
 		secrets?: Secret[];
 		/** The hosts that run the profile: the hosts of its plans. */
 		targets?: Agent[];
+		/** The parameters that the profile declares, for a variable of the kind `parameter`. */
+		parameters?: readonly ProfileParameter[];
 		/** An Operator and a Viewer read the scripts and change nothing. */
 		readonly?: boolean;
 		problem?: ApiProblem | null;
@@ -51,11 +60,6 @@
 
 	let secretOpen = $state(false);
 	let secretTarget = $state<{ script: number; parameter: number } | null>(null);
-	let secretName = $state('');
-	let secretValue = $state('');
-	let secretSaving = $state(false);
-	let secretProblem = $state<ApiProblem | null>(null);
-	let secretError = $state<string | null>(null);
 
 	const beforeCount = $derived(scripts.filter((item) => groupOf(item.phase) === 'before').length);
 	const afterCount = $derived(scripts.length - beforeCount);
@@ -107,11 +111,6 @@
 		);
 	});
 
-	function messageOf(error: unknown): string {
-		if (error instanceof ApiError) return tErrorCode(error.code) ?? error.title;
-		return t('table.error');
-	}
-
 	function errorFor(index: number): (field: string) => string | undefined {
 		return (field) => fieldError(problem, `scripts[${index}].${field}`);
 	}
@@ -145,36 +144,15 @@
 
 	function openSecret(script: number, parameter: number): void {
 		secretTarget = { script, parameter };
-		secretName = '';
-		secretValue = '';
-		secretProblem = null;
-		secretError = null;
 		secretOpen = true;
 	}
 
-	async function createSecret(): Promise<void> {
-		secretSaving = true;
-		secretProblem = null;
-		secretError = null;
-		try {
-			const created = await service.createSecret({
-				name: secretName.trim(),
-				purpose: 'hook_secret',
-				value: secretValue
-			});
-			secrets = [...secrets, created];
-			if (secretTarget && scripts[secretTarget.script]) {
-				scripts[secretTarget.script].env[secretTarget.parameter].value = created.id;
-			}
-			secretOpen = false;
-			secretValue = '';
-			pushToast('success', t('scripts.secret.created'));
-		} catch (error) {
-			if (error instanceof ApiError) secretProblem = error.problem;
-			else secretError = messageOf(error);
-		} finally {
-			secretSaving = false;
+	function secretCreated(created: Secret): void {
+		secrets = [...secrets, created];
+		if (secretTarget && scripts[secretTarget.script]) {
+			scripts[secretTarget.script].env[secretTarget.parameter].value = created.id;
 		}
+		pushToast('success', t('scripts.secret.created'));
 	}
 </script>
 
@@ -245,6 +223,7 @@
 						number={numbers[item.key] ?? 1}
 						{group}
 						{secrets}
+						{parameters}
 						{readonly}
 						canUp={canMove(scripts, item.key, -1)}
 						canDown={canMove(scripts, item.key, 1)}
@@ -331,35 +310,7 @@
 	{/snippet}
 </Dialog>
 
-<Dialog
-	bind:open={secretOpen}
-	size="md"
-	title={t('scripts.secret.title')}
-	description={t('scripts.secret.description')}
-	onsubmit={createSecret}
->
-	{#if secretError}
-		<Alert tone="danger" title={secretError} />
-	{/if}
-	<TextField
-		label={t('scripts.secret.name')}
-		error={fieldError(secretProblem, 'name')}
-		bind:value={secretName}
-		required
-	/>
-	<PasswordField
-		label={t('scripts.secret.value')}
-		error={fieldError(secretProblem, 'value')}
-		bind:value={secretValue}
-		required
-	/>
-	{#snippet footer()}
-		<Button onclick={() => (secretOpen = false)}>{t('common.cancel')}</Button>
-		<Button type="submit" variant="primary" loading={secretSaving}>
-			{t('scripts.secret.create')}
-		</Button>
-	{/snippet}
-</Dialog>
+<SecretDialog bind:open={secretOpen} oncreated={secretCreated} />
 
 <style>
 	.scripts {

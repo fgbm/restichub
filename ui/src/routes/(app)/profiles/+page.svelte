@@ -11,7 +11,8 @@
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import { plural } from '#lib/list-format.ts';
-	import { profilePathText, profileRetention } from '#lib/profile-picker.ts';
+	import { profileParameterNames, profilePathText, profileRetention } from '#lib/profile-picker.ts';
+	import { parameterChip } from '#lib/parameters.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 	import { fromRefusal, fromUsage, type BlockedView } from '#lib/delete-check.ts';
@@ -52,7 +53,14 @@
 	const matching = $derived(
 		profiles.filter((profile) => {
 			const { q, tag } = filters.value;
-			if (!matchesSearch(q, [profile.name, profilePathText(profile), ...profile.tags]))
+			if (
+				!matchesSearch(q, [
+					profile.name,
+					profilePathText(profile),
+					...profileParameterNames(profile),
+					...profile.tags
+				])
+			)
 				return false;
 			if (tag && !splitList(tag).some((item) => profile.tags.includes(item))) return false;
 			return true;
@@ -100,7 +108,9 @@
 
 	function meta(profile: Profile): ListMeta[] {
 		const count = planCount(profile);
+		const chip = parameterChip(profile.parameters ?? []);
 		return [
+			chip ? { text: chip, icon: 'braces' as const, title: t('parameters.chipTitle') } : null,
 			{ text: profilePathText(profile), mono: true },
 			profileRetention(profile),
 			count > 0 ? plural('profiles.plans', count) : t('profiles.noPlans')

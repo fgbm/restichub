@@ -23,7 +23,7 @@ use time::OffsetDateTime;
 use crate::delivery::DeliveryError;
 use crate::job_result_params::IncompatibleParams;
 use crate::jobs::{delivered_secrets, repository_access, timestamp};
-use crate::profiles::{compiler_profile_from_row, target_facts};
+use crate::profiles::{compiler_profile_from_row, target_facts_with};
 use crate::server::AppState;
 
 /// The fixed job timeout that an agent without [`AgentCapability::JobLimitsV1`] still needs: it
@@ -61,6 +61,8 @@ pub enum Refusal {
     /// The host of the agent did not turn on the trust mode for server scripts, or lacks the
     /// interpreter (AC-HK-07).
     ServerScriptsDisabled,
+    /// A required parameter of the profile has no value for this plan (FR-PF-11).
+    ParameterMissing,
 }
 
 impl Refusal {
@@ -84,6 +86,7 @@ impl Refusal {
             Self::SecretUnavailable => "secret_unavailable",
             Self::JobInvalid => "job_invalid",
             Self::ServerScriptsDisabled => "server_scripts_disabled",
+            Self::ParameterMissing => "parameter_missing",
         }
     }
 
@@ -98,6 +101,7 @@ impl Refusal {
             | Self::RequestMissing
             | Self::SecretUnavailable
             | Self::ServerScriptsDisabled
+            | Self::ParameterMissing
             | Self::NotRepositoryHost => JobResultCode::ConfigError,
             _ => JobResultCode::Failed,
         }
@@ -217,6 +221,9 @@ pub async fn build(
         .map_err(delivery_error)?,
     );
 
+    // An agent without `script-masked-value` rejects `masked_value`, so it gets the same text as a
+    // secret value, which it masks in the step log (FR-PF-12, ADR-0047).
+    super::compat::fit_masked_values(&mut steps, &capabilities);
     record_script_run(tx, job, &steps).await?;
 
     let mut expires_at = now + MAX_SIGNED_LIFETIME;
@@ -380,7 +387,18 @@ async fn plan_steps(
     if plan.repository_id != repository_id {
         return Err(BuildError::Refused(Refusal::RepositoryChanged));
     }
-    let target = target_facts(agent, now).map_err(|error| {
+    // The values of the parameters come from the plan, the host and the defaults (FR-PF-10).
+    let definitions = crate::parameters::from_row(&profile.parameters).map_err(|error| {
+        tracing::warn!(job = %job.id, cause = ?error, "the stored parameters do not convert");
+        BuildError::Refused(Refusal::CompileFailed)
+    })?;
+    let parameters = crate::parameters::resolved_for_plan(tx, &definitions, plan.id, plan.agent_id)
+        .await
+        .map_err(|error| {
+            tracing::warn!(job = %job.id, cause = ?error, "the parameter values do not read");
+            BuildError::Refused(Refusal::CompileFailed)
+        })?;
+    let target = target_facts_with(agent, now, parameters).map_err(|error| {
         tracing::warn!(job = %job.id, cause = ?error, "the agent facts do not give a compile target");
         BuildError::Refused(Refusal::AgentFactsInvalid)
     })?;
@@ -399,6 +417,11 @@ async fn plan_steps(
             BuildError::Incompatible(params)
         } else if error.is_script() {
             BuildError::Refused(Refusal::ServerScriptsDisabled)
+        } else if matches!(
+            error,
+            restichub_compiler::CompileError::MissingParameter { .. }
+        ) {
+            BuildError::Refused(Refusal::ParameterMissing)
         } else {
             BuildError::Refused(Refusal::CompileFailed)
         }

@@ -134,6 +134,7 @@ pub fn write_body(
         ("PATCH", "/api/v1/agents/{id}") => Some(json!({"hostname": "matrix-host"})),
         ("POST", "/api/v1/agents/{id}/reenroll") => Some(json!({})),
         ("POST", "/api/v1/agents/{id}/replace") => Some(json!({"old_agent_id": agent_id})),
+        ("PUT", "/api/v1/agents/{id}/parameters") => Some(json!({"parameters": []})),
         ("POST", "/api/v1/secrets") => Some(json!({
             "name": format!("matrix-secret-{index}"),
             "purpose": "repository_password",
@@ -587,6 +588,7 @@ pub async fn seed_profile(db: &Database, tenant: TenantId, name: &str) -> restic
             retention: None,
             check_options: None,
             scripts: serde_json::json!([]),
+            parameters: serde_json::json!([]),
             created_by: None,
         },
     )

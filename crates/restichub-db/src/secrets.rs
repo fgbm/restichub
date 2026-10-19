@@ -185,7 +185,8 @@ pub struct SecretUsage {
 /// `only` limits the list to one secret. A repository and a channel name a secret by a foreign
 /// key. A profile and a job template hold the identifier of a hook secret in a script variable of
 /// the kind `secret_ref`, so the match is on that field only (migration 0046 and the script
-/// validation keep the identifier in its canonical form).
+/// validation keep the identifier in its canonical form). A parameter value of a host or of a plan
+/// names a secret by a foreign key (FR-PF-10).
 pub async fn list_usage(
     tx: &mut TenantTx<'_>,
     only: Option<SecretId>,
@@ -210,6 +211,16 @@ pub async fn list_usage(
            CROSS JOIN LATERAL jsonb_path_query(t.scripts, \
                 '$[*].env[*] ? (@.kind == \"secret_ref\").value') AS ref(value) \
            JOIN secrets s ON s.id::text = ref.value #>> '{}' \
+         WHERE ($1::uuid IS NULL OR s.id = $1) \
+         UNION ALL \
+         SELECT s.id, 'host'::text, a.id, a.hostname FROM agent_parameter_values v \
+           JOIN agents a ON a.tenant_id = v.tenant_id AND a.id = v.agent_id \
+           JOIN secrets s ON s.tenant_id = v.tenant_id AND s.id = v.secret_id \
+         WHERE ($1::uuid IS NULL OR s.id = $1) \
+         UNION ALL \
+         SELECT s.id, 'plan'::text, p.id, p.name FROM plan_parameter_values v \
+           JOIN plans p ON p.tenant_id = v.tenant_id AND p.id = v.plan_id \
+           JOIN secrets s ON s.tenant_id = v.tenant_id AND s.id = v.secret_id \
          WHERE ($1::uuid IS NULL OR s.id = $1) \
          ORDER BY 4, 3",
     )

@@ -441,6 +441,21 @@ pub const ROUTES: &[Route] = &[
     },
     Route {
         method: "get",
+        path: "/api/v1/agents/{id}/parameters",
+        access: Access::Protected(Operation::AgentsRead),
+        handler: || routes!(crate::parameters::get_parameters),
+    },
+    Route {
+        method: "put",
+        path: "/api/v1/agents/{id}/parameters",
+        access: Access::Protected(Operation::AgentParametersWrite),
+        handler: || {
+            routes!(crate::parameters::replace_parameters)
+                .layer(axum::extract::DefaultBodyLimit::max(BODY_LIMIT))
+        },
+    },
+    Route {
+        method: "get",
         path: "/api/v1/enrollment-tokens",
         access: Access::Protected(Operation::EnrollmentTokensRead),
         handler: || routes!(crate::enrollment_tokens::list_enrollment_tokens),

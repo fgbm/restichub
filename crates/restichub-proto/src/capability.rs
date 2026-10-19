@@ -10,6 +10,9 @@ pub enum AgentCapability {
     JobLimitsV1,
     /// The agent runs the `script` step on a host with the local trust mode (FR-HK-09, ADR-0037).
     ScriptsV1,
+    /// The agent reads `ScriptEnv.masked_value` and masks that value in the step log. An older
+    /// agent rejects the field (FR-PF-12, ADR-0047).
+    ScriptMaskedValue,
     /// The agent keeps unacknowledged log chunks in a spool and sends them again after a
     /// reconnect; the control plane answers with `LogAck` (FR-LG-07).
     LogAckV1,
@@ -17,11 +20,12 @@ pub enum AgentCapability {
 
 impl AgentCapability {
     /// Every capability that this build supports.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::ForgetAllTags,
         Self::RestoreV1,
         Self::JobLimitsV1,
         Self::ScriptsV1,
+        Self::ScriptMaskedValue,
         Self::LogAckV1,
     ];
 
@@ -33,6 +37,7 @@ impl AgentCapability {
             Self::RestoreV1 => "restore-v1",
             Self::JobLimitsV1 => "job-limits-v1",
             Self::ScriptsV1 => "scripts-v1",
+            Self::ScriptMaskedValue => "script-masked-value",
             Self::LogAckV1 => "log-ack-v1",
         }
     }
@@ -80,6 +85,7 @@ mod tests {
         names.push("restore-v1".to_owned());
         names.push("job-limits-v1".to_owned());
         names.push("scripts-v1".to_owned());
+        names.push("script-masked-value".to_owned());
         names.push("log-ack-v1".to_owned());
         assert_eq!(
             AgentCapability::parse_list(&names),
@@ -88,6 +94,7 @@ mod tests {
                 AgentCapability::RestoreV1,
                 AgentCapability::JobLimitsV1,
                 AgentCapability::ScriptsV1,
+                AgentCapability::ScriptMaskedValue,
                 AgentCapability::LogAckV1
             ]
         );

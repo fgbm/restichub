@@ -2,17 +2,36 @@
  * The model of the profile editor page: the form draft, the conversion to the API shape, the
  * summary of each section, the retention preview and the command preview (FR-PF-01, FR-PF-04).
  */
-import type { GroupBy, JobLimitDefaults, Profile } from '#lib/api/index.ts';
+import type {
+	GroupBy,
+	JobLimitDefaults,
+	ParameterKind,
+	Profile,
+	ProfileParameter
+} from '#lib/api/index.ts';
 import { formatMinutes } from '#lib/format.ts';
 import { t } from '#lib/i18n/index.ts';
 import { pluralRules } from '#lib/intl.ts';
 import type { MessageKey } from '#lib/i18n/index.ts';
-import { draftOf, scriptOf } from '#lib/scripts.ts';
+import { draftOf, newKey, scriptOf } from '#lib/scripts.ts';
 import type { ScriptDraft } from '#lib/scripts.ts';
+import { usageOf } from '#lib/parameters.ts';
+import type { ParameterUsage, UsageSource } from '#lib/parameters.ts';
 
 export type SectionKey = 'excludes' | 'tags' | 'options' | 'retention' | 'check' | 'scripts';
 export type RuleKey =
 	'keepLast' | 'keepHourly' | 'keepDaily' | 'keepWeekly' | 'keepMonthly' | 'keepYearly';
+
+/** One declared parameter in the form (FR-PF-09). `key` identifies the table row; it is never sent. */
+export interface ProfileParameterDraft {
+	key: number;
+	name: string;
+	kind: ParameterKind;
+	required: boolean;
+	/** A text parameter only: a secret default would give one password to every host (ADR-0047). */
+	defaultValue: string;
+	description: string;
+}
 
 export interface ProfileDraft {
 	name: string;
@@ -47,6 +66,7 @@ export interface ProfileDraft {
 	maxDurationHours: string;
 	enabled: Record<SectionKey, boolean>;
 	scripts: ScriptDraft[];
+	parameters: ProfileParameterDraft[];
 }
 
 export const RULES: { key: RuleKey; unit: Unit | 'last'; flag: string }[] = [
@@ -166,8 +186,14 @@ export function emptyDraft(defaults?: JobLimitDefaults): ProfileDraft {
 			check: false,
 			scripts: false
 		},
-		scripts: []
+		scripts: [],
+		parameters: []
 	};
+}
+
+/** A new, empty row of the parameter table. The row goes to the request when it has a name. */
+export function blankParameter(kind: ParameterKind = 'text'): ProfileParameterDraft {
+	return { key: newKey(), name: '', kind, required: false, defaultValue: '', description: '' };
 }
 
 export function draftFromProfile(profile: Profile): ProfileDraft {
@@ -212,6 +238,14 @@ export function draftFromProfile(profile: Profile): ProfileDraft {
 	}
 	draft.readDataSubset = profile.check?.read_data_subset ?? '';
 	draft.scripts = (profile.scripts ?? []).map((script) => draftOf(script));
+	draft.parameters = (profile.parameters ?? []).map((parameter) => ({
+		key: newKey(),
+		name: parameter.name,
+		kind: parameter.kind,
+		required: parameter.required,
+		defaultValue: parameter.default_value ?? '',
+		description: parameter.description ?? ''
+	}));
 	draft.enabled = {
 		excludes: draft.excludes !== '' || draft.excludeFiles !== '',
 		tags: draft.tags.length > 0,
@@ -288,8 +322,62 @@ export function settingsOf(
 					}
 				}
 			: null,
-		check: on.check ? { read_data_subset: draft.readDataSubset.trim() } : null
+		check: on.check ? { read_data_subset: draft.readDataSubset.trim() } : null,
+		// A row without a name is a row that the person added and did not fill yet.
+		parameters: draft.parameters
+			.filter((parameter) => parameter.name.trim() !== '')
+			.map((parameter) => ({
+				name: parameter.name.trim(),
+				kind: parameter.kind,
+				required: parameter.required,
+				default_value:
+					parameter.kind === 'text' && parameter.defaultValue !== ''
+						? parameter.defaultValue
+						: undefined,
+				description: parameter.description.trim() === '' ? undefined : parameter.description.trim()
+			}))
 	};
+}
+
+/** The declarations of the draft as a reader sees them, for the lists that name a parameter. */
+export function declaredParameters(draft: ProfileDraft): ProfileParameter[] {
+	return draft.parameters
+		.filter((parameter) => parameter.name.trim() !== '')
+		.map((parameter) => ({
+			name: parameter.name.trim(),
+			kind: parameter.kind,
+			required: parameter.required,
+			default_value:
+				parameter.kind === 'text' && parameter.defaultValue !== '' ? parameter.defaultValue : null,
+			description: parameter.description.trim() === '' ? null : parameter.description.trim(),
+			hidden: false
+		}));
+}
+
+/** The fields of the draft in which a parameter expands, as the switch of each section leaves them. */
+export function usageSource(draft: ProfileDraft): UsageSource {
+	return {
+		paths: [
+			...splitLines(draft.pathsAll),
+			...splitLines(draft.pathsWindows),
+			...splitLines(draft.pathsLinux),
+			...splitLines(draft.pathsMacos)
+		],
+		excludes: draft.enabled.excludes ? splitLines(draft.excludes) : [],
+		excludeFiles: draft.enabled.excludes ? splitLines(draft.excludeFiles) : [],
+		tags: draft.enabled.tags ? draft.tags : [],
+		scripts: draft.enabled.scripts ? draft.scripts : []
+	};
+}
+
+/** The uses of each declared parameter of the draft, by the name of the parameter. */
+export function parameterUses(draft: ProfileDraft): Record<string, ParameterUsage> {
+	const source = usageSource(draft);
+	return Object.fromEntries(
+		draft.parameters
+			.filter((parameter) => parameter.name.trim() !== '')
+			.map((parameter) => [parameter.name.trim(), usageOf(parameter.name.trim(), source)])
+	);
 }
 
 /* ------------------------------------------------------------------ plurals */
@@ -297,7 +385,7 @@ export function settingsOf(
 /** The plural form of a counted word. The catalog holds `.one`, `.few`, `.many` and `.other`. */
 export function plural(base: string, count: number): string {
 	const category = pluralRules().select(count);
-	return t(`${base}.${category}` as MessageKey);
+	return t(`${base}.${category}` as MessageKey, { n: count });
 }
 
 /* ---------------------------------------------------------------- retention */
@@ -473,7 +561,7 @@ export interface Summary {
 	text: string;
 }
 
-export type SummaryKey = 'basics' | 'paths' | SectionKey | 'limits';
+export type SummaryKey = 'basics' | 'paths' | SectionKey | 'parameters' | 'limits';
 
 export const SUMMARY_ORDER: SummaryKey[] = [
 	'basics',
@@ -484,6 +572,7 @@ export const SUMMARY_ORDER: SummaryKey[] = [
 	'retention',
 	'check',
 	'scripts',
+	'parameters',
 	'limits'
 ];
 
@@ -570,6 +659,14 @@ export function summarize(
 		limitText(optionalHoursAsMinutes(draft.maxDurationHours), defaults?.max_duration_minutes, 'max')
 	];
 
+	const declared = draft.parameters.filter((parameter) => parameter.name.trim() !== '');
+	const textCount = declared.filter((parameter) => parameter.kind === 'text').length;
+	const secretCount = declared.length - textCount;
+	const parameterParts: string[] = [];
+	if (declared.length > 0) parameterParts.push(plural('parameters.count', declared.length));
+	if (textCount > 0) parameterParts.push(plural('pe.param.summaryText', textCount));
+	if (secretCount > 0) parameterParts.push(plural('pe.param.summarySecret', secretCount));
+
 	const scriptTotal = scriptCounts.before + scriptCounts.after;
 	return {
 		basics: {
@@ -593,6 +690,10 @@ export function summarize(
 				: '',
 			'pe.sum.noScripts'
 		),
+		parameters:
+			declared.length > 0
+				? { state: 'on', text: parameterParts.join(' · ') }
+				: { state: 'off', text: t('pe.param.summaryNone') },
 		limits: { state: 'on', text: limits.join(' · ') }
 	};
 }

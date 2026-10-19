@@ -201,6 +201,7 @@ pub async fn create_profile(
     let warnings = save_warnings(&validated)?;
     let profile_id = ProfileId::new();
     let mut tx = state.db().begin_tenant(context.tenant_id).await?;
+    tx.lock(crate::parameters::PARAMETERS_LOCK).await?;
     script_secrets::check_script_secrets(&mut tx, &validated.scripts).await?;
     repo::create(
         &mut tx,
@@ -211,7 +212,7 @@ pub async fn create_profile(
 
     let mut event =
         context.audit_event(AuditAction::ProfileCreate, "profile", profile_id.as_uuid());
-    event.diff = Some(diff(None, Some(&profile_value(&validated)), &[]));
+    event.diff = Some(diff(None, Some(&profile_value(&validated, None)), &[]));
     restichub_db::audit::insert(&mut tx, &event).await?;
 
     let created = repo::get(&mut tx, profile_id).await?;
@@ -255,7 +256,9 @@ pub async fn update_profile(
     let profile_id = parse_profile_id(&id)?;
     let now = state.auth().clock.now();
     let mut tx = state.db().begin_tenant(context.tenant_id).await?;
-    // The read locks the row: a concurrent delete cannot remove it between the read and the write.
+    // The advisory lock comes first: it serializes every write that can change the completeness of
+    // a plan of this tenant (FR-PF-11).
+    tx.lock(crate::parameters::PARAMETERS_LOCK).await?;
     let Some(current) = repo::get_for_update(&mut tx, profile_id).await? else {
         return Err(ApiError::not_found());
     };
@@ -267,17 +270,79 @@ pub async fn update_profile(
     }
     let warnings = save_warnings(&validated)?;
     script_secrets::check_script_secrets(&mut tx, &validated.scripts).await?;
+    // A name cannot have two kinds on one host, because the host holds one value for each name
+    // (ADR-0047).
+    let hosts = plans_of_profile_agents(&mut tx, profile_id).await?;
+    for agent_id in &hosts {
+        crate::parameters::check_kinds_of_host(
+            &mut tx,
+            *agent_id,
+            profile_id,
+            None,
+            "parameters",
+            &validated.parameters,
+        )
+        .await?;
+    }
+    // A parameter that left the profile takes the overrides of its name with it; a rename is a new
+    // parameter (owner decision, ADR-0047). The host values stay.
+    let removed = removed_parameters(&current, &validated)?;
+    let names: Vec<&str> = removed
+        .iter()
+        .map(|definition| definition.name.as_str())
+        .collect();
+    let overrides = restichub_db::parameters::values_of_profile_plans(&mut tx, profile_id).await?;
+    let dropped: Vec<(
+        restichub_db::PlanId,
+        restichub_db::parameters::ParameterValue,
+    )> = overrides
+        .into_iter()
+        .filter(|(_, value)| names.contains(&value.name.as_str()))
+        .collect();
+    // A dropped override of the kind `secret` is the credential that a script receives, so only an
+    // Admin removes it (ADR-0047).
+    if dropped
+        .iter()
+        .any(|(_, value)| value.kind == restichub_db::ParameterKind::Secret)
+    {
+        context.authorize(Operation::ParameterSecretWrite)?;
+    }
+    // A declaration that leaves the profile, or that stops being a `secret`, stops the use of the
+    // secret value of the name on every host of the profile, so only an Admin does it (ADR-0047).
+    let secret_names: Vec<&str> = removed
+        .iter()
+        .filter(|definition| definition.kind == restichub_db::ParameterKind::Secret)
+        .map(|definition| definition.name.as_str())
+        .collect();
+    if host_holds_secret(&mut tx, &hosts, &secret_names).await? {
+        context.authorize(Operation::ParameterSecretWrite)?;
+    }
+    for name in &names {
+        restichub_db::parameters::delete_profile_name(&mut tx, profile_id, name).await?;
+    }
     repo::update(&mut tx, profile_id, &validated.update())
         .await
         .map_err(map_write_error)?;
+    if let Some(missing) =
+        crate::parameters::missing_in_plans_of_profile(&mut tx, profile_id, &validated.parameters)
+            .await?
+    {
+        return Err(crate::parameters::refuse_missing(missing));
+    }
 
+    let stored_definitions = crate::parameters::from_row(&current.parameters)?;
+    let mut after = profile_value(&validated, Some(&stored_definitions));
+    if !dropped.is_empty()
+        && let Some(object) = after.as_object_mut()
+    {
+        object.insert(
+            "parameter_overrides_dropped".to_owned(),
+            crate::parameters::audit_dropped(&dropped),
+        );
+    }
     let mut event =
         context.audit_event(AuditAction::ProfileUpdate, "profile", profile_id.as_uuid());
-    event.diff = Some(diff(
-        Some(&stored_value(&current)),
-        Some(&profile_value(&validated)),
-        &[],
-    ));
+    event.diff = Some(diff(Some(&stored_value(&current)), Some(&after), &[]));
     restichub_db::audit::insert(&mut tx, &event).await?;
 
     let updated = repo::get(&mut tx, profile_id).await?;
@@ -347,6 +412,7 @@ pub async fn delete_profile(
     context.authorize(Operation::ProfilesWrite)?;
     let profile_id = parse_profile_id(&id)?;
     let mut tx = state.db().begin_tenant(context.tenant_id).await?;
+    tx.lock(crate::parameters::PARAMETERS_LOCK).await?;
     let Some(current) = repo::get_for_update(&mut tx, profile_id).await? else {
         return Err(ApiError::not_found());
     };
@@ -402,6 +468,16 @@ pub(crate) fn target_facts(
     agent: &Agent,
     now: time::OffsetDateTime,
 ) -> Result<TargetFacts, ApiError> {
+    target_facts_with(agent, now, BTreeMap::new())
+}
+
+/// The compiler input facts of a registered agent, with the resolved values of its parameters
+/// (FR-PF-03, FR-PF-10).
+pub(crate) fn target_facts_with(
+    agent: &Agent,
+    now: time::OffsetDateTime,
+    parameters: BTreeMap<String, restichub_compiler::ParameterValue>,
+) -> Result<TargetFacts, ApiError> {
     let os =
         parse_os(&agent.os).ok_or_else(|| ApiError::invalid_field("agent_id", Reason::Unknown))?;
     let arch = parse_arch(&agent.arch);
@@ -415,6 +491,7 @@ pub(crate) fn target_facts(
         os,
         arch,
         labels: parse_labels(&agent.labels),
+        parameters,
         restic_version,
         now,
         server_scripts: crate::scripts::server_scripts_of(agent),
@@ -501,12 +578,74 @@ pub(crate) fn compile_for_agent(
     profile: &repo::Profile,
     repository_id: restichub_db::RepositoryId,
     agent: &restichub_db::agents::Agent,
+    parameters: BTreeMap<String, restichub_compiler::ParameterValue>,
     now: time::OffsetDateTime,
 ) -> Result<Plan, ApiError> {
-    let target = target_facts(agent, now)?;
+    let target = target_facts_with(agent, now, parameters)?;
     let compiler_profile = compiler_profile_from_row(profile)?;
     compile(&compiler_profile, Some(&repository_id.to_string()), &target)
         .map_err(compile_error_to_api)
+}
+
+/// The hosts of the plans of a profile, without a repeat (ADR-0047).
+async fn plans_of_profile_agents(
+    tx: &mut restichub_db::TenantTx<'_>,
+    profile_id: restichub_db::ProfileId,
+) -> Result<Vec<restichub_db::AgentId>, ApiError> {
+    let mut agents: Vec<restichub_db::AgentId> = Vec::new();
+    for plan in plans_repo::list_by_profile(tx, profile_id).await? {
+        if !agents.contains(&plan.agent_id) {
+            agents.push(plan.agent_id);
+        }
+    }
+    Ok(agents)
+}
+
+/// The declarations of the stored profile that the update removes, or whose kind changes
+/// (ADR-0047).
+///
+/// An override of a removed name has no meaning, and an override of the other kind does not count.
+/// The returned declaration is the old one: its kind decides whether a value of the name is a
+/// secret.
+fn removed_parameters(
+    current: &repo::Profile,
+    validated: &settings::ValidatedProfile,
+) -> Result<Vec<crate::parameters::ParameterDef>, ApiError> {
+    let before = crate::parameters::from_row(&current.parameters)?;
+    Ok(before
+        .into_iter()
+        .filter(|old| {
+            validated
+                .parameters
+                .iter()
+                .find(|new| new.name == old.name)
+                .is_none_or(|new| new.kind != old.kind)
+        })
+        .collect())
+}
+
+/// True when a host of the profile holds a secret value for one of the names (ADR-0047).
+///
+/// The caller holds the advisory lock, so a change of the host values waits for this transaction
+/// (FR-PF-11).
+async fn host_holds_secret(
+    tx: &mut restichub_db::TenantTx<'_>,
+    hosts: &[restichub_db::AgentId],
+    names: &[&str],
+) -> Result<bool, ApiError> {
+    if names.is_empty() {
+        return Ok(false);
+    }
+    for agent_id in hosts {
+        let values = restichub_db::parameters::agent_values(tx, *agent_id).await?;
+        if values.iter().any(|value| {
+            value.kind == restichub_db::ParameterKind::Secret
+                && names.contains(&value.name.as_str())
+        }) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// The plans of the profile that no longer compile for the facts of their agent (FR-SC-11).
@@ -519,12 +658,16 @@ async fn plan_compile_warnings(
     now: time::OffsetDateTime,
 ) -> Result<Vec<PlanWarning>, ApiError> {
     let compiler_profile = compiler_profile_from_row(profile)?;
+    let definitions = crate::parameters::from_row(&profile.parameters)?;
     let mut warnings = Vec::new();
     for plan in plans_repo::list_by_profile(tx, profile.id).await? {
         let Some(agent) = agents_repo::get(tx, plan.agent_id).await? else {
             continue;
         };
-        let Ok(target) = target_facts(&agent, now) else {
+        let plan_values = restichub_db::parameters::plan_values(tx, plan.id).await?;
+        let host_values = restichub_db::parameters::agent_values(tx, plan.agent_id).await?;
+        let parameters = crate::parameters::resolve(&definitions, &plan_values, &host_values);
+        let Ok(target) = target_facts_with(&agent, now, parameters) else {
             continue;
         };
         if let Err(error) = compile(
@@ -551,13 +694,22 @@ fn compile_error_to_api(error: CompileError) -> ApiError {
 }
 
 /// The field and the stable reason of a compiler rejection (AC-PF-02).
-fn compile_error_parts(error: &CompileError) -> (String, Reason) {
+pub(crate) fn compile_error_parts(error: &CompileError) -> (String, Reason) {
     match error {
         CompileError::UnknownVariable { field, .. }
         | CompileError::MissingLabel { field, .. }
         | CompileError::InvalidDate { field, .. }
         | CompileError::UnterminatedTemplate { field }
         | CompileError::InvalidValue { field } => (field.to_string(), Reason::InvalidFormat),
+        CompileError::MissingParameter { field, .. } => {
+            (field.to_string(), Reason::ParameterMissing)
+        }
+        CompileError::SecretParameterInTemplate { field, .. } => {
+            (field.to_string(), Reason::ParameterSecretInTemplate)
+        }
+        CompileError::ParameterNotAllowed { field, .. } => {
+            (field.to_string(), Reason::ParameterNotAllowed)
+        }
         CompileError::InvalidCron { .. } => ("cron".to_owned(), Reason::InvalidFormat),
         CompileError::NoPaths { .. } => ("paths".to_owned(), Reason::Empty),
         CompileError::ServerScriptsDisabled { field } => {

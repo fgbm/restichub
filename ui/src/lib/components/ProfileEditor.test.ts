@@ -654,3 +654,232 @@ describe('Profile editor tags and limits', () => {
 		expect(screen.getByLabelText(/^Maximum duration/)).toHaveValue(10);
 	});
 });
+
+describe('Profile editor parameters (FR-PF-09, FR-PF-11, ADR-0047)', () => {
+	const DECLARED = [
+		{
+			name: 'pg_dir',
+			kind: 'text',
+			required: true,
+			default_value: '/var/backups/pg',
+			description: 'Directory of the dumps',
+			hidden: false
+		},
+		{
+			name: 'pg_password',
+			kind: 'secret',
+			required: true,
+			default_value: null,
+			description: 'Backup password',
+			hidden: false
+		}
+	];
+
+	beforeEach(() => {
+		mocks.listProfiles.mockResolvedValue([
+			profile({
+				parameters: DECLARED,
+				paths: { all: ['{{param.pg_dir}}/dump'], windows: [], linux: [], macos: [] },
+				tags: ['{{param.pg_dir}}']
+			})
+		]);
+	});
+
+	it('ac_pf_09_locks_the_default_of_a_secret_and_names_the_visibility', async () => {
+		const u = user();
+		render(ProfileEditor, { profileId: 'p_1' });
+		await expand(u, /^Parameters/);
+
+		expect(screen.getByDisplayValue('pg_dir')).toBeInTheDocument();
+		expect(screen.getByDisplayValue('/var/backups/pg')).toBeInTheDocument();
+		expect(screen.getByDisplayValue('Not set')).toBeDisabled();
+		expect(
+			screen.getByText(/A text value in a path, an exclusion or a tag is visible/)
+		).toBeInTheDocument();
+	});
+
+	it('fr_pf_09_puts_the_description_in_a_row_across_the_table', async () => {
+		const u = user();
+		render(ProfileEditor, { profileId: 'p_1' });
+		await expand(u, /^Parameters/);
+
+		const description = screen.getByDisplayValue('Directory of the dumps');
+		const cell = description.closest('td') as HTMLTableCellElement;
+		expect(cell.getAttribute('colspan')).toBe('6');
+	});
+
+	it('fr_pf_10_shows_where_a_parameter_is_used', async () => {
+		const u = user();
+		render(ProfileEditor, { profileId: 'p_1' });
+		await expand(u, /^Parameters/);
+
+		expect(screen.getByText('1 path · 1 tag')).toBeInTheDocument();
+	});
+
+	it('fr_pf_09_adds_a_row_and_sends_the_declared_parameters', async () => {
+		const u = user();
+		render(ProfileEditor, { profileId: 'p_1' });
+		await expand(u, /^Parameters/);
+		await u.click(screen.getByRole('button', { name: 'Add parameter' }));
+
+		const names = screen.getAllByLabelText('Parameter');
+		await u.type(names[names.length - 1], 'pg_host');
+		await u.click(screen.getByRole('button', { name: 'Save' }));
+
+		await waitFor(() => expect(mocks.updateProfile).toHaveBeenCalledTimes(1));
+		expect(mocks.updateProfile.mock.calls[0][1].parameters).toEqual([
+			{
+				name: 'pg_dir',
+				kind: 'text',
+				required: true,
+				default_value: '/var/backups/pg',
+				description: 'Directory of the dumps'
+			},
+			{
+				name: 'pg_password',
+				kind: 'secret',
+				required: true,
+				default_value: undefined,
+				description: 'Backup password'
+			},
+			{
+				name: 'pg_host',
+				kind: 'text',
+				required: false,
+				default_value: undefined,
+				description: undefined
+			}
+		]);
+	});
+
+	it('fr_pf_09_removes_a_row_and_drops_the_default_of_a_secret', async () => {
+		const u = user();
+		render(ProfileEditor, { profileId: 'p_1' });
+		await expand(u, /^Parameters/);
+
+		const kinds = screen.getAllByLabelText('Type');
+		await u.selectOptions(kinds[0], 'secret');
+		expect(screen.getAllByDisplayValue('Not set').length).toBeGreaterThan(0);
+
+		await u.click(screen.getByRole('button', { name: 'Delete the parameter pg_password' }));
+		expect(screen.queryByDisplayValue('pg_password')).not.toBeInTheDocument();
+	});
+
+	it('fr_pf_10_a_field_names_an_undeclared_parameter_and_declares_it', async () => {
+		const u = user();
+		mocks.listProfiles.mockResolvedValue([
+			profile({
+				parameters: DECLARED,
+				paths: { all: ['/srv/{{param.pg_host}}'], windows: [], linux: [], macos: [] }
+			})
+		]);
+		render(ProfileEditor, { profileId: 'p_1' });
+
+		expect(await screen.findByText('The parameter pg_host is not declared.')).toBeInTheDocument();
+		await u.click(screen.getByRole('button', { name: 'Declare' }));
+
+		// The button adds a required text parameter with the name of the reference.
+		expect(screen.getByDisplayValue('pg_host')).toBeInTheDocument();
+		expect(screen.queryByText('The parameter pg_host is not declared.')).not.toBeInTheDocument();
+		await u.click(screen.getByRole('button', { name: 'Save' }));
+
+		await waitFor(() => expect(mocks.updateProfile).toHaveBeenCalledTimes(1));
+		expect(mocks.updateProfile.mock.calls[0][1].parameters).toContainEqual({
+			name: 'pg_host',
+			kind: 'text',
+			required: true,
+			default_value: undefined,
+			description: undefined
+		});
+	});
+
+	it('fr_pf_10_a_removed_parameter_names_the_plans_that_lose_its_value', async () => {
+		const u = user();
+		mocks.listPlans.mockResolvedValue([
+			{
+				id: 'pl_1',
+				name: 'pg-dump-daily',
+				profile_id: 'p_1',
+				agent_id: 'a_1',
+				parameter_values: [{ name: 'pg_dir', kind: 'text', value: '/srv/pg' }]
+			},
+			{
+				id: 'pl_2',
+				name: 'pg-dump-fast',
+				profile_id: 'p_2',
+				agent_id: 'a_1',
+				parameter_values: [{ name: 'pg_dir', kind: 'text', value: '/srv/pg' }]
+			}
+		]);
+		render(ProfileEditor, { profileId: 'p_1' });
+		await expand(u, /^Parameters/);
+		await u.click(screen.getByRole('button', { name: 'Delete the parameter pg_dir' }));
+		await u.click(screen.getByRole('button', { name: 'Save' }));
+
+		const dialog = await screen.findByRole('dialog');
+		expect(
+			within(dialog).getByText(
+				'Plans of the profile set a value for the parameter pg_dir. The save deletes their values for it.'
+			)
+		).toBeInTheDocument();
+		expect(within(dialog).getByRole('link', { name: 'pg-dump-daily' })).toHaveAttribute(
+			'href',
+			'/(app)/plans/pl_1'
+		);
+		// A plan of another profile keeps its value, so the dialog names it no more.
+		expect(within(dialog).queryByRole('link', { name: 'pg-dump-fast' })).toBeNull();
+		// Cancel keeps the form unchanged and sends nothing.
+		await u.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+		expect(mocks.updateProfile).not.toHaveBeenCalled();
+
+		await u.click(screen.getByRole('button', { name: 'Save' }));
+		const again = await screen.findByRole('dialog');
+		await u.click(within(again).getByRole('button', { name: 'Delete the values and save' }));
+		await waitFor(() => expect(mocks.updateProfile).toHaveBeenCalledTimes(1));
+		expect(mocks.updateProfile.mock.calls[0][1].parameters).toEqual([
+			{
+				name: 'pg_password',
+				kind: 'secret',
+				required: true,
+				default_value: undefined,
+				description: 'Backup password'
+			}
+		]);
+	});
+
+	it('ac_pf_07_names_the_plans_that_would_lose_the_value_and_keeps_save', async () => {
+		const u = user();
+		mocks.updateProfile.mockRejectedValue(
+			new ApiError({
+				status: 400,
+				code: 'parameter_missing_in_plans',
+				title: 'Bad Request',
+				field: 'parameters',
+				parameters: ['pg_password'],
+				blockers: {
+					items: [
+						{ kind: 'plan', id: 'pl_1', name: 'pg-dump-daily' },
+						{ kind: 'plan', id: 'pl_2', name: 'pg-dump-fast' }
+					],
+					total: 3
+				}
+			})
+		);
+		render(ProfileEditor, { profileId: 'p_1' });
+		const name = await screen.findByLabelText(/^Profile/);
+		await u.type(name, '-2');
+		await u.click(screen.getByRole('button', { name: 'Save' }));
+
+		expect(
+			await screen.findByText(
+				'The profile is not saved: plans would stay without the required parameter pg_password.'
+			)
+		).toBeInTheDocument();
+		expect(screen.getByRole('link', { name: 'pg-dump-daily' })).toHaveAttribute(
+			'href',
+			'/(app)/plans/pl_1'
+		);
+		expect(screen.getByText('and 1 more')).toBeInTheDocument();
+		expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
+	});
+});

@@ -292,6 +292,11 @@
 												<time datetime={field.time} title={field.title ?? fullTime(field.time)}
 													>{field.text}</time
 												>
+											{:else if field.icon}
+												<span class="item__chip" title={field.title}>
+													<Icon name={field.icon} size="xs" />
+													{field.text}
+												</span>
 											{:else}
 												<span class:item__mono={field.mono} title={field.title}>{field.text}</span>
 											{/if}
@@ -487,6 +492,23 @@
 	.item__mono {
 		font-family: var(--rh-font-mono);
 		font-size: 0.92em;
+	}
+
+	/* A neutral chip: it does not compete with the status pill of the item (ui-principles 2.7). */
+	.item__chip {
+		display: inline-flex;
+		align-items: center;
+		gap: 3px;
+		height: 16px;
+		padding: 0 var(--rh-space-1);
+		border: var(--rh-border-width) solid var(--rh-color-neutral-border);
+		border-radius: var(--rh-radius-pill);
+		background-color: var(--rh-color-neutral-bg);
+		color: var(--rh-color-neutral-text);
+		font-size: var(--rh-font-size-xs);
+		font-weight: var(--rh-font-weight-semibold);
+		line-height: 16px;
+		vertical-align: middle;
 	}
 
 	.item__meta time,

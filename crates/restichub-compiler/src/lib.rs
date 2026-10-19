@@ -8,6 +8,10 @@
 //! Template variables expand into values only (FR-PF-03). The argument builder
 //! in [`arg`] keeps every value out of an option position (ADR-0021). The agent
 //! uses that builder, so the command line of the preview agrees with the job.
+//!
+//! A profile parameter expands as `{{param.<name>}}` in the paths, the excludes, the exclude files
+//! and the tags, and it gives the value of a script variable (FR-PF-10, ADR-0047). A secret
+//! parameter never expands: the restic arguments are visible in the process list (FR-AG-06).
 
 pub mod arg;
 mod compile;
@@ -35,8 +39,8 @@ pub use script::{
     FailurePolicy, ScriptEnvRef, ScriptEnvValue, ScriptInterpreter, ScriptRef, ServerScripts,
     check_script,
 };
-pub use target::{Architecture, OperatingSystem, ResticVersion, TargetFacts};
-pub use template::TemplateError;
+pub use target::{Architecture, OperatingSystem, ParameterValue, ResticVersion, TargetFacts};
+pub use template::{TemplateError, parameter_names};
 
 /// Reports `incompatible` when the installed restic is older than the option
 /// needs (AC-AG-09).

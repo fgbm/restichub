@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{CompileError, FieldPath};
 use crate::profile::HookPhase;
-use crate::target::{OperatingSystem, TargetFacts};
+use crate::target::{OperatingSystem, ParameterValue, TargetFacts};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -68,13 +68,15 @@ pub enum FailurePolicy {
     Continue,
 }
 
-/// The value of one environment variable of a script (FR-HK-09).
+/// The value of one environment variable of a script (FR-HK-09, FR-PF-10).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ScriptEnvValue {
     Plain(String),
     /// The identifier of a secret. The control plane replaces it when it sends the job.
     Secret(String),
+    /// The name of a profile parameter. The compiler resolves it for the target (ADR-0047).
+    Parameter(String),
 }
 
 /// One environment variable of a script.
@@ -132,19 +134,42 @@ pub fn check_script(
     Ok(())
 }
 
-pub(crate) fn script_step(index: usize, script: &ScriptRef) -> Step {
-    let env = script
-        .env
-        .iter()
-        .map(|variable| ScriptEnv {
+/// The step of one script, with the value of each variable resolved for the target (FR-PF-10).
+///
+/// # Errors
+///
+/// Returns [`CompileError::MissingParameter`] when a variable names a parameter that no source
+/// gives a value.
+pub(crate) fn script_step(
+    index: usize,
+    script: &ScriptRef,
+    target: &TargetFacts,
+) -> Result<Step, CompileError> {
+    let mut env = Vec::with_capacity(script.env.len());
+    for (position, variable) in script.env.iter().enumerate() {
+        let value = match &variable.value {
+            ScriptEnvValue::Plain(value) => script_env::Value::StringValue(value.clone()),
+            ScriptEnvValue::Secret(id) => script_env::Value::SecretValue(id.clone()),
+            // A text parameter reaches the agent as a value that it masks, because a profile may
+            // hold a credential in a text value (FR-PF-12). A secret parameter keeps its reference,
+            // so the job builder resolves it and writes `secret_delivered` (ADR-0017).
+            ScriptEnvValue::Parameter(name) => match target.parameters.get(name) {
+                Some(ParameterValue::Text(value)) => script_env::Value::MaskedValue(value.clone()),
+                Some(ParameterValue::Secret(id)) => script_env::Value::SecretValue(id.clone()),
+                None => {
+                    return Err(CompileError::MissingParameter {
+                        field: FieldPath::new(format!("scripts[{index}].env[{position}].value")),
+                        name: name.clone(),
+                    });
+                }
+            },
+        };
+        env.push(ScriptEnv {
             name: variable.name.clone(),
-            value: Some(match &variable.value {
-                ScriptEnvValue::Plain(value) => script_env::Value::StringValue(value.clone()),
-                ScriptEnvValue::Secret(id) => script_env::Value::SecretValue(id.clone()),
-            }),
-        })
-        .collect();
-    Step {
+            value: Some(value),
+        });
+    }
+    Ok(Step {
         step_id: format!("script-{index}"),
         timeout_seconds: script.timeout_seconds,
         kind: Some(step::Kind::Script(ScriptStep {
@@ -158,7 +183,7 @@ pub(crate) fn script_step(index: usize, script: &ScriptRef) -> Step {
             },
             env,
         })),
-    }
+    })
 }
 
 fn phase_flag(phase: HookPhase) -> i32 {

@@ -42,6 +42,7 @@ pub mod log_store;
 pub mod maintenance;
 pub mod maintenance_scheduler;
 pub mod metrics;
+pub mod parameters;
 pub mod password;
 pub mod pki;
 pub mod plans;

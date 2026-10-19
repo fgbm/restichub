@@ -5,8 +5,8 @@
 	import Field from './Field.svelte';
 	import Icon from './Icon.svelte';
 	import RecordLine from './RecordLine.svelte';
-	import { matchesRecord, recordPartText } from './record';
-	import type { RecordOption } from './types';
+	import { matchesRecord } from './record';
+	import type { RecordOption, RecordPart } from './types';
 
 	let {
 		value = $bindable(''),
@@ -68,9 +68,12 @@
 		all.filter((option) => matchesRecord(option.label, option.description, query, option.search))
 	);
 	const first = $derived(selected?.description?.[0]);
-	const detail = $derived(
-		selected?.detail ?? (first !== undefined ? recordPartText(first) : undefined)
-	);
+	const detailParts = $derived.by<RecordPart[] | undefined>(() => {
+		const detail = selected?.detail;
+		if (Array.isArray(detail)) return detail;
+		if (typeof detail === 'string') return [detail];
+		return first !== undefined ? [first] : undefined;
+	});
 	const closedText = $derived(selected?.label ?? value);
 	const showNotSet = $derived(disabled && closedText === '');
 	const found = $derived(shown.filter((option) => option.value !== '' || allLabel === undefined));
@@ -80,9 +83,8 @@
 			: (countLabel?.(options.length) ?? '')
 	);
 	const describedBy = $derived(
-		[error ? errorId : help ? helpId : '', detail !== undefined ? detailId : '']
-			.filter(Boolean)
-			.join(' ') || undefined
+		[error ? errorId : help ? helpId : '', detailParts ? detailId : ''].filter(Boolean).join(' ') ||
+			undefined
 	);
 
 	function setOpen(next: boolean): void {
@@ -159,8 +161,9 @@
 					<span class="rh-record__dot rh-record__dot--{selected.dot}" aria-hidden="true"></span>
 				{/if}
 				<span class="rh-record__value" id={valueId}>{closedText}</span>
-				{#if detail !== undefined}
-					<span class="rh-record__detail" id={detailId}>· {detail}</span>
+				{#if detailParts}
+					<span class="rh-record__sep" aria-hidden="true">·</span>
+					<RecordLine parts={detailParts} id={detailId} />
 				{/if}
 			{/if}
 			<span class="rh-select-wrap__icon"><Icon name="chevron-down" /></span>
@@ -270,7 +273,8 @@
 	}
 
 	.rh-record__value,
-	.rh-record__detail {
+	.rh-record__sep,
+	:global(.rh-record__field) :global(.record-line) {
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
@@ -281,9 +285,15 @@
 		max-width: 60%;
 	}
 
-	.rh-record__detail {
-		min-width: 0;
+	.rh-record__sep {
+		flex: none;
 		color: var(--rh-color-text-muted);
+	}
+
+	/* The closed field is one row, so the parts must be items of its flex box and not of a wrapper
+	   that puts them below the label. The parts cut at the end and keep a chip in view. */
+	:global(.rh-record__field) :global(.record-line) {
+		flex: 0 1 auto;
 	}
 
 	.rh-record__placeholder {

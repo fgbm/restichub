@@ -1,14 +1,43 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
 	import { resolve } from '$app/paths';
-	import { ApiError, service } from '#lib/api/index.ts';
-	import type { Agent, Alert as AlertItem, Job, Plan, User } from '#lib/api/index.ts';
+	import { ApiError, fieldError, service } from '#lib/api/index.ts';
+	import type {
+		Agent,
+		Alert as AlertItem,
+		ApiProblem,
+		HostParameterRow,
+		Job,
+		ParameterValueDef,
+		Plan,
+		Secret,
+		User
+	} from '#lib/api/index.ts';
 	import { eventReader } from '#lib/events.ts';
 	import HostActions from './HostActions.svelte';
 	import ProfileSection from './ProfileSection.svelte';
+	import SecretDialog from './SecretDialog.svelte';
 	import { RecordPage, SummaryPanel } from './layout/index.ts';
-	import { Alert, Badge, Button, CopyField, DangerZone, ListView, StatusPill } from './ui/index.ts';
-	import type { DangerAction, KeyValueItem, StatusTone } from './ui/index.ts';
+	import {
+		Alert,
+		Badge,
+		Button,
+		CopyField,
+		DangerZone,
+		DataTable,
+		Icon,
+		ListView,
+		Select,
+		StatusPill,
+		TextField
+	} from './ui/index.ts';
+	import type {
+		DangerAction,
+		KeyValueItem,
+		SelectOption,
+		StatusTone,
+		TableColumn
+	} from './ui/index.ts';
 	import { isTimed, jobDuration, jobMeta, jobTitle } from '#lib/job-item.ts';
 	import { iconOf, jobState, pillOf } from '#lib/vocabulary.ts';
 	import { formatTime, relativeTime } from '#lib/format.ts';
@@ -17,15 +46,27 @@
 	import type { SummaryState } from '#lib/profile-form.ts';
 	import { osFamily } from '#lib/host-picker.ts';
 	import { enableCommand } from '#lib/scripts.ts';
+	import { kindLabel, parameterCount, plansRefusal } from '#lib/parameters.ts';
+	import type { PlansRefusal } from '#lib/parameters.ts';
+	import { plural } from '#lib/list-format.ts';
 	import { onEvent } from '#lib/stores/events.svelte.ts';
 	import { rememberSections } from '#lib/section-state.svelte.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
+	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 	import { keepUnchanged } from '#lib/unchanged.ts';
 
 	let { hostId }: { hostId: string } = $props();
 
-	type SectionKey = 'general' | 'link' | 'restore' | 'scripts' | 'jobs' | 'danger';
-	const SECTIONS: SectionKey[] = ['general', 'link', 'restore', 'scripts', 'jobs', 'danger'];
+	type SectionKey = 'general' | 'link' | 'restore' | 'parameters' | 'scripts' | 'jobs' | 'danger';
+	const SECTIONS: SectionKey[] = [
+		'general',
+		'link',
+		'restore',
+		'parameters',
+		'scripts',
+		'jobs',
+		'danger'
+	];
 	const RECENT_JOBS = 5;
 	// An agent rotates at two thirds of the lifetime, so a certificate that is close to its end
 	// means that the agent could not rotate (FR-ID-03).
@@ -38,6 +79,18 @@
 	let jobs = $state<Job[]>([]);
 	let plans = $state<Plan[]>([]);
 	let openAlerts = $state<AlertItem[]>([]);
+	let secrets = $state<Secret[]>([]);
+	let parameterRows = $state<HostParameterRow[]>([]);
+	/** The value that the person types, by parameter name. A secret holds the identifier of a secret. */
+	let parameterValues = $state<Record<string, { text: string; secretId: string }>>({});
+	/** The values that the person removed; the request leaves them out and the host forgets them. */
+	let removedParameters = $state<string[]>([]);
+	let parameterBaseline = $state('');
+	let parameterSaving = $state(false);
+	let parameterProblem = $state<ApiProblem | null>(null);
+	let parameterError = $state<string | null>(null);
+	let secretOpen = $state(false);
+	let secretParameter = $state<string | null>(null);
 	let hostActions: HostActions;
 	const open = rememberSections(
 		'host',
@@ -48,6 +101,9 @@
 	const jobsHref = $derived(`${resolve('/(app)/jobs')}?agent_id=${encodeURIComponent(hostId)}`);
 	const restoreHref = $derived(`${resolve('/(app)/restore')}?target=${encodeURIComponent(hostId)}`);
 	const canWrite = $derived(getSession()?.role === 'admin');
+	// An Operator sets the text values; only an Admin changes a secret value (ADR-0047).
+	const canSetText = $derived(['admin', 'operator'].includes(getSession()?.role ?? ''));
+	const canSetSecret = $derived(getSession()?.role === 'admin');
 	const active = $derived(agent?.status === 'active');
 	const olderDuplicate = $derived(
 		agent?.possible_duplicate_of?.is_older && active ? agent.possible_duplicate_of : null
@@ -59,14 +115,18 @@
 	}
 
 	async function read(): Promise<void> {
-		const [agentResult, userList, jobPage, planList, alertPage] = await Promise.allSettled([
-			service.getAgent(hostId),
-			// Only an Admin lists the users; the others see no name of the revoking user.
-			canWrite ? service.listUsers() : Promise.resolve([] as User[]),
-			service.listJobs({ agent_id: hostId, limit: RECENT_JOBS }),
-			service.listPlans(),
-			service.listAlerts({ status: 'open', limit: 200 })
-		]);
+		const [agentResult, userList, jobPage, planList, alertPage, parameterResult, secretList] =
+			await Promise.allSettled([
+				service.getAgent(hostId),
+				// Only an Admin lists the users; the others see no name of the revoking user.
+				canWrite ? service.listUsers() : Promise.resolve([] as User[]),
+				service.listJobs({ agent_id: hostId, limit: RECENT_JOBS }),
+				service.listPlans(),
+				service.listAlerts({ status: 'open', limit: 200 }),
+				service.getAgentParameters(hostId),
+				// The secret picker lists the credentials that a parameter may reference.
+				canSetText ? service.listSecrets() : Promise.resolve([] as Secret[])
+			]);
 		if (agentResult.status === 'rejected') throw agentResult.reason;
 		agent = agentResult.value;
 		users = userList.status === 'fulfilled' ? userList.value : [];
@@ -82,6 +142,8 @@
 			alertPage.status === 'fulfilled'
 				? alertPage.value.items.filter((item) => item.agent_id === hostId)
 				: [];
+		secrets = secretList.status === 'fulfilled' ? secretList.value : [];
+		if (parameterResult.status === 'fulfilled') applyParameters(parameterResult.value.parameters);
 	}
 
 	async function load(): Promise<void> {
@@ -105,6 +167,134 @@
 		} catch {
 			// The next event reads again; the visible state stays.
 		}
+	}
+
+	/* ------------------------------------------------------- parameter values */
+
+	function draftOf(rows: HostParameterRow[]): Record<string, { text: string; secretId: string }> {
+		return Object.fromEntries(
+			rows.map((row) => [
+				row.name,
+				{
+					text: row.value?.kind === 'text' ? (row.value.value ?? '') : '',
+					secretId: row.value?.kind === 'secret' ? (row.value.secret_id ?? '') : ''
+				}
+			])
+		);
+	}
+
+	// A refresh keeps the values that the person typed, so an event does not undo an edit.
+	function applyParameters(rows: HostParameterRow[]): void {
+		parameterRows = rows;
+		// The first read fills the draft; a later refresh keeps the values that the person typed.
+		if (parameterBaseline !== '' && parameterDirty) return;
+		parameterValues = draftOf(rows);
+		removedParameters = [];
+		parameterBaseline = JSON.stringify([parameterValues, removedParameters]);
+	}
+
+	function cancelParameters(): void {
+		parameterValues = draftOf(parameterRows);
+		removedParameters = [];
+		parameterBaseline = JSON.stringify([parameterValues, removedParameters]);
+	}
+
+	const parameterDirty = $derived(
+		JSON.stringify([parameterValues, removedParameters]) !== parameterBaseline
+	);
+	const shownParameters = $derived(
+		parameterRows.filter((row) => !removedParameters.includes(row.name))
+	);
+
+	function valueOf(row: HostParameterRow): { text: string; secretId: string } {
+		return parameterValues[row.name] ?? { text: '', secretId: '' };
+	}
+
+	// A text parameter without a value falls back to the default of the profile (FR-PF-10).
+	function hasValue(row: HostParameterRow): boolean {
+		if (row.kind === 'secret') return valueOf(row).secretId !== '';
+		return valueOf(row).text.trim() !== '' || Boolean(row.default_value);
+	}
+
+	const missingValues = $derived(shownParameters.filter((row) => row.required && !hasValue(row)));
+	const secretOptions = $derived<SelectOption[]>([
+		{ value: '', label: t('scripts.parameter.selectSecret') },
+		...secrets.map((secret) => ({ value: secret.id, label: secret.name }))
+	]);
+
+	function setText(row: HostParameterRow, text: string): void {
+		parameterValues[row.name] = { ...valueOf(row), text };
+	}
+
+	function setSecret(row: HostParameterRow, secretId: string): void {
+		parameterValues[row.name] = { ...valueOf(row), secretId };
+	}
+
+	/** The value that a Viewer reads: a mask, or the fallback of the profile without the text. */
+	function viewerText(row: HostParameterRow): string {
+		if (row.value) return '••••••';
+		if (row.hidden || row.default_value) return t('hp.param.fromDefaultOnly');
+		return '';
+	}
+
+	function removeValue(row: HostParameterRow): void {
+		removedParameters = [...removedParameters, row.name];
+	}
+
+	function openSecret(name: string): void {
+		secretParameter = name;
+		secretOpen = true;
+	}
+
+	function secretCreated(secret: Secret): void {
+		secrets = [...secrets, secret];
+		if (secretParameter) {
+			parameterValues[secretParameter] = {
+				...valueOf({ name: secretParameter } as HostParameterRow),
+				secretId: secret.id
+			};
+		}
+		pushToast('success', t('scripts.secret.created'));
+	}
+
+	async function saveParameters(): Promise<void> {
+		parameterSaving = true;
+		parameterProblem = null;
+		parameterError = null;
+		try {
+			const body: ParameterValueDef[] = [];
+			for (const row of shownParameters) {
+				const value = valueOf(row);
+				if (row.kind === 'secret') {
+					if (value.secretId !== '') {
+						body.push({ name: row.name, kind: 'secret', secret_id: value.secretId });
+					}
+				} else if (value.text.trim() !== '') {
+					body.push({ name: row.name, kind: 'text', value: value.text });
+				}
+			}
+			const response = await service.replaceAgentParameters(hostId, body);
+			applyParameters(response.parameters);
+			pushToast('success', t('hp.param.saved'));
+		} catch (problem) {
+			if (problem && typeof problem === 'object' && 'problem' in problem) {
+				parameterProblem = (problem as { problem: ApiProblem }).problem;
+			} else {
+				parameterError = messageOf(problem);
+			}
+		} finally {
+			parameterSaving = false;
+		}
+	}
+
+	const refusedValues = $derived<PlansRefusal | null>(plansRefusal(parameterProblem));
+
+	function parameterFieldError(row: HostParameterRow): string | undefined {
+		const index = shownParameters.findIndex((item) => item.name === row.name);
+		return (
+			fieldError(parameterProblem, `parameters[${index}].value`) ??
+			fieldError(parameterProblem, `parameters[${index}].secret_id`)
+		);
 	}
 
 	function scrollToHash(): void {
@@ -160,6 +350,14 @@
 		return t(`hosts.serverScripts.${item.server_scripts}` as MessageKey);
 	}
 
+	const parameterSummary = $derived.by<{ text: string; state: SummaryState }>(() => {
+		if (parameterRows.length === 0) return { text: t('hp.param.none'), state: 'off' };
+		if (missingValues.length > 0) {
+			return { text: plural('hp.param.missing', missingValues.length), state: 'warn' };
+		}
+		return { text: parameterCount(parameterRows.length), state: 'on' };
+	});
+
 	const summaries = $derived.by<Record<SectionKey, { text: string; state: SummaryState }>>(() => {
 		const item = agent;
 		if (!item) {
@@ -168,6 +366,7 @@
 				general: blank,
 				link: blank,
 				restore: blank,
+				parameters: blank,
 				scripts: blank,
 				jobs: blank,
 				danger: blank
@@ -188,6 +387,7 @@
 				}),
 				state: certExpired || certWarn || item.superseded_certificate_used_at ? 'warn' : 'on'
 			},
+			parameters: parameterSummary,
 			restore: hasRoots
 				? {
 						text:
@@ -292,6 +492,71 @@
 {#snippet alertsValue()}
 	{openAlerts.length}
 	<a class="link" href={resolve('/(app)/alerts')}>{t('hp.state.alertsLink')}</a>
+{/snippet}
+
+{#snippet parameterNameCell(row: HostParameterRow)}
+	<span class="mono">{row.name}</span>
+	{#if row.required}
+		<span class="param-note">· {t('parameters.requiredShort')}</span>
+	{/if}
+{/snippet}
+
+{#snippet parameterKindCell(row: HostParameterRow)}
+	<span class="kind">
+		{#if row.kind === 'secret'}<Icon name="lock" size="xs" />{/if}
+		{kindLabel(row.kind)}
+	</span>
+{/snippet}
+
+{#snippet parameterValueCell(row: HostParameterRow)}
+	{#if row.kind === 'secret'}
+		{#if canSetSecret}
+			<div class="value-row">
+				<Select
+					value={valueOf(row).secretId}
+					options={secretOptions}
+					aria-label={t('hp.param.valueOf', { name: row.name })}
+					onchange={(event) => setSecret(row, event.currentTarget.value)}
+					error={parameterFieldError(row)}
+				/>
+				<Button variant="ghost" size="sm" icon="plus" onclick={() => openSecret(row.name)}>
+					{t('scripts.secret.new')}
+				</Button>
+			</div>
+		{:else}
+			<TextField
+				disabled
+				value={row.value?.secret_name ?? ''}
+				aria-label={t('hp.param.valueOf', { name: row.name })}
+				title={t('hp.param.secretLocked')}
+			/>
+		{/if}
+	{:else if !canSetText}
+		<TextField
+			disabled
+			value={viewerText(row)}
+			aria-label={t('hp.param.valueOf', { name: row.name })}
+		/>
+	{:else}
+		<TextField
+			value={valueOf(row).text}
+			oninput={(event) => setText(row, event.currentTarget.value)}
+			mono
+			aria-label={t('hp.param.valueOf', { name: row.name })}
+			placeholder={row.default_value
+				? t('hp.param.fromDefault', { value: row.default_value })
+				: undefined}
+			error={parameterFieldError(row)}
+		/>
+	{/if}
+{/snippet}
+
+{#snippet parameterNeededCell(row: HostParameterRow)}
+	{#if row.unused}
+		<span class="muted">{t('hp.param.unused')}</span>
+	{:else}
+		<span class="nowrap">{row.needed_by.join(', ')}</span>
+	{/if}
 {/snippet}
 
 <RecordPage
@@ -467,6 +732,118 @@
 			{/if}
 		</ProfileSection>
 
+		<div id="parameters" class="anchor">
+			<ProfileSection
+				id="parameters"
+				title={t('hp.section.parameters')}
+				summary={summaries.parameters.text}
+				state={summaries.parameters.state}
+				bind:open={open.parameters}
+			>
+				<p class="lead">{t('hp.param.hint')}</p>
+				{#if !canSetText}
+					<Alert variant="inline" tone="info" icon="eye-off" title={t('hp.param.viewer')} />
+				{:else if !canSetSecret}
+					<Alert variant="inline" tone="info" icon="lock" title={t('hp.param.secretLocked')} />
+				{/if}
+				{#if refusedValues}
+					<Alert
+						tone="danger"
+						title={t('hp.param.refusedTitle', { names: refusedValues.names.join(', ') })}
+					>
+						<ul class="blockers">
+							{#each refusedValues.plans.links as link (link.href + link.label)}
+								<li>
+									<span class="blockers__kind">{link.kind}</span>
+									<!-- The refusal resolves the address of the plan with `resolve()`. -->
+									<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+									<a href={link.href}>{link.label}</a>
+								</li>
+							{/each}
+							{#if refusedValues.plans.more > 0}
+								<li class="blockers__more">
+									{t('deleteBlocked.more', { n: refusedValues.plans.more })}
+								</li>
+							{/if}
+						</ul>
+					</Alert>
+				{/if}
+				{#if parameterError}
+					<Alert tone="danger" title={parameterError} />
+				{/if}
+				{#if parameterRows.length === 0}
+					<p class="muted">{t('hp.param.none')}</p>
+				{:else}
+					<DataTable
+						paginated={false}
+						rowKey={(row) => row.name}
+						rows={shownParameters}
+						columns={[
+							{
+								key: 'name',
+								header: t('parameters.name'),
+								sortable: false,
+								nowrap: true,
+								render: parameterNameCell
+							},
+							{
+								key: 'kind',
+								header: t('parameters.kind'),
+								sortable: false,
+								nowrap: true,
+								render: parameterKindCell
+							},
+							{
+								key: 'value',
+								header: t('hp.param.value'),
+								sortable: false,
+								render: parameterValueCell
+							},
+							{
+								key: 'needed',
+								header: t('hp.param.neededBy'),
+								sortable: false,
+								render: parameterNeededCell
+							}
+						] satisfies TableColumn<HostParameterRow>[]}
+						actions={(row) =>
+							canSetText && row.unused
+								? [
+										{
+											id: 'remove',
+											label: t('hp.param.remove', { name: row.name }),
+											hint: t('hp.param.remove', { name: row.name }),
+											icon: 'trash',
+											danger: true,
+											onSelect: () => removeValue(row)
+										}
+									]
+								: []}
+					/>
+					{#if canSetText}
+						<div class="param-actions">
+							{#if parameterDirty}
+								<span class="muted">{t('hp.param.dirty')}</span>
+							{/if}
+							<span class="spacer"></span>
+							{#if parameterDirty}
+								<Button onclick={cancelParameters}>{t('common.cancel')}</Button>
+							{/if}
+							<Button
+								variant="primary"
+								loading={parameterSaving}
+								disabled={!parameterDirty}
+								title={parameterDirty ? undefined : t('record.save.clean')}
+								onclick={() => void saveParameters()}
+							>
+								{t('hp.param.save')}
+							</Button>
+						</div>
+					{/if}
+				{/if}
+			</ProfileSection>
+		</div>
+
 		<div id="scripts" class="anchor">
 			<ProfileSection
 				id="scripts"
@@ -564,6 +941,8 @@
 
 <HostActions bind:this={hostActions} onchanged={read} />
 
+<SecretDialog bind:open={secretOpen} oncreated={secretCreated} />
+
 <style>
 	.banner {
 		margin-bottom: var(--rh-space-4);
@@ -660,6 +1039,59 @@
 
 	.rows li:first-child {
 		border-top: 0;
+	}
+
+	.kind {
+		display: inline-flex;
+		align-items: center;
+		gap: var(--rh-space-1);
+		color: var(--rh-color-text-muted);
+	}
+
+	.param-note {
+		margin-inline-start: var(--rh-space-1);
+		color: var(--rh-color-text-muted);
+		font-size: var(--rh-font-size-xs);
+	}
+
+	.value-row {
+		display: flex;
+		align-items: center;
+		gap: var(--rh-space-2);
+	}
+
+	.value-row :global(.rh-field) {
+		flex: 1;
+		min-width: 0;
+	}
+
+	.param-actions {
+		display: flex;
+		align-items: center;
+		gap: var(--rh-space-2);
+	}
+
+	.param-actions .spacer {
+		flex: 1;
+	}
+
+	.blockers {
+		display: flex;
+		flex-direction: column;
+		gap: var(--rh-space-1);
+		margin: var(--rh-space-2) 0 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.blockers__kind {
+		margin-inline-end: var(--rh-space-2);
+		color: var(--rh-color-text-muted);
+	}
+
+	.blockers__more {
+		color: var(--rh-color-text-muted);
+		font-size: var(--rh-font-size-sm);
 	}
 
 	.rows__main {

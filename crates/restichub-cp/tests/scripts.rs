@@ -939,3 +939,84 @@ async fn ac_hk_11_the_log_api_returns_the_lines_of_one_step() {
     assert_eq!(lines(&second), ["dumped"]);
     env.db.cleanup().await;
 }
+
+/// AC-PF-10: a secret parameter reaches the agent as a secret value, and a text parameter as a value
+/// that the agent masks (FR-PF-10, FR-PF-12).
+#[tokio::test]
+async fn ac_pf_10_a_parameter_of_a_script_variable_reaches_the_agent() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let mut agent = env
+        .connect_agent_trusting("host-params", true, bash())
+        .await;
+    let repository = env
+        .create_repository(agent.id, "pw-of-the-repository")
+        .await;
+    let secret = create_secret(&env, "db.password", "hook_secret").await;
+    let scripts = json!([script(
+        "dump",
+        "before",
+        json!([
+            {"name": "PGDIR", "kind": "parameter", "value": "pg_dir"},
+            {"name": "PGPASSWORD", "kind": "parameter", "value": "pg_password"},
+        ])
+    )]);
+    let profile = env
+        .create_profile(json!({
+            "paths": {"all": ["/data/{{param.pg_dir}}"]},
+            "parameters": [
+                {"name": "pg_dir", "kind": "text", "required": true},
+                {"name": "pg_password", "kind": "secret", "required": true},
+            ],
+            "scripts": scripts,
+        }))
+        .await;
+    let (status, body) = env
+        .call(
+            &env.admin,
+            "PUT",
+            &format!("/api/v1/agents/{}/parameters", agent.id),
+            Some(json!({"parameters": [
+                {"name": "pg_dir", "kind": "text", "value": "/srv/pg"},
+                {"name": "pg_password", "kind": "secret", "secret_id": secret},
+            ]})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let plan = env.create_plan(profile, agent.id, repository).await;
+    env.run_plan(plan).await;
+    env.pass().await;
+    let signed = agent.job().await;
+    let job = env.verify(&signed, &agent).await;
+
+    let Some(step::Kind::Script(dump)) = &job.steps[0].kind else {
+        panic!("the first step is a script");
+    };
+    let value = |name: &str| {
+        dump.env
+            .iter()
+            .find(|variable| variable.name == name)
+            .and_then(|variable| variable.value.clone())
+    };
+    // The secret value comes from the hook secret of the tenant, and the audit records it.
+    assert_eq!(
+        value("PGPASSWORD"),
+        Some(script_env::Value::SecretValue(CANARY.to_owned()))
+    );
+    // A text value keeps the mask marker, so the agent hides it in the step log.
+    assert_eq!(
+        value("PGDIR"),
+        Some(script_env::Value::MaskedValue("/srv/pg".to_owned()))
+    );
+    let Some(step::Kind::Backup(backup)) = &job.steps[1].kind else {
+        panic!("the second step is the backup");
+    };
+    assert_eq!(backup.paths, vec!["/data//srv/pg".to_owned()]);
+    assert_eq!(
+        audit_rows(&env, "secret_delivered").await.len(),
+        2,
+        "the password of the repository and the parameter secret"
+    );
+}

@@ -149,6 +149,37 @@ describe('summarize', () => {
 		expect(sums.scripts.state).toBe('off');
 	});
 
+	it('fr_pf_09_sums_up_the_declared_parameters', () => {
+		const draft = emptyDraft();
+		expect(summarize(draft, none).parameters).toEqual({
+			state: 'off',
+			text: 'No parameters'
+		});
+		draft.parameters = [
+			{ key: 1, name: 'pg_dir', kind: 'text', required: true, defaultValue: '', description: '' },
+			{
+				key: 2,
+				name: 'app_name',
+				kind: 'text',
+				required: false,
+				defaultValue: '',
+				description: ''
+			},
+			{
+				key: 3,
+				name: 'pg_password',
+				kind: 'secret',
+				required: true,
+				defaultValue: '',
+				description: ''
+			}
+		];
+		expect(summarize(draft, none).parameters).toEqual({
+			state: 'on',
+			text: '3 parameters · 2 texts · 1 secret'
+		});
+	});
+
 	it('warns when retention is on without a rule', () => {
 		const draft = withRules({});
 		expect(summarize(draft, none).retention).toEqual({
@@ -159,7 +190,7 @@ describe('summarize', () => {
 
 	it('counts the sections that are on', () => {
 		const draft = draftFromProfile(stored());
-		expect(enabledCount(summarize(draft, none))).toEqual({ on: 6, total: 9 });
+		expect(enabledCount(summarize(draft, none))).toEqual({ on: 6, total: 10 });
 	});
 });
 
@@ -223,6 +254,63 @@ describe('settingsOf', () => {
 		expect(
 			settingsOf(draftFromProfile(existing), { canEditScripts: true, existing }).retention
 		).toEqual(retention);
+	});
+
+	it('fr_pf_09_sends_the_declared_parameters_and_leaves_the_empty_row_out', () => {
+		const draft = draftFromProfile(
+			stored({
+				parameters: [
+					{
+						name: 'pg_dir',
+						kind: 'text',
+						required: true,
+						default_value: '/var/backups/pg',
+						description: ' Directory of the dumps ',
+						hidden: false
+					},
+					{
+						name: 'pg_password',
+						kind: 'secret',
+						required: true,
+						default_value: null,
+						description: null,
+						hidden: false
+					}
+				]
+			})
+		);
+		draft.parameters = [...draft.parameters, { ...draft.parameters[0], key: 999, name: '' }];
+		expect(settingsOf(draft, context).parameters).toEqual([
+			{
+				name: 'pg_dir',
+				kind: 'text',
+				required: true,
+				default_value: '/var/backups/pg',
+				description: 'Directory of the dumps'
+			},
+			{
+				name: 'pg_password',
+				kind: 'secret',
+				required: true,
+				default_value: undefined,
+				description: undefined
+			}
+		]);
+	});
+
+	it('fr_pf_09_drops_the_default_of_a_parameter_that_became_a_secret', () => {
+		const draft = emptyDraft();
+		draft.parameters = [
+			{
+				key: 1,
+				name: 'pg_password',
+				kind: 'secret',
+				required: true,
+				defaultValue: 'x',
+				description: ''
+			}
+		];
+		expect(settingsOf(draft, context).parameters[0].default_value).toBeUndefined();
 	});
 
 	it('fills a new draft with the server defaults and shows the stored limits', () => {

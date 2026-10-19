@@ -40,6 +40,12 @@ pub enum CompileError {
     InvalidDate { field: FieldPath, format: String },
     #[error("unterminated template in {field}")]
     UnterminatedTemplate { field: FieldPath },
+    #[error("the parameter {name:?} has no value for {field}")]
+    MissingParameter { field: FieldPath, name: String },
+    #[error("the parameter {name:?} is a secret and cannot be expanded in {field}")]
+    SecretParameterInTemplate { field: FieldPath, name: String },
+    #[error("the parameter {name:?} cannot be used in {field}")]
+    ParameterNotAllowed { field: FieldPath, name: String },
     #[error("invalid value in {field}")]
     InvalidValue { field: FieldPath },
     #[error("invalid cron expression {expression:?}")]
@@ -172,6 +178,9 @@ impl CompileError {
             | Self::MissingLabel { field, .. }
             | Self::InvalidDate { field, .. }
             | Self::UnterminatedTemplate { field }
+            | Self::MissingParameter { field, .. }
+            | Self::SecretParameterInTemplate { field, .. }
+            | Self::ParameterNotAllowed { field, .. }
             | Self::InvalidValue { field }
             | Self::ServerScriptsDisabled { field }
             | Self::InterpreterUnavailable { field, .. }

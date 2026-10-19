@@ -329,7 +329,9 @@ describe('Platform user page', () => {
 		await screen.findByRole('heading', { level: 1, name: 'Ivan Egorkin' });
 		// The sentence of the platform user list is the subtitle of the record.
 		expect(
-			screen.getByText('Installation accounts and their memberships in the organizations.')
+			screen.getByText(
+				'A platform user is an installation account with memberships in organizations.'
+			)
 		).toBeInTheDocument();
 		const header = document.querySelector<HTMLElement>('.page-header__actions') as HTMLElement;
 		expect(within(header).getByRole('button', { name: 'Reset password' })).toBeInTheDocument();

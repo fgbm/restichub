@@ -137,6 +137,8 @@
 
 	const USAGE_COUNTS: Record<SecretUsageKind, string> = {
 		repository: 'secrets.count.repository',
+		host: 'secrets.count.host',
+		plan: 'secrets.count.plan',
 		profile: 'secrets.count.profile',
 		channel: 'secrets.count.channel',
 		job_template: 'secrets.count.jobTemplate'

@@ -12,6 +12,7 @@ mod auth;
 mod enrollment_tokens;
 mod job_logs;
 mod migrations;
+mod parameters;
 mod plans;
 mod profiles;
 mod repositories;
@@ -71,7 +72,7 @@ const SECURITY_DEFINER_ALLOWED: [&str; 35] = [
     "enroll_consume_token",
 ];
 
-const TENANT_TABLES: [&str; 26] = [
+const TENANT_TABLES: [&str; 28] = [
     "users",
     "memberships",
     "sessions",
@@ -86,6 +87,8 @@ const TENANT_TABLES: [&str; 26] = [
     "jobs",
     "profiles",
     "plans",
+    "agent_parameter_values",
+    "plan_parameter_values",
     "maintenance_schedules",
     "job_steps",
     "job_logs",
@@ -346,6 +349,22 @@ async fn seed_tenant(db: &Database, tenant: TenantId) -> Result<Seed, Box<dyn st
     .bind(crate::PlanId::new())
     .bind(tenant)
     .bind(repository_id)
+    .execute(tx.as_conn())
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO agent_parameter_values (tenant_id, agent_id, name, kind, value) \
+         VALUES ($1, (SELECT id FROM agents WHERE tenant_id = $1), 'pg_dir', 'text', '/srv/pg')",
+    )
+    .bind(tenant)
+    .execute(tx.as_conn())
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO plan_parameter_values (tenant_id, plan_id, name, kind, value) \
+         VALUES ($1, (SELECT id FROM plans WHERE tenant_id = $1), 'pg_dir', 'text', '/srv/pg')",
+    )
+    .bind(tenant)
     .execute(tx.as_conn())
     .await?;
 

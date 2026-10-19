@@ -270,7 +270,9 @@ fn check_script(job: &Job, script: &ScriptStep) -> Result<(), Rejection> {
             Some(script_env::Value::StringValue(value)) => {
                 value.len() <= MAX_SCRIPT_ENV_VALUE_BYTES && !has_forbidden(value)
             }
-            Some(script_env::Value::SecretValue(value)) => {
+            // A masked value is a text parameter of the profile. It can hold any character that
+            // the profile accepts, so only the length and the NUL rule apply (ADR-0047).
+            Some(script_env::Value::SecretValue(value) | script_env::Value::MaskedValue(value)) => {
                 value.len() <= MAX_SCRIPT_ENV_VALUE_BYTES && !has_nul(value)
             }
             None => false,

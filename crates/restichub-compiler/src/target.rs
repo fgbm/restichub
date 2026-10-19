@@ -82,6 +82,18 @@ impl fmt::Display for ResticVersion {
     }
 }
 
+/// A value of a profile parameter for one plan (FR-PF-10, ADR-0047).
+///
+/// The control plane resolves the value in the order plan, host, default before it compiles, so the
+/// compiler never reads a database row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ParameterValue {
+    /// A value that the `{{param.<name>}}` variable expands.
+    Text(String),
+    /// The identifier of a secret of the purpose `hook_secret`. A template never expands it.
+    Secret(String),
+}
+
 /// Facts that the compiler uses for one target agent (FR-PF-03).
 #[derive(Debug, Clone)]
 pub struct TargetFacts {
@@ -95,6 +107,9 @@ pub struct TargetFacts {
     pub arch: Architecture,
     /// Key-value pairs for the `{{agent.label.<key>}}` variables.
     pub labels: BTreeMap<String, String>,
+    /// The resolved value of each parameter that a template or a script variable names
+    /// (FR-PF-10). A name that no source gives is absent.
+    pub parameters: BTreeMap<String, ParameterValue>,
     pub restic_version: ResticVersion,
     /// Plan-local time for the date variables.
     pub now: OffsetDateTime,

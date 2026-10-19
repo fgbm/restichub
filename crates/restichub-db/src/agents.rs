@@ -208,26 +208,6 @@ pub async fn get_for_update(tx: &mut TenantTx<'_>, id: AgentId) -> Result<Option
     Ok(row.map(Agent::from))
 }
 
-/// Reads one agent with the lock that a new foreign key to the row takes anyway. A caller takes it
-/// before its other locks, so the lock order matches a replace (agent, then plans and repositories).
-pub async fn get_for_key_share(
-    tx: &mut TenantTx<'_>,
-    id: AgentId,
-) -> Result<Option<Agent>, DbError> {
-    let row = sqlx::query_as::<_, AgentRow>(concat!(
-        "SELECT ",
-        agent_columns!(),
-        " FROM agents a ",
-        duplicate_join!(),
-        " WHERE a.id = $1 FOR KEY SHARE OF a"
-    ))
-    .bind(id)
-    .fetch_optional(tx.as_conn())
-    .await
-    .map_err(DbError::Query)?;
-    Ok(row.map(Agent::from))
-}
-
 /// Keeps a rotated certificate as pending. A later request replaces an earlier pending one
 /// (ADR-0026).
 pub async fn set_pending_certificate(
@@ -414,6 +394,9 @@ pub struct Replaced {
     pub plans: u64,
     pub repositories: u64,
     pub queued_jobs: u64,
+    /// The values that came from the old record, and the ones that the successor already held
+    /// (FR-PF-10, FR-PF-12).
+    pub parameter_values: crate::parameters::MovedValues,
 }
 
 /// How a replacement ended: done, or refused for a reason the caller maps to a status.
@@ -427,8 +410,8 @@ pub enum ReplaceOutcome {
     OldRecentlyOnline,
 }
 
-/// Moves the plans, the maintenance host references, the queued jobs and the labels of the old
-/// agent to the new one, then revokes the old agent (FR-ID-11).
+/// Moves the plans, the maintenance host references, the queued jobs, the labels and the parameter
+/// values of the old agent to the new one, then revokes the old agent (FR-ID-11, FR-PF-10).
 ///
 /// The caller runs it in one transaction. The pair qualifies when both rows are active, differ,
 /// carry the same machine hash, and the new row was created after the old row. The old row must have
@@ -442,6 +425,16 @@ pub async fn replace(
     now: OffsetDateTime,
     online_window: time::Duration,
 ) -> Result<ReplaceOutcome, DbError> {
+    // The replace writes the maintenance agent of these repository rows. The restore path and the
+    // queue take a repository row before an agent row, so this order cannot deadlock with them
+    // (FR-ID-11, ADR-0046).
+    sqlx::query(
+        "SELECT 1 FROM repositories WHERE maintenance_agent_id = $1 ORDER BY id FOR UPDATE",
+    )
+    .bind(old)
+    .fetch_all(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
     let paired: Option<(Option<OffsetDateTime>,)> = sqlx::query_as(
         "SELECT o.last_seen_at FROM agents n JOIN agents o ON o.tenant_id = n.tenant_id \
          WHERE n.id = $1 AND o.id = $2 AND n.id <> o.id \
@@ -497,11 +490,13 @@ pub async fn replace(
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
+    let moved_values = crate::parameters::move_agent_values(tx, old, new).await?;
     revoke(tx, old, actor, now).await?;
     Ok(ReplaceOutcome::Replaced(Replaced {
         plans,
         repositories,
         queued_jobs,
+        parameter_values: moved_values,
     }))
 }
 

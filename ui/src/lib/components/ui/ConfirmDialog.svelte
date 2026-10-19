@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { t } from '#lib/i18n/index.ts';
-	import type { BlockedView } from '#lib/delete-check.ts';
+	import type { BlockedLink, BlockedView } from '#lib/delete-check.ts';
 	import Alert from './Alert.svelte';
 	import Button from './Button.svelte';
 	import Dialog from './Dialog.svelte';
@@ -16,6 +16,8 @@
 		icon,
 		loading = false,
 		blocked = null,
+		links = [],
+		more = 0,
 		checking = false,
 		onConfirm
 	}: {
@@ -30,32 +32,42 @@
 		loading?: boolean;
 		/** The reason the action is refused. The confirm button stays disabled. */
 		blocked?: BlockedView | null;
+		/** The records that the confirmation names, for example the plans that lose a value. */
+		links?: BlockedLink[];
+		/** The count of the records that `links` leaves out. */
+		more?: number;
 		/** The dialog waits for the usage check, so the button stays disabled. */
 		checking?: boolean;
 		onConfirm?: () => void;
 	} = $props();
 </script>
 
+{#snippet records(list: BlockedLink[], rest: number)}
+	{#if list.length > 0}
+		<ul class="blockers">
+			{#each list as link (link.href + link.label)}
+				<li>
+					<span class="blockers__kind">{link.kind}</span>
+					<!-- The caller resolves the address with `resolve()`. -->
+					<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+					<a href={link.href}>{link.label}</a>
+				</li>
+			{/each}
+			{#if rest > 0}
+				<li class="blockers__more">{t('deleteBlocked.more', { n: rest })}</li>
+			{/if}
+		</ul>
+	{/if}
+{/snippet}
+
 <Dialog bind:open {title} {icon} description={message} size="sm" closable={false}>
 	{#if checking}
 		<p class="hint">{t('deleteBlocked.checking')}</p>
 	{:else if blocked}
 		<Alert tone="danger" title={blocked.reason} />
-		{#if blocked.links.length > 0}
-			<ul class="blockers">
-				{#each blocked.links as link (link.href + link.label)}
-					<li>
-						<span class="blockers__kind">{link.kind}</span>
-						<!-- The caller resolves the address with `resolve()`. -->
-						<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
-						<a href={link.href}>{link.label}</a>
-					</li>
-				{/each}
-				{#if blocked.more > 0}
-					<li class="blockers__more">{t('deleteBlocked.more', { n: blocked.more })}</li>
-				{/if}
-			</ul>
-		{/if}
+		{@render records(blocked.links, blocked.more)}
+	{:else}
+		{@render records(links, more)}
 	{/if}
 	{#snippet footer()}
 		<Button variant="secondary" onclick={() => (open = false)}>{cancelLabel}</Button>

@@ -61,6 +61,27 @@ export interface paths {
         patch: operations["rename_agent"];
         trace?: never;
     };
+    "/api/v1/agents/{id}/parameters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Reads the parameter table of a host (FR-PF-10, FR-PF-12). */
+        get: operations["get_parameters"];
+        /**
+         * Replaces the parameter values of a host.
+         * @description The control plane refuses a change that leaves a plan without a required parameter (`parameter_missing_in_plans`).
+         */
+        put: operations["replace_parameters"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/agents/{id}/reenroll": {
         parameters: {
             query?: never;
@@ -1011,7 +1032,7 @@ export interface paths {
         put?: never;
         /**
          * Previews a profile draft for one target agent.
-         * @description The steps and the command lines agree with the command that the agent runs. The draft is not stored. Secrets are masked (AC-PF-01). A caller without the profile write right receives the preview of the stored profile that `profile_id` names, and its draft fields are ignored. A caller without the script write right receives the stored scripts and its draft scripts are ignored.
+         * @description The steps and the command lines agree with the command that the agent runs. The draft is not stored. Secrets are masked (AC-PF-01). A caller without the profile write right receives the preview of the stored profile that `profile_id` names, and its draft fields are ignored. A caller without the script write right receives the stored scripts and its draft scripts are ignored. A caller without the script read right receives the parameter values of the requested host only when a plan of the stored profile runs there.
          */
         post: operations["preview_profile"];
         delete?: never;
@@ -1810,6 +1831,7 @@ export interface components {
          * @example profile_hooks_removed
          * @example job_rejected
          * @example agent_message_refused
+         * @example agent_parameters_update
          */
         AuditAction: string;
         AuditItem: {
@@ -1945,7 +1967,7 @@ export interface components {
             name: string;
         };
         /** @enum {string} */
-        BlockerKind: "repository" | "channel" | "profile" | "job_template" | "plan" | "job";
+        BlockerKind: "repository" | "channel" | "profile" | "job_template" | "plan" | "job" | "host";
         /** @description At most `restichub_db::referrers::REFERRER_LIMIT` records, and the count of all of them. */
         Blockers: {
             items: components["schemas"]["Blocker"][];
@@ -2083,6 +2105,8 @@ export interface components {
             missed_run_policy: components["schemas"]["MissedRunPolicy"];
             /** @description Free text of 1 to 100 characters. Unique in the tenant, ignoring the letter case. Holds no control or format character. */
             name: string;
+            /** @description The values that the plan sets instead of the values of the host (FR-PF-10). At most 64. */
+            parameter_values?: components["schemas"]["ParameterValueDef"][];
             profile_id: string;
             /** @description The repository that the plan backs up into (ADR-0047). */
             repository_id: string;
@@ -2103,6 +2127,8 @@ export interface components {
             /** @description Free text of 1 to 100 characters. Unique in the tenant, ignoring the letter case. Holds no control or format character. */
             name: string;
             options?: components["schemas"]["BackupOptions"];
+            /** @description What the profile offers to its hosts (FR-PF-09). At most 64. */
+            parameters?: components["schemas"]["ParameterDefRequest"][];
             paths?: components["schemas"]["ProfilePaths"];
             retention?: components["schemas"]["Retention"] | null;
             /**
@@ -2355,7 +2381,7 @@ export interface components {
             used_by_agent_id?: string | null;
         };
         /** @enum {string} */
-        EnvKind: "string" | "secret_ref";
+        EnvKind: "string" | "secret_ref" | "parameter";
         /** @enum {string} */
         ErrorCode: "not_found" | "service_unavailable" | "internal_error" | "unauthenticated" | "invalid_credentials" | "forbidden" | "csrf_required" | "conflict" | "invalid_argument" | "payload_too_large" | "tenant_key_missing" | "ambiguous_credentials" | "method_not_allowed" | "rate_limited" | "busy" | "shared_account" | "username_taken" | "email_taken" | "agent_offline" | "already_queued" | "agent_capability_missing" | "restore_target_denied" | "token_used" | "token_already_revoked" | "token_expired" | "agent_recently_online" | "setup_already_done" | "invalid_setup_token" | "repository_host_locked" | "not_repository_host" | "repository_in_use" | "repository_has_active_job" | "profile_in_use" | "secret_in_use" | "last_admin" | "own_account_protected" | "platform_tenant_protected" | "repository_location_taken";
         /** @description One value of a filter with the number of rows that hold it. */
@@ -2390,6 +2416,34 @@ export interface components {
          * @enum {string}
          */
         HookPhase: "before" | "after" | "on_success" | "on_error" | "finally";
+        /** @description One row of the parameter table of a host (FR-PF-10, FR-PF-12). */
+        HostParameterView: {
+            /**
+             * @description What a text parameter falls back to. Null for a secret, when no profile declares a value
+             *     and when the reader may not see it.
+             */
+            default_value?: string | null;
+            description?: string | null;
+            /** @description True when the server hid a text value from this reader (FR-PF-12). */
+            hidden: boolean;
+            kind: components["schemas"]["ParameterKind"];
+            name: string;
+            /** @description The profiles of the plans of this host that declare the parameter. */
+            needed_by: string[];
+            /** @description True when a profile of the plans of this host requires the parameter. */
+            required: boolean;
+            /** @description True for a value that no profile of the plans of this host declares. */
+            unused: boolean;
+            value?: components["schemas"]["ParameterValueView"] | null;
+        };
+        /**
+         * @description What the page of a host shows: the values that it holds and the parameters of the profiles of
+         *     its plans (FR-PF-10).
+         */
+        HostParametersResponse: {
+            agent_id: string;
+            parameters: components["schemas"]["HostParameterView"][];
+        };
         IncompatibleParams: {
             /** @description The restic version of the agent, such as `0.18.1`. */
             installed_version: string;
@@ -2765,14 +2819,78 @@ export interface components {
          * @enum {string}
          */
         OverwriteMode: "always" | "if-changed" | "if-newer" | "never";
+        /** @description The declaration of one parameter in a profile request (FR-PF-09). */
+        ParameterDefRequest: {
+            /** @description A text parameter only. A secret default would give one password to every host (ADR-0047). */
+            default_value?: string | null;
+            /** @description At most 200 characters. */
+            description?: string | null;
+            kind: components["schemas"]["ParameterKind"];
+            /** @description A lower-case letter, then letters, digits and underscores; at most 64 characters. */
+            name: string;
+            /** @description A plan without a value for a required parameter is refused (FR-PF-11). */
+            required?: boolean;
+        };
         /**
-         * @description The type of a template parameter. The value becomes an environment variable of the script.
+         * @description The declaration of one parameter as a reader sees it (FR-PF-09, FR-PF-12).
+         *
+         *     The type is separate from [`ParameterDef`] because it holds the marker of a hidden value.
+         */
+        ParameterDefView: {
+            /** @description What a text parameter falls back to. Empty with the flag `hidden` for a Viewer. */
+            default_value?: string | null;
+            description?: string | null;
+            /** @description True when the server hid the default value from this reader (FR-PF-12). */
+            hidden: boolean;
+            kind: components["schemas"]["ParameterKind"];
+            name: string;
+            required: boolean;
+        };
+        /**
+         * @description The kind of a parameter of a profile and of its value (FR-PF-09, ADR-0047).
+         *
+         *     The string value is the stored value of the `kind` column and of the profile JSON. It is stable.
          * @enum {string}
          */
-        ParameterKind: "string" | "secret_ref" | "integer" | "boolean";
+        ParameterKind: "text" | "secret";
+        /**
+         * @description One value of a parameter in a plan request or in a host request (FR-PF-10).
+         *
+         *     The kind must agree with the declaration. Exactly one of `value` and `secret_id` is set.
+         */
+        ParameterValueDef: {
+            kind: components["schemas"]["ParameterKind"];
+            name: string;
+            /** @description The identifier of a secret of the purpose `hook_secret`, for a `secret` parameter. */
+            secret_id?: string | null;
+            /** @description A text of 1 to 4096 bytes, for a `text` parameter. */
+            value?: string | null;
+        };
+        /** @description The value of one parameter on a host (FR-PF-12). */
+        ParameterValueView: {
+            kind: components["schemas"]["ParameterKind"];
+            /** @description The identifier of the secret of a secret parameter. */
+            secret_id?: string | null;
+            /** @description What the referenced secret is called; a name is not a secret. */
+            secret_name?: string | null;
+            /** @description The text as the reader sees it; null for a secret and for a hidden text. */
+            value?: string | null;
+        };
         PlanListResponse: {
             items: components["schemas"]["PlanView"][];
             next_cursor?: string | null;
+        };
+        /** @description One override of a plan as a reader sees it (FR-PF-10, FR-PF-12). */
+        PlanParameterValueView: {
+            /** @description True when the server hid a text value from this reader (FR-PF-12). */
+            hidden: boolean;
+            kind: components["schemas"]["ParameterKind"];
+            name: string;
+            /** @description The identifier of the secret of a secret parameter. */
+            secret_id?: string | null;
+            secret_name?: string | null;
+            /** @description The text as the reader sees it: empty with the flag `hidden` for a Viewer (FR-PF-12). */
+            value?: string | null;
         };
         PlanResponse: {
             plan: components["schemas"]["PlanView"];
@@ -2803,6 +2921,11 @@ export interface components {
             name: string;
             /** @description In UTC, in RFC 3339. Null when the plan is disabled. */
             next_run_at?: string | null;
+            /**
+             * @description The values that the plan sets instead of the values of the host (FR-PF-10). For a Viewer, a
+             *     text value is empty with the flag `hidden` (FR-PF-12).
+             */
+            parameter_values: components["schemas"]["PlanParameterValueView"][];
             profile_id: string;
             profile_name: string;
             repository_id: string;
@@ -2936,6 +3059,11 @@ export interface components {
              */
             name?: string;
             options?: components["schemas"]["BackupOptions"];
+            /**
+             * @description A caller without the profile write right sends no fields, and the stored profile gives them
+             *     (FR-PF-09).
+             */
+            parameters?: components["schemas"]["ParameterDefRequest"][];
             paths?: components["schemas"]["ProfilePaths"];
             /**
              * @description The stored profile that the draft edits. Required for a caller without the profile write
@@ -2997,6 +3125,12 @@ export interface components {
             existing_name?: string | null;
             /** @description Set by `invalid_argument`, `username_taken` and `email_taken`. */
             field?: string | null;
+            /**
+             * @description Only a validation refusal sets it: `parameter_missing`, `parameter_kind_mismatch`,
+             *     `parameter_not_declared` and `parameter_needs_default` (FR-PF-05, FR-PF-11); the last two
+             *     list one name.
+             */
+            parameters?: string[] | null;
             /** @description In snake_case; only `invalid_argument` sets it. */
             reason?: string | null;
             request_id: string;
@@ -3044,6 +3178,11 @@ export interface components {
             id: string;
             name: string;
             options: components["schemas"]["BackupOptions"];
+            /**
+             * @description What the profile declares (FR-PF-09). For a Viewer, a text default is empty with the flag
+             *     `hidden` (FR-PF-12).
+             */
+            parameters: components["schemas"]["ParameterDefView"][];
             paths: components["schemas"]["ProfilePaths"];
             retention?: components["schemas"]["Retention"] | null;
             scripts: components["schemas"]["ScriptDef"][];
@@ -3108,6 +3247,11 @@ export interface components {
             queued_jobs_moved: number;
             /** Format: int64 */
             repositories_moved: number;
+        };
+        /** @description The request body that replaces the values of a host (FR-PF-10). */
+        ReplaceParametersRequest: {
+            /** @description The whole set. A name that the body leaves out loses its value. */
+            parameters: components["schemas"]["ParameterValueDef"][];
         };
         /**
          * @description The type does not derive `Debug`, so a log line cannot print the value by accident. The value is
@@ -3295,7 +3439,7 @@ export interface components {
             /** @description Shown in the form. 1 to 64 characters. */
             label: string;
             name: string;
-            type: components["schemas"]["ParameterKind"];
+            type: components["schemas"]["TemplateParameterKind"];
         };
         /** @description A script template, built-in or of the tenant. */
         ScriptTemplateView: {
@@ -3347,7 +3491,7 @@ export interface components {
          * @description The kind of the object that references a secret.
          * @enum {string}
          */
-        SecretUsageKind: "repository" | "channel" | "profile" | "job_template";
+        SecretUsageKind: "repository" | "channel" | "profile" | "job_template" | "host" | "plan";
         /** @description One object that references a secret. */
         SecretUsageView: {
             id: string;
@@ -3566,6 +3710,14 @@ export interface components {
             count: number;
         };
         /**
+         * @description The type of a script template parameter. The value becomes an environment variable of the script.
+         *
+         *     The name is separate from the kind of a profile parameter (ADR-0047), so the two enums keep two
+         *     schemas.
+         * @enum {string}
+         */
+        TemplateParameterKind: "string" | "secret_ref" | "integer" | "boolean";
+        /**
          * @description The tenancy mode of the installation (ADR-0024).
          *
          *     The mode changes the API surface and the user interface. It never changes the storage model.
@@ -3659,6 +3811,8 @@ export interface components {
             missed_run_policy: components["schemas"]["MissedRunPolicy"];
             /** @description Free text of 1 to 100 characters. Unique in the tenant, ignoring the letter case. Holds no control or format character. */
             name?: string | null;
+            /** @description Replaces the whole list of the values of the plan (FR-PF-10). */
+            parameter_values?: components["schemas"]["ParameterValueDef"][];
             profile_id: string;
             /** @description The repository that the plan backs up into (ADR-0047). An absent value is refused. */
             repository_id: string;
@@ -3677,6 +3831,8 @@ export interface components {
             /** @description Free text of 1 to 100 characters. Unique in the tenant, ignoring the letter case. Holds no control or format character. */
             name?: string | null;
             options?: components["schemas"]["BackupOptions"];
+            /** @description Replaces the whole list (FR-PF-09). */
+            parameters?: components["schemas"]["ParameterDefRequest"][];
             paths?: components["schemas"]["ProfilePaths"];
             retention?: components["schemas"]["Retention"] | null;
             /** @description Replaces the whole list. Only an Admin can change it (FR-HK-12). */
@@ -3955,6 +4111,119 @@ export interface operations {
                 };
             };
             /** @description A field is not valid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The agent is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    get_parameters: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the agent. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The values on the host and the parameters of the profiles of its plans. For a Viewer, a text value is empty with the flag `hidden`. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostParametersResponse"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The role is not sufficient. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description The agent is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    replace_parameters: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The identifier of the agent. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReplaceParametersRequest"];
+            };
+        };
+        responses: {
+            /** @description The stored values. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostParametersResponse"];
+                };
+            };
+            /** @description A field is not valid, or a plan loses a required value. */
             400: {
                 headers: {
                     [name: string]: unknown;

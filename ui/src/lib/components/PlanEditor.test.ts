@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => ({
 	listProfiles: vi.fn(),
 	listAgents: vi.fn(),
 	listRepositories: vi.fn(),
+	listSecrets: vi.fn(),
+	getAgentParameters: vi.fn(),
 	createPlan: vi.fn(),
 	updatePlan: vi.fn(),
 	deletePlan: vi.fn(),
@@ -50,6 +52,8 @@ vi.mock('#lib/api/index.ts', async (importOriginal) => {
 			listProfiles: mocks.listProfiles,
 			listAgents: mocks.listAgents,
 			listRepositories: mocks.listRepositories,
+			listSecrets: mocks.listSecrets,
+			getAgentParameters: mocks.getAgentParameters,
 			createPlan: mocks.createPlan,
 			updatePlan: mocks.updatePlan,
 			deletePlan: mocks.deletePlan,
@@ -67,6 +71,7 @@ function plan(overrides: Record<string, unknown> = {}) {
 		profile_id: 'p_1',
 		profile_name: 'web-daily',
 		repository_id: 'r_1',
+		parameter_values: [],
 		agent_id: 'a_1',
 		agent_hostname: 'win-fs01',
 		cron: '0 2 * * *',
@@ -158,6 +163,8 @@ describe('the plan page', () => {
 			}
 		]);
 		mocks.previewSchedule.mockResolvedValue({ time_zone: 'Europe/Berlin', runs: [] });
+		mocks.listSecrets.mockResolvedValue([]);
+		mocks.getAgentParameters.mockResolvedValue({ agent_id: 'a_1', parameters: [] });
 	});
 
 	it('fr_sc_01 creates a plan and returns to the list', async () => {
@@ -172,7 +179,6 @@ describe('the plan page', () => {
 		// A new plan starts with the browser zone, so the test replaces it.
 		await user.clear(input('#plan-time-zone'));
 		await user.type(input('#plan-time-zone'), 'Europe/Berlin');
-		document.querySelector('form.record')?.addEventListener('submit', () => console.log('SUBMIT2'));
 		await user.click(screen.getByRole('button', { name: 'Save' }));
 
 		await waitFor(() =>
@@ -185,7 +191,8 @@ describe('the plan page', () => {
 				time_zone: 'Europe/Berlin',
 				missed_run_policy: 'run_all',
 				enabled: true,
-				rpo_seconds: null
+				rpo_seconds: null,
+				parameter_values: []
 			})
 		);
 		expect(mocks.pushToast).toHaveBeenCalledWith('success', 'The plan is created.');
@@ -379,7 +386,8 @@ describe('the plan page', () => {
 				time_zone: 'Europe/Berlin',
 				missed_run_policy: 'latest_only',
 				enabled: true,
-				rpo_seconds: null
+				rpo_seconds: null,
+				parameter_values: []
 			})
 		);
 		expect(mocks.pushToast).toHaveBeenCalledWith('success', 'The plan is updated.');
@@ -461,7 +469,7 @@ describe('the plan page', () => {
 		const order = [...document.querySelectorAll('[data-section]')].map((node) =>
 			node.getAttribute('data-section')
 		);
-		expect(order).toEqual(['source', 'basics', 'schedule', 'objective']);
+		expect(order).toEqual(['source', 'parameters', 'basics', 'schedule', 'objective']);
 	});
 
 	it('keeps the delete of a stored plan in the dangerous section only', async () => {
@@ -504,6 +512,40 @@ describe('the plan page', () => {
 
 		await waitFor(() => expect(mocks.deletePlan).toHaveBeenCalledWith('pl_1'));
 		expect(mocks.goto).toHaveBeenCalledWith('/(app)/plans');
+	});
+
+	it('adr_0047_an_operator_deletes_no_plan_that_sets_a_secret_value', async () => {
+		session.role = 'operator';
+		mocks.listPlans.mockResolvedValue([
+			plan({
+				parameter_values: [
+					{ name: 'pg_password', kind: 'secret', secret_id: 's_1', secret_name: 'pg' }
+				]
+			})
+		]);
+		render(PlanEditor, { planId: 'pl_1' });
+
+		await screen.findByRole('heading', { level: 1, name: 'nightly-web' });
+		const button = screen.getByRole('button', { name: 'Delete plan' });
+		expect(button).toBeDisabled();
+		expect(button).toHaveAttribute(
+			'title',
+			'Only an Admin deletes a plan that sets a secret value.'
+		);
+	});
+
+	it('adr_0047_an_admin_deletes_a_plan_that_sets_a_secret_value', async () => {
+		mocks.listPlans.mockResolvedValue([
+			plan({
+				parameter_values: [
+					{ name: 'pg_password', kind: 'secret', secret_id: 's_1', secret_name: 'pg' }
+				]
+			})
+		]);
+		render(PlanEditor, { planId: 'pl_1' });
+
+		await screen.findByRole('heading', { level: 1, name: 'nightly-web' });
+		expect(screen.getByRole('button', { name: 'Delete plan' })).toBeEnabled();
 	});
 
 	it('shows an error for a plan that does not exist', async () => {
@@ -598,5 +640,153 @@ describe('the plan page', () => {
 		await screen.findByRole('heading', { level: 1, name: 'nightly-web' });
 		expect(screen.getByText('Your role cannot change a plan.')).toBeInTheDocument();
 		expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
+	});
+});
+
+describe('the parameters of the profile on the plan page (FR-PF-10, FR-PF-11, ADR-0047)', () => {
+	function definition(overrides: Record<string, unknown> = {}) {
+		return {
+			name: 'pg_dir',
+			kind: 'text',
+			required: true,
+			default_value: null,
+			description: null,
+			hidden: false,
+			...overrides
+		};
+	}
+
+	function hostRow(overrides: Record<string, unknown> = {}) {
+		return {
+			name: 'pg_host',
+			kind: 'text',
+			required: true,
+			default_value: null,
+			description: null,
+			needed_by: ['db-hourly'],
+			value: { kind: 'text', value: 'db.local', secret_id: null, secret_name: null },
+			unused: false,
+			hidden: false,
+			...overrides
+		};
+	}
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		session.role = 'admin';
+		mocks.listAgents.mockResolvedValue([agent('a_1', 'win-fs01')]);
+		mocks.listRepositories.mockResolvedValue([
+			{
+				id: 'r_1',
+				name: 'repo-a',
+				backend: { kind: 'rest', endpoint: 'https://rest.example.net/a' },
+				maintenance_agent_id: 'a_1',
+				initialized: true
+			}
+		]);
+		mocks.previewSchedule.mockResolvedValue({ time_zone: 'Europe/Berlin', runs: [] });
+		mocks.listSecrets.mockResolvedValue([]);
+		mocks.listProfiles.mockResolvedValue([
+			{
+				id: 'p_1',
+				name: 'web-daily',
+				paths: { all: ['/srv'] },
+				retention: null,
+				parameters: [
+					definition({ name: 'pg_dir', default_value: '/var/backups/pg' }),
+					definition({ name: 'pg_host' }),
+					definition({ name: 'keep_logs', required: false })
+				]
+			}
+		]);
+		mocks.listPlans.mockResolvedValue([
+			plan({
+				profile_id: 'p_1',
+				agent_id: 'a_1',
+				parameter_values: [
+					{
+						name: 'keep_logs',
+						kind: 'text',
+						value: '30',
+						secret_id: null,
+						secret_name: null,
+						hidden: false
+					}
+				]
+			})
+		]);
+		mocks.getAgentParameters.mockResolvedValue({ agent_id: 'a_1', parameters: [hostRow()] });
+	});
+
+	async function openParameters(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+		const button = await screen.findByRole('button', { name: /^Profile parameters/ });
+		if (button.getAttribute('aria-expanded') !== 'true') await user.click(button);
+	}
+
+	it('ac_pf_08_shows_the_value_of_the_plan_the_host_and_the_default', async () => {
+		const user = userEvent.setup();
+		render(PlanEditor, { planId: 'pl_1' });
+		await screen.findByRole('heading', { level: 1, name: 'nightly-web' });
+		await openParameters(user);
+
+		expect(await screen.findByText('db.local')).toBeInTheDocument();
+		expect(screen.getByText('/var/backups/pg')).toBeInTheDocument();
+		expect(screen.getByText('30')).toBeInTheDocument();
+		expect(screen.getByText('default')).toBeInTheDocument();
+		expect(screen.getByText('host')).toBeInTheDocument();
+		expect(screen.getByText('plan')).toBeInTheDocument();
+	});
+
+	it('ac_pf_06_disables_the_save_and_names_the_parameter_without_a_value', async () => {
+		const user = userEvent.setup();
+		mocks.getAgentParameters.mockResolvedValue({ agent_id: 'a_1', parameters: [] });
+		render(PlanEditor, { planId: 'pl_1' });
+		await screen.findByRole('heading', { level: 1, name: 'nightly-web' });
+		await openParameters(user);
+
+		expect(
+			await screen.findByText('The plan cannot be saved: the parameter pg_host has no value.')
+		).toBeInTheDocument();
+		const header = screen.getByRole('button', { name: /^Profile parameters/ });
+		expect(header.querySelector('[data-state="warn"]')).not.toBeNull();
+		expect(screen.getByText('not set')).toBeInTheDocument();
+		const save = screen.getByRole('button', { name: 'Save' });
+		expect(save).toBeDisabled();
+		expect(save).toHaveAttribute(
+			'title',
+			'The plan cannot be saved: the parameter pg_host has no value'
+		);
+	});
+
+	it('ac_pf_06_sets_a_value_for_the_plan_and_removes_it', async () => {
+		const user = userEvent.setup();
+		mocks.getAgentParameters.mockResolvedValue({ agent_id: 'a_1', parameters: [] });
+		render(PlanEditor, { planId: 'pl_1' });
+		await screen.findByRole('heading', { level: 1, name: 'nightly-web' });
+		await openParameters(user);
+
+		await user.click(
+			screen.getByRole('button', { name: 'Set the value of pg_host for this plan' })
+		);
+		await user.type(await screen.findByLabelText('Value'), 'plan.local');
+		await user.click(screen.getByRole('button', { name: 'Set' }));
+
+		expect(screen.getByText('plan.local')).toBeInTheDocument();
+		await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled());
+
+		await user.click(
+			screen.getByRole('button', { name: 'Remove the value of pg_host from the plan' })
+		);
+		expect(screen.queryByText('plan.local')).not.toBeInTheDocument();
+	});
+
+	it('ac_pf_08_opens_the_host_page_for_a_host_value', async () => {
+		const user = userEvent.setup();
+		render(PlanEditor, { planId: 'pl_1' });
+		await screen.findByRole('heading', { level: 1, name: 'nightly-web' });
+		await openParameters(user);
+
+		await user.click(screen.getByRole('button', { name: 'Set the value of pg_host on the host' }));
+		expect(mocks.goto).toHaveBeenCalledWith('/(app)/hosts/a_1#parameters');
 	});
 });

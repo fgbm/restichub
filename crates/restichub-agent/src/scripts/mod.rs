@@ -175,7 +175,11 @@ impl ScriptStore {
         for variable in &step.env {
             let (value, secret) = match &variable.value {
                 Some(script_env::Value::StringValue(value)) => (value, false),
-                Some(script_env::Value::SecretValue(value)) => (value, true),
+                // A masked value is a text parameter of the profile: it is no secret, but the
+                // profile may hold a credential, so the scrubber hides it too (FR-PF-12).
+                Some(
+                    script_env::Value::SecretValue(value) | script_env::Value::MaskedValue(value),
+                ) => (value, true),
                 None => return Err(ScriptRefusal::Invalid("a variable has no value".to_owned())),
             };
             env.push((variable.name.clone(), Zeroizing::new(value.clone())));

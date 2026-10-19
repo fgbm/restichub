@@ -332,6 +332,10 @@ message ScriptEnv {
     // Value of a secret reference. The control plane resolves the reference
     // when it sends the job (ADR-0017). The agent masks it in the job log.
     string secret_value = 3;
+    // Value of a profile parameter that the control plane resolved (ADR-0047).
+    // It is a text parameter, so it is no secret, but the agent masks it in the
+    // job log like a secret value.
+    string masked_value = 4;
   }
 }
 

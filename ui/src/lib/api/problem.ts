@@ -18,8 +18,10 @@ export interface ApiProblem {
 	type?: string;
 	field?: string;
 	reason?: string;
-	/** The records that block a delete. */
+	/** The records that block a delete, and the plans that lose a required parameter. */
 	blockers?: Blockers;
+	/** The names of the parameters of a `parameter_missing` or `parameter_kind_mismatch` refusal. */
+	parameters?: string[];
 	/** The repository that holds a taken location. */
 	existingName?: string;
 }
@@ -47,6 +49,7 @@ export function parseProblem(body: unknown, status: number): ApiProblem {
 			field: asString(wire.field),
 			reason: asString(wire.reason),
 			blockers: wire.blockers ?? undefined,
+			parameters: wire.parameters ?? undefined,
 			existingName: asString(wire.existing_name)
 		};
 	}
@@ -70,6 +73,14 @@ export function fieldError(
 	if (!problem || problem.field !== field) return undefined;
 	if (problem.code === 'repository_location_taken') {
 		return t('error.repository_location_taken', { name: problem.existingName ?? '' });
+	}
+	// These refusals name one parameter in the `parameters` list (FR-PF-05, FR-PF-10).
+	const name = problem.parameters?.[0] ?? '';
+	if (problem.reason === 'parameter_not_declared') {
+		return t('reason.parameter_not_declared', { name });
+	}
+	if (problem.reason === 'parameter_needs_default') {
+		return t('reason.parameter_needs_default', { name });
 	}
 	const byCode = problem.code === 'invalid_argument' ? undefined : tErrorCode(problem.code);
 	return tErrorReason(problem.reason) ?? byCode ?? t('error.field');

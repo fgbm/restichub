@@ -49,6 +49,8 @@ pub struct Profile {
     pub check_options: Option<Value>,
     /// Definitions as a JSON array (FR-HK-09).
     pub scripts: Value,
+    /// A JSON array of declarations that the compiler and the save check read (FR-PF-09).
+    pub parameters: Value,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
     pub created_by: Option<UserId>,
@@ -105,6 +107,8 @@ pub struct NewProfile<'a> {
     pub retention: Option<Value>,
     pub check_options: Option<Value>,
     pub scripts: Value,
+    /// A JSON array of declarations that the compiler and the save check read (FR-PF-09).
+    pub parameters: Value,
     /// Absent for an API token actor.
     pub created_by: Option<UserId>,
 }
@@ -131,6 +135,8 @@ pub struct ProfileUpdate<'a> {
     pub retention: Option<Value>,
     pub check_options: Option<Value>,
     pub scripts: Value,
+    /// A JSON array of declarations that the compiler and the save check read (FR-PF-09).
+    pub parameters: Value,
 }
 
 pub async fn create(tx: &mut TenantTx<'_>, new: &NewProfile<'_>) -> Result<ProfileId, DbError> {
@@ -139,9 +145,9 @@ pub async fn create(tx: &mut TenantTx<'_>, new: &NewProfile<'_>) -> Result<Profi
          (id, tenant_id, name, paths_all, paths_windows, paths_linux, paths_macos, \
           excludes, exclude_files, tags, use_fs_snapshot, one_file_system, exclude_caches, \
           limit_upload_kib, limit_download_kib, retention, check_options, scripts, \
-          created_by, stall_timeout_minutes, max_duration_minutes) \
+          created_by, stall_timeout_minutes, max_duration_minutes, parameters) \
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, \
-                 $18, $19, $20, $21)",
+                 $18, $19, $20, $21, $22)",
     )
     .bind(new.id)
     .bind(tx.tenant())
@@ -164,6 +170,7 @@ pub async fn create(tx: &mut TenantTx<'_>, new: &NewProfile<'_>) -> Result<Profi
     .bind(new.created_by)
     .bind(new.stall_timeout_minutes)
     .bind(new.max_duration_minutes)
+    .bind(&new.parameters)
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
@@ -181,8 +188,8 @@ pub async fn list(tx: &mut TenantTx<'_>, page: &ProfilePage) -> Result<ProfilePa
         "SELECT id, name, paths_all, paths_windows, paths_linux, paths_macos, \
                 excludes, exclude_files, tags, use_fs_snapshot, one_file_system, exclude_caches, \
                 limit_upload_kib, limit_download_kib, stall_timeout_minutes, \
-                max_duration_minutes, retention, check_options, scripts, created_at, \
-                updated_at, created_by \
+                max_duration_minutes, retention, check_options, scripts, parameters, \
+                created_at, updated_at, created_by \
          FROM profiles \
          WHERE ($1::timestamptz IS NULL OR (created_at, id) < ($1::timestamptz, $2::uuid)) \
          ORDER BY created_at DESC, id DESC \
@@ -206,8 +213,8 @@ pub async fn get(tx: &mut TenantTx<'_>, id: ProfileId) -> Result<Option<Profile>
         "SELECT id, name, paths_all, paths_windows, paths_linux, paths_macos, \
                 excludes, exclude_files, tags, use_fs_snapshot, one_file_system, exclude_caches, \
                 limit_upload_kib, limit_download_kib, stall_timeout_minutes, \
-                max_duration_minutes, retention, check_options, scripts, created_at, \
-                updated_at, created_by \
+                max_duration_minutes, retention, check_options, scripts, parameters, \
+                created_at, updated_at, created_by \
          FROM profiles WHERE id = $1",
     )
     .bind(id)
@@ -229,30 +236,9 @@ pub async fn get_for_update(
         "SELECT id, name, paths_all, paths_windows, paths_linux, paths_macos, \
                 excludes, exclude_files, tags, use_fs_snapshot, one_file_system, exclude_caches, \
                 limit_upload_kib, limit_download_kib, stall_timeout_minutes, \
-                max_duration_minutes, retention, check_options, scripts, created_at, \
-                updated_at, created_by \
+                max_duration_minutes, retention, check_options, scripts, parameters, \
+                created_at, updated_at, created_by \
          FROM profiles WHERE id = $1 FOR UPDATE",
-    )
-    .bind(id)
-    .fetch_optional(tx.as_conn())
-    .await
-    .map_err(DbError::Query)?;
-    Ok(row.map(Profile::from))
-}
-
-/// Reads one profile with a share lock: a concurrent update or delete of the profile waits for the
-/// transaction, and other readers that take the same lock do not.
-pub async fn get_for_share(
-    tx: &mut TenantTx<'_>,
-    id: ProfileId,
-) -> Result<Option<Profile>, DbError> {
-    let row = sqlx::query_as::<_, ProfileRow>(
-        "SELECT id, name, paths_all, paths_windows, paths_linux, paths_macos, \
-                excludes, exclude_files, tags, use_fs_snapshot, one_file_system, exclude_caches, \
-                limit_upload_kib, limit_download_kib, stall_timeout_minutes, \
-                max_duration_minutes, retention, check_options, scripts, created_at, \
-                updated_at, created_by \
-         FROM profiles WHERE id = $1 FOR SHARE",
     )
     .bind(id)
     .fetch_optional(tx.as_conn())
@@ -272,7 +258,7 @@ pub async fn update(
                 paths_linux = $5, paths_macos = $6, excludes = $7, exclude_files = $8, tags = $9, \
                 use_fs_snapshot = $10, one_file_system = $11, exclude_caches = $12, \
                 limit_upload_kib = $13, limit_download_kib = $14, retention = $15, \
-                check_options = $16, scripts = $17, \
+                check_options = $16, scripts = $17, parameters = $20, \
                 stall_timeout_minutes = COALESCE($18, stall_timeout_minutes), \
                 max_duration_minutes = COALESCE($19, max_duration_minutes), updated_at = now() \
          WHERE id = $1",
@@ -296,6 +282,7 @@ pub async fn update(
     .bind(&patch.scripts)
     .bind(patch.stall_timeout_minutes)
     .bind(patch.max_duration_minutes)
+    .bind(&patch.parameters)
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
@@ -333,6 +320,7 @@ struct ProfileRow {
     retention: Option<Value>,
     check_options: Option<Value>,
     scripts: Value,
+    parameters: Value,
     created_at: OffsetDateTime,
     updated_at: OffsetDateTime,
     created_by: Option<Uuid>,
@@ -360,6 +348,7 @@ impl From<ProfileRow> for Profile {
             retention: row.retention,
             check_options: row.check_options,
             scripts: row.scripts,
+            parameters: row.parameters,
             created_at: row.created_at,
             updated_at: row.updated_at,
             created_by: row.created_by.map(UserId::from_uuid),

@@ -10,6 +10,7 @@ use restichub_proto::agent::v1::{
 
 use super::setting::set_mode_at;
 use super::{ScriptMode, ScriptRefusal, ScriptStore};
+use crate::scrub::Scrubber;
 use crate::trust::Trust;
 
 const CANARY: &str = "CANARY-secret-7f3a";
@@ -158,6 +159,40 @@ fn fr_hk_09_a_script_with_a_broken_rule_is_invalid() {
         }],
         ..step("echo")
     });
+}
+
+#[test]
+fn ac_pf_10_a_text_parameter_value_is_masked_in_the_script_output() {
+    let dir = TempDir::new();
+    let store = store(dir.path());
+    set_mode_at(
+        &dir.path().join("restichub-agent-server-scripts"),
+        true,
+        Trust::CurrentUser,
+    )
+    .expect("enable");
+    // The control plane sends a text parameter of the profile as a masked value, so the agent
+    // hides it in the step log like a secret (FR-PF-12, ADR-0047).
+    let script = ScriptStep {
+        env: vec![ScriptEnv {
+            name: "PGDIR".to_owned(),
+            value: Some(script_env::Value::MaskedValue(CANARY.to_owned())),
+        }],
+        ..step("echo hello")
+    };
+    let prepared = store.prepare(&script, 30).expect("prepared");
+    let invocation = &prepared.invocation;
+    assert!(
+        invocation
+            .env
+            .iter()
+            .any(|(name, value)| name == "PGDIR" && value.as_str() == CANARY)
+    );
+    assert_eq!(invocation.secrets.len(), 1);
+    assert_eq!(
+        Scrubber::for_secrets(&invocation.secrets).scrub(&format!("dir {CANARY}")),
+        "dir ***"
+    );
 }
 
 #[test]

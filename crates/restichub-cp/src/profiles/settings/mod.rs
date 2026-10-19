@@ -8,13 +8,21 @@
 //! `secrets` table (ADR-0017). A script variable of the kind `secret_ref` holds the identifier of a
 //! secret, never the value (FR-HK-09); the job builder resolves it at dispatch time.
 
+mod audit;
+mod save;
+mod validate;
+
+pub use audit::{profile_value, stored_value};
+pub use save::save_warnings;
+pub use validate::{validate_create, validate_draft, validate_update};
+
 use std::collections::BTreeMap;
 
 use restichub_compiler::{
-    Architecture, BackupOptions as CompilerBackupOptions, CheckOptions as CompilerCheckOptions,
-    CompileError, GroupBy as CompilerGroupBy, JobLimits as CompilerJobLimits, OperatingSystem,
-    Profile as CompilerProfile, ProfilePaths as CompilerProfilePaths, ResticVersion,
-    Retention as CompilerRetention, SnapshotFilter as CompilerSnapshotFilter, TargetFacts, compile,
+    BackupOptions as CompilerBackupOptions, CheckOptions as CompilerCheckOptions,
+    GroupBy as CompilerGroupBy, JobLimits as CompilerJobLimits, OperatingSystem,
+    Profile as CompilerProfile, ProfilePaths as CompilerProfilePaths,
+    Retention as CompilerRetention, SnapshotFilter as CompilerSnapshotFilter,
 };
 use restichub_db::profiles::{NewProfile, Profile, ProfileUpdate};
 use restichub_db::{ProfileId, UserId};
@@ -24,8 +32,9 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::error::ApiError;
+use crate::parameters::{self, ParameterDef, ParameterDefRequest, ParameterDefView};
 use crate::scripts::{EnvKind, ScriptDef};
-use crate::validation::{self, Reason};
+use crate::validation::Reason;
 
 /// Limit in characters of one exclude, exclude file or tag.
 pub const MAX_PATTERN: usize = 4096;
@@ -160,33 +169,6 @@ impl BackupOptions {
     }
 }
 
-fn validate_limits(options: &BackupOptions) -> Result<(), ApiError> {
-    if let Some(minutes) = options.stall_timeout_minutes {
-        if minutes < MIN_STALL_TIMEOUT_MINUTES {
-            return Err(ApiError::invalid_field(
-                "options.stall_timeout_minutes",
-                Reason::TooShort,
-            ));
-        }
-        if minutes > MAX_STALL_TIMEOUT_MINUTES {
-            return Err(ApiError::invalid_field(
-                "options.stall_timeout_minutes",
-                Reason::TooLong,
-            ));
-        }
-    }
-    if options
-        .max_duration_minutes
-        .is_some_and(|minutes| minutes > MAX_DURATION_MINUTES)
-    {
-        return Err(ApiError::invalid_field(
-            "options.max_duration_minutes",
-            Reason::TooLong,
-        ));
-    }
-    Ok(())
-}
-
 /// Position of a script in the job (FR-HK-05).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
@@ -282,6 +264,10 @@ pub struct CreateProfileRequest {
     /// Absent when the profile runs no verification step.
     #[serde(default)]
     pub check: Option<CheckOptions>,
+    /// What the profile offers to its hosts (FR-PF-09). At most 64.
+    #[serde(default)]
+    #[schema(max_items = 64)]
+    pub parameters: Vec<ParameterDefRequest>,
     /// Accepted only as an empty list, so an old client keeps working; use `scripts` instead
     /// (ADR-0040).
     #[serde(default)]
@@ -314,6 +300,10 @@ pub struct UpdateProfileRequest {
     pub retention: Option<Retention>,
     #[serde(default)]
     pub check: Option<CheckOptions>,
+    /// Replaces the whole list (FR-PF-09).
+    #[serde(default)]
+    #[schema(max_items = 64)]
+    pub parameters: Vec<ParameterDefRequest>,
     /// Accepted only as an empty list, so an old client keeps working; use `scripts` instead
     /// (ADR-0040).
     #[serde(default)]
@@ -334,6 +324,9 @@ pub struct ProfileView {
     pub scripts: Vec<ScriptDef>,
     pub retention: Option<Retention>,
     pub check: Option<CheckOptions>,
+    /// What the profile declares (FR-PF-09). For a Viewer, a text default is empty with the flag
+    /// `hidden` (FR-PF-12).
+    pub parameters: Vec<ParameterDefView>,
     /// In RFC 3339.
     pub created_at: String,
     /// In RFC 3339.
@@ -344,7 +337,8 @@ pub struct ProfileView {
 
 impl ProfileView {
     /// A string value may hold a credential that was typed into the script, so it goes with the body
-    /// (FR-HK-12).
+    /// (FR-HK-12). A text parameter default is a value too, so a Viewer reads none of them
+    /// (FR-PF-12).
     pub fn hide_script_bodies(&mut self) {
         for script in &mut self.scripts {
             script.body.clear();
@@ -352,6 +346,14 @@ impl ProfileView {
                 if variable.kind == EnvKind::String {
                     variable.value.clear();
                 }
+            }
+        }
+        for definition in &mut self.parameters {
+            if definition.kind == restichub_db::ParameterKind::Text
+                && definition.default_value.is_some()
+            {
+                definition.default_value = Some(String::new());
+                definition.hidden = true;
             }
         }
     }
@@ -400,111 +402,6 @@ pub struct PlanWarning {
     pub reason: String,
 }
 
-/// The outcome of one synthetic compile at save time (FR-PF-05, AC-PF-02).
-enum SaveOutcome {
-    /// The profile is wrong for every target: the request is refused.
-    Refusal(ApiError),
-    /// The profile is wrong for one target only: the caller gets a warning.
-    Warning(ProfileWarning),
-}
-
-/// Runs the compiler against a synthetic target for each operating system (FR-PF-05).
-///
-/// A template error is wrong for every target, so it refuses the request. An operating-system or
-/// version mismatch is a warning, because a profile may target several operating systems. The
-/// synthetic target has no scripts: the scripts are checked against the report of the real agents
-/// (FR-HK-10).
-///
-/// # Errors
-///
-/// Returns a field error for a defect that no target accepts.
-pub fn save_warnings(profile: &ValidatedProfile) -> Result<Vec<ProfileWarning>, ApiError> {
-    let mut compiler_profile = profile.to_compiler_profile();
-    // Scripts depend on the trust mode of the target agents, which the synthetic target lacks.
-    compiler_profile.scripts.clear();
-    let mut warnings = Vec::new();
-    let mut seen = std::collections::BTreeSet::new();
-    for os in [
-        OperatingSystem::Linux,
-        OperatingSystem::Windows,
-        OperatingSystem::Macos,
-    ] {
-        let target = synthetic_target(os);
-        if let Err(error) = compile(&compiler_profile, None, &target) {
-            match classify_save_error(error) {
-                SaveOutcome::Refusal(api) => return Err(api),
-                SaveOutcome::Warning(warning) => {
-                    let key = (
-                        warning.field.clone(),
-                        warning.reason.clone(),
-                        warning.os.clone(),
-                    );
-                    if seen.insert(key) {
-                        warnings.push(warning);
-                    }
-                }
-            }
-        }
-    }
-    Ok(warnings)
-}
-
-fn synthetic_target(os: OperatingSystem) -> TargetFacts {
-    TargetFacts {
-        agent_id: "synthetic".to_owned(),
-        agent_name: "agent".to_owned(),
-        hostname: "host".to_owned(),
-        os,
-        arch: Architecture::X86_64,
-        labels: BTreeMap::new(),
-        // The newest supported version: the option and version check runs in the preview against
-        // the real agent (FR-PF-05, AC-AG-09).
-        restic_version: ResticVersion {
-            major: 0,
-            minor: 19,
-            patch: 0,
-        },
-        now: time::OffsetDateTime::now_utc(),
-        server_scripts: restichub_compiler::ServerScripts::default(),
-    }
-}
-
-fn classify_save_error(error: CompileError) -> SaveOutcome {
-    let warning = |field: &str, reason: &str, os: Option<String>| {
-        SaveOutcome::Warning(ProfileWarning {
-            field: field.to_owned(),
-            reason: reason.to_owned(),
-            os,
-        })
-    };
-    match error {
-        CompileError::UnknownVariable { field, .. }
-        | CompileError::InvalidDate { field, .. }
-        | CompileError::UnterminatedTemplate { field }
-        | CompileError::InvalidValue { field } => SaveOutcome::Refusal(ApiError::invalid_field(
-            field.as_str(),
-            Reason::InvalidFormat,
-        )),
-        CompileError::ServerScriptsDisabled { field }
-        | CompileError::InterpreterUnavailable { field, .. } => {
-            SaveOutcome::Refusal(ApiError::invalid_field(field.as_str(), Reason::Unavailable))
-        }
-        CompileError::StepsRejected { .. } => {
-            SaveOutcome::Refusal(ApiError::invalid_field("steps", Reason::InvalidFormat))
-        }
-        CompileError::MissingLabel { field, .. } => warning(field.as_str(), "unknown", None),
-        CompileError::UnsupportedOs { field, os, .. } => {
-            warning(field.as_str(), "unsupported", Some(os.as_str().to_owned()))
-        }
-        CompileError::NoPaths { os } => warning("paths", "empty", Some(os.as_str().to_owned())),
-        CompileError::IncompatibleOption { field, .. } => {
-            warning(field.as_str(), "incompatible", None)
-        }
-        CompileError::UnsupportedRestic { .. } => warning("agent_id", "incompatible", None),
-        CompileError::InvalidCron { .. } => warning("cron", "invalid_format", None),
-    }
-}
-
 impl TryFrom<&Profile> for ProfileView {
     type Error = ApiError;
 
@@ -533,6 +430,10 @@ impl TryFrom<&Profile> for ProfileView {
             scripts: crate::scripts::from_row(&profile.scripts)?,
             retention: retention_from_row(profile)?,
             check: check_from_row(profile)?,
+            parameters: parameters::from_row(&profile.parameters)?
+                .iter()
+                .map(|definition| ParameterDefView::of(definition, true))
+                .collect(),
             created_at: format_time(profile.created_at),
             updated_at: format_time(profile.updated_at),
             created_by: profile.created_by.map(|id| id.to_string()),
@@ -583,6 +484,7 @@ pub struct ValidatedProfile {
     pub scripts: Vec<ScriptDef>,
     pub retention: Option<Retention>,
     pub check: Option<CheckOptions>,
+    pub parameters: Vec<ParameterDef>,
 }
 
 impl ValidatedProfile {
@@ -607,6 +509,7 @@ impl ValidatedProfile {
             retention: self.retention_value(),
             check_options: self.check_value(),
             scripts: self.scripts_value(),
+            parameters: self.parameters_value(),
             created_by,
         }
     }
@@ -637,6 +540,7 @@ impl ValidatedProfile {
             retention: self.retention_value(),
             check_options: self.check_value(),
             scripts: self.scripts_value(),
+            parameters: self.parameters_value(),
         }
     }
 
@@ -654,6 +558,10 @@ impl ValidatedProfile {
 
     fn scripts_value(&self) -> Value {
         serde_json::to_value(&self.scripts).unwrap_or_else(|_| json!([]))
+    }
+
+    fn parameters_value(&self) -> Value {
+        parameters::to_value(&self.parameters)
     }
 
     /// The profile as the compiler input (FR-PF-04).
@@ -744,6 +652,7 @@ pub fn compiler_profile_from_row(profile: &Profile) -> Result<CompilerProfile, A
         scripts: crate::scripts::from_row(&profile.scripts)?,
         retention: retention_from_row(profile)?,
         check: check_from_row(profile)?,
+        parameters: parameters::from_row(&profile.parameters)?,
     };
     let mut compiler_profile = validated.to_compiler_profile();
     compiler_profile.profile_tag = Some(profile_tag(profile.id));
@@ -777,282 +686,6 @@ fn compiler_retention(retention: &Retention) -> CompilerRetention {
     }
 }
 
-/// Validates a create request and returns the normalized settings (FR-PF-05).
-pub fn validate_create(body: CreateProfileRequest) -> Result<ValidatedProfile, ApiError> {
-    reject_hooks(body.hooks.as_deref())?;
-    validate_profile(
-        Some(body.name),
-        body.paths,
-        body.excludes,
-        body.exclude_files,
-        body.tags,
-        body.options,
-        body.scripts,
-        body.retention,
-        body.check,
-    )
-}
-
-/// Validates an update request. `current_name` is used when the body holds no name.
-pub fn validate_update(
-    body: UpdateProfileRequest,
-    current_name: &str,
-) -> Result<ValidatedProfile, ApiError> {
-    reject_hooks(body.hooks.as_deref())?;
-    let name = body.name.unwrap_or_else(|| current_name.to_owned());
-    validate_profile(
-        Some(name),
-        body.paths,
-        body.excludes,
-        body.exclude_files,
-        body.tags,
-        body.options,
-        body.scripts,
-        body.retention,
-        body.check,
-    )
-}
-
-pub(super) fn reject_hooks(hooks: Option<&[serde_json::Value]>) -> Result<(), ApiError> {
-    match hooks {
-        Some([_, ..]) => Err(ApiError::invalid_field("hooks", Reason::Removed)),
-        _ => Ok(()),
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(super) fn validate_profile(
-    // `None` skips the name check: a preview of a new profile has no name yet (FR-PF-04).
-    name: Option<String>,
-    paths: ProfilePaths,
-    excludes: Vec<String>,
-    exclude_files: Vec<String>,
-    tags: Vec<String>,
-    options: BackupOptions,
-    scripts: Vec<ScriptDef>,
-    retention: Option<Retention>,
-    check: Option<CheckOptions>,
-) -> Result<ValidatedProfile, ApiError> {
-    let name = match name {
-        Some(name) => crate::validation::validate_record_name("name", &name)?,
-        None => String::new(),
-    };
-    let paths = validate_paths(paths)?;
-    let excludes = validate_patterns("excludes", excludes)?;
-    ensure_count("excludes", excludes.len(), MAX_EXCLUDES)?;
-    let exclude_files = validate_patterns("exclude_files", exclude_files)?;
-    ensure_count("exclude_files", exclude_files.len(), MAX_EXCLUDE_FILES)?;
-    let tags = validate_tags("tags", tags)?;
-    ensure_count("tags", tags.len(), MAX_TAGS)?;
-    validate_limits(&options)?;
-    let scripts = crate::scripts::validate_scripts(scripts, "scripts")?;
-    let retention = match retention {
-        Some(retention) => Some(validate_retention(retention)?),
-        None => None,
-    };
-    let check = match check {
-        Some(check) => Some(validate_check(check)?),
-        None => None,
-    };
-    Ok(ValidatedProfile {
-        name,
-        paths,
-        excludes,
-        exclude_files,
-        tags,
-        options,
-        scripts,
-        retention,
-        check,
-    })
-}
-
-fn validate_paths(paths: ProfilePaths) -> Result<ProfilePaths, ApiError> {
-    let all = validate_path_entries("paths.all", paths.all)?;
-    let windows = validate_path_entries("paths.windows", paths.windows)?;
-    let linux = validate_path_entries("paths.linux", paths.linux)?;
-    let macos = validate_path_entries("paths.macos", paths.macos)?;
-    let total = all.len() + windows.len() + linux.len() + macos.len();
-    if total > MAX_PATHS {
-        return Err(ApiError::invalid_field("paths", Reason::TooLong));
-    }
-    Ok(ProfilePaths {
-        all,
-        windows,
-        linux,
-        macos,
-    })
-}
-
-/// A path entry is absolute: it starts with `/` or a drive letter (FR-PF-01). A template variable
-/// is allowed inside the path (FR-PF-03). A root path (`/` or `C:\`) is allowed and one trailing
-/// separator is dropped, so `/srv/` becomes `/srv`.
-fn validate_path_entries(
-    field: &'static str,
-    values: Vec<String>,
-) -> Result<Vec<String>, ApiError> {
-    let mut result = Vec::with_capacity(values.len());
-    for value in values {
-        result.push(validate_path_entry(field, &value)?);
-    }
-    Ok(result)
-}
-
-fn validate_path_entry(field: &'static str, value: &str) -> Result<String, ApiError> {
-    let value = value.trim();
-    if value == "/" {
-        return Ok("/".to_owned());
-    }
-    let bytes = value.as_bytes();
-    if bytes.len() == 3
-        && bytes[0].is_ascii_alphabetic()
-        && bytes[1] == b':'
-        && matches!(bytes[2], b'\\' | b'/')
-    {
-        return Ok(format!("{}:\\", char::from(bytes[0])));
-    }
-    let trimmed = value
-        .strip_suffix('/')
-        .or_else(|| value.strip_suffix('\\'))
-        .unwrap_or(value);
-    let validated = validation::validate_local_path(field, trimmed)?;
-    if validated.chars().count() > MAX_PATH_ENTRY {
-        return Err(ApiError::invalid_field(field, Reason::TooLong));
-    }
-    Ok(validated)
-}
-
-/// An exclude, an exclude file or a tag holds no control character (FR-PF-01).
-fn validate_patterns(field: &'static str, values: Vec<String>) -> Result<Vec<String>, ApiError> {
-    let mut result = Vec::with_capacity(values.len());
-    for value in values {
-        let value = value.trim();
-        if value.is_empty() {
-            return Err(ApiError::invalid_field(field, Reason::Empty));
-        }
-        if value.chars().count() > MAX_PATTERN {
-            return Err(ApiError::invalid_field(field, Reason::TooLong));
-        }
-        if restichub_proto::validate::has_forbidden(value) || value.chars().any(char::is_control) {
-            return Err(ApiError::invalid_field(field, Reason::InvalidCharacter));
-        }
-        result.push(value.to_owned());
-    }
-    Ok(result)
-}
-
-/// A tag holds no comma and no surrounding space: restic reads these forms differently (AC-PR-08).
-fn validate_tags(field: &'static str, values: Vec<String>) -> Result<Vec<String>, ApiError> {
-    let mut result = Vec::with_capacity(values.len());
-    for value in values {
-        let trimmed = value.trim();
-        if trimmed.is_empty() {
-            return Err(ApiError::invalid_field(field, Reason::Empty));
-        }
-        if trimmed.chars().count() > MAX_PATTERN || trimmed.contains(',') {
-            return Err(ApiError::invalid_field(field, Reason::InvalidFormat));
-        }
-        if restichub_proto::validate::has_forbidden(trimmed) {
-            return Err(ApiError::invalid_field(field, Reason::InvalidCharacter));
-        }
-        // The maintenance job isolates the profiles with the tags of this prefix (FR-RP-08).
-        if trimmed
-            .to_ascii_lowercase()
-            .starts_with(RESERVED_TAG_PREFIX)
-        {
-            return Err(ApiError::invalid_field(field, Reason::Reserved));
-        }
-        result.push(trimmed.to_owned());
-    }
-    Ok(result)
-}
-
-fn validate_retention(retention: Retention) -> Result<Retention, ApiError> {
-    if !retention.keep_within.is_empty() && !is_duration(&retention.keep_within) {
-        return Err(ApiError::invalid_field(
-            "retention.keep_within",
-            Reason::InvalidFormat,
-        ));
-    }
-    let keep_tags = validate_tags("retention.keep_tags", retention.keep_tags)?;
-    ensure_count("retention.keep_tags", keep_tags.len(), MAX_RETENTION_LIST)?;
-    // The maintenance step of a profile covers every agent of its plans, so a host name that
-    // depends on one agent has no single meaning (ADR-0034).
-    if retention.filter.hosts.iter().any(|host| host.contains('{')) {
-        return Err(ApiError::invalid_field(
-            "retention.filter.hosts",
-            Reason::InvalidFormat,
-        ));
-    }
-    let filter = SnapshotFilter {
-        hosts: validate_patterns("retention.filter.hosts", retention.filter.hosts)?,
-        tags: validate_tags("retention.filter.tags", retention.filter.tags)?,
-        paths: validate_patterns("retention.filter.paths", retention.filter.paths)?,
-    };
-    ensure_count(
-        "retention.filter.hosts",
-        filter.hosts.len(),
-        MAX_RETENTION_LIST,
-    )?;
-    ensure_count(
-        "retention.filter.tags",
-        filter.tags.len(),
-        MAX_RETENTION_LIST,
-    )?;
-    ensure_count(
-        "retention.filter.paths",
-        filter.paths.len(),
-        MAX_RETENTION_LIST,
-    )?;
-    Ok(Retention {
-        keep_tags,
-        filter,
-        ..retention
-    })
-}
-
-/// Refuses a list that is longer than the limit (FR-PF-05).
-fn ensure_count(field: &'static str, length: usize, maximum: usize) -> Result<(), ApiError> {
-    if length > maximum {
-        return Err(ApiError::invalid_field(field, Reason::TooLong));
-    }
-    Ok(())
-}
-
-fn validate_check(check: CheckOptions) -> Result<CheckOptions, ApiError> {
-    if !check.read_data_subset.is_empty() && !is_read_data_subset(&check.read_data_subset) {
-        return Err(ApiError::invalid_field(
-            "check.read_data_subset",
-            Reason::InvalidFormat,
-        ));
-    }
-    Ok(check)
-}
-
-/// A restic duration, for example `30d`, `2w` or `1y2m3d4h`.
-fn is_duration(value: &str) -> bool {
-    let mut digits = false;
-    for character in value.chars() {
-        if character.is_ascii_digit() {
-            digits = true;
-        } else if !matches!(character, 'y' | 'm' | 'd' | 'h' | 'w') {
-            return false;
-        }
-    }
-    digits
-}
-
-/// The `read-data-subset` form: `N%` or `N/M` (FR-PF-01).
-fn is_read_data_subset(value: &str) -> bool {
-    if let Some(percent) = value.strip_suffix('%') {
-        return percent.parse::<u32>().is_ok();
-    }
-    match value.split_once('/') {
-        Some((part, total)) => part.parse::<u32>().is_ok() && total.parse::<u32>().is_ok(),
-        None => false,
-    }
-}
-
 /// The identifier of a profile from a path parameter.
 pub fn parse_profile_id(value: &str) -> Result<ProfileId, ApiError> {
     Uuid::parse_str(value)
@@ -1060,68 +693,6 @@ pub fn parse_profile_id(value: &str) -> Result<ProfileId, ApiError> {
         .map_err(|error| {
             ApiError::invalid_field_cause("id", Reason::InvalidFormat, error.to_string())
         })
-}
-
-/// The settings of a validated profile for an audit diff. It holds no secret (FR-PF-01).
-pub fn profile_value(profile: &ValidatedProfile) -> Value {
-    json!({
-        "name": profile.name,
-        "paths": {
-            "all": profile.paths.all,
-            "windows": profile.paths.windows,
-            "linux": profile.paths.linux,
-            "macos": profile.paths.macos,
-        },
-        "excludes": profile.excludes,
-        "exclude_files": profile.exclude_files,
-        "tags": profile.tags,
-        "options": {
-            "use_fs_snapshot": profile.options.use_fs_snapshot,
-            "one_file_system": profile.options.one_file_system,
-            "exclude_caches": profile.options.exclude_caches,
-            "limit_upload_kib": profile.options.limit_upload_kib,
-            "limit_download_kib": profile.options.limit_download_kib,
-            "stall_timeout_minutes": profile.options.stall_timeout_minutes,
-            "max_duration_minutes": profile.options.max_duration_minutes,
-        },
-        "scripts": crate::scripts::audit_value(&profile.scripts),
-        "retention": profile.retention,
-        "check": profile.check,
-    })
-}
-
-/// The settings of a stored row for an audit diff.
-pub fn stored_value(profile: &Profile) -> Value {
-    json!({
-        "name": profile.name,
-        "paths": {
-            "all": profile.paths_all,
-            "windows": profile.paths_windows,
-            "linux": profile.paths_linux,
-            "macos": profile.paths_macos,
-        },
-        "excludes": profile.excludes,
-        "exclude_files": profile.exclude_files,
-        "tags": profile.tags,
-        "options": {
-            "use_fs_snapshot": profile.use_fs_snapshot,
-            "one_file_system": profile.one_file_system,
-            "exclude_caches": profile.exclude_caches,
-            "limit_upload_kib": profile.limit_upload_kib,
-            "limit_download_kib": profile.limit_download_kib,
-            "stall_timeout_minutes": profile.stall_timeout_minutes,
-            "max_duration_minutes": profile.max_duration_minutes,
-        },
-        "scripts": stored_scripts_value(&profile.scripts),
-        "retention": profile.retention,
-        "check": profile.check_options,
-    })
-}
-
-/// The stored scripts as the audit diff shows them. A row that does not parse shows as null.
-fn stored_scripts_value(scripts: &Value) -> Value {
-    crate::scripts::from_row(scripts)
-        .map_or(Value::Null, |scripts| crate::scripts::audit_value(&scripts))
 }
 
 fn format_time(value: time::OffsetDateTime) -> String {

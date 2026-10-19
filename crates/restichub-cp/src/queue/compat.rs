@@ -6,7 +6,7 @@
 //! step: an old agent rejects the kind, but the control plane never relies on that (FR-PR-09).
 
 use restichub_proto::AgentCapability;
-use restichub_proto::agent::v1::{Step, step};
+use restichub_proto::agent::v1::{Step, script_env, step};
 
 use super::build::Refusal;
 
@@ -50,8 +50,40 @@ pub(super) fn fit_steps(
     Ok(())
 }
 
+/// Replaces the parameter value of a script variable with a secret value for an agent that does not
+/// know `masked_value` (FR-PF-12, ADR-0047).
+///
+/// An older agent rejects an unknown field of the oneof, and it masks a secret value in the step log
+/// the same way. The call runs after [`resolve_hook_secrets`](super::build) resolved the references,
+/// so a text value that reaches an old agent carries the same bytes and the same mask.
+pub(super) fn fit_masked_values(steps: &mut [Step], capabilities: &[AgentCapability]) {
+    if capabilities.contains(&AgentCapability::ScriptMaskedValue) {
+        return;
+    }
+    for step in steps {
+        let Some(step::Kind::Script(script)) = step.kind.as_mut() else {
+            continue;
+        };
+        for variable in &mut script.env {
+            if let Some(script_env::Value::MaskedValue(value)) = &mut variable.value {
+                variable.value = Some(script_env::Value::SecretValue(std::mem::take(value)));
+            }
+        }
+    }
+}
+
 /// The capabilities that the agent needs to read the steps without losing a field.
 pub(super) fn required_capabilities(steps: &[Step]) -> Vec<AgentCapability> {
+    let needs_masked_value = steps.iter().any(|step| {
+        matches!(
+            &step.kind,
+            Some(step::Kind::Script(script))
+                if script
+                    .env
+                    .iter()
+                    .any(|variable| matches!(variable.value, Some(script_env::Value::MaskedValue(_))))
+        )
+    });
     let needs_all_tags = steps.iter().any(|step| {
         matches!(
             &step.kind,
@@ -75,12 +107,17 @@ pub(super) fn required_capabilities(steps: &[Step]) -> Vec<AgentCapability> {
     if needs_restore {
         required.push(AgentCapability::RestoreV1);
     }
+    if needs_masked_value {
+        required.push(AgentCapability::ScriptMaskedValue);
+    }
     required
 }
 
 #[cfg(test)]
 mod tests {
-    use restichub_proto::agent::v1::{ForgetStep, RestoreStep, SnapshotsFilter};
+    use restichub_proto::agent::v1::{
+        ForgetStep, RestoreStep, ScriptEnv, ScriptStep, SnapshotsFilter, script_env,
+    };
 
     use super::*;
 
@@ -168,6 +205,67 @@ mod tests {
         assert_eq!(
             fit_steps(&mut steps, &[AgentCapability::ForgetAllTags]),
             Err(Refusal::ForgetWithoutTags)
+        );
+    }
+
+    fn script_step(value: script_env::Value) -> Step {
+        Step {
+            step_id: "script-0".to_owned(),
+            timeout_seconds: 0,
+            kind: Some(step::Kind::Script(ScriptStep {
+                name: "dump".to_owned(),
+                env: vec![ScriptEnv {
+                    name: "PGDIR".to_owned(),
+                    value: Some(value),
+                }],
+                ..ScriptStep::default()
+            })),
+        }
+    }
+
+    fn script_value(step: &Step) -> script_env::Value {
+        let Some(step::Kind::Script(script)) = &step.kind else {
+            panic!("a script step");
+        };
+        script.env[0].value.clone().expect("a value")
+    }
+
+    #[test]
+    fn fr_pf_12_an_agent_without_the_capability_gets_a_secret_value() {
+        let mut steps = [script_step(script_env::Value::MaskedValue(
+            "/srv/pg".to_owned(),
+        ))];
+        assert_eq!(
+            required_capabilities(&steps),
+            [
+                AgentCapability::ScriptsV1,
+                AgentCapability::ScriptMaskedValue
+            ]
+        );
+        fit_masked_values(&mut steps, &[]);
+        assert_eq!(
+            script_value(&steps[0]),
+            script_env::Value::SecretValue("/srv/pg".to_owned())
+        );
+    }
+
+    #[test]
+    fn fr_pf_12_an_agent_with_the_capability_keeps_the_masked_value() {
+        let mut steps = [script_step(script_env::Value::MaskedValue(
+            "/srv/pg".to_owned(),
+        ))];
+        fit_masked_values(&mut steps, &[AgentCapability::ScriptMaskedValue]);
+        assert_eq!(
+            script_value(&steps[0]),
+            script_env::Value::MaskedValue("/srv/pg".to_owned())
+        );
+        // The value stays masked, so the step still needs the capability.
+        assert_eq!(
+            required_capabilities(&steps),
+            [
+                AgentCapability::ScriptsV1,
+                AgentCapability::ScriptMaskedValue
+            ]
         );
     }
 }

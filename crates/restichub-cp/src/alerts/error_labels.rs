@@ -61,6 +61,11 @@ pub(super) const LABELS: &[(&str, &str, &str)] = &[
         "профиль не компилируется",
     ),
     (
+        "parameter_missing",
+        "a required parameter has no value",
+        "у обязательного параметра нет значения",
+    ),
+    (
         "lock_retries_exhausted",
         "the repository stayed locked",
         "репозиторий остался заблокирован",
