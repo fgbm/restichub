@@ -225,7 +225,7 @@ jobs:
           echo "RESTICHUB_REQUIRE_PROMTOOL=1" >> "$GITHUB_ENV"
       # nextest runs the tests of all binaries side by side, and the test helper shares one template
       # database across the processes. It does not run the doc tests; the Rust job runs them.
-      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: nextest
       - name: Build the tests
