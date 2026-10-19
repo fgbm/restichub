@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { VariableOption, VariableSource } from '#lib/variables.ts';
 	import { caretExpression, insertVariable, variableGroups } from '#lib/variables.ts';
-	import VariableList from './VariableList.svelte';
+	import VariablePopover from './VariablePopover.svelte';
 	import { Field } from './ui/index.ts';
 
 	let {
@@ -31,7 +31,7 @@
 	const listId = $derived(`${fieldId}-list`);
 
 	let field = $state<HTMLTextAreaElement | null>(null);
-	let popover = $state<HTMLDivElement | null>(null);
+	let panel = $state<HTMLDivElement | null>(null);
 	let open = $state(false);
 	let typed = $state('');
 	/** The index of the first `{` of the expression that the list follows. */
@@ -39,7 +39,8 @@
 	/** Escape closed the list for this expression; the next typed text does not reopen it. */
 	let dismissed = $state(false);
 	let active = $state(-1);
-	let top = $state(0);
+	/** The bottom edge of the line of the caret, in pixels from the top of the field. */
+	let line = $state(0);
 
 	const source = $derived({ parameters, labels });
 	const groups = $derived(open ? variableGroups(typed, source) : []);
@@ -49,12 +50,16 @@
 	const total = $derived(
 		variableGroups('', source).reduce((count, group) => count + group.options.length, 0)
 	);
-
-	// The popover hangs at the line of the caret. CSS cannot read the caret, and a style attribute
-	// needs `unsafe-inline`, so the node takes its place (ADR-0027).
-	$effect(() => {
-		void top;
-		if (popover) popover.style.top = `${top}px`;
+	// The list hangs at the line of the caret and covers the lines below it; the field keeps its
+	// height. The rect reads the field when the floating layer asks, so a scroll moves the list.
+	const anchor = $derived.by(() => {
+		const offset = line;
+		return {
+			getBoundingClientRect() {
+				const box = field?.getBoundingClientRect();
+				return box ? new DOMRect(box.left, box.top + offset, box.width, 0) : new DOMRect();
+			}
+		};
 	});
 
 	function firstEnabled(list: readonly VariableOption[]): number {
@@ -90,7 +95,7 @@
 		typed = context.typed;
 		open = true;
 		active = firstEnabled(variableGroups(typed, source).flatMap((group) => group.options));
-		top = lineTop(element, caret);
+		line = lineTop(element, caret);
 	}
 
 	function move(step: number): void {
@@ -162,7 +167,7 @@
 	// "Declare" inside the list keeps it open until its click runs.
 	function onblur(event: FocusEvent): void {
 		const next = event.relatedTarget as Node | null;
-		if (next && popover?.contains(next)) return;
+		if (next && panel?.contains(next)) return;
 		open = false;
 		dismissed = false;
 	}
@@ -175,48 +180,33 @@
 </script>
 
 <Field {label} {help} {error} for={fieldId}>
-	<div class="field">
-		<textarea
-			bind:this={field}
-			id={fieldId}
-			class="rh-textarea rh-input--mono"
-			{rows}
-			bind:value
-			aria-autocomplete="list"
-			aria-expanded={open}
-			aria-controls={open ? listId : undefined}
-			aria-activedescendant={activeId}
-			{oninput}
-			{onkeydown}
-			onclick={oncursor}
-			{onkeyup}
-			{onblur}></textarea>
-		{#if open}
-			<div class="popover" bind:this={popover}>
-				<VariableList
-					id={listId}
-					{groups}
-					{activeOption}
-					{typed}
-					{total}
-					onpick={choose}
-					ondeclare={declare}
-				/>
-			</div>
-		{/if}
-	</div>
+	<textarea
+		bind:this={field}
+		id={fieldId}
+		class="rh-textarea rh-input--mono"
+		{rows}
+		bind:value
+		aria-autocomplete="list"
+		aria-expanded={open}
+		aria-controls={open ? listId : undefined}
+		aria-activedescendant={activeId}
+		{oninput}
+		{onkeydown}
+		onclick={oncursor}
+		{onkeyup}
+		{onblur}></textarea>
+	<VariablePopover
+		{open}
+		id={listId}
+		{anchor}
+		{groups}
+		{activeOption}
+		{typed}
+		{total}
+		owner={field}
+		onpick={choose}
+		ondeclare={declare}
+		onclose={() => (open = false)}
+		bind:panel
+	/>
 </Field>
-
-<style>
-	.field {
-		position: relative;
-	}
-
-	.popover {
-		/* `lineTop` sets the row of the caret; the popover covers the rows below it. */
-		position: absolute;
-		right: 0;
-		left: 0;
-		margin-top: 2px;
-	}
-</style>

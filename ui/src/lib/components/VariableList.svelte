@@ -34,10 +34,16 @@
 
 	let list = $state<HTMLDivElement | null>(null);
 
-	// The list scrolls at 420 px, so the highlight stays in view for the arrow keys.
+	// The list scrolls at 420 px, so the highlight stays in view for the arrow keys. The list is a
+	// child of the body, so the scroll must not move the page.
 	$effect(() => {
 		if (!activeOption || !list) return;
-		list.querySelector('[aria-selected="true"]')?.scrollIntoView?.({ block: 'nearest' });
+		const option = list.querySelector<HTMLElement>('[aria-selected="true"]');
+		if (!option) return;
+		const box = option.getBoundingClientRect();
+		const frame = list.getBoundingClientRect();
+		if (box.top < frame.top) list.scrollTop += box.top - frame.top;
+		else if (box.bottom > frame.bottom) list.scrollTop += box.bottom - frame.bottom;
 	});
 
 	function optionId(option: VariableOption): string {
@@ -131,14 +137,10 @@
 
 <style>
 	.vars {
-		position: absolute;
-		right: 0;
-		left: 0;
-		/* The popover covers the lines below the caret; the field keeps its height. */
-		z-index: var(--rh-z-panel);
 		display: flex;
 		flex-direction: column;
-		max-height: 420px;
+		/* The list scrolls at 420 px, and it shrinks when the window has less room. */
+		max-height: min(420px, var(--bits-floating-available-height, 420px));
 		border: var(--rh-border-width) solid var(--rh-color-border);
 		border-radius: var(--rh-radius-md);
 		background-color: var(--rh-color-surface);

@@ -125,3 +125,46 @@ test('screen 5: the inserted variable and the count of uses', async ({ page }) =
 	await page.locator('[data-section="parameters"]').scrollIntoViewIfNeeded();
 	await shot(page, 'screen-5-parameters-1440');
 });
+
+// The list must keep the full opacity of a switched-off section and stay above the whole page.
+/** Opens the list at the first line of an empty field, below the caret, in the middle of the window. */
+async function openList(page: Page, selector: string): Promise<void> {
+	const field = page.locator(selector);
+	await field.click();
+	await field.evaluate((node) => {
+		const element = node as HTMLTextAreaElement;
+		element.value = '';
+		element.setSelectionRange(0, 0);
+		element.dispatchEvent(new Event('input', { bubbles: true }));
+		window.scrollBy(0, element.getBoundingClientRect().top - 240);
+	});
+	await page.keyboard.type('{{');
+	await expect(page.getByRole('listbox', { name: 'Переменные' })).toBeVisible();
+}
+
+for (const width of [1440, 360]) {
+	test(`fix: the list over a switched-off section (${width} px)`, async ({ page }) => {
+		await start(page, width);
+		await expect(
+			page.getByRole('switch', { name: 'Включить раздел «Исключения»' })
+		).toHaveAttribute('aria-checked', 'false');
+		await openList(page, '#profile-excludes');
+		await shot(page, `fix-overlay-excludes-off-${width}`);
+	});
+}
+
+test('fix: the list below the tags field', async ({ page }) => {
+	await start(page, 1440);
+	await page.locator('#profile-tags').click();
+	await page.keyboard.type('db-{{');
+	await expect(page.getByRole('listbox', { name: 'Переменные' })).toBeVisible();
+	await page.locator('[data-section="tags"]').scrollIntoViewIfNeeded();
+	await shot(page, 'fix-overlay-tags-1440');
+});
+
+test('fix: the list at the caret line of a path', async ({ page }) => {
+	await start(page, 1440);
+	await typeIn(page, '#profile-paths-all', '/var/backups/\n/etc/pg', 13, '{{');
+	await page.locator('[data-section="paths"]').scrollIntoViewIfNeeded();
+	await shot(page, 'fix-overlay-paths-1440');
+});

@@ -130,4 +130,33 @@ describe('the list of variables in a text field', () => {
 		expect(screen.getByText(/No matches/)).toBeInTheDocument();
 		expect(screen.queryByRole('button', { name: 'Declare' })).not.toBeInTheDocument();
 	});
+
+	it('fr_pf_03_the_list_leaves_the_field_and_keeps_the_full_opacity_of_the_page', async () => {
+		const user = userEvent.setup();
+		const { container } = render(VariableTextarea, {
+			label: 'All systems',
+			parameters: source.parameters,
+			labels: source.labels,
+			ondeclare: vi.fn(),
+			value: '/srv/'
+		});
+		// A switched-off section dims its fields with the opacity of the body.
+		container.style.opacity = '0.55';
+		const field = screen.getByLabelText('All systems') as HTMLTextAreaElement;
+		await typeAtEnd(user, field, '{{pg');
+
+		const list = listbox() as HTMLElement;
+		expect(container.contains(list)).toBe(false);
+		expect(list.closest('[style*="opacity"]')).toBeNull();
+		// The list is a child of the body, so a later section cannot paint over it.
+		expect(list.parentElement?.parentElement?.parentElement).toBe(document.body);
+	});
+
+	it('fr_pf_03_a_pointer_down_in_the_field_keeps_the_list_open', async () => {
+		const { user, field } = setup();
+		await typeAtEnd(user, field, '{{pg');
+
+		await fireEvent.pointerDown(field);
+		expect(listbox()).toBeInTheDocument();
+	});
 });
