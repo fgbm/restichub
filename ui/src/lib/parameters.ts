@@ -11,7 +11,8 @@ import type {
 	ParameterKind,
 	Plan,
 	PlanParameterValue,
-	ProfileParameter
+	ProfileParameter,
+	Role
 } from '#lib/api/index.ts';
 import { blockedView } from '#lib/delete-check.ts';
 import type { BlockedLink, BlockedView } from '#lib/delete-check.ts';
@@ -24,11 +25,24 @@ import type { ScriptDraft } from '#lib/scripts.ts';
 /** The rule of a parameter name, the same as the rule of the server (FR-PF-09). */
 const NAME = /^[a-z][a-z0-9_]{0,63}$/;
 
+/** True for a name that the server accepts. The button "Declare" shows only for such a name. */
+export function isParameterName(name: string): boolean {
+	return NAME.test(name.trim());
+}
+
 /** The reason why a name does not fit the rule, or null. */
 export function parameterNameError(name: string): string | null {
 	const text = name.trim();
-	if (text === '' || NAME.test(text)) return null;
+	if (text === '' || isParameterName(text)) return null;
 	return t('pe.param.nameInvalid');
+}
+
+/**
+ * True for a role that passes `Operation::ParameterSecretWrite`: the server requires the Admin
+ * role, and a role includes the lower ones (ADR-0047, `crates/restichub-cp/src/context.rs`).
+ */
+export function canWriteSecret(role: Role | null | undefined): boolean {
+	return role === 'admin' || role === 'platform_admin';
 }
 
 export function kindLabel(kind: ParameterKind): string {

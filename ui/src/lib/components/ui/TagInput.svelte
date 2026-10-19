@@ -15,7 +15,8 @@
 		max,
 		maxLength,
 		check,
-		separator = /[\s,]+/
+		separator = /[\s,]+/,
+		listbox
 	}: {
 		value?: string[];
 		label?: string;
@@ -31,6 +32,11 @@
 		/** Returns the reason why a value is not valid, or null. */
 		check?: (value: string) => string | null;
 		separator?: RegExp;
+		/**
+		 * A list below the field that the typed text drives. The field keeps its keys while the list
+		 * is open; the parent moves the highlight.
+		 */
+		listbox?: { id: string; expanded: boolean; activeId?: string };
 	} = $props();
 
 	const uid = $props.id();
@@ -136,6 +142,10 @@
 			placeholder={value.length === 0 ? (placeholder ?? t('tagInput.placeholder')) : undefined}
 			aria-invalid={shownError ? 'true' : undefined}
 			aria-describedby={shownError ? errorId : help ? helpId : undefined}
+			aria-autocomplete={listbox ? 'list' : undefined}
+			aria-expanded={listbox ? listbox.expanded : undefined}
+			aria-controls={listbox?.expanded ? listbox.id : undefined}
+			aria-activedescendant={listbox?.expanded ? listbox.activeId : undefined}
 			bind:value={text}
 			oninput={onInput}
 			onkeydown={onKeydown}
