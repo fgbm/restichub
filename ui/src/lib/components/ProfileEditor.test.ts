@@ -311,6 +311,16 @@ describe('Profile editor sections', () => {
 		expect(toggle).toHaveAttribute('aria-expanded', 'true');
 	});
 
+	it('fr_pf_03_shows_the_hint_of_the_variables_once_at_the_all_systems_paths', async () => {
+		render(ProfileEditor, { profileId: 'p_1' });
+		const section = await screen.findByRole('button', { name: /^What to back up/ });
+		if (section.getAttribute('aria-expanded') !== 'true') await user().click(section);
+
+		const hints = screen.getAllByText('Variables: type {{');
+		expect(hints).toHaveLength(1);
+		expect(screen.getByLabelText(/^All systems/).closest('.rh-field')).toContainElement(hints[0]);
+	});
+
 	it('fr_pf_04_the_commands_come_from_the_server_for_the_draft', async () => {
 		const u = user();
 		mocks.listProfiles.mockResolvedValue([

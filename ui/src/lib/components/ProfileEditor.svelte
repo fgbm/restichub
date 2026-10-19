@@ -688,7 +688,6 @@
 			<VariableTextarea
 				id="profile-paths-windows"
 				label={t('profiles.pathsWindows')}
-				help={t('pe.vars.help')}
 				error={fieldError(formProblem, 'paths.windows') ?? secretReferenceIn(draft.pathsWindows)}
 				rows={3}
 				parameters={listParameters}
@@ -700,7 +699,6 @@
 			<VariableTextarea
 				id="profile-paths-linux"
 				label={t('profiles.pathsLinux')}
-				help={t('pe.vars.help')}
 				error={fieldError(formProblem, 'paths.linux') ?? secretReferenceIn(draft.pathsLinux)}
 				rows={3}
 				parameters={listParameters}
@@ -712,7 +710,6 @@
 			<VariableTextarea
 				id="profile-paths-macos"
 				label={t('profiles.pathsMacos')}
-				help={t('pe.vars.help')}
 				error={fieldError(formProblem, 'paths.macos') ?? secretReferenceIn(draft.pathsMacos)}
 				rows={3}
 				parameters={listParameters}

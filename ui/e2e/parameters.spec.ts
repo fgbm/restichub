@@ -102,10 +102,12 @@ test('fr_pf_03_the_path_field_lists_the_variables_and_inserts_one', async ({
 	await expect(list).toBeVisible();
 	await expect(list).toContainText('3 of 10');
 
-	// The secret stays in the list, cannot be inserted, and the arrows skip it.
+	// The secret stays in the list, cannot be inserted, and the arrows skip it. Its reason replaces
+	// the description, so the row keeps one line of detail.
 	const secret = list.getByRole('option', { name: /pg_password/ });
 	await expect(secret).toHaveAttribute('aria-disabled', 'true');
 	await expect(secret).toContainText('A secret cannot go into a path or a tag.');
+	await expect(secret).not.toContainText('Backup password');
 
 	// Enter writes the name with the closing braces and puts the caret after them.
 	await page.keyboard.press('ArrowDown');

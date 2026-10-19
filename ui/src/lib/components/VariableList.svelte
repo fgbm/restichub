@@ -107,7 +107,7 @@
 										</span>
 									{/if}
 								</span>
-								{#if option.description}
+								{#if option.description && !option.reason}
 									<span class="vars__desc" id={`${optionId(option)}-d`}>{option.description}</span>
 								{/if}
 								{#if option.reason}
@@ -182,7 +182,7 @@
 	}
 
 	.vars__option--disabled .vars__name,
-	.vars__option--disabled .vars__desc {
+	.vars__option--disabled .vars__reason {
 		opacity: 0.55;
 	}
 

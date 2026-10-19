@@ -73,7 +73,10 @@ describe('the list of variables in a text field', () => {
 		await typeAtEnd(user, field, '{{pg');
 		const secret = screen.getByRole('option', { name: /pg_password/ });
 		expect(secret).toHaveAttribute('aria-disabled', 'true');
+		// The reason of the refusal takes the place of the description, and it stays described.
 		expect(secret).toHaveTextContent('A secret cannot go into a path or a tag.');
+		expect(secret).not.toHaveTextContent('Backup password');
+		expect(secret).toHaveAccessibleDescription('A secret cannot go into a path or a tag.');
 
 		// The first enabled row is pg_dir; the next one is pg_host, and the secret never takes it.
 		await user.keyboard('{ArrowDown}{Enter}');
