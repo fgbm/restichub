@@ -81,6 +81,12 @@ pub enum Reason {
     ParameterMissingInPlans,
     /// A value has another kind than the parameter (FR-PF-11).
     ParameterKindMismatch,
+    /// A template field or a script variable names a parameter that the profile does not declare
+    /// (FR-PF-05, FR-PF-10).
+    ParameterNotDeclared,
+    /// An optional parameter without a default fills a template field with the empty string
+    /// (FR-PF-05, FR-PF-10).
+    ParameterNeedsDefault,
     /// A secret parameter cannot expand in a template field (FR-PF-12, FR-AG-06).
     ParameterSecretInTemplate,
     /// A parameter cannot expand in the retention or the check fields (ADR-0047).
@@ -116,6 +122,8 @@ impl Reason {
             Self::ParameterMissing => "parameter_missing",
             Self::ParameterMissingInPlans => "parameter_missing_in_plans",
             Self::ParameterKindMismatch => "parameter_kind_mismatch",
+            Self::ParameterNotDeclared => "parameter_not_declared",
+            Self::ParameterNeedsDefault => "parameter_needs_default",
             Self::ParameterSecretInTemplate => "parameter_secret_in_template",
             Self::ParameterNotAllowed => "parameter_not_allowed",
         }

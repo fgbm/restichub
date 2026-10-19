@@ -8,10 +8,13 @@ import type { ApiProblem } from '#lib/api/index.ts';
 import {
 	kindLabel,
 	missingValue,
+	overridingPlans,
 	parameterChip,
 	parameterNameError,
 	plansRefusal,
+	referencedNames,
 	resolveValue,
+	undeclaredNames,
 	usageOf,
 	usageText
 } from './parameters';
@@ -89,6 +92,50 @@ describe('the uses of a parameter', () => {
 		expect(usage).toEqual({ paths: 1, excludes: 1, excludeFiles: 0, tags: 1, scripts: 1 });
 		expect(usageText(usage)).toBe('1 path · 1 exclusion · 1 tag · 1 script');
 		expect(usageText({ paths: 0, excludes: 0, excludeFiles: 0, tags: 0, scripts: 0 })).toBe('—');
+	});
+});
+
+describe('the references of a template field', () => {
+	it('fr_pf_10_reads_the_names_with_the_spaces_of_the_server', () => {
+		expect(referencedNames('/srv/{{param.a}}/{{ param.b }}/{{hostname}}')).toEqual(['a', 'b']);
+		expect(referencedNames('/srv')).toEqual([]);
+	});
+
+	it('fr_pf_10_names_the_references_that_the_draft_does_not_declare', () => {
+		expect(undeclaredNames(['/srv/{{param.a}}', '{{param.b}}', '/srv/{{param.a}}'], ['a'])).toEqual(
+			['b']
+		);
+		expect(undeclaredNames(['/srv/{{param.a}}'], ['a', 'b'])).toEqual([]);
+	});
+});
+
+describe('the plans that lose a value', () => {
+	it('fr_pf_10_lists_the_plans_of_the_profile_that_hold_a_value', () => {
+		const plans = [
+			{
+				id: 'pl_1',
+				name: 'pg-dump-daily',
+				profile_id: 'p_1',
+				parameter_values: [{ name: 'pg_dir', kind: 'text' as const }]
+			},
+			{
+				id: 'pl_2',
+				name: 'other',
+				profile_id: 'p_2',
+				parameter_values: [{ name: 'pg_dir', kind: 'text' as const }]
+			},
+			{
+				id: 'pl_3',
+				name: 'no-override',
+				profile_id: 'p_1',
+				parameter_values: []
+			}
+		];
+		const view = overridingPlans(plans as unknown as Parameters<typeof overridingPlans>[0], 'p_1', [
+			'pg_dir'
+		]);
+		expect(view.links.map((link) => link.label)).toEqual(['pg-dump-daily']);
+		expect(view.more).toBe(0);
 	});
 });
 

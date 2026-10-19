@@ -53,6 +53,24 @@ describe('fieldError', () => {
 		expect(fieldError(taken, 'backend.path')).toContain('"repo-b"');
 	});
 
+	it('fr_pf_10_names_the_parameter_of_an_undeclared_reference', () => {
+		const undeclared = {
+			...problem('paths.all[0]', 'parameter_not_declared'),
+			parameters: ['pg_host']
+		};
+		expect(fieldError(undeclared, 'paths.all[0]')).toBe(
+			'The parameter pg_host is not declared in the section Parameters.'
+		);
+	});
+
+	it('fr_pf_10_names_the_parameter_that_needs_a_default', () => {
+		const needsDefault = {
+			...problem('tags[0]', 'parameter_needs_default'),
+			parameters: ['pg_dir']
+		};
+		expect(fieldError(needsDefault, 'tags[0]')).toContain('An optional parameter pg_dir');
+	});
+
 	it('returns undefined for another field', () => {
 		expect(fieldError(problem('username'), 'password')).toBeUndefined();
 		expect(fieldError(null, 'username')).toBeUndefined();

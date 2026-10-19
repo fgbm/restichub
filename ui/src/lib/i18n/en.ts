@@ -1061,6 +1061,7 @@ export const en = {
 	'pl.danger.summary': 'Delete the plan',
 	'pl.danger.delete':
 		'The scheduler does not run the plan any more. The jobs that it ran stay in the job list.',
+	'pl.danger.deleteSecret': 'Only an Admin deletes a plan that sets a secret value.',
 	'plans.moreActions': 'More actions for {name}',
 	'pl.newTitle': 'New plan',
 	'pl.notFound': 'The plan does not exist.',
@@ -1636,6 +1637,10 @@ export const en = {
 		'A secret parameter cannot go into a path, an exclude or a tag, because the command line shows it.',
 	'reason.parameter_not_allowed':
 		'A parameter cannot go into the retention or the check settings, because one maintenance job serves every host.',
+	'reason.parameter_not_declared':
+		'The parameter {name} is not declared in the section Parameters.',
+	'reason.parameter_needs_default':
+		'An optional parameter {name} without a default value gives an empty string, and an empty path or tag is not allowed. Make the parameter required or set a default value.',
 	'scripts.title': 'Scripts',
 	'scripts.description':
 		'Scripts run on the host as the agent account. They run before and after the backup, in the order of the lists. Each script is a step of the job with its own log.',
@@ -2099,6 +2104,12 @@ export const en = {
 	'pe.param.refusedTitle':
 		'The profile is not saved: plans would stay without the required parameter {names}.',
 	'pe.param.refusedHint': 'Set the value in these plans and save the profile again.',
+	'pe.param.notDeclared': 'The parameter {name} is not declared.',
+	'pe.param.declare': 'Declare',
+	'pe.param.removeTitle': 'Delete the values of the plans?',
+	'pe.param.removeBody':
+		'Plans of the profile set a value for the parameter {names}. The save deletes their values for it.',
+	'pe.param.removeConfirm': 'Delete the values and save',
 	'pe.commands.visibility':
 		'Values in paths, exclusions and tags are visible in the snapshots. The value of a script variable is masked.',
 	'parameters.title': 'Parameters',

@@ -639,6 +639,14 @@ pub async fn delete_plan(
     restichub_db::jobs::cancel_for_plan(&mut tx, plan_id, now).await?;
     // The values are read before the delete: the foreign key removes them with the plan.
     let values = restichub_db::parameters::plan_values(&mut tx, plan_id).await?;
+    // The delete removes the secret overrides of the plan, and only an Admin removes a secret
+    // value, because it chooses the credential that a script receives (ADR-0047).
+    if values
+        .iter()
+        .any(|value| value.kind == restichub_db::ParameterKind::Secret)
+    {
+        context.authorize(Operation::ParameterSecretWrite)?;
+    }
     repo::delete(&mut tx, plan_id).await?;
     let mut event = context.audit_event(AuditAction::PlanDelete, "plan", plan_id.as_uuid());
     event.diff = Some(diff(Some(&stored_value(&current, &values)), None, &[]));

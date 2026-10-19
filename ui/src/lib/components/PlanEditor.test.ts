@@ -514,6 +514,40 @@ describe('the plan page', () => {
 		expect(mocks.goto).toHaveBeenCalledWith('/(app)/plans');
 	});
 
+	it('adr_0047_an_operator_deletes_no_plan_that_sets_a_secret_value', async () => {
+		session.role = 'operator';
+		mocks.listPlans.mockResolvedValue([
+			plan({
+				parameter_values: [
+					{ name: 'pg_password', kind: 'secret', secret_id: 's_1', secret_name: 'pg' }
+				]
+			})
+		]);
+		render(PlanEditor, { planId: 'pl_1' });
+
+		await screen.findByRole('heading', { level: 1, name: 'nightly-web' });
+		const button = screen.getByRole('button', { name: 'Delete plan' });
+		expect(button).toBeDisabled();
+		expect(button).toHaveAttribute(
+			'title',
+			'Only an Admin deletes a plan that sets a secret value.'
+		);
+	});
+
+	it('adr_0047_an_admin_deletes_a_plan_that_sets_a_secret_value', async () => {
+		mocks.listPlans.mockResolvedValue([
+			plan({
+				parameter_values: [
+					{ name: 'pg_password', kind: 'secret', secret_id: 's_1', secret_name: 'pg' }
+				]
+			})
+		]);
+		render(PlanEditor, { planId: 'pl_1' });
+
+		await screen.findByRole('heading', { level: 1, name: 'nightly-web' });
+		expect(screen.getByRole('button', { name: 'Delete plan' })).toBeEnabled();
+	});
+
 	it('shows an error for a plan that does not exist', async () => {
 		render(PlanEditor, { planId: 'pl_missing' });
 

@@ -393,9 +393,16 @@
 		}
 	]);
 
+	// The delete removes the secret override of the plan, and only an Admin removes a secret value
+	// (ADR-0047).
+	const secretOverride = $derived(
+		existing?.parameter_values.some((value) => value.kind === 'secret') ?? false
+	);
+
 	// Delete is on the plan page only, so a list item keeps two actions.
 	const dangerActions = $derived.by<DangerAction[]>(() => {
 		if (!existing || !canWrite) return [];
+		const refusedSecret = secretOverride && !canSetSecret;
 		return [
 			{
 				key: 'delete',
@@ -403,6 +410,8 @@
 				label: t('plans.delete'),
 				icon: 'trash',
 				tone: 'danger',
+				disabled: refusedSecret,
+				hint: refusedSecret ? t('pl.danger.deleteSecret') : undefined,
 				onclick: () => (deleteOpen = true)
 			}
 		];

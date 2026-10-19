@@ -655,8 +655,9 @@ pub struct ProblemBody {
     /// `parameter_missing_in_plans` set it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub blockers: Option<Blockers>,
-    /// The names that a `parameter_missing` refusal lists. Only `parameter_missing` and
-    /// `parameter_kind_mismatch` set it (FR-PF-11).
+    /// Only a validation refusal sets it: `parameter_missing`, `parameter_kind_mismatch`,
+    /// `parameter_not_declared` and `parameter_needs_default` (FR-PF-05, FR-PF-11); the last two
+    /// list one name.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parameters: Option<Vec<String>>,
     /// The name of the repository that holds the location; only `repository_location_taken` sets

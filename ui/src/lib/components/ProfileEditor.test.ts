@@ -765,6 +765,88 @@ describe('Profile editor parameters (FR-PF-09, FR-PF-11, ADR-0047)', () => {
 		expect(screen.queryByDisplayValue('pg_password')).not.toBeInTheDocument();
 	});
 
+	it('fr_pf_10_a_field_names_an_undeclared_parameter_and_declares_it', async () => {
+		const u = user();
+		mocks.listProfiles.mockResolvedValue([
+			profile({
+				parameters: DECLARED,
+				paths: { all: ['/srv/{{param.pg_host}}'], windows: [], linux: [], macos: [] }
+			})
+		]);
+		render(ProfileEditor, { profileId: 'p_1' });
+
+		expect(await screen.findByText('The parameter pg_host is not declared.')).toBeInTheDocument();
+		await u.click(screen.getByRole('button', { name: 'Declare' }));
+
+		// The button adds a required text parameter with the name of the reference.
+		expect(screen.getByDisplayValue('pg_host')).toBeInTheDocument();
+		expect(screen.queryByText('The parameter pg_host is not declared.')).not.toBeInTheDocument();
+		await u.click(screen.getByRole('button', { name: 'Save' }));
+
+		await waitFor(() => expect(mocks.updateProfile).toHaveBeenCalledTimes(1));
+		expect(mocks.updateProfile.mock.calls[0][1].parameters).toContainEqual({
+			name: 'pg_host',
+			kind: 'text',
+			required: true,
+			default_value: undefined,
+			description: undefined
+		});
+	});
+
+	it('fr_pf_10_a_removed_parameter_names_the_plans_that_lose_its_value', async () => {
+		const u = user();
+		mocks.listPlans.mockResolvedValue([
+			{
+				id: 'pl_1',
+				name: 'pg-dump-daily',
+				profile_id: 'p_1',
+				agent_id: 'a_1',
+				parameter_values: [{ name: 'pg_dir', kind: 'text', value: '/srv/pg' }]
+			},
+			{
+				id: 'pl_2',
+				name: 'pg-dump-fast',
+				profile_id: 'p_2',
+				agent_id: 'a_1',
+				parameter_values: [{ name: 'pg_dir', kind: 'text', value: '/srv/pg' }]
+			}
+		]);
+		render(ProfileEditor, { profileId: 'p_1' });
+		await expand(u, /^Parameters/);
+		await u.click(screen.getByRole('button', { name: 'Delete the parameter pg_dir' }));
+		await u.click(screen.getByRole('button', { name: 'Save' }));
+
+		const dialog = await screen.findByRole('dialog');
+		expect(
+			within(dialog).getByText(
+				'Plans of the profile set a value for the parameter pg_dir. The save deletes their values for it.'
+			)
+		).toBeInTheDocument();
+		expect(within(dialog).getByRole('link', { name: 'pg-dump-daily' })).toHaveAttribute(
+			'href',
+			'/(app)/plans/pl_1'
+		);
+		// A plan of another profile keeps its value, so the dialog names it no more.
+		expect(within(dialog).queryByRole('link', { name: 'pg-dump-fast' })).toBeNull();
+		// Cancel keeps the form unchanged and sends nothing.
+		await u.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+		expect(mocks.updateProfile).not.toHaveBeenCalled();
+
+		await u.click(screen.getByRole('button', { name: 'Save' }));
+		const again = await screen.findByRole('dialog');
+		await u.click(within(again).getByRole('button', { name: 'Delete the values and save' }));
+		await waitFor(() => expect(mocks.updateProfile).toHaveBeenCalledTimes(1));
+		expect(mocks.updateProfile.mock.calls[0][1].parameters).toEqual([
+			{
+				name: 'pg_password',
+				kind: 'secret',
+				required: true,
+				default_value: undefined,
+				description: 'Backup password'
+			}
+		]);
+	});
+
 	it('ac_pf_07_names_the_plans_that_would_lose_the_value_and_keeps_save', async () => {
 		const u = user();
 		mocks.updateProfile.mockRejectedValue(

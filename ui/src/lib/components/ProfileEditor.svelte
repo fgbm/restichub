@@ -33,6 +33,7 @@
 		Badge,
 		Button,
 		Checkbox,
+		ConfirmDialog,
 		DataTable,
 		Disclosure,
 		Field,
@@ -53,12 +54,19 @@
 		enabledCount,
 		parameterUses,
 		settingsOf,
+		splitLines,
 		summarize,
 		minutesToHours,
 		MAX_TAGS
 	} from '#lib/profile-form.ts';
 	import type { ProfileDraft, ProfileParameterDraft, SummaryKey } from '#lib/profile-form.ts';
-	import { parameterNameError, plansRefusal, usageText } from '#lib/parameters.ts';
+	import {
+		overridingPlans,
+		parameterNameError,
+		plansRefusal,
+		undeclaredNames,
+		usageText
+	} from '#lib/parameters.ts';
 	import { rememberSections } from '#lib/section-state.svelte.ts';
 	import { loadPreference, savePreference } from '#lib/stores/ui-preferences.svelte.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
@@ -270,6 +278,27 @@
 		{ value: 'secret', label: t('parameters.kind.secret') }
 	]);
 	const uses = $derived(parameterUses(draft));
+	const declaredNames = $derived(
+		draft.parameters.map((parameter) => parameter.name.trim()).filter((name) => name !== '')
+	);
+
+	// A reference that the draft does not declare gets a hint under its field, and the person
+	// declares it there; nothing is declared automatically (FR-PF-10).
+	function undeclaredIn(text: string): string[] {
+		return undeclaredNames(splitLines(text), declaredNames);
+	}
+
+	function declareParameter(name: string): void {
+		if (declaredNames.includes(name)) return;
+		const row = blankParameter();
+		row.name = name;
+		row.required = true;
+		draft.parameters = [...draft.parameters, row];
+		open.parameters = true;
+		document
+			.getElementById('sec-parameters')
+			?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+	}
 
 	function parameterIndexOf(row: ProfileParameterDraft): number {
 		return draft.parameters.findIndex((parameter) => parameter.key === row.key);
@@ -292,6 +321,28 @@
 	function changeParameterKind(row: ProfileParameterDraft, kind: string): void {
 		row.kind = kind === 'secret' ? 'secret' : 'text';
 		if (row.kind === 'secret') row.defaultValue = '';
+	}
+
+	// A removed or renamed parameter drops the values that the plans of the profile hold for it
+	// (FR-PF-10), so the person confirms which plans lose them.
+	const lostOverrides = $derived.by(() => {
+		if (!existing) return null;
+		const removed = (existing.parameters ?? [])
+			.map((parameter) => parameter.name)
+			.filter((name) => !declaredNames.includes(name));
+		if (removed.length === 0) return null;
+		const found = overridingPlans(plans, existing.id, removed);
+		if (found.links.length === 0 && found.more === 0) return null;
+		return { names: removed, plans: found };
+	});
+	let confirmOverrides = $state(false);
+
+	function requestSave(): void {
+		if (lostOverrides) {
+			confirmOverrides = true;
+			return;
+		}
+		void save();
 	}
 
 	async function save(): Promise<void> {
@@ -420,6 +471,17 @@
 	}
 </script>
 
+{#snippet parameterHint(names: string[])}
+	{#each names as name (name)}
+		<p class="hint">
+			<span>{t('pe.param.notDeclared', { name })}</span>
+			<Button size="sm" variant="ghost" onclick={() => declareParameter(name)}>
+				{t('pe.param.declare')}
+			</Button>
+		</p>
+	{/each}
+{/snippet}
+
 {#snippet parameterNameCell(row: ProfileParameterDraft)}
 	<TextField
 		value={row.name}
@@ -489,7 +551,7 @@
 	description={t('profiles.description')}
 	{loading}
 	error={loadError}
-	onsubmit={() => void save()}
+	onsubmit={requestSave}
 	save={{
 		dirty: dirty || unsavedCopy,
 		saving,
@@ -591,6 +653,7 @@
 				rows="2"
 				bind:value={draft.pathsAll}></textarea>
 		</Field>
+		{@render parameterHint(undeclaredIn(draft.pathsAll))}
 		<div class="grid3">
 			<Field
 				label={t('profiles.pathsWindows')}
@@ -603,6 +666,7 @@
 					rows="3"
 					bind:value={draft.pathsWindows}></textarea>
 			</Field>
+			{@render parameterHint(undeclaredIn(draft.pathsWindows))}
 			<Field
 				label={t('profiles.pathsLinux')}
 				error={fieldError(formProblem, 'paths.linux')}
@@ -614,6 +678,7 @@
 					rows="3"
 					bind:value={draft.pathsLinux}></textarea>
 			</Field>
+			{@render parameterHint(undeclaredIn(draft.pathsLinux))}
 			<Field
 				label={t('profiles.pathsMacos')}
 				error={fieldError(formProblem, 'paths.macos')}
@@ -625,6 +690,7 @@
 					rows="3"
 					bind:value={draft.pathsMacos}></textarea>
 			</Field>
+			{@render parameterHint(undeclaredIn(draft.pathsMacos))}
 		</div>
 	</ProfileSection>
 
@@ -650,6 +716,7 @@
 				rows="4"
 				bind:value={draft.excludes}></textarea>
 		</Field>
+		{@render parameterHint(undeclaredIn(draft.excludes))}
 		<Disclosure label={t('pe.excludes.more')} bind:open={excludeListOpen}>
 			<Field
 				label={t('profiles.excludeFiles')}
@@ -663,6 +730,7 @@
 					rows="3"
 					bind:value={draft.excludeFiles}></textarea>
 			</Field>
+			{@render parameterHint(undeclaredIn(draft.excludeFiles))}
 		</Disclosure>
 	</ProfileSection>
 
@@ -685,6 +753,7 @@
 			error={fieldError(formProblem, 'tags')}
 			bind:value={draft.tags}
 		/>
+		{@render parameterHint(undeclaredIn(draft.tags.join('\n')))}
 	</ProfileSection>
 
 	<ProfileSection
@@ -977,6 +1046,19 @@
 	</SidePanel>
 </RecordPage>
 
+<ConfirmDialog
+	bind:open={confirmOverrides}
+	title={t('pe.param.removeTitle')}
+	message={t('pe.param.removeBody', { names: (lostOverrides?.names ?? []).join(', ') })}
+	confirmLabel={t('pe.param.removeConfirm')}
+	links={lostOverrides?.plans.links ?? []}
+	more={lostOverrides?.plans.more ?? 0}
+	onConfirm={() => {
+		confirmOverrides = false;
+		void save();
+	}}
+/>
+
 <style>
 	.note {
 		margin: 0;
@@ -1054,6 +1136,16 @@
 		.grid3 {
 			grid-template-columns: minmax(0, 1fr);
 		}
+	}
+
+	.hint {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: var(--rh-space-2);
+		margin: 0;
+		color: var(--rh-color-text-muted);
+		font-size: var(--rh-font-size-sm);
 	}
 
 	.commands {

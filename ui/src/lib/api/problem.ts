@@ -74,6 +74,14 @@ export function fieldError(
 	if (problem.code === 'repository_location_taken') {
 		return t('error.repository_location_taken', { name: problem.existingName ?? '' });
 	}
+	// These refusals name one parameter in the `parameters` list (FR-PF-05, FR-PF-10).
+	const name = problem.parameters?.[0] ?? '';
+	if (problem.reason === 'parameter_not_declared') {
+		return t('reason.parameter_not_declared', { name });
+	}
+	if (problem.reason === 'parameter_needs_default') {
+		return t('reason.parameter_needs_default', { name });
+	}
 	const byCode = problem.code === 'invalid_argument' ? undefined : tErrorCode(problem.code);
 	return tErrorReason(problem.reason) ?? byCode ?? t('error.field');
 }

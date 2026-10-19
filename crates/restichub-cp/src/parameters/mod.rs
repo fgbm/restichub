@@ -672,7 +672,11 @@ pub fn check_templates<'a>(
                 .iter()
                 .find(|definition| definition.name == name)
             else {
-                return Err(ApiError::invalid_field(field, Reason::Unknown));
+                return Err(ApiError::parameters(
+                    field,
+                    Reason::ParameterNotDeclared,
+                    vec![name.to_owned()],
+                ));
             };
             if definition.kind == ParameterKind::Secret {
                 return Err(ApiError::invalid_field(
@@ -681,7 +685,11 @@ pub fn check_templates<'a>(
                 ));
             }
             if !definition.required && definition.default_value.is_none() {
-                return Err(ApiError::invalid_field(field, Reason::ParameterMissing));
+                return Err(ApiError::parameters(
+                    field,
+                    Reason::ParameterNeedsDefault,
+                    vec![definition.name.clone()],
+                ));
             }
         }
     }
@@ -725,9 +733,10 @@ pub fn check_script_parameters(
                 .iter()
                 .any(|definition| definition.name == variable.value)
             {
-                return Err(ApiError::invalid_field(
+                return Err(ApiError::parameters(
                     format!("scripts[{index}].env[{position}].value"),
-                    Reason::Unknown,
+                    Reason::ParameterNotDeclared,
+                    vec![variable.value.clone()],
                 ));
             }
         }

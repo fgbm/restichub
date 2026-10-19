@@ -3126,8 +3126,9 @@ export interface components {
             /** @description Set by `invalid_argument`, `username_taken` and `email_taken`. */
             field?: string | null;
             /**
-             * @description The names that a `parameter_missing` refusal lists. Only `parameter_missing` and
-             *     `parameter_kind_mismatch` set it (FR-PF-11).
+             * @description Only a validation refusal sets it: `parameter_missing`, `parameter_kind_mismatch`,
+             *     `parameter_not_declared` and `parameter_needs_default` (FR-PF-05, FR-PF-11); the last two
+             *     list one name.
              */
             parameters?: string[] | null;
             /** @description In snake_case; only `invalid_argument` sets it. */

@@ -9,12 +9,14 @@
 import type {
 	ApiProblem,
 	ParameterKind,
+	Plan,
 	PlanParameterValue,
 	ProfileParameter
 } from '#lib/api/index.ts';
 import { blockedView } from '#lib/delete-check.ts';
-import type { BlockedView } from '#lib/delete-check.ts';
+import type { BlockedLink, BlockedView } from '#lib/delete-check.ts';
 import type { HostParameterRow } from '#lib/api/index.ts';
+import { resolve } from '$app/paths';
 import { t } from '#lib/i18n/index.ts';
 import { plural } from '#lib/list-format.ts';
 import type { ScriptDraft } from '#lib/scripts.ts';
@@ -60,18 +62,56 @@ export interface ParameterUsage {
 	scripts: number;
 }
 
-function held(values: readonly string[], token: string): number {
-	return values.filter((value) => value.includes(token)).length;
+function held(values: readonly string[], name: string): number {
+	return values.filter((value) => referencedNames(value).includes(name)).length;
+}
+
+/** The rule of a `{{param.<name>}}` reference, with the spaces that the server accepts (FR-PF-10). */
+const REFERENCE = /\{\{\s*param\.([A-Za-z0-9_]+)\s*\}\}/g;
+
+/** The parameter names of the references of one field, without a repeat. */
+export function referencedNames(value: string): string[] {
+	return Array.from(value.matchAll(REFERENCE), (match) => match[1]);
+}
+
+/**
+ * The names that the fields use and that the draft does not declare. The hint names one of them
+ * with the button that declares it (FR-PF-10).
+ */
+export function undeclaredNames(values: readonly string[], declared: readonly string[]): string[] {
+	const names = new Set(values.flatMap(referencedNames));
+	return [...names].filter((name) => !declared.includes(name));
+}
+
+/** The number of plans that the dialog lists before it shows the count of the rest. */
+const PLAN_LINKS = 10;
+
+/** The plans of a profile that hold a value of one of the names, as the dialog lists them. */
+export function overridingPlans(
+	plans: readonly Plan[],
+	profileId: string,
+	names: readonly string[]
+): Pick<BlockedView, 'links' | 'more'> {
+	const found = plans.filter(
+		(plan) =>
+			plan.profile_id === profileId &&
+			(plan.parameter_values ?? []).some((value) => names.includes(value.name))
+	);
+	const links: BlockedLink[] = found.slice(0, PLAN_LINKS).map((plan) => ({
+		label: plan.name,
+		kind: t('deleteBlocked.kind.plan'),
+		href: resolve('/(app)/plans/[id]', { id: plan.id })
+	}));
+	return { links, more: Math.max(found.length - links.length, 0) };
 }
 
 /** How many fields of the draft take the value of this parameter. */
 export function usageOf(name: string, source: UsageSource): ParameterUsage {
-	const token = `{{param.${name}}}`;
 	return {
-		paths: held(source.paths, token),
-		excludes: held(source.excludes, token),
-		excludeFiles: held(source.excludeFiles, token),
-		tags: held(source.tags, token),
+		paths: held(source.paths, name),
+		excludes: held(source.excludes, name),
+		excludeFiles: held(source.excludeFiles, name),
+		tags: held(source.tags, name),
 		scripts: source.scripts.filter((script) =>
 			script.env.some((variable) => variable.kind === 'parameter' && variable.value === name)
 		).length

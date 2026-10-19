@@ -125,7 +125,8 @@ async fn adr_0047_an_optional_parameter_without_a_default_fills_no_path() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{response}");
     assert_eq!(response["field"], "paths.all[0]");
-    assert_eq!(response["reason"], "parameter_missing");
+    assert_eq!(response["reason"], "parameter_needs_default");
+    assert_eq!(response["parameters"], json!(["pg_dir"]));
 
     let (status, _, response) = send(
         &app,
@@ -194,7 +195,8 @@ async fn adr_0047_an_optional_parameter_without_a_default_fills_no_path() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{response}");
     assert_eq!(response["field"], "scripts[0].env[0].value");
-    assert_eq!(response["reason"], "unknown");
+    assert_eq!(response["reason"], "parameter_not_declared");
+    assert_eq!(response["parameters"], json!(["pg_dir"]));
 
     db.cleanup().await;
 }
