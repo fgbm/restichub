@@ -15,7 +15,7 @@ resticprofile keeps the settings of restic in a configuration file on each host.
 
 | resticprofile | ResticHub |
 |---|---|
-| `repository`, `password-file`, backend variables | A [repository](/restichub/concepts/repositories/). The control plane encrypts the password and the credentials. |
+| `repository`, `password-file`, backend variables | A [repository](/restichub/concepts/repositories/). The control plane encrypts the password and the credentials. The plan selects the repository, not the profile. |
 | A profile section | A [profile](/restichub/concepts/profiles/). |
 | `backup.source` | "What to back up" |
 | `backup.exclude`, `exclude-file` | "Exclusions" |
@@ -35,7 +35,7 @@ resticprofile keeps the settings of restic in a configuration file on each host.
 3. Add the repository. Enter the same backend address and the same password as in resticprofile.
 4. Add a profile for each resticprofile profile. Copy the paths, the exclusions and the tags.
 5. Set the retention. Choose the preset that is closest to your `keep-*` values, then change the numbers.
-6. Add a plan for each profile. Convert the schedule to a cron expression.
+6. Add a plan for each profile. Select the repository, and convert the schedule to a cron expression.
 7. Select "Run now" on the plan. Read the job log.
 8. Check that the new snapshot appears in the repository.
 9. Disable the schedule of resticprofile on the host. Remove the systemd timer or the cron entry.

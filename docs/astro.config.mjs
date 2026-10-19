@@ -93,6 +93,7 @@ export default defineConfig({
 					'concepts/trust-model',
 					'concepts/repositories',
 					'concepts/profiles',
+					'concepts/profile-parameters',
 					'concepts/plans',
 					'concepts/job-lifecycle',
 					'concepts/agent-jobs',
@@ -107,6 +108,7 @@ export default defineConfig({
 					]),
 					subgroup('Everyday tasks', 'Текущие задачи', [
 						'guides/jobs',
+						'guides/profile-parameters',
 						'guides/restore',
 						'guides/scripts',
 						'guides/upgrade',
@@ -129,6 +131,7 @@ export default defineConfig({
 					'reference/agent-packages',
 					'reference/agent-logs',
 					'reference/environment-variables',
+					'reference/variables',
 					'reference/metrics',
 					'reference/status-codes',
 					'reference/agent-version-compatibility',

@@ -20,7 +20,7 @@ The data of a restore goes from the repository to the target agent. It does not 
 ## List the snapshots
 
 1. Open **Restore**.
-2. Select a repository in the page header. An agent runs `restic snapshots` once for the whole repository, and the screen shows all snapshots. If the control plane already holds a stored list, the screen shows it with its age.
+2. Select a repository in the field at the top of the page. The field shows the name, the backend kind and the location of each repository. For a local repository, it also shows the repository host. The search finds a repository by its name or its location. An agent runs `restic snapshots` once for the whole repository, and the screen shows all snapshots. If the control plane already holds a stored list, the screen shows it with its age.
 3. Narrow the list with the search field and the filters above the list. The filters apply at once, on the loaded list. There is no search button.
    - **Search by path**: type a part of a path. A snapshot matches when any of its backup paths contains the text. The search ignores case.
    - **Host** and **Tag**: select one or more values. The menus list the values that the loaded snapshots hold, with the number of snapshots for each value. A tag that comes from a profile shows the name of the profile.

@@ -27,6 +27,7 @@ If the control plane cannot build a job, the job fails with a reason code:
 | `agent_revoked` | The agent is revoked. |
 | `plan_missing`, `plan_changed` | The plan is deleted, or it moved to another agent. |
 | `profile_missing`, `repository_deleted`, `repository_changed` | An object of the job is deleted or changed. |
+| `parameter_missing` | A required parameter of the profile has no value. |
 | `secret_unavailable` | A secret of the repository cannot be read. |
 | `signing_failed` | The control plane could not sign the job. |
 
@@ -43,6 +44,20 @@ A tenant holds one repository for each location. A create or an update that name
 The control plane folds the spelling before it compares. It ignores the case of the host, the default port, a trailing slash and a `.` segment.
 
 A repository that exists already stays as it is. The control plane logs a warning for it at the start, and the list marks it as a shared location.
+
+## Refused parameter values
+
+A write that leaves a plan without a required parameter value gives `400` with the code `parameter_missing` or `parameter_missing_in_plans`. The body holds the field `parameters` with the names of the parameters. For `parameter_missing_in_plans`, the body also holds `blockers` with the plans. The control plane changes nothing.
+
+| Code | Meaning |
+|---|---|
+| `parameter_missing` | A plan save, or a job, has no value for a required parameter. |
+| `parameter_missing_in_plans` | A profile save or a change of the host values leaves a plan without a required parameter. |
+| `parameter_kind_mismatch` | A value has another kind than the declaration. A value of the wrong kind counts as missing. |
+| `parameter_not_declared` | A template or a script variable names a parameter that the profile does not declare. |
+| `parameter_needs_default` | An optional parameter without a default value stands in a path or in a tag. Its value would be an empty string. |
+| `parameter_not_allowed` | A parameter stands in a retention or check field. One maintenance step serves every host, so a parameter has no value there. |
+| `parameter_secret_in_template` | A secret parameter stands in a path, an exclude or a tag. The restic arguments are visible in the process list. |
 
 ## Reasons and result codes
 
@@ -62,10 +77,10 @@ The problem body of a code that names records has a `blockers` object. It holds 
 
 | Code | Meaning |
 |---|---|
-| `repository_in_use` | A profile uses the repository. Switch the profiles to another repository, or delete them. |
+| `repository_in_use` | A plan writes to the repository. Move the plans to another repository, or delete them. |
 | `repository_has_active_job` | A job runs on the repository. Wait until it ends, or cancel it. |
 | `profile_in_use` | A plan uses the profile. Switch the plans to another profile, or delete them. |
-| `secret_in_use` | A repository, a channel, a profile or a job template uses the secret. |
+| `secret_in_use` | A repository, a channel, a profile, a job template, a host parameter value or a plan parameter value uses the secret. |
 | `last_admin` | The user is the last Admin of the organization. |
 | `own_account_protected` | You cannot remove, disable or demote your own account. |
 | `platform_tenant_protected` | The platform organization cannot be suspended or deleted. |

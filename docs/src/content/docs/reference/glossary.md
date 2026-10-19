@@ -12,8 +12,11 @@ The documentation and the web UI use these terms. One term has one meaning.
 | host | A computer with an agent. |
 | tenant | The unit of isolation in one installation. A tenant owns hosts, repositories, plans, profiles, secrets and members. The web UI calls it an organization. |
 | repository | A restic repository. |
-| profile | The definition of a backup: paths, exclusions, options and retention. |
-| plan | A profile that runs on a host with a schedule. |
+| profile | The definition of a backup: paths, exclusions, options, retention and scripts. A profile declares parameters and holds no repository. |
+| plan | A profile, a host and a repository with a schedule. |
+| profile parameter | A named value that a profile declares. A host sets the value for all its profiles, and a plan can override it. |
+| parameter value | The value of a profile parameter on a host or on a plan. |
+| template variable | A placeholder such as `{{hostname}}` or `{{param.<name>}}` in a path, an exclude or a tag. The control plane replaces it with a value for each host. |
 | job | One run of a plan, or one manual operation. |
 | step | One command in a job. |
 | snapshot | A restic snapshot. |

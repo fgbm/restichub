@@ -19,7 +19,7 @@ The control plane creates the maintenance jobs from two schedules of the reposit
 
 | Task | Default | Job |
 |---|---|---|
-| Retention | Every week, Sunday at 03:00 | One `forget` step for each profile and host, then one `prune` step. |
+| Retention | Every week, Sunday at 03:00 | One `forget` step for each distinct profile of the plans of the repository, then one `prune` step. |
 | Check | Every month, on the first day at 04:00 | One `check` step. |
 
 The page of the repository, `/repositories/<id>`, holds the schedules in two sections. The section "Retention rules" holds the retention schedule and the "Time zone", an IANA name such as `Europe/Berlin`. The section "Check" holds the check schedule. Each section has a "Cron expression", preset buttons and a switch that turns the schedule on or off. Both schedules use the one time zone. For a new repository, the page proposes the time zone of the browser. Each section previews the "Next runs" and shows the "Last run". A change of a schedule starts from the next fire time after the change.
@@ -40,7 +40,7 @@ Several profiles can use one repository. The retention of a profile removes only
 
 - The control plane adds the tag `restichub-profile-<profile id>` to every backup of a profile.
 - The tag prefix `restichub-` is reserved. A profile tag, a keep tag and a retention filter tag cannot start with it.
-- Each profile with a retention gets one `forget` step. The step filters on the profile tag. It uses the grouping of the profile. A profile without a grouping uses `host,paths`, so each host and each set of paths keeps its own policy.
+- Each distinct profile of the plans of the repository gets one `forget` step. The step filters on the profile tag. It uses the grouping of the profile. A profile without a grouping uses `host,paths`, so each host and each set of paths keeps its own policy. The step takes the facts of an agent from the plans of this profile in this repository only.
 - The filter in the retention of the profile narrows the step. A snapshot must have the profile tag and all the filter tags. The filter paths and the filter hosts narrow the step more. A plan agent whose host name is not in the filter hosts gives no step. The host name compares with the host name that restic records in the snapshot. A template is not allowed in the filter hosts.
 - The filter tags always mean AND with the profile tag. The `forget` step that follows a backup uses the same rule.
 - The step always groups by host, because a profile can run on several agents. If the grouping of the profile has no host, the control plane adds it, and each host keeps its own snapshots.
@@ -57,7 +57,11 @@ Otherwise, remove such snapshots by hand. A profile with a retention and without
 
 ### Check
 
-The `check` step reads the largest data subset that a profile of the repository sets. If two subsets are equal, the oldest profile wins. If no profile sets a subset, the check reads the structure only.
+The `check` step reads the largest data subset that a profile of the plans of the repository sets. If two subsets are equal, the oldest profile wins. If no profile sets a subset, the check reads the structure only.
+
+## Delete a repository
+
+The plans of a repository block its delete. The control plane refuses the delete with the code `repository_in_use` and names the plans. Move a plan to another repository in the plan editor, or delete the plan, then delete the repository again. A bulk move of the plans is not available in this version.
 
 ## Roles
 

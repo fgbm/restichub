@@ -48,6 +48,12 @@ A plan that ran a hook now runs without it, and its jobs can still succeed. Chec
 
 The agent no longer reads the file `restichub-agent-hooks.toml`. When the file still exists, the agent writes a warning with its path at each start. Delete the file when you no longer need it.
 
+### Masked script values
+
+A script variable can take the value of a profile parameter. The control plane sends a text value in the field `masked_value`, and the agent hides that value in the log of the script. An agent of an older package does not know the field, so it rejects the message. An agent that announces the capability `script-masked-value` knows the field.
+
+The control plane reads the capabilities of the current connection. Thus an agent of an older package receives the value as a secret value, and it masks the value in the same way. The upgrade of the agent changes nothing for you.
+
 ### User name of a rest-server
 
 Before this release, ResticHub sent the REST server password without a user name, so a rest-server with an `.htpasswd` file refused each job. For each REST server repository with a password, enter the user name of the account in the field "User name".

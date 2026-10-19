@@ -27,6 +27,7 @@ Apply all controls that your storage supports.
 
 - Keep the key encryption key (KEK) outside the database backup. The KEK protects the repository passwords, the job signing keys and the keys of the certificate authority. Without it, a restored database holds no usable secret.
 - Copy the repository password outside ResticHub. If you lose the control plane, you cannot open the snapshots without the password.
+- Keep a credential out of a text parameter, a path and a tag. The control plane masks a text parameter value in a script variable, a preview and an audit record. A value in a path, an exclude or a tag is part of the restic command and of the snapshot. Each role that sees jobs and snapshots sees it. See [Profile parameters](/restichub/concepts/profile-parameters/).
 - Turn on the trust mode for server scripts only on a host that you accept to control from the control plane. See [Server scripts](/restichub/guides/scripts/).
 - Put a reverse proxy with rate limits in front of the enrollment endpoint. See [Agent enrollment rate limit](/restichub/operations/enrollment-rate-limit/).
 - Revoke a host that you do not trust. See [Agent revocation](/restichub/guides/agent-revocation/).
@@ -37,6 +38,7 @@ Apply all controls that your storage supports.
 |---|---|---|
 | A compromised agent reads or deletes a repository. | Secrets exist for one job only. Storage controls. | You accept the risk. Use the controls above. |
 | A compromised control plane sends harmful steps. | Steps are typed. A restore writes only below a restore directory. A script runs only where the trust mode is on. | The control plane can still send restic steps, such as `forget` with a short retention. A restore below a root that covers system or user files, such as `/` or `/home`, can lead to code execution. Set narrow restore directories. |
+| An Operator points a script at another server through a text parameter. The script sends the secret value of the host to that server. | Only an Admin sets, changes or removes a secret parameter value. The audit log records each change. The agent masks the value in the log. | An Operator still changes a text value and so points the script at another server. The Admin-only secret value and the audit log limit the damage. |
 | A network attacker alters or replays a job. A control plane without the signing key sends a job. | The control plane signs each job. The agent checks the signature, the addressee, the expiry time and the replay journal. | Nothing known. |
 | Someone writes to the database and adds jobs. | Database permissions and the audit log. The job signature does not help here. The control plane signs each job from the state of the database. The signing key is in the database, wrapped by the KEK. | An attacker who can write to the database, or who has the KEK, makes the control plane send any typed step. Restrict the access to the database. |
 | Someone copies a database dump. | Envelope encryption with a KEK outside the database. | If the KEK and the dump leak together, all secrets leak. |
