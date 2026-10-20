@@ -4,6 +4,7 @@
 #
 #   install-smoke.sh db-prepare   create the roles, the passwords and the schema
 #   install-smoke.sh cp-up        start the control plane, create the administrator and the token
+#   install-smoke.sh cp-serve     start the control plane again after a stop, on the same database
 #   install-smoke.sh ca           write the installation CA that the listener presents
 #   install-smoke.sh token FILE   write a new enrollment token to FILE
 #   install-smoke.sh connected    wait until the control plane lists the agent as connected
@@ -47,14 +48,10 @@ SQL
 		"${CP_BIN:?set CP_BIN}" migrate
 }
 
-cp_up() {
-	mkdir -p "$smoke_dir"
+cp_serve() {
 	export RESTICHUB_LISTEN_ADDR="127.0.0.1:8080"
 	export RESTICHUB_DATABASE_URL="postgres://restichub_runtime@127.0.0.1:5432/restichub"
 	export RESTICHUB_DATABASE_PASSWORD=runtime
-	# A file, not RESTICHUB_KEK: Git Bash converts an environment value that starts with "/" to a
-	# Windows path before it starts a native program. SMOKE_KEK sets a fixed value for that case.
-	(umask 077 && printf '%s\n' "${SMOKE_KEK:-$(head -c 32 /dev/urandom | base64)}" >"$smoke_dir/kek")
 	unset RESTICHUB_KEK
 	export RESTICHUB_KEK_FILE="$smoke_dir/kek"
 	export RESTICHUB_SERVER_INSECURE_COOKIES=true
@@ -62,13 +59,22 @@ cp_up() {
 	export RESTICHUB_AGENT_LISTEN="127.0.0.1:$listener_port"
 	export RESTICHUB_AGENT_ENDPOINT="https://$listener_host:$listener_port"
 	export NO_COLOR=1
-	"${CP_BIN:?set CP_BIN}" serve >"$smoke_dir/cp.log" 2>&1 &
+	"${CP_BIN:?set CP_BIN}" serve >>"$smoke_dir/cp.log" 2>&1 &
 	echo $! >"$smoke_dir/cp.pid"
 	for _ in $(seq 1 60); do
 		if curl -fsS "$web/readyz" >/dev/null 2>&1; then break; fi
 		sleep 1
 	done
 	curl -fsS "$web/readyz" >/dev/null
+}
+
+cp_up() {
+	mkdir -p "$smoke_dir"
+	# A file, not RESTICHUB_KEK: Git Bash converts an environment value that starts with "/" to a
+	# Windows path before it starts a native program. SMOKE_KEK sets a fixed value for that case.
+	(umask 077 && printf '%s\n' "${SMOKE_KEK:-$(head -c 32 /dev/urandom | base64)}" >"$smoke_dir/kek")
+	: >"$smoke_dir/cp.log"
+	cp_serve
 
 	local setup_token
 	setup_token="$(sed -n 's/.*setup_token=\([^ ]*\).*/\1/p' "$smoke_dir/cp.log" | head -n1 | tr -d '"\r')"
@@ -267,6 +273,7 @@ local_repository() {
 case "${1:-}" in
 db-prepare) db_prepare ;;
 cp-up) cp_up ;;
+cp-serve) cp_serve ;;
 ca) ca ;;
 token) shift; token "$@" ;;
 connected) shift; connected "$@" ;;

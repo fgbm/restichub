@@ -49,7 +49,7 @@ impl std::fmt::Display for UnsafeTree {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "the agent does not start from the folder that it repaired: {}; an administrator checks the folder and runs `restichub-agent install-service`",
+            "the agent does not start: a folder that File Explorer opened to a local administrator holds something that the agent refuses: {}; an administrator checks the folder, removes what this message names, and runs `restichub-agent install-service`",
             self.cause
         )
     }
@@ -140,7 +140,7 @@ impl std::fmt::Display for UnsafeIdentity {
         match self.kind {
             UnsafeKind::Changeable => write!(
                 f,
-                "the agent does not use the identity in {}: {}; an administrator runs `restichub-agent install-service`, which repairs the access control; if it says that another account could change the identity, {}",
+                "the agent does not use the identity in {}: {}; an administrator runs `restichub-agent install-service`, which removes the access that File Explorer gave to a local administrator and repairs the access control; if it says that another account could change the identity, {}",
                 self.dir.display(),
                 self.cause,
                 crate::preflight::REGISTER_AGAIN

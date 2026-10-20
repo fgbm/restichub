@@ -155,6 +155,12 @@ pub fn repair_config_dir(
     #[cfg(windows)]
     {
         let root = agent_root();
+        // The repair below keeps an open identity directory for a new registration, but an entry
+        // that File Explorer gave a local administrator heals as at the start of the service
+        // (ADR-0049).
+        if untrusted == UntrustedIdentity::Keep {
+            crate::winrepair::heal_identity(dir, &root)?;
+        }
         let mut report = crate::winrepair::Report::new(&root, verbose, log);
         let result = crate::winrepair::repair_agent_tree(dir, &root, untrusted, &mut |action| {
             report.action(action);

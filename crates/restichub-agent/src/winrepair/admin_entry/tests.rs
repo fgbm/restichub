@@ -261,18 +261,130 @@ fn ac_ag_15_an_open_identity_directory_keeps_the_refusal() {
 }
 
 #[test]
-fn ac_ag_15_the_heal_leaves_the_identity_directory_alone() {
+fn ac_ag_15_the_heal_covers_the_identity_directory_and_its_backup() {
     let (base, _, config) = tree("heal-levels");
     let healed: Vec<PathBuf> = levels(&config)
         .into_iter()
         .map(|(path, _, _)| path)
         .collect();
-    assert!(!healed.contains(&config), "the identity directory stays");
+    assert!(healed.contains(&config), "{healed:?}");
     assert!(
-        !healed.contains(&crate::identity::sibling(&config, ".old")),
-        "the backup of the identity stays"
+        healed.contains(&crate::identity::sibling(&config, ".old")),
+        "{healed:?}"
     );
     assert!(healed.contains(&crate::paths::agent_root()), "{healed:?}");
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+/// The Guest account of the computer: a user account outside Administrators.
+fn guest_sid() -> String {
+    let sid = admin_sid();
+    let (domain, _) = sid
+        .rsplit_once('-')
+        .expect("a SID holds a relative identifier");
+    format!("{domain}-501")
+}
+
+#[test]
+fn ac_ag_15_an_explorer_entry_of_an_administrator_on_the_identity_directory_is_removed() {
+    let (base, root, config) = tree("heal-identity-admin");
+    crate::identity::tests::sample()
+        .save(&config)
+        .expect("cannot save the identity");
+    let backup = crate::identity::sibling(&config, ".old");
+    create_protected_dir(&backup).expect("cannot create the backup");
+    for path in [&config, &backup] {
+        grant_sid(path, &admin_sid(), "(OI)(CI)(F)").expect("cannot add the entry");
+    }
+    crate::winrepair::check_identity(&config, &root)
+        .expect_err("the test must open the identity directory");
+    let program = base.join("Program").join("Agent");
+    heal_levels(&config, &root, &program, identity_levels(&config)).expect("the heal must pass");
+    check_admin_only(&config).expect("the identity directory must lose the entry");
+    check_admin_only(&backup).expect("the backup must lose the entry");
+    crate::winrepair::check_identity(&config, &root)
+        .expect("the identity must pass after the heal");
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[test]
+fn ac_ag_15_an_entry_of_a_non_administrator_on_the_identity_directory_stays() {
+    let (base, root, config) = tree("heal-identity-user");
+    crate::identity::tests::sample()
+        .save(&config)
+        .expect("cannot save the identity");
+    grant_sid(&config, &guest_sid(), "(OI)(CI)(F)").expect("cannot add the entry");
+    let program = base.join("Program").join("Agent");
+    heal_levels(&config, &root, &program, identity_levels(&config))
+        .expect("the heal leaves the entry to the identity check");
+    assert!(check_admin_only(&config).is_err(), "the entry must stay");
+    crate::winrepair::check_identity(&config, &root)
+        .expect_err("the identity check must refuse the entry");
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[test]
+fn ac_ag_15_a_refused_identity_heal_keeps_the_entry_for_the_next_start() {
+    let (base, root, config) = tree("heal-identity-refused");
+    crate::identity::tests::sample()
+        .save(&config)
+        .expect("cannot save the identity");
+    std::fs::write(config.join("planted.txt"), b"x").expect("cannot plant the file");
+    grant_sid(&config, &admin_sid(), "(OI)(CI)(F)").expect("cannot add the entry");
+    let program = base.join("Program").join("Agent");
+    for start in ["first", "second"] {
+        let error = format!(
+            "{:#}",
+            heal_levels(&config, &root, &program, identity_levels(&config))
+                .expect_err("a name that the agent does not know must stop each start")
+        );
+        assert!(error.contains("planted.txt"), "{start} start: {error}");
+        assert!(
+            check_admin_only(&config).is_err(),
+            "the {start} start must keep the entry, so the next start refuses again"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[test]
+fn ac_ag_15_install_service_heals_the_entry_of_an_administrator_on_the_identity_directory() {
+    let (base, root, config) = tree("install-heal-identity");
+    crate::identity::tests::sample()
+        .save(&config)
+        .expect("cannot save the identity");
+    grant_sid(&config, &admin_sid(), "(OI)(CI)(F)").expect("cannot add the entry");
+    heal_identity(&config, &root).expect("the heal must pass");
+    let changeable = crate::winrepair::repair_agent_tree(
+        &config,
+        &root,
+        crate::paths::UntrustedIdentity::Keep,
+        &mut |_| {},
+    )
+    .expect("the repair must pass");
+    assert!(changeable.is_empty(), "{changeable:?}");
+    check_admin_only(&config).expect("the identity directory must lose the entry");
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[test]
+fn ac_ag_15_install_service_refuses_an_identity_file_that_another_account_could_change() {
+    let (base, root, config) = tree("install-heal-file");
+    crate::identity::tests::sample()
+        .save(&config)
+        .expect("cannot save the identity");
+    let file = config.join(crate::identity::IDENTITY_FILES[0]);
+    grant_sid(&file, &guest_sid(), "(M)").expect("cannot add the file entry");
+    grant_sid(&config, &admin_sid(), "(OI)(CI)(F)").expect("cannot add the entry");
+    let error = heal_identity(&config, &root).expect_err("the identity file must stop the heal");
+    assert!(
+        error.downcast_ref::<ChangeableIdentity>().is_some(),
+        "install-service stops the service for this error: {error:#}"
+    );
+    assert!(
+        check_admin_only(&config).is_err(),
+        "a refusal must keep the entry"
+    );
     let _ = std::fs::remove_dir_all(&base);
 }
 

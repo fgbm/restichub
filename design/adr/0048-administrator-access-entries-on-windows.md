@@ -1,6 +1,6 @@
 # ADR-0048: Self-repair of administrator access entries on Windows
 
-- Status: accepted
+- Status: accepted, decision 3 (the identity directory is not healed) superseded by ADR-0049
 - Date: 2026-10-20
 - Requirements: FR-AG-01, FR-AG-04, FR-IN-07, FR-IN-08
 - Related: [ADR-0038](0038-agent-downloads-restic.md) (the restic record), [ADR-0037](0037-server-scripts-on-trusted-hosts.md) (the trust mode file), [ADR-0045](0045-repository-roots-for-local-repositories.md) (the roots files)

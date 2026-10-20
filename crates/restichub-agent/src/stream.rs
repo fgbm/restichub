@@ -224,8 +224,9 @@ fn spawn_shutdown(shutdown: Option<Receiver<()>>, stop: watch::Sender<bool>) -> 
 /// # Errors
 ///
 /// Returns [`IdentityReplaced::Agent`] when a registration stored the identity of another agent,
-/// so the service starts again with it, and [`crate::commands::UnsafeIdentity`] when another
-/// account could change the identity that a reconnect loads. A failed connection is retried.
+/// so the service starts again with it, and [`crate::commands::UnsafeIdentity`] (Windows:
+/// `ExposedWhileRunning`) when another account could change the identity that a reconnect
+/// loads. A failed connection is retried.
 pub async fn run(
     identity: &StoredIdentity,
     dir: &Path,
@@ -295,12 +296,10 @@ pub async fn run(
                 (false, false)
             }
         };
-        // A rotation stored a newer certificate during the stream; the next connection uses it.
-        if let Some(fresh) = fresher_identity(dir, rotated.as_ref().unwrap_or(identity)).await? {
-            rotated = Some(fresh);
-        }
-        if *stop.borrow() {
-            return Ok(());
+        match after_stream(dir, rotated.as_ref().unwrap_or(identity), stop).await? {
+            AfterStream::Stop => return Ok(()),
+            AfterStream::Reconnect(Some(fresh)) => rotated = Some(*fresh),
+            AfterStream::Reconnect(None) => {}
         }
         let delay = if refused {
             options.backoff.max
@@ -322,6 +321,26 @@ pub async fn run(
             }
         }
     }
+}
+
+enum AfterStream {
+    Stop,
+    /// Connect again, with the identity that a rotation stored during the stream if there is one.
+    Reconnect(Option<Box<StoredIdentity>>),
+}
+
+/// A stop comes before the identity check, so a stopping service reports no refusal.
+async fn after_stream(
+    dir: &Path,
+    active: &StoredIdentity,
+    stop: &watch::Receiver<bool>,
+) -> Result<AfterStream> {
+    if *stop.borrow() {
+        return Ok(AfterStream::Stop);
+    }
+    Ok(AfterStream::Reconnect(
+        fresher_identity(dir, active).await?.map(Box::new),
+    ))
 }
 
 /// How often a refused agent looks for an identity that a registration stored in the meantime.
@@ -358,13 +377,23 @@ async fn wait_before_retry(
 /// # Errors
 ///
 /// Returns [`crate::commands::UnsafeIdentity`] when another account could change the identity, so
-/// the service stops with the exit code 78 (T20). A file that a save is writing only waits.
+/// the service stops with the exit code 78 (T20). On Windows it returns [`ExposedWhileRunning`]
+/// instead. A file that a save is writing only waits.
 async fn fresher_identity(dir: &Path, active: &StoredIdentity) -> Result<Option<StoredIdentity>> {
     if !StoredIdentity::exists(dir) {
         return Ok(None);
     }
     let stored = match load_off_runtime(dir).await {
         Ok(stored) => stored,
+        #[cfg(windows)]
+        Err(error) if crate::commands::needs_administrator(&error) => {
+            let exposed = ExposedWhileRunning {
+                cause: format!("{error:#}"),
+            };
+            tracing::error!("{exposed}");
+            return Err(exposed.into());
+        }
+        #[cfg(not(windows))]
         Err(error) if crate::commands::needs_administrator(&error) => {
             tracing::error!("{error:#}");
             return Err(error);
@@ -378,6 +407,31 @@ async fn fresher_identity(dir: &Path, active: &StoredIdentity) -> Result<Option<
     };
     Ok((same_agent && newer).then_some(stored))
 }
+
+/// Another account got an access to the identity while the service ran (ADR-0049, T20).
+///
+/// The service manager restarts the service after this error, and the start removes the entry of
+/// a local administrator or stops with the exit code 78. The exit code 78 here would keep the
+/// service stopped, and the heal would not run until the next boot.
+#[cfg(windows)]
+#[derive(Debug)]
+pub struct ExposedWhileRunning {
+    cause: String,
+}
+
+#[cfg(windows)]
+impl std::fmt::Display for ExposedWhileRunning {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "the agent stops so that the service starts again and checks its folders: {}",
+            self.cause
+        )
+    }
+}
+
+#[cfg(windows)]
+impl std::error::Error for ExposedWhileRunning {}
 
 /// Logs that an expired certificate cannot connect (FR-ID-03). The rotation needs a valid
 /// certificate, so the agent has to register again.
@@ -1094,6 +1148,56 @@ mod tests {
             .expect_err("a file that every account can change");
         assert!(crate::commands::needs_administrator(&error), "{error:#}");
         assert!(format!("{error:#}").contains("identity.json"), "{error:#}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn ac_ag_15_a_stop_comes_before_the_identity_check() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = std::env::temp_dir().join(format!(
+            "restichub-agent-stop-identity-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let identity = crate::identity::tests::sample();
+        identity.save(&dir).expect("cannot save the identity");
+        std::fs::set_permissions(
+            dir.join(crate::identity::METADATA_FILE),
+            std::fs::Permissions::from_mode(0o666),
+        )
+        .expect("cannot open the file");
+        let (stop, receiver) = tokio::sync::watch::channel(false);
+        assert!(
+            super::after_stream(&dir, &identity, &receiver)
+                .await
+                .is_err(),
+            "a running agent refuses the identity"
+        );
+        stop.send(true).expect("cannot send the stop");
+        let next = super::after_stream(&dir, &identity, &receiver)
+            .await
+            .expect("a stopping agent reports no refusal");
+        assert!(matches!(next, super::AfterStream::Stop));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn ac_ag_15_an_exposure_while_the_service_runs_restarts_the_service() {
+        let dir = crate::winsec::tests::temp("stream-exposure");
+        let identity = crate::identity::tests::sample();
+        identity.save(&dir).expect("cannot save the identity");
+        crate::winsec::tests::grant(&dir, "(OI)(CI)(F)").expect("cannot add the entry");
+        let error = super::fresher_identity(&dir, &identity)
+            .await
+            .expect_err("an open identity directory");
+        assert!(
+            error.downcast_ref::<super::ExposedWhileRunning>().is_some(),
+            "{error:#}"
+        );
+        // The exit code 78 would keep the service stopped, so the start would not heal.
+        assert!(!crate::commands::needs_administrator(&error), "{error:#}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
