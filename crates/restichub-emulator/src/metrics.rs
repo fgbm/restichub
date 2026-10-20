@@ -170,7 +170,6 @@ impl Metrics {
         self.results.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// Counts one sent log chunk of `bytes` bytes.
     pub fn log_chunk_sent(&self, bytes: usize) {
         self.log_chunks_sent.fetch_add(1, Ordering::Relaxed);
         self.log_bytes_sent

@@ -83,7 +83,6 @@ async fn run_one_job_each(
         seen.push(event);
     }
     assert_eq!(finished.len(), AGENTS, "not every agent reported its job");
-    // A forged result follows the real one.
     let drain = Instant::now() + Duration::from_millis(500);
     while let Ok(Ok(event)) = tokio::time::timeout(
         drain.saturating_duration_since(Instant::now()),

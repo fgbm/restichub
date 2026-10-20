@@ -339,9 +339,11 @@ impl AgentService for ControlPlane {
 
         let state = Arc::clone(&self.state);
         let id = agent_id.clone();
+        // A strong sender here would keep the stream open after `disconnect_all`.
+        let acks = tx.downgrade();
         tokio::spawn(async move {
             while let Ok(Some(message)) = inbound.message().await {
-                handle_message(&state, &id, &message, &tx);
+                handle_message(&state, &id, &message, &acks);
             }
             // A reconnect can insert the next stream before this task runs. The
             // remove touches only the stream that this task opened.
@@ -362,7 +364,7 @@ fn handle_message(
     state: &Arc<State>,
     agent_id: &str,
     message: &AgentMessage,
-    tx: &mpsc::Sender<ControlMessage>,
+    acks: &mpsc::WeakSender<ControlMessage>,
 ) {
     let event = match &message.payload {
         Some(agent_message::Payload::AgentHello(hello)) => Some(AgentEvent::Hello {
@@ -399,7 +401,7 @@ fn handle_message(
             nonce: pong.nonce,
         }),
         Some(agent_message::Payload::LogChunk(chunk)) => {
-            let _ = tx.try_send(ControlMessage {
+            let ack = ControlMessage {
                 payload: Some(control_message::Payload::LogAck(LogAck {
                     job_id: chunk.job_id.clone(),
                     streams: vec![LogStreamAck {
@@ -407,7 +409,10 @@ fn handle_message(
                         sequence: chunk.sequence,
                     }],
                 })),
-            });
+            };
+            if let Some(tx) = acks.upgrade() {
+                let _ = tx.try_send(ack);
+            }
             Some(AgentEvent::Log {
                 agent_id: agent_id.to_owned(),
                 job_id: chunk.job_id.clone(),

@@ -30,7 +30,6 @@ const MAX_JOBS: usize = 64;
 
 const TRUNCATION_MARKER: &str = "log truncated: the limit of 1048576 bytes is reached\n";
 
-/// The log rate of the profile.
 #[derive(Debug, Clone, Copy)]
 pub struct LogLoad {
     pub lines_per_second: f64,
@@ -78,7 +77,6 @@ pub fn line_text(number: u64, line_bytes: usize) -> Vec<u8> {
     line
 }
 
-/// Lines due after `elapsed` at `per_second`.
 #[must_use]
 pub fn due_lines(per_second: f64, elapsed: Duration) -> u64 {
     (per_second * elapsed.as_secs_f64()).floor() as u64

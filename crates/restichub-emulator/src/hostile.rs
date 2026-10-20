@@ -30,7 +30,6 @@ const SEEN_LIMIT: usize = 1024;
 
 const FLOOD_TICK: Duration = Duration::from_millis(10);
 
-/// The modes of one hostile agent.
 #[derive(Debug)]
 pub struct HostileLoad {
     pub forged_result_share: f64,
