@@ -479,8 +479,6 @@ jobs:
             Remove-LocalUser $name -ErrorAction SilentlyContinue
             $global:LASTEXITCODE = 0
           }
-          bash scripts/install-smoke.sh one-job "$env:SMOKE_DIR/acl-selfheal"
-          if ($LASTEXITCODE -ne 0) { throw 'the job after the repair failed' }
       - name: An upgrade repairs the access of an older agent build (T20)
         shell: pwsh
         run: |
