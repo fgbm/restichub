@@ -498,6 +498,31 @@ jobs:
           Start-Sleep -Seconds 10
           $after = Get-CimInstance Win32_Service -Filter "Name='restichub-agent'"
           if ($after.State -ne 'Running' -or $after.ProcessId -ne $service.ProcessId) { throw "the service did not stay running: $($after.State), process $($after.ProcessId)" }
+      # An upgrade with install-service while the service runs with the entry: the command runs the
+      # same heal before its repair and needs no new registration (ADR-0049, AC-AG-15).
+      - name: install-service heals the Explorer access of an administrator on the identity directory (ADR-0049)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $config = Join-Path $env:ProgramData 'ResticHub\Agent'
+          $agent = Join-Path $env:ProgramFiles 'ResticHub\Agent\restichub-agent.exe'
+          $user = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          $userAce = { param($path) (Get-Acl $path).GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) | Where-Object { $_.IdentityReference.Value -eq $user } }
+          if ((Get-Service restichub-agent).Status -ne 'Running') { throw 'not running' }
+          icacls $config /grant "*${user}:(OI)(CI)(F)" | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "icacls $config exit code $LASTEXITCODE" }
+          if (-not (& $userAce $config)) { throw "the test did not open the access of $config" }
+          $since = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+          $output = (& $agent install-service 2>&1 | ForEach-Object { "$_" }) -join "`n"
+          $code = $LASTEXITCODE
+          Write-Host $output
+          if ($code -ne 0) { throw "install-service exit code $code" }
+          if (& $userAce $config) { throw "the entry of the administrator stays on $config" }
+          if ($output -notmatch 'removed the access of' -or $output -notmatch 'identity was exposed') { throw 'install-service printed no warning for the identity directory' }
+          if ((Get-Service restichub-agent).Status -ne 'Running') { throw 'not running' }
+          bash scripts/install-smoke.sh connected $since 60
+          if ($LASTEXITCODE -ne 0) { throw 'not connected' }
       # The checks run before the removal, so a refusal keeps the entry for each later start.
       - name: A planted file keeps the Explorer access of an administrator and the refusal (ADR-0048)
         shell: pwsh

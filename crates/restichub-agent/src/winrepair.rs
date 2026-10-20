@@ -20,7 +20,7 @@ use crate::winsec::{Entry, Exposure, Removal, Rights, Sid, Tree};
 mod admin_entry;
 mod program;
 
-pub(crate) use admin_entry::heal as heal_admin_entries;
+pub(crate) use admin_entry::{heal as heal_admin_entries, heal_identity};
 pub(crate) use program::{check_program_tree, rebuild_open_program_tree};
 
 /// The directory that an older build used as the default restore root. The repair never reads

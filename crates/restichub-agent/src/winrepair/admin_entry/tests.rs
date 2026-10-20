@@ -276,17 +276,6 @@ fn ac_ag_15_the_heal_covers_the_identity_directory_and_its_backup() {
     let _ = std::fs::remove_dir_all(&base);
 }
 
-fn identity_levels(config: &Path) -> Vec<(PathBuf, Tree, Rights)> {
-    vec![
-        (config.to_path_buf(), Tree::Data, Rights::Change),
-        (
-            crate::identity::sibling(config, ".old"),
-            Tree::Data,
-            Rights::Change,
-        ),
-    ]
-}
-
 /// The Guest account of the computer: a user account outside Administrators.
 fn guest_sid() -> String {
     let sid = admin_sid();
@@ -355,6 +344,47 @@ fn ac_ag_15_a_refused_identity_heal_keeps_the_entry_for_the_next_start() {
             "the {start} start must keep the entry, so the next start refuses again"
         );
     }
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[test]
+fn ac_ag_15_install_service_heals_the_entry_of_an_administrator_on_the_identity_directory() {
+    let (base, root, config) = tree("install-heal-identity");
+    crate::identity::tests::sample()
+        .save(&config)
+        .expect("cannot save the identity");
+    grant_sid(&config, &admin_sid(), "(OI)(CI)(F)").expect("cannot add the entry");
+    heal_identity(&config, &root).expect("the heal must pass");
+    let changeable = crate::winrepair::repair_agent_tree(
+        &config,
+        &root,
+        crate::paths::UntrustedIdentity::Keep,
+        &mut |_| {},
+    )
+    .expect("the repair must pass");
+    assert!(changeable.is_empty(), "{changeable:?}");
+    check_admin_only(&config).expect("the identity directory must lose the entry");
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[test]
+fn ac_ag_15_install_service_refuses_an_identity_file_that_another_account_could_change() {
+    let (base, root, config) = tree("install-heal-file");
+    crate::identity::tests::sample()
+        .save(&config)
+        .expect("cannot save the identity");
+    let file = config.join(crate::identity::IDENTITY_FILES[0]);
+    grant_sid(&file, &guest_sid(), "(M)").expect("cannot add the file entry");
+    grant_sid(&config, &admin_sid(), "(OI)(CI)(F)").expect("cannot add the entry");
+    let error = heal_identity(&config, &root).expect_err("the identity file must stop the heal");
+    assert!(
+        error.downcast_ref::<ChangeableIdentity>().is_some(),
+        "install-service stops the service for this error: {error:#}"
+    );
+    assert!(
+        check_admin_only(&config).is_err(),
+        "a refusal must keep the entry"
+    );
     let _ = std::fs::remove_dir_all(&base);
 }
 

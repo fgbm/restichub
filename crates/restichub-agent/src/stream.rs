@@ -224,8 +224,9 @@ fn spawn_shutdown(shutdown: Option<Receiver<()>>, stop: watch::Sender<bool>) -> 
 /// # Errors
 ///
 /// Returns [`IdentityReplaced::Agent`] when a registration stored the identity of another agent,
-/// so the service starts again with it, and [`crate::commands::UnsafeIdentity`] when another
-/// account could change the identity that a reconnect loads. A failed connection is retried.
+/// so the service starts again with it, and [`crate::commands::UnsafeIdentity`] (Windows:
+/// `ExposedWhileRunning`) when another account could change the identity that a reconnect
+/// loads. A failed connection is retried.
 pub async fn run(
     identity: &StoredIdentity,
     dir: &Path,

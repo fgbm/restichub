@@ -10,13 +10,15 @@
 //! trustee that the computer cannot verify keep the refusal of the checks that follow. A file stays
 //! a refusal, because a non-elevated process of the account could have changed its content. The
 //! identity directory and its backup lose the entry too, with a warning that the identity was
-//! exposed to the account (ADR-0049).
+//! exposed to the account. `install-service` and `register` without `--force` run the same heal of
+//! these two levels before their repair (ADR-0049).
 
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, bail};
 
 use super::Action;
+use crate::preflight::ChangeableIdentity;
 use crate::winsec::{
     Account, Entry, Exposure, Foreign, Removal, Rights, Sid, Tree, local_administrator,
 };
@@ -73,6 +75,26 @@ fn heal_levels(
         tracing::warn!("{warning}");
     }
     healed
+}
+
+/// Removes the explicit entries of local administrators from the identity directory and its backup
+/// only, as the service does at its start (ADR-0049).
+///
+/// `install-service` and `register` without `--force` run it before their repair, which keeps an
+/// identity directory that another account could change as found.
+///
+/// # Errors
+///
+/// Returns the error of [`heal`]. An identity that another account could change gives
+/// [`ChangeableIdentity`].
+pub(crate) fn heal_identity(config: &Path, data_root: &Path) -> Result<()> {
+    heal_levels(
+        config,
+        data_root,
+        &crate::paths::program_dir(),
+        identity_levels(config),
+    )?;
+    Ok(())
 }
 
 fn check_and_remove(
@@ -164,15 +186,10 @@ fn refuse_changeable(changeable: &[PathBuf]) -> Result<()> {
     if changeable.is_empty() {
         return Ok(());
     }
-    let files = changeable
-        .iter()
-        .map(|path| path.display().to_string())
-        .collect::<Vec<_>>()
-        .join(", ");
-    bail!(
-        "the identity of this host could be changed by another account ({files}), so the agent does not use it; {}",
-        crate::preflight::REGISTER_AGAIN
-    );
+    Err(ChangeableIdentity {
+        paths: changeable.to_vec(),
+    }
+    .into())
 }
 
 /// Finds the explicit entries of local administrators on one directory, and changes nothing.
@@ -300,16 +317,14 @@ fn restamp_children(dir: &Path, trustees: &[Sid]) -> Result<()> {
 fn levels(config: &Path) -> Vec<(PathBuf, Tree, Rights)> {
     let program = crate::paths::program_dir();
     let root = program.parent().map(Path::to_path_buf).unwrap_or_default();
-    vec![
+    [
         (root, Tree::Program, Rights::Change),
         (program, Tree::Program, Rights::Change),
         (crate::paths::agent_root(), Tree::Data, Rights::Change),
-        (config.to_path_buf(), Tree::Data, Rights::Change),
-        (
-            crate::identity::sibling(config, ".old"),
-            Tree::Data,
-            Rights::Change,
-        ),
+    ]
+    .into_iter()
+    .chain(identity_levels(config))
+    .chain([
         (
             crate::logging::service_log_dir(config),
             Tree::Data,
@@ -318,6 +333,18 @@ fn levels(config: &Path) -> Vec<(PathBuf, Tree, Rights)> {
         (config.join("cache"), Tree::Data, Rights::Change),
         (
             config.join(crate::log_spool::SPOOL_DIR),
+            Tree::Data,
+            Rights::Change,
+        ),
+    ])
+    .collect()
+}
+
+fn identity_levels(config: &Path) -> Vec<(PathBuf, Tree, Rights)> {
+    vec![
+        (config.to_path_buf(), Tree::Data, Rights::Change),
+        (
+            crate::identity::sibling(config, ".old"),
             Tree::Data,
             Rights::Change,
         ),
