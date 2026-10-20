@@ -235,7 +235,11 @@ fn ac_ag_15_a_folder_of_another_owner_stops_the_start() {
     let (base, root, config) = tree("heal-owner");
     let spool = config.join(crate::log_spool::SPOOL_DIR);
     create_protected_dir(&spool).expect("cannot create the spool");
-    set_owner(&spool, "S-1-5-32-545").expect("cannot change the owner");
+    set_owner(
+        &spool,
+        &current_user_sid().expect("cannot read the user SID"),
+    )
+    .expect("cannot change the owner");
     grant_sid(&root, &admin_sid(), "(OI)(CI)(F)").expect("cannot add the entry");
     level(&root, Rights::Change)
         .expect("cannot remove the access")
@@ -264,7 +268,7 @@ fn ac_ag_15_an_open_identity_directory_keeps_the_refusal() {
 
 #[test]
 fn ac_ag_15_the_heal_leaves_the_identity_directory_alone() {
-    let (base, root, config) = tree("heal-levels");
+    let (base, _, config) = tree("heal-levels");
     let healed: Vec<PathBuf> = levels(&config)
         .into_iter()
         .map(|(path, _, _)| path)
@@ -274,7 +278,7 @@ fn ac_ag_15_the_heal_leaves_the_identity_directory_alone() {
         !healed.contains(&crate::identity::sibling(&config, ".old")),
         "the backup of the identity stays"
     );
-    assert!(healed.contains(&root), "{healed:?}");
+    assert!(healed.contains(&crate::paths::agent_root()), "{healed:?}");
     let _ = std::fs::remove_dir_all(&base);
 }
 
