@@ -371,6 +371,16 @@ pub(crate) fn grant_sid(path: &Path, sid: &str, rights: &str) -> Result<()> {
     run_icacls(path, &["/grant", &format!("*{sid}:{rights}")])
 }
 
+/// Adds an entry for a security identifier that this computer does not resolve, for a negative
+/// test. `icacls` refuses such an identifier, so the descriptor comes from its text form.
+pub(crate) fn grant_unresolved(path: &Path) -> Result<()> {
+    let sddl = format!("O:BAG:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;{UNRESOLVED_SID})");
+    apply_descriptor(path, &sddl)
+}
+
+/// An identifier of an account that never existed on this computer.
+pub(crate) const UNRESOLVED_SID: &str = "S-1-5-21-1-2-3-4242";
+
 /// Copies the DACL of the real `C:\Program Files` onto `dir`, for a positive test.
 fn copy_program_files_dacl(dir: &Path) -> Result<()> {
     let source = open_security(Path::new(r"C:\Program Files"))?;

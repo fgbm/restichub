@@ -1,7 +1,7 @@
 #![allow(clippy::expect_used)]
 
 use super::*;
-use crate::winsec::tests::{current_user_sid, grant, grant_sid, temp};
+use crate::winsec::tests::{current_user_sid, grant, grant_sid, grant_unresolved, temp};
 use crate::winsec::{
     check_admin_only, create_protected_dir, create_protected_file, create_protected_tree,
 };
@@ -57,7 +57,7 @@ fn adr_0048_an_entry_of_a_non_administrator_stays() {
 fn adr_0048_an_unresolved_sid_counts_as_a_non_administrator() {
     let dir = protected("unknown-entry");
     // A deleted account leaves its identifier in the access control list.
-    grant_sid(&dir, "S-1-5-21-1-2-3-4242", "(OI)(CI)(F)").expect("cannot add the entry");
+    grant_unresolved(&dir).expect("cannot add the entry");
     assert!(
         heal_level(&dir, Rights::Change).is_none(),
         "an identifier that does not resolve must stay"

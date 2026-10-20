@@ -701,7 +701,11 @@ jobs:
           if (& $userAce $installed) { throw 'the agent executable stays open' }
           if (Test-Path (Join-Path $program 'Agent\restic.exe')) { throw 'restic of the open directory stays' }
           if ((Get-FileHash $identity).Hash -ne $before.Hash) { throw 'install-service changed the identity' }
-          # The service refuses the identity and does not restart forever.
+          # The service refuses the identity and does not restart forever. An entry of the
+          # administrator on a directory is repaired at the start (ADR-0048), so the refusal comes
+          # from an entry on a file, which the agent never repairs.
+          icacls (Join-Path $data 'agent-key.pem') /grant "*${user}:(M)" | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "icacls the key exit code $LASTEXITCODE" }
           & $agent status 2>&1 | Out-String | Tee-Object -Variable status | Write-Host
           if ($status -notmatch 'does not use the identity') { throw 'status does not report the refusal' }
           $start = [DateTime]::Now
