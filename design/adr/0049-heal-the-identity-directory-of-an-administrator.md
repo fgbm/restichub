@@ -20,14 +20,15 @@ An entry can also come while the service runs. Then the next break of the stream
 3. After the removal the service checks the identity again. It writes a warning to the `ResticHub` event log and to the agent log. The warning names the path and the account, and it tells that the identity was exposed to that account. It also tells how to register the host again if the account is not trusted.
 4. Each other entry on the identity directory or its backup keeps the refusal with the exit code 78 and `register --force`. This covers a user account outside Administrators, a group, a trustee that the computer cannot verify and an entry that the agent does not parse.
 5. The stream loop of a running service does a stop before it checks the identity, so a stop of the service is a clean stop. On Windows, the running service can find an identity that another account could change. Then the process stops with an error, and the recovery actions of the service restart it. The new start runs the heal. A refusal there stops the service with the exit code 78, so no restart loop occurs.
+6. `install-service` and `register` without `--force` run the same heal of the identity directory and its backup before their repair. The checks, the order and the warning are the same as at the start of the service. A refusal keeps the entry, and the command stops with the message of the check.
 
 ## Consequences
 
 - An administrator who opens `%ProgramData%\ResticHub\Agent` in File Explorer gets a working service at the next start, without a new token.
 - The account could read and change the identity between the click and the next start. The heal does not undo this. The warning tells the administrator, who decides if a new registration is necessary. The checks before the removal refuse an identity file that the account replaced, because the account owns the new file. They also refuse a name that the account added.
 - An entry that File Explorer adds while the service runs heals at the next break of the stream, after a restart from the service manager. Until that break the account keeps its access.
-- `install-service` keeps its rule: it leaves an identity directory that another account could change as found, and only a new registration replaces it. The heal at the start of the service removes the entry of an administrator before the command sees it.
-- Linux does not change. A running Linux agent still stops with the exit code 78 when another account could change the identity.
+- `install-service` keeps its rule for each other entry. It leaves an identity directory that another account could change as found. Only a new registration replaces it. The command also heals an entry of an administrator that File Explorer added while the service ran. Thus an upgrade with `install-service` needs no new token.
+- The heal is for Windows only. A running Linux agent still stops with the exit code 78 when another account could change the identity. Decision 5 applies to Linux too, so a stop of the service there is a clean stop with the exit code 0.
 
 ## Alternatives
 
