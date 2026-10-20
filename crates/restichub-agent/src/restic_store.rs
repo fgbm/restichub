@@ -161,7 +161,7 @@ impl Layout {
         release: &VerifiedRelease,
         probe: &dyn Fn(&Path) -> Result<String>,
     ) -> Result<()> {
-        crate::paths::create_protected_file(staging, &release.binary)?;
+        crate::paths::create_program_file(staging, &release.binary)?;
         make_executable(staging)?;
         let written = std::fs::read(staging)
             .with_context(|| format!("cannot read back {}", staging.display()))?;

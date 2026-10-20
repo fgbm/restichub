@@ -26,6 +26,11 @@ pub const MAX_FILE_BYTES: u64 = 10 * 1024 * 1024;
 
 pub const MAX_FILES: usize = 5;
 
+/// The sink of the service log, so the start repair can ask it to try its file again (ADR-0048).
+#[cfg(windows)]
+static SERVICE_LOG: std::sync::OnceLock<std::sync::Arc<sinks::ServiceLog>> =
+    std::sync::OnceLock::new();
+
 /// The directory of the Windows service log, `%ProgramData%\ResticHub\Agent-logs`.
 ///
 /// It is not inside the configuration directory: a new registration replaces that directory with
@@ -59,9 +64,21 @@ pub fn init_service() {
         Box::new(|| Ok(Box::new(event_log::EventSource::open()?) as Box<dyn sinks::EventSink>)),
         Box::new(std::time::Instant::now),
     );
+    let log = std::sync::Arc::new(log);
+    // The start repair changes the directory of the log, so it asks the sink to try again.
+    let _ = SERVICE_LOG.set(std::sync::Arc::clone(&log));
     let _ = tracing_subscriber::fmt()
         .with_env_filter(env_filter())
         .with_ansi(false)
-        .with_writer(sinks::ServiceWriter(std::sync::Arc::new(log)))
+        .with_writer(sinks::ServiceWriter(log))
         .try_init();
+}
+
+/// Lets the file sink open its file again before the end of its pause, so a warning of the start
+/// repair reaches the file (ADR-0048).
+#[cfg(windows)]
+pub fn retry_log_file() {
+    if let Some(log) = SERVICE_LOG.get() {
+        log.retry_now();
+    }
 }

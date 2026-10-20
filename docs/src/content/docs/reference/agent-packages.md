@@ -55,7 +55,7 @@ The agent takes the latest release of restic from GitHub. It verifies the OpenPG
 The agent stores the binary in a protected directory:
 
 - Linux: `/opt/restichub-agent/bin/restic`.
-- Windows: `%ProgramFiles%\ResticHub\Agent\restic.exe`, next to the agent executable. Only SYSTEM and Administrators can write there.
+- Windows: `%ProgramFiles%\ResticHub\Agent\restic.exe`, next to the agent executable. Users can read and run the files. Only SYSTEM and Administrators can write there.
 
 The protected configuration directory holds the file `restic.json` with the version and the SHA-256 of the installed binary. At each start, and before each restic process, the agent checks the binary against this record and refuses a different binary. The control plane cannot set the restic path. If restic is absent or does not match, the service stops with a message that names the next step: run `restichub-agent restic update`.
 

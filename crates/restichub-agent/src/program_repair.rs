@@ -175,6 +175,7 @@ pub(crate) fn prepare(config: &Path, manager: &dyn ServiceManager) -> Result<Pre
     }
     crate::paths::ensure_program_dir(&crate::paths::restic_dir())?;
     crate::paths::ensure_program_dir(&crate::paths::program_dir())?;
+    add_user_read()?;
     if prepared.rebuilt.replaced() {
         // The installed service starts from this path also when a later check refuses the identity.
         crate::self_install::copy_agent(&crate::self_install::Placement::host(), &running)?;
@@ -187,6 +188,24 @@ pub(crate) fn prepare(config: &Path, manager: &dyn ServiceManager) -> Result<Pre
         .state()
         .context("cannot read the state of the agent service")?;
     Ok(prepared)
+}
+
+/// Gives Users the read and execute access on the program tree of an install that an older build
+/// made for SYSTEM and Administrators only (ADR-0048).
+///
+/// A level that Users can read is left as it is, so a second run changes nothing. An entry that
+/// another account can change stays as found, so the check of the start keeps its refusal.
+#[cfg(windows)]
+fn add_user_read() -> Result<()> {
+    for path in crate::paths::program_entries() {
+        crate::winsec::add_user_read(&path)?;
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn add_user_read() -> Result<()> {
+    Ok(())
 }
 
 /// A moved tree is new, so no old handle reaches it and an older record goes.
