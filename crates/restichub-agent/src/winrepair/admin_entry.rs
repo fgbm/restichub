@@ -9,8 +9,8 @@
 //! other entry: another account, an inherited entry, an entry that the agent does not parse, and a
 //! trustee that the computer cannot verify keep the refusal of the checks that follow. A file stays
 //! a refusal, because a non-elevated process of the account could have changed its content. The
-//! identity directory is not healed either: the repair of `install-service` leaves it open on
-//! purpose, so a new registration replaces it.
+//! identity directory and its backup lose the entry too, with a warning that the identity was
+//! exposed to the account (ADR-0049).
 
 use std::path::{Path, PathBuf};
 
@@ -123,15 +123,30 @@ fn check_then_remove(
             config, data_root, &data, &trustees, log,
         )?)?;
     }
+    let identity = [
+        config.to_path_buf(),
+        crate::identity::sibling(config, ".old"),
+    ];
     for (path, tree, found) in opened {
         found.remove(path)?;
         for account in &found.accounts {
-            warnings.push(format!(
-                "removed the access of {} ({}) from {}: Windows Explorer adds this access when an administrator opens the folder without elevation; the agent checks the folder, the identity and restic again, and the service continues",
-                account.name,
-                account.sid,
-                path.display()
-            ));
+            let warning = if identity.contains(path) {
+                format!(
+                    "removed the access of {} ({}) from {}: Windows Explorer adds this access when an administrator opens the folder without elevation; the agent identity was exposed to this account; the agent checks the identity again, and the service continues; if you do not trust this account, {}",
+                    account.name,
+                    account.sid,
+                    path.display(),
+                    super::REENROLL_ADVICE
+                )
+            } else {
+                format!(
+                    "removed the access of {} ({}) from {}: Windows Explorer adds this access when an administrator opens the folder without elevation; the agent checks the folder, the identity and restic again, and the service continues",
+                    account.name,
+                    account.sid,
+                    path.display()
+                )
+            };
+            warnings.push(warning);
         }
         if *tree == Tree::Program {
             // Windows gave each child that is not protected a copy of the entry.
@@ -281,8 +296,7 @@ fn restamp_children(dir: &Path, trustees: &[Sid]) -> Result<()> {
 }
 
 /// The directories that the service checks at its start, with the rights that its checks apply
-/// (ADR-0048). The identity directory and its backup stay out: `install-service` leaves an open
-/// identity directory for a new registration.
+/// (ADR-0048, ADR-0049).
 fn levels(config: &Path) -> Vec<(PathBuf, Tree, Rights)> {
     let program = crate::paths::program_dir();
     let root = program.parent().map(Path::to_path_buf).unwrap_or_default();
@@ -290,6 +304,12 @@ fn levels(config: &Path) -> Vec<(PathBuf, Tree, Rights)> {
         (root, Tree::Program, Rights::Change),
         (program, Tree::Program, Rights::Change),
         (crate::paths::agent_root(), Tree::Data, Rights::Change),
+        (config.to_path_buf(), Tree::Data, Rights::Change),
+        (
+            crate::identity::sibling(config, ".old"),
+            Tree::Data,
+            Rights::Change,
+        ),
         (
             crate::logging::service_log_dir(config),
             Tree::Data,

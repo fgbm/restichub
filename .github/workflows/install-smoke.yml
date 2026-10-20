@@ -383,7 +383,7 @@ jobs:
           if ((Get-Service restichub-agent).Status -ne 'Running') { throw 'not running' }
           bash scripts/install-smoke.sh connected $since 60
       # File Explorer adds an entry for a non-elevated administrator who opens an agent folder.
-      # The service removes it at its start and continues (ADR-0048, AC-AG-15).
+      # The service removes it at its start and continues (ADR-0048, ADR-0049, AC-AG-15).
       - name: The Explorer access of an administrator does not stop the service (ADR-0048)
         shell: pwsh
         run: |
@@ -392,7 +392,8 @@ jobs:
           $tree = Join-Path $env:ProgramFiles 'ResticHub'
           $program = Join-Path $tree 'Agent'
           $data = Join-Path $env:ProgramData 'ResticHub'
-          $cache = Join-Path $data 'Agent\cache'
+          $config = Join-Path $data 'Agent'
+          $cache = Join-Path $config 'cache'
           $user = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
           $userAce = { param($path) (Get-Acl $path).GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) | Where-Object { $_.IdentityReference.Value -eq $user } }
           $restic = Join-Path $program 'restic.exe'
@@ -408,11 +409,11 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "icacls $path exit code $LASTEXITCODE" }
           }
           $start = [DateTime]::Now
-          foreach ($path in $tree, $program, $data, $cache) {
+          foreach ($path in $tree, $program, $data, $config, $cache) {
             icacls $path /grant "*${user}:(OI)(CI)(F)" | Out-Null
             if ($LASTEXITCODE -ne 0) { throw "icacls $path exit code $LASTEXITCODE" }
           }
-          foreach ($path in $tree, $program, $data, $cache, $previous, $blob) {
+          foreach ($path in $tree, $program, $data, $config, $cache, $previous, $blob) {
             if (-not (& $userAce $path)) { throw "the test did not open the access of $path" }
           }
           $since = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
@@ -421,15 +422,16 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'not connected' }
           if ((Get-Service restichub-agent).Status -ne 'Running') { throw 'not running' }
           # A directory and each child that inherited the entry lose it.
-          foreach ($path in $tree, $program, $data, $cache, $previous, $blob) {
+          foreach ($path in $tree, $program, $data, $config, $cache, $previous, $blob) {
             if (& $userAce $path) { throw "the entry of the administrator stays on $path" }
           }
-          foreach ($path in $tree, $program, $data, $cache) {
+          foreach ($path in $tree, $program, $data, $config, $cache) {
             if (-not (Get-Acl $path).AreAccessRulesProtected) { throw "$path is not protected" }
             $refusal = Get-WinEvent -FilterHashtable @{LogName='ResticHub'; ProviderName='ResticHub Agent'; StartTime=$start} -ErrorAction SilentlyContinue |
-              Where-Object { $_.Message -match 'removed the access of' -and $_.Message -match [regex]::Escape($path) } | Select-Object -First 1
+              Where-Object { $_.Message -match 'removed the access of' -and $_.Message -match "$([regex]::Escape($path)):" } | Select-Object -First 1
             if (-not $refusal) { throw "the ResticHub log holds no warning for $path" }
             Write-Host "event: $($refusal.Message)"
+            if ($path -eq $config -and $refusal.Message -notmatch 'identity was exposed') { throw 'the warning for the identity directory does not tell the exposure' }
           }
           Remove-Item $previous, $blob -Force
           # Users read and run the program files; the data stays closed to them.
@@ -443,6 +445,59 @@ jobs:
           if ((Get-FileHash $restic).Hash -ne $hash) { throw 'restic changed' }
           $record = Get-Content (Join-Path $data 'Agent\restic.json') | ConvertFrom-Json
           if ($record.sha256 -ne $hash.ToLower()) { throw 'restic does not match its record' }
+      # An entry that File Explorer adds while the service runs: the next break of the stream ends
+      # the process with an error, the service manager starts it again, and the start removes the
+      # entry (ADR-0049, AC-AG-15).
+      - name: The Explorer access of an administrator while the service runs, and a stream break (ADR-0049)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $config = Join-Path $env:ProgramData 'ResticHub\Agent'
+          $user = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          $service = Get-CimInstance Win32_Service -Filter "Name='restichub-agent'"
+          if ($service.State -ne 'Running') { throw "state: $($service.State)" }
+          Set-Content "$env:SMOKE_DIR/running-heal" "$($service.ProcessId) $([DateTime]::Now.ToString('o')) $([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())"
+          icacls $config /grant "*${user}:(OI)(CI)(F)" | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "icacls $config exit code $LASTEXITCODE" }
+          $listener = Get-NetTCPConnection -LocalPort 8443 -State Listen
+          Stop-Process -Id $listener.OwningProcess -Force
+      - name: Start the control plane again
+        env:
+          CP_BIN: target/debug/restichub-cp.exe
+        run: scripts/install-smoke.sh cp-serve
+      - name: The service starts again and removes the entry (ADR-0049)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $config = Join-Path $env:ProgramData 'ResticHub\Agent'
+          $user = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          $userAce = { param($path) (Get-Acl $path).GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) | Where-Object { $_.IdentityReference.Value -eq $user } }
+          $before, $stamp, $since = (Get-Content "$env:SMOKE_DIR/running-heal") -split ' '
+          $start = [DateTime]::Parse($stamp)
+          $service = $null
+          for ($i = 0; $i -lt 120; $i++) {
+            $service = Get-CimInstance Win32_Service -Filter "Name='restichub-agent'"
+            if ($service.State -eq 'Running' -and "$($service.ProcessId)" -ne $before -and -not (& $userAce $config)) { break }
+            Start-Sleep -Seconds 1
+          }
+          $service | Format-List State, ProcessId, ExitCode, ServiceSpecificExitCode
+          if ("$($service.ProcessId)" -eq $before) { throw 'the service did not start again' }
+          if (& $userAce $config) { throw "the entry of the administrator stays on $config" }
+          bash scripts/install-smoke.sh connected $since 120
+          if ($LASTEXITCODE -ne 0) { throw 'not connected' }
+          $events = Get-WinEvent -FilterHashtable @{LogName='ResticHub'; ProviderName='ResticHub Agent'; StartTime=$start} -ErrorAction SilentlyContinue
+          $restart = $events | Where-Object { $_.Message -match 'starts again and checks its folders' } | Select-Object -First 1
+          if (-not $restart) { throw 'the ResticHub log holds no restart for the exposure' }
+          Write-Host "event: $($restart.Message)"
+          $warning = $events | Where-Object { $_.Message -match 'removed the access of' -and $_.Message -match 'identity was exposed' } | Select-Object -First 1
+          if (-not $warning) { throw "the ResticHub log holds no warning for $config" }
+          Write-Host "event: $($warning.Message)"
+          # One restart, not a loop.
+          Start-Sleep -Seconds 10
+          $after = Get-CimInstance Win32_Service -Filter "Name='restichub-agent'"
+          if ($after.State -ne 'Running' -or $after.ProcessId -ne $service.ProcessId) { throw "the service did not stay running: $($after.State), process $($after.ProcessId)" }
       # The checks run before the removal, so a refusal keeps the entry for each later start.
       - name: A planted file keeps the Explorer access of an administrator and the refusal (ADR-0048)
         shell: pwsh
@@ -764,8 +819,8 @@ jobs:
           if (Test-Path (Join-Path $program 'Agent\restic.exe')) { throw 'restic of the open directory stays' }
           if ((Get-FileHash $identity).Hash -ne $before.Hash) { throw 'install-service changed the identity' }
           # The service refuses the identity and does not restart forever. An entry of the
-          # administrator on a directory is repaired at the start (ADR-0048), so the refusal comes
-          # from an entry on a file, which the agent never repairs.
+          # administrator on a directory is repaired at the start (ADR-0048, ADR-0049), so the
+          # refusal comes from an entry on a file, which the agent never repairs.
           icacls (Join-Path $data 'agent-key.pem') /grant "*${user}:(M)" | Out-Null
           if ($LASTEXITCODE -ne 0) { throw "icacls the key exit code $LASTEXITCODE" }
           & $agent status 2>&1 | Out-String | Tee-Object -Variable status | Write-Host
@@ -776,7 +831,7 @@ jobs:
           for ($i = 0; $i -lt 60 -and -not $refused; $i++) {
             Start-Sleep -Seconds 1
             $refused = Get-WinEvent -FilterHashtable @{LogName='ResticHub'; ProviderName='ResticHub Agent'; StartTime=$start} -ErrorAction SilentlyContinue |
-              Where-Object { $_.Message -match 'does not use the identity' } | Select-Object -First 1
+              Where-Object { $_.Message -match 'does not use the identity|identity of this host could be changed' } | Select-Object -First 1
           }
           if (-not $refused) { throw 'the service wrote no refusal to the event log' }
           Write-Host "event: $($refused.Message)"
