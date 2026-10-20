@@ -1,0 +1,47 @@
+# ADR-0048: Self-repair of administrator access entries on Windows
+
+- Status: accepted
+- Date: 2026-10-20
+- Requirements: FR-AG-01, FR-AG-04, FR-IN-07, FR-IN-08
+- Related: [ADR-0038](0038-agent-downloads-restic.md) (the restic record), [ADR-0037](0037-server-scripts-on-trusted-hosts.md) (the trust mode file), [ADR-0045](0045-repository-roots-for-local-repositories.md) (the roots files)
+
+## Context
+
+The agent keeps `%ProgramFiles%\ResticHub` and `%ProgramData%\ResticHub` with one protected access control list: full control for SYSTEM and Administrators, and no entry for any other account. A non-elevated token of an administrator holds the Administrators group as deny-only. Thus the administrator has no list right on these directories, and File Explorer asks for consent when the administrator opens one.
+
+File Explorer then adds an explicit full-control entry for the account of the administrator. Windows propagates a copy to the children that are not protected. The protected levels and files keep their list, so the identity, restic and the record stay closed. The service checks its directories at each start. It then stops with the exit code 78, often weeks after the click, and after a reboot. Until then the account could change the directory without elevation, and a library that it placed in `Agent` ran as SYSTEM at that start.
+
+The existing repair replaces the whole program tree and downloads restic again. It needs network access or a restic archive. It is a large action for an entry that Windows adds on purpose.
+
+## Decision
+
+1. The program tree grants the read and execute access to Users: `%ProgramFiles%\ResticHub`, `Agent` and each program file that an install writes. Only SYSTEM and Administrators write there. The read right is no change right, so each existing check keeps its result. `install-service` and `register` add this entry to a level of an existing install that passed the check.
+2. At its start the service removes an allow entry from an agent directory when the entry is explicit. Its trustee must be a user account in the local Administrators group, and a nested group counts. The Authorization API builds the group list of the account. The service removes the entry from these directories: `%ProgramFiles%\ResticHub`, `Agent`, `%ProgramData%\ResticHub`, `Agent-logs`, `Agent\cache` and the log spool. The other entries of the directory stay, so an entry that the checks allow, such as a read for Users, keeps its place. Windows gave each child that is not protected a copy of the removed entry, so the service removes those copies too. Before it removes an entry, the service runs the checks and the repair that `install-service` runs for a level that another account could write. During these checks the entry and its copies stay in place, and the checks ignore them. The checks refuse a name that the agent does not know, a link and an entry of a foreign owner. The repair removes the lock and the leftovers of an interrupted write, and it distrusts a settings file. A refusal stops the service with the exit code 78 and the message of the repair. The entry stays, so each later start refuses again until an administrator runs `install-service`. After the removal the service runs the checks again, because the account could change the level between the first check and the removal. The service writes the warnings to the `ResticHub` event log and to the agent log. The warning names the path and the account. The service continues.
+3. The identity directory and its backup are not healed. `install-service` leaves an identity directory that another account could change as found, so that only a new registration replaces it (ADR-0038). The service keeps that rule: it does not remove an entry from `Agent` or `Agent.old`, and it stops with the exit code 78 that names `register --force`.
+4. Before it removes an entry of a program level, the service checks the program tree and ignores the entry and its copies. It refuses a name that the agent does not know, a link and an open entry. A refusal keeps the entry, so each later start refuses again. After the removal the service removes the copies on the children and checks the program tree again. It then checks the identity again and verifies restic against its record. A failure stops the service with the exit code 78, as before.
+5. Every other entry keeps the refusal with the exit code 78. This covers a user account outside Administrators, a group and an entry that the agent does not parse. It also covers an inherited entry on a level that Explorer did not open. A trustee that the computer cannot verify and every entry on a file stay a refusal too. An entry on the two roots files stays a refusal too, because a non-elevated process of the account could have changed their content. The repair moves such a file aside and gives the copy a closed access, so an administrator can check it and move it back.
+6. The command `install-service` repairs a directory that a non-administrator opened, as before. `register --force` replaces an identity that another account could change.
+7. `%ProgramData%\ResticHub` keeps no read entry for Users, so the names of the files there do not leak. The log stays readable by SYSTEM and Administrators only.
+
+## Consequences
+
+- An administrator who opens an agent folder in File Explorer and clicks "Continue" gets a working service at the next start. The entry does not wait for an install, a download and a restart of the computer. A child of the folder loses the copy of the entry too. The account keeps no access to a log file, to a cache file or to the previous restic.
+- The account had write access to the directory between the click and the next start. A library that it placed in `Agent` ran as SYSTEM at that start. The refusal of the old behaviour did not prevent this either: it stopped the service after the library loaded. The heal stops a later use of the entry. The checks that `install-service` runs refuse a name that the account put in the folder while the entry existed.
+- An administrator who opens `%ProgramData%\ResticHub\Agent` itself gets the refusal with the exit code 78, and `register --force` replaces the identity. The entry on that directory hides a change of the identity, and only a new registration repairs it.
+- A handle that a process opened on the directory before the heal keeps its access until it closes. This is the same residual as the repair in place. A change between the first check and the removal stops only the start that sees it.
+- A domain account in Administrators gets the heal only while the domain controller answers. The computer account must also read the group list. A domain controller that is not reachable gives the refusal with the exit code 78. A hardened domain and an Entra ID account do the same. Then `install-service` repairs the tree.
+- A disabled account that stays in Administrators counts as an administrator. The entry gives a disabled account no access.
+- The program tree is readable by every local user. It holds public binaries only. The restic record, the identity and the log stay closed.
+- The heal runs at each start of the service, and in a console run of `run` that has the right to change the access control. A non-elevated console run changes nothing, so the checks refuse as before.
+
+## Alternatives
+
+| Alternative | Why we did not select it |
+|---|---|
+| Give Users the read access on `%ProgramData%\ResticHub` | The names of the files there show whether the trust mode is on. |
+| Give Users the read access on `Agent-logs` | A read of the log shows paths and host names to every local user, and FR-AG-04 says SYSTEM and Administrators only. |
+| Remove each entry that another account holds | A non-elevated process of that account could have changed the directory or a file already. The administrator must look at it first. |
+| Heal the entries of files too | A file that another account could change has content that the agent must not trust. Only a new registration or an install replaces it. |
+| Repair the directory at the click, from File Explorer | The agent does not run there, and the consent dialog belongs to Windows. |
+| Check the directories periodically while the service runs | The service holds no timer for a repair. The next start is enough: the checks refuse a later change. |
+| Let `install-service` replace the tree, as today | It downloads restic again and needs network access for an entry that Windows adds on purpose. |

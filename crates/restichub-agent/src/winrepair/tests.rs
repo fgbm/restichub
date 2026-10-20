@@ -237,7 +237,7 @@ fn fr_ag_04_the_service_refuses_an_identity_that_another_account_could_change() 
     Entry::open(&key)
         .expect("cannot open")
         .expect("the key must exist")
-        .protect()
+        .protect(Tree::Data)
         .expect("cannot protect");
     check_identity(&config, &root).expect("a protected key passes again");
 
@@ -268,7 +268,7 @@ fn fr_ag_04_an_empty_identity_directory_does_not_hide_a_planted_backup() {
     Entry::open(&backup.join(crate::identity::CA_CHAIN_FILE))
         .expect("cannot open")
         .expect("the chain must exist")
-        .protect()
+        .protect(Tree::Data)
         .expect("cannot protect");
 
     // The attack: the identity directory is empty and the root is open.
@@ -525,6 +525,37 @@ fn fr_ag_04_an_unknown_entry_is_refused_after_the_level_is_protected() {
             Action::RemovedTrustMode(mode)
         ]
     );
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[test]
+fn adr_0045_the_repository_roots_file_is_a_known_entry() {
+    let (base, root, config) = tree("repair-repository-roots");
+    let file = crate::repository_roots::roots_file_for(&config);
+    let name = file
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .expect("the file has a name");
+    assert!(
+        root_entries(&config, &root)
+            .iter()
+            .any(|(entry, _)| *entry == name),
+        "{name} must be a known entry"
+    );
+    create_protected_file(&file, b"/srv/restic").expect("cannot write");
+    grant(&file, "(R,W)").expect("cannot add the entry");
+    grant(&root, "(OI)(CI)(WD)").expect("cannot add the entry");
+    let (result, actions) = repair(&config, &root);
+    result.expect("the repair must succeed");
+    assert!(!file.exists(), "a writable roots file must be set aside");
+    let [
+        Action::Protected(protected),
+        Action::MovedRepositoryRoots { from, .. },
+    ] = actions.as_slice()
+    else {
+        panic!("unexpected actions: {actions:?}");
+    };
+    assert_eq!((protected, from), (&root, &file));
     let _ = std::fs::remove_dir_all(&base);
 }
 

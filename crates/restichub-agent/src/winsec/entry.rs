@@ -20,8 +20,8 @@ use windows_sys::Win32::Storage::FileSystem::{
 };
 
 use super::{
-    AGENT_RIGHTS, DIR_SDDL, FILE_SDDL, OwnedDescriptor, descriptor, first_foreign_grant,
-    is_trusted_sid, wide_path,
+    AGENT_RIGHTS, Foreign, OwnedDescriptor, Removal, Sid, Tree, descriptor, first_foreign_grant,
+    grants_user_read, is_trusted_sid, wide_path,
 };
 
 /// What the owner and the DACL of an entry allow to another account.
@@ -130,6 +130,83 @@ impl Entry {
     }
 
     pub(crate) fn exposure(&self, rights: Rights) -> Result<Exposure> {
+        self.security(|owner, dacl| {
+            if owner.is_null() || !is_trusted_sid(owner) {
+                return Ok(Exposure::ForeignOwner);
+            }
+            Ok(if first_foreign_grant(dacl, rights.mask())?.is_some() {
+                Exposure::ForeignGrant
+            } else {
+                Exposure::Clean
+            })
+        })
+    }
+
+    /// The exposure that stays when `removal` takes the allow entries of `trustees`, so a check can
+    /// run before the heal removes them (ADR-0048).
+    pub(crate) fn exposure_without(
+        &self,
+        rights: Rights,
+        trustees: &[Sid],
+        removal: Removal,
+    ) -> Result<Exposure> {
+        self.security(|owner, dacl| {
+            if owner.is_null() || !is_trusted_sid(owner) {
+                return Ok(Exposure::ForeignOwner);
+            }
+            let open = match super::foreign(dacl, rights.mask())? {
+                Foreign::None => false,
+                Foreign::Unknown => true,
+                Foreign::Grants(grants) => grants.iter().any(|grant| {
+                    let removed = removal == Removal::All || grant.inherited;
+                    !(removed && trustees.contains(&grant.sid))
+                }),
+            };
+            Ok(if open {
+                Exposure::ForeignGrant
+            } else {
+                Exposure::Clean
+            })
+        })
+    }
+
+    /// The allow entries that give another account one of the rights, with their trustee.
+    pub(crate) fn foreign(&self, rights: Rights) -> Result<Foreign> {
+        self.security(|_, dacl| super::foreign(dacl, rights.mask()))
+    }
+
+    /// Tells whether Users hold the read and execute access on this entry.
+    pub(crate) fn grants_users_read(&self) -> Result<bool> {
+        self.security(|_, dacl| grants_user_read(dacl))
+    }
+
+    /// Applies the DACL of `tree` to this entry only, without a change of the children.
+    pub(crate) fn protect(&self, tree: Tree) -> Result<()> {
+        self.set(
+            tree,
+            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+        )
+    }
+
+    /// Removes the allow entries of `trustees` from this entry only, and keeps every other entry
+    /// (ADR-0048). Needs an entry from [`Entry::open`].
+    pub(crate) fn remove_permits(&self, trustees: &[Sid], removal: Removal) -> Result<bool> {
+        super::remove_permits(self.handle, trustees, removal)
+    }
+
+    /// Sets the DACL of `tree` and Administrators as the owner too. Needs an entry from
+    /// [`Entry::open_to_own`].
+    pub(crate) fn own_and_protect(&self, tree: Tree) -> Result<()> {
+        self.set(
+            tree,
+            OWNER_SECURITY_INFORMATION
+                | DACL_SECURITY_INFORMATION
+                | PROTECTED_DACL_SECURITY_INFORMATION,
+        )
+    }
+
+    /// Reads the owner and the DACL of this entry for a check.
+    fn security<T>(&self, read: impl FnOnce(PSID, *mut ACL) -> Result<T>) -> Result<T> {
         let mut owner: PSID = std::ptr::null_mut();
         let mut dacl: *mut ACL = std::ptr::null_mut();
         let mut raw: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
@@ -152,33 +229,17 @@ impl Entry {
                 std::io::Error::from_raw_os_error(status as i32)
             );
         }
+        // The descriptor stays alive while the check reads the identifiers inside the DACL.
         let _descriptor = OwnedDescriptor(raw);
-        if owner.is_null() || !is_trusted_sid(owner) {
-            return Ok(Exposure::ForeignOwner);
-        }
-        Ok(if first_foreign_grant(dacl, rights.mask())?.is_some() {
-            Exposure::ForeignGrant
+        read(owner, dacl)
+    }
+
+    fn set(&self, tree: Tree, info: u32) -> Result<()> {
+        let descriptor = descriptor(if self.is_dir() {
+            tree.dir_sddl()
         } else {
-            Exposure::Clean
-        })
-    }
-
-    /// Sets the protected DACL of SYSTEM and Administrators on this entry only.
-    pub(crate) fn protect(&self) -> Result<()> {
-        self.set(DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION)
-    }
-
-    /// Sets Administrators as the owner too. Needs an entry from [`Entry::open_to_own`].
-    pub(crate) fn own_and_protect(&self) -> Result<()> {
-        self.set(
-            OWNER_SECURITY_INFORMATION
-                | DACL_SECURITY_INFORMATION
-                | PROTECTED_DACL_SECURITY_INFORMATION,
-        )
-    }
-
-    fn set(&self, info: u32) -> Result<()> {
-        let descriptor = descriptor(if self.is_dir() { DIR_SDDL } else { FILE_SDDL })?;
+            tree.file_sddl()
+        })?;
         // `SetSecurityInfo` would flow the DACL into the children, past a junction among them, so
         // the low-level call sets this object alone and the caller walks the children itself.
         // SAFETY: the handle is open with the rights that `info` needs and the descriptor stays

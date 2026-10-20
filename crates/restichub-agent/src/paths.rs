@@ -420,7 +420,8 @@ pub fn create_protected_dir(dir: &Path) -> Result<()> {
 /// write (FR-IN-07, T20).
 ///
 /// Linux levels are `0755`; the caller runs as root, so root owns them. Windows levels get the
-/// protected DACL and refuse a junction, with the `ResticHub` level as the top of the owned tree.
+/// program DACL: Users read and run the files, and only SYSTEM and Administrators change them
+/// (ADR-0048). A junction is refused, with the `ResticHub` level as the top of the owned tree.
 ///
 /// # Errors
 ///
@@ -434,7 +435,7 @@ pub fn ensure_program_dir(dir: &Path) -> Result<()> {
             Some(root) if dir.starts_with(root) => root.to_path_buf(),
             _ => dir.parent().map(Path::to_path_buf).unwrap_or_default(),
         };
-        crate::winsec::create_protected_tree(dir, &root)
+        crate::winsec::create_program_tree(dir, &root)
     }
     #[cfg(not(windows))]
     {
@@ -504,6 +505,40 @@ pub fn create_protected_file(path: &Path, contents: &[u8]) -> Result<()> {
     {
         write_owner_only(path, contents)
     }
+}
+
+/// Writes a program file that Users read and run and that only SYSTEM and Administrators change
+/// (ADR-0048).
+///
+/// # Errors
+///
+/// Returns an error when the file cannot be written.
+pub fn create_program_file(path: &Path, contents: &[u8]) -> Result<()> {
+    #[cfg(windows)]
+    {
+        crate::winsec::create_program_file(path, contents)
+    }
+    #[cfg(not(windows))]
+    {
+        create_protected_file(path, contents)
+    }
+}
+
+/// The entries of the program tree that Users read and run (ADR-0048).
+///
+/// The list is fixed: the two levels of `%ProgramFiles%\ResticHub`, the agent executable, and the
+/// two restic binaries that an install writes there.
+#[cfg(windows)]
+pub(crate) fn program_entries() -> Vec<PathBuf> {
+    let layout = crate::restic_store::Layout::host();
+    let program = program_dir();
+    vec![
+        program.parent().map(Path::to_path_buf).unwrap_or_default(),
+        program.clone(),
+        agent_exe_in(&program),
+        layout.binary_path(),
+        layout.previous_path(),
+    ]
 }
 
 /// Replaces a file with one rename, so a reader sees the old or the new content (FR-AG-04).

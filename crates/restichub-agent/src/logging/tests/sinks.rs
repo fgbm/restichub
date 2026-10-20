@@ -217,6 +217,27 @@ fn a_file_that_cannot_open_is_reported_once_and_opened_again_later() {
 }
 
 #[test]
+fn ac_ag_15_the_start_repair_opens_the_file_sink_before_the_end_of_the_pause() {
+    let sinks = sinks_with("file-retry", 1024, true);
+    sinks
+        .log
+        .write(Level::WARN, b"t1  WARN run: cannot open the log file\n");
+    // The service removed the entry from the directory of the log, so the file opens now.
+    sinks.file_fail.store(false, Ordering::SeqCst);
+    sinks.log.retry_now();
+    sinks.log.write(
+        Level::WARN,
+        b"t2  WARN winrepair: removed the access of an account\n",
+    );
+    let file = read_all(&sinks.dir);
+    assert!(file.contains("removed the access of an account"), "{file}");
+    assert!(
+        file.contains("the log file works again; 1 events of the outage are not in it"),
+        "{file}"
+    );
+}
+
+#[test]
 fn ac_ag_03_identical_events_reach_the_event_log_once_a_minute_and_the_file_each_time() {
     let sinks = sinks("repeats", 1 << 20);
     for stamp in 1..=5 {

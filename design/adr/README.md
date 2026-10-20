@@ -53,3 +53,4 @@ To write a new record, copy [0000-template.md](0000-template.md) and use the nex
 | [0045](0045-repository-roots-for-local-repositories.md) | Repository roots for local repositories | accepted |
 | [0046](0046-local-repository-bound-to-its-host.md) | A local repository is bound to its host | accepted, partly amended by ADR-0047 (the plan holds the repository) |
 | [0047](0047-repository-in-the-plan-and-profile-parameters.md) | The repository in the plan, and profile parameters | accepted |
+| [0048](0048-administrator-access-entries-on-windows.md) | Self-repair of administrator access entries on Windows | accepted |
