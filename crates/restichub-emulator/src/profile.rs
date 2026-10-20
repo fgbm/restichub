@@ -13,6 +13,9 @@ use std::time::Duration;
 use anyhow::{Context as _, bail};
 use serde::Deserialize;
 
+/// The control plane stores at most 8192 characters of one log line.
+pub const MAX_LOG_LINE_BYTES: usize = 8192;
+
 /// The agents, the rate and the failures of one run.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -27,6 +30,9 @@ pub struct LoadProfile {
     pub reconnect_storm: ReconnectStorm,
     pub clock_skew_seconds: f64,
     pub ack_delay_ms: u64,
+    pub log_lines_per_second: f64,
+    pub log_line_bytes: usize,
+    pub hostile: Hostile,
 }
 
 impl Default for LoadProfile {
@@ -42,8 +48,33 @@ impl Default for LoadProfile {
             reconnect_storm: ReconnectStorm::default(),
             clock_skew_seconds: 0.0,
             ack_delay_ms: 0,
+            log_lines_per_second: 0.0,
+            log_line_bytes: 120,
+            hostile: Hostile::default(),
         }
     }
+}
+
+/// Misbehaviour of the first `agents` agents, for the hostile-agent scenario. The control plane
+/// must refuse every such message.
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Hostile {
+    pub agents: usize,
+    /// The chance that a job result is followed by a result for a job that the agent never got.
+    pub forged_result_share: f64,
+    /// Progress messages for unknown jobs, sent each second over each hostile stream.
+    pub flood_per_second: f64,
+    /// One message of this size, once for each hostile agent.
+    pub oversize: Option<Oversize>,
+}
+
+/// The size of the one oversize message, relative to the protocol limit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Oversize {
+    AtLimit,
+    AboveLimit,
 }
 
 /// Bounds of the uniform step time.
@@ -168,6 +199,40 @@ impl LoadProfile {
                 self.clock_skew_seconds
             );
         }
+        if !(self.log_lines_per_second.is_finite() && self.log_lines_per_second >= 0.0) {
+            bail!(
+                "log_lines_per_second must be zero or more, got {}",
+                self.log_lines_per_second
+            );
+        }
+        if !(1..=MAX_LOG_LINE_BYTES).contains(&self.log_line_bytes) {
+            bail!(
+                "log_line_bytes must be in [1, {MAX_LOG_LINE_BYTES}], got {}",
+                self.log_line_bytes
+            );
+        }
+        let hostile = &self.hostile;
+        if hostile.agents > self.agents {
+            bail!(
+                "hostile.agents must be at most agents ({}), got {}",
+                self.agents,
+                hostile.agents
+            );
+        }
+        if !(hostile.forged_result_share.is_finite()
+            && (0.0..=1.0).contains(&hostile.forged_result_share))
+        {
+            bail!(
+                "hostile.forged_result_share must be in [0, 1], got {}",
+                hostile.forged_result_share
+            );
+        }
+        if !(hostile.flood_per_second.is_finite() && hostile.flood_per_second >= 0.0) {
+            bail!(
+                "hostile.flood_per_second must be zero or more, got {}",
+                hostile.flood_per_second
+            );
+        }
         Ok(())
     }
 
@@ -242,6 +307,28 @@ mod tests {
         assert_eq!((0..50).filter(|i| storm_selects(*i, 50, 20.0)).count(), 10);
         assert_eq!((0..50).filter(|i| storm_selects(*i, 50, 0.0)).count(), 0);
         assert_eq!((0..50).filter(|i| storm_selects(*i, 50, 100.0)).count(), 50);
+    }
+
+    #[test]
+    fn the_log_and_hostile_fields_are_read_and_checked() {
+        let profile: LoadProfile = serde_json::from_str(
+            r#"{"agents": 4, "log_lines_per_second": 50, "log_line_bytes": 200,
+                "hostile": {"agents": 1, "forged_result_share": 0.5,
+                            "flood_per_second": 1000, "oversize": "above_limit"}}"#,
+        )
+        .expect("profile");
+        profile.validate().expect("valid profile");
+        assert_eq!(profile.hostile.oversize, Some(super::Oversize::AboveLimit));
+
+        let mut bad = profile.clone();
+        bad.hostile.agents = 5;
+        assert!(bad.validate().is_err());
+        let mut bad = profile.clone();
+        bad.hostile.forged_result_share = 1.5;
+        assert!(bad.validate().is_err());
+        let mut bad = profile;
+        bad.log_line_bytes = 0;
+        assert!(bad.validate().is_err());
     }
 
     #[test]

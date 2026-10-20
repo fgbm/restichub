@@ -13,8 +13,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use restichub_proto::agent::v1::{
-    AgentMessage, CancelJob, ControlMessage, Job, Ping, ServerHello, SignedJob, SigningKeyUpdate,
-    agent_message,
+    AgentMessage, CancelJob, ControlMessage, Job, LogAck, LogStreamAck, Ping, ServerHello,
+    SignedJob, SigningKeyUpdate, agent_message,
     agent_service_server::{AgentService, AgentServiceServer},
     control_message,
 };
@@ -60,6 +60,12 @@ pub enum AgentEvent {
     Pong {
         agent_id: String,
         nonce: u64,
+    },
+    Log {
+        agent_id: String,
+        job_id: String,
+        sequence: u64,
+        bytes: usize,
     },
 }
 
@@ -119,9 +125,10 @@ impl TestControlPlane {
         let addr = listener.local_addr()?;
         let incoming = TcpListenerStream::new(listener);
         let (shutdown, shutdown_rx) = oneshot::channel();
-        let server = Server::builder()
-            .tls_config(tls)?
-            .add_service(AgentServiceServer::new(service));
+        let server = Server::builder().tls_config(tls)?.add_service(
+            AgentServiceServer::new(service)
+                .max_decoding_message_size(restichub_proto::MAX_MESSAGE_BYTES),
+        );
         let task = tokio::spawn(async move {
             if let Err(error) = server
                 .serve_with_incoming_shutdown(incoming, async {
@@ -319,7 +326,12 @@ impl AgentService for ControlPlane {
             payload: Some(control_message::Payload::ServerHello(ServerHello {
                 protocol_version_major: restichub_proto::PROTOCOL_VERSION_MAJOR,
                 protocol_version_minor: restichub_proto::PROTOCOL_VERSION_MINOR,
-                accepted_capabilities: vec!["backup".to_owned()],
+                accepted_capabilities: vec![
+                    "backup".to_owned(),
+                    restichub_proto::AgentCapability::LogAckV1
+                        .as_str()
+                        .to_owned(),
+                ],
                 control_plane_version: env!("CARGO_PKG_VERSION").to_owned(),
             })),
         };
@@ -329,7 +341,7 @@ impl AgentService for ControlPlane {
         let id = agent_id.clone();
         tokio::spawn(async move {
             while let Ok(Some(message)) = inbound.message().await {
-                handle_message(&state, &id, &message);
+                handle_message(&state, &id, &message, &tx);
             }
             // A reconnect can insert the next stream before this task runs. The
             // remove touches only the stream that this task opened.
@@ -346,7 +358,12 @@ impl AgentService for ControlPlane {
     }
 }
 
-fn handle_message(state: &Arc<State>, agent_id: &str, message: &AgentMessage) {
+fn handle_message(
+    state: &Arc<State>,
+    agent_id: &str,
+    message: &AgentMessage,
+    tx: &mpsc::Sender<ControlMessage>,
+) {
     let event = match &message.payload {
         Some(agent_message::Payload::AgentHello(hello)) => Some(AgentEvent::Hello {
             agent_id: agent_id.to_owned(),
@@ -381,6 +398,23 @@ fn handle_message(state: &Arc<State>, agent_id: &str, message: &AgentMessage) {
             agent_id: agent_id.to_owned(),
             nonce: pong.nonce,
         }),
+        Some(agent_message::Payload::LogChunk(chunk)) => {
+            let _ = tx.try_send(ControlMessage {
+                payload: Some(control_message::Payload::LogAck(LogAck {
+                    job_id: chunk.job_id.clone(),
+                    streams: vec![LogStreamAck {
+                        stream: chunk.stream,
+                        sequence: chunk.sequence,
+                    }],
+                })),
+            });
+            Some(AgentEvent::Log {
+                agent_id: agent_id.to_owned(),
+                job_id: chunk.job_id.clone(),
+                sequence: chunk.sequence,
+                bytes: chunk.data.len(),
+            })
+        }
         _ => None,
     };
     if let Some(event) = event {

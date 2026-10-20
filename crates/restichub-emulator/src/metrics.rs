@@ -124,6 +124,15 @@ pub struct Metrics {
     jobs_acked: AtomicU64,
     results: AtomicU64,
     streams: AtomicI64,
+    log_chunks_sent: AtomicU64,
+    log_bytes_sent: AtomicU64,
+    log_chunks_acked: AtomicU64,
+    log_chunks_resent: AtomicU64,
+    log_chunks_unacked: AtomicI64,
+    forged_results_foreign: AtomicU64,
+    forged_results_unknown: AtomicU64,
+    flood_messages: AtomicU64,
+    oversize_messages: AtomicU64,
 }
 
 impl Metrics {
@@ -159,6 +168,78 @@ impl Metrics {
     pub fn record_result(&self, microseconds: u64) {
         lock(&self.result_micros).record(microseconds);
         self.results.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Counts one sent log chunk of `bytes` bytes.
+    pub fn log_chunk_sent(&self, bytes: usize) {
+        self.log_chunks_sent.fetch_add(1, Ordering::Relaxed);
+        self.log_bytes_sent
+            .fetch_add(bytes as u64, Ordering::Relaxed);
+    }
+
+    /// Counts chunks that went into a spool.
+    pub fn log_chunks_kept(&self, count: usize) {
+        self.log_chunks_unacked
+            .fetch_add(count as i64, Ordering::Relaxed);
+    }
+
+    /// Counts chunks that a `LogAck` removed from a spool.
+    pub fn log_chunks_acked(&self, count: usize) {
+        self.log_chunks_acked
+            .fetch_add(count as u64, Ordering::Relaxed);
+        self.log_chunks_unacked
+            .fetch_sub(count as i64, Ordering::Relaxed);
+    }
+
+    /// Counts chunks that left a spool without an acknowledgement.
+    pub fn log_chunks_dropped(&self, count: usize) {
+        self.log_chunks_unacked
+            .fetch_sub(count as i64, Ordering::Relaxed);
+    }
+
+    /// Counts chunks sent again on a new stream.
+    pub fn log_chunks_resent(&self, count: usize) {
+        self.log_chunks_resent
+            .fetch_add(count as u64, Ordering::Relaxed);
+    }
+
+    /// Counts one forged job result; `foreign` when it names a job of another agent.
+    pub fn forged_result(&self, foreign: bool) {
+        let counter = if foreign {
+            &self.forged_results_foreign
+        } else {
+            &self.forged_results_unknown
+        };
+        counter.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn flood_message(&self) {
+        self.flood_messages.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn oversize_message(&self) {
+        self.oversize_messages.fetch_add(1, Ordering::Relaxed);
+    }
+
+    #[must_use]
+    pub fn logs(&self) -> LogSummary {
+        LogSummary {
+            chunks_sent: self.log_chunks_sent.load(Ordering::Relaxed),
+            bytes_sent: self.log_bytes_sent.load(Ordering::Relaxed),
+            chunks_acked: self.log_chunks_acked.load(Ordering::Relaxed),
+            chunks_resent: self.log_chunks_resent.load(Ordering::Relaxed),
+            chunks_unacked: self.log_chunks_unacked.load(Ordering::Relaxed),
+        }
+    }
+
+    #[must_use]
+    pub fn hostile(&self) -> HostileSummary {
+        HostileSummary {
+            forged_results_foreign: self.forged_results_foreign.load(Ordering::Relaxed),
+            forged_results_unknown: self.forged_results_unknown.load(Ordering::Relaxed),
+            flood_messages: self.flood_messages.load(Ordering::Relaxed),
+            oversize_messages: self.oversize_messages.load(Ordering::Relaxed),
+        }
     }
 
     #[must_use]
@@ -249,6 +330,62 @@ impl Metrics {
             "Agent streams open now.",
             self.streams(),
         );
+        let logs = self.logs();
+        for (name, help, value) in [
+            (
+                "restichub_emulator_log_chunks_total",
+                "Log chunks sent.",
+                logs.chunks_sent,
+            ),
+            (
+                "restichub_emulator_log_bytes_total",
+                "Log bytes sent.",
+                logs.bytes_sent,
+            ),
+            (
+                "restichub_emulator_log_chunks_acked_total",
+                "Log chunks that a LogAck removed from a spool.",
+                logs.chunks_acked,
+            ),
+            (
+                "restichub_emulator_log_chunks_resent_total",
+                "Log chunks sent again on a new stream.",
+                logs.chunks_resent,
+            ),
+        ] {
+            write_counter(&mut out, name, help, value);
+        }
+        write_gauge(
+            &mut out,
+            "restichub_emulator_log_chunks_unacked",
+            "Log chunks that wait for a LogAck.",
+            logs.chunks_unacked,
+        );
+        let hostile = self.hostile();
+        for (name, help, value) in [
+            (
+                "restichub_emulator_forged_results_foreign_total",
+                "Forged job results that name a job of another agent.",
+                hostile.forged_results_foreign,
+            ),
+            (
+                "restichub_emulator_forged_results_unknown_total",
+                "Forged job results that name a job that does not exist.",
+                hostile.forged_results_unknown,
+            ),
+            (
+                "restichub_emulator_flood_messages_total",
+                "Flood messages of the hostile agents.",
+                hostile.flood_messages,
+            ),
+            (
+                "restichub_emulator_oversize_messages_total",
+                "Oversize messages of the hostile agents.",
+                hostile.oversize_messages,
+            ),
+        ] {
+            write_counter(&mut out, name, help, value);
+        }
         out
     }
 
@@ -267,8 +404,29 @@ impl Metrics {
             connect_seconds: latency(&lock(&self.connect_seconds), 1e-6),
             ack_millis: latency(&lock(&self.ack_micros), 1e-3),
             result_millis: latency(&lock(&self.result_micros), 1e-3),
+            logs: self.logs(),
+            hostile: self.hostile(),
         }
     }
+}
+
+/// The log counters of a run (FR-AG-08, FR-LG-07).
+#[derive(Debug, Clone, Serialize)]
+pub struct LogSummary {
+    pub chunks_sent: u64,
+    pub bytes_sent: u64,
+    pub chunks_acked: u64,
+    pub chunks_resent: u64,
+    pub chunks_unacked: i64,
+}
+
+/// The messages of the hostile agents, which the control plane must refuse.
+#[derive(Debug, Clone, Serialize)]
+pub struct HostileSummary {
+    pub forged_results_foreign: u64,
+    pub forged_results_unknown: u64,
+    pub flood_messages: u64,
+    pub oversize_messages: u64,
 }
 
 /// The counts and the percentiles of one latency metric.
@@ -295,6 +453,8 @@ pub struct Summary {
     pub connect_seconds: LatencySummary,
     pub ack_millis: LatencySummary,
     pub result_millis: LatencySummary,
+    pub logs: LogSummary,
+    pub hostile: HostileSummary,
 }
 
 fn latency(histogram: &Histogram, scale: f64) -> LatencySummary {
