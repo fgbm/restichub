@@ -32,7 +32,30 @@ pub fn needs_administrator(error: &anyhow::Error) -> bool {
         || error.downcast_ref::<UnsafeIdentity>().is_some()
         || error.downcast_ref::<NoRestic>().is_some()
         || error.downcast_ref::<UnsafeProgram>().is_some()
+        || error.downcast_ref::<UnsafeTree>().is_some()
 }
+
+/// A directory that lost the entry of a local administrator at this start holds something that the
+/// repair of `install-service` refuses, so the service does not start (ADR-0048, T20).
+///
+/// The service cannot repair it: the account could write there while the entry existed, and only
+/// an administrator can check that content.
+#[derive(Debug)]
+pub struct UnsafeTree {
+    cause: String,
+}
+
+impl std::fmt::Display for UnsafeTree {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "the agent does not start from the folder that it repaired: {}; an administrator checks the folder and runs `restichub-agent install-service`",
+            self.cause
+        )
+    }
+}
+
+impl std::error::Error for UnsafeTree {}
 
 /// Another account could change the agent program or restic, so the service does not run them
 /// (T20). On Windows a DLL beside the program runs with the rights of the service.
@@ -745,9 +768,19 @@ pub fn status(dir: &Path) -> Result<()> {
 pub fn run(dir: &Path, shutdown: Option<Receiver<()>>) -> Result<()> {
     // A non-elevated token of an administrator holds Administrators as deny-only, so File Explorer
     // asks before it opens an agent folder and then adds an entry for that account. The service
-    // removes that entry and checks the objects again below (ADR-0048, T20).
+    // removes that entry and runs the checks and the repair that `install-service` runs for the
+    // changed levels (ADR-0048, T20).
     #[cfg(windows)]
-    let healed_program = crate::winrepair::heal_admin_entries(dir);
+    let healed_program = match crate::winrepair::heal_admin_entries(dir) {
+        Ok(program) => program,
+        Err(error) => {
+            let refused = UnsafeTree {
+                cause: format!("{error:#}"),
+            };
+            tracing::error!("{refused}");
+            return Err(anyhow::Error::new(refused));
+        }
+    };
     #[cfg(not(windows))]
     let healed_program = false;
     if healed_program && let Err(refused) = crate::paths::check_program_files() {
@@ -786,12 +819,16 @@ pub fn run(dir: &Path, shutdown: Option<Receiver<()>>) -> Result<()> {
     let mut keys = crate::keys::KeyState::load(&identity, dir)?;
     let cache = crate::paths::cache_dir();
     // A cache that another account could change would restart the service forever with the exit
-    // code of an ordinary error, so it stops like an identity that another account could change.
+    // code of an ordinary error, so on Windows it stops like an identity that another account could
+    // change. Linux keeps the ordinary error.
+    #[cfg(windows)]
     if let Err(error) = crate::preflight::prepare_cache(&cache) {
         let refused = unsafe_identity(&cache, &error);
         tracing::error!("{refused}");
         return Err(anyhow::Error::new(refused));
     }
+    #[cfg(not(windows))]
+    crate::preflight::prepare_cache(&cache)?;
     // An update can replace the agent without a new `register`, so a restic in the Windows
     // location of an earlier version moves first (ADR-0038).
     #[cfg(windows)]

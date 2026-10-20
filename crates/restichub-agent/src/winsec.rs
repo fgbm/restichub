@@ -26,14 +26,14 @@ use windows_sys::Win32::Foundation::{
 };
 use windows_sys::Win32::Security::Authorization::{
     ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
-    ConvertStringSidToSidW, GetNamedSecurityInfoW, SDDL_REVISION_1, SE_FILE_OBJECT,
-    SetNamedSecurityInfoW,
+    ConvertStringSidToSidW, GetNamedSecurityInfoW, GetSecurityInfo, SDDL_REVISION_1,
+    SE_FILE_OBJECT, SetNamedSecurityInfoW, SetSecurityInfo,
 };
 use windows_sys::Win32::Security::{
-    ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, ACL_SIZE_INFORMATION, AclSizeInformation,
-    CheckTokenMembership, DACL_SECURITY_INFORMATION, EqualSid, GENERIC_MAPPING, GetAce,
+    ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, ACL_REVISION, ACL_SIZE_INFORMATION, AclSizeInformation,
+    AddAce, CheckTokenMembership, DACL_SECURITY_INFORMATION, EqualSid, GENERIC_MAPPING, GetAce,
     GetAclInformation, GetLengthSid, GetSecurityDescriptorDacl, GetSecurityDescriptorOwner,
-    GetTokenInformation, INHERIT_ONLY_ACE, INHERITED_ACE, MapGenericMask,
+    GetTokenInformation, INHERIT_ONLY_ACE, INHERITED_ACE, InitializeAcl, MapGenericMask,
     OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
     SECURITY_ATTRIBUTES, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation,
 };
@@ -743,7 +743,161 @@ pub(crate) fn add_user_read(path: &Path) -> Result<bool> {
     Ok(true)
 }
 
+/// The entries that a heal takes from an object (ADR-0048).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Removal {
+    /// Each allow entry of the trustee, whether the object itself or a parent holds it.
+    All,
+    /// Only the copies that a parent directory passed down to a child.
+    InheritedCopies,
+}
+
+/// Removes the allow entries of `trustees` from the object of `handle`, and keeps every other entry
+/// (ADR-0048).
+///
+/// The module rewrites the DACL instead of applying the descriptor of a whole tree, so an entry
+/// that the checks allow, such as a read for Users, stays. The DACL stays protected, as the agent
+/// makes it, so a new child inherits only the entries that remain.
+fn remove_permits(handle: HANDLE, trustees: &[Sid], removal: Removal) -> Result<bool> {
+    let mut dacl: *mut ACL = std::ptr::null_mut();
+    let mut raw: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
+    // SAFETY: the handle is open with READ_CONTROL and the out parameters point to locals.
+    let status = unsafe {
+        GetSecurityInfo(
+            handle,
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut dacl,
+            std::ptr::null_mut(),
+            &mut raw,
+        )
+    };
+    if status != ERROR_SUCCESS {
+        bail!(
+            "cannot read the access control: {}",
+            std::io::Error::from_raw_os_error(status as i32)
+        );
+    }
+    let _descriptor = OwnedDescriptor(raw);
+    if dacl.is_null() {
+        return Ok(false);
+    }
+    let mut size = ACL_SIZE_INFORMATION::default();
+    // SAFETY: the DACL is a valid ACL and the out parameter is a local.
+    let ok = unsafe {
+        GetAclInformation(
+            dacl,
+            std::ptr::addr_of_mut!(size).cast(),
+            u32::try_from(std::mem::size_of::<ACL_SIZE_INFORMATION>())
+                .context("the ACL size information is too large")?,
+            AclSizeInformation,
+        )
+    };
+    if ok == 0 {
+        bail!(
+            "cannot read an access control list: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+    let mut kept: Vec<Vec<u8>> = Vec::new();
+    let mut removed = false;
+    for index in 0..size.AceCount {
+        let mut ace: *mut core::ffi::c_void = std::ptr::null_mut();
+        // SAFETY: the DACL is valid and the index is inside the list.
+        let ok = unsafe { GetAce(dacl, index, &mut ace) };
+        if ok == 0 || ace.is_null() {
+            bail!(
+                "cannot read an access control entry: {}",
+                std::io::Error::last_os_error()
+            );
+        }
+        // SAFETY: every entry starts with an ACE_HEADER.
+        let header = unsafe { *(ace as *const ACE_HEADER) };
+        // An entry of a type this module does not parse is kept, so the checks keep their refusal.
+        if u32::from(header.AceType) == ACCESS_ALLOWED_ACE_TYPE {
+            // SAFETY: the type byte says that the entry is an ACCESS_ALLOWED_ACE.
+            let allowed = unsafe { &*(ace as *const ACCESS_ALLOWED_ACE) };
+            // SAFETY: SidStart is the first byte of the security identifier of the entry.
+            let sid = std::ptr::addr_of!(allowed.SidStart).cast::<core::ffi::c_void>() as PSID;
+            let inherited = u32::from(header.AceFlags) & INHERITED_ACE != 0;
+            let wanted = removal == Removal::All || inherited;
+            // SAFETY: both pointers are valid security identifiers.
+            if wanted
+                && trustees
+                    .iter()
+                    .any(|trustee| unsafe { EqualSid(sid, trustee.as_ptr()) } != 0)
+            {
+                removed = true;
+                continue;
+            }
+        }
+        // SAFETY: the header gives the length of this entry inside the DACL.
+        kept.push(
+            unsafe { std::slice::from_raw_parts(ace.cast::<u8>(), usize::from(header.AceSize)) }
+                .to_vec(),
+        );
+    }
+    if !removed {
+        return Ok(false);
+    }
+    if kept.is_empty() {
+        // An empty DACL grants every account full control, so this module never writes one.
+        bail!("cannot remove the entry: no entry of the agent would stay");
+    }
+    let needed = std::mem::size_of::<ACL>() + kept.iter().map(Vec::len).sum::<usize>();
+    let capacity = usize::try_from(size.AclBytesInUse)
+        .unwrap_or(needed)
+        .max(needed);
+    // The ACL needs the alignment of its header, so the buffer counts in 32-bit units.
+    let mut buffer = vec![0u32; capacity.div_ceil(std::mem::size_of::<u32>())];
+    let acl = buffer.as_mut_ptr().cast::<ACL>();
+    let length = u32::try_from(buffer.len() * std::mem::size_of::<u32>())
+        .context("the access control list is too large")?;
+    // SAFETY: the buffer holds `length` bytes and is aligned for an ACL.
+    let ok = unsafe { InitializeAcl(acl, length, ACL_REVISION) };
+    if ok == 0 {
+        bail!(
+            "cannot build the access control list: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+    for entry in &kept {
+        let bytes = u32::try_from(entry.len()).context("the access control entry is too large")?;
+        // SAFETY: the ACL has room for each kept entry, and each entry is a valid ACE.
+        let ok = unsafe { AddAce(acl, ACL_REVISION, u32::MAX, entry.as_ptr().cast(), bytes) };
+        if ok == 0 {
+            bail!(
+                "cannot build the access control list: {}",
+                std::io::Error::last_os_error()
+            );
+        }
+    }
+    let info = DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION;
+    // SAFETY: the handle is open with WRITE_DAC and the ACL stays alive for the call.
+    let status = unsafe {
+        SetSecurityInfo(
+            handle,
+            SE_FILE_OBJECT,
+            info,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            acl,
+            std::ptr::null_mut(),
+        )
+    };
+    if status != ERROR_SUCCESS {
+        bail!(
+            "cannot set the access control: {}",
+            std::io::Error::from_raw_os_error(status as i32)
+        );
+    }
+    Ok(true)
+}
+
 /// A security identifier that the module owns, copied out of a DACL.
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) struct Sid(Vec<u8>);
 
 impl Sid {

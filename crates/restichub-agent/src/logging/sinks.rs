@@ -84,6 +84,15 @@ impl ServiceLog {
         log
     }
 
+    /// Lets the next line open the file sink again before its pause ends, so the warning of a start
+    /// repair reaches the file (ADR-0048).
+    pub(crate) fn retry_now(&self) {
+        let mut sink = lock(&self.file);
+        if let Sink::Down { retry_at, .. } = &mut *sink {
+            *retry_at = (self.now)();
+        }
+    }
+
     /// Writes one formatted event. Each level goes to the file; a warning and an error also go to
     /// the event log.
     pub(crate) fn write(&self, level: Level, bytes: &[u8]) {

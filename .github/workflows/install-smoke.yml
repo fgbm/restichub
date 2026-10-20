@@ -390,30 +390,48 @@ jobs:
           $ErrorActionPreference = 'Continue'
           $PSNativeCommandUseErrorActionPreference = $false
           $tree = Join-Path $env:ProgramFiles 'ResticHub'
+          $program = Join-Path $tree 'Agent'
           $data = Join-Path $env:ProgramData 'ResticHub'
+          $cache = Join-Path $data 'Agent\cache'
           $user = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
           $userAce = { param($path) (Get-Acl $path).GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) | Where-Object { $_.IdentityReference.Value -eq $user } }
-          $restic = Join-Path $tree 'Agent\restic.exe'
+          $restic = Join-Path $program 'restic.exe'
           $hash = (Get-FileHash $restic).Hash
+          # A child without a protected access control list takes a copy of the entry.
+          $previous = Join-Path $program 'restic-previous.exe'
+          Copy-Item $restic $previous
+          if (-not (Test-Path $cache)) { throw "the agent has no cache directory: $cache" }
+          $blob = Join-Path $cache 'blob-inherited'
+          Set-Content $blob 'x'
+          foreach ($path in $previous, $blob) {
+            icacls $path /setowner '*S-1-5-32-544' | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "icacls $path exit code $LASTEXITCODE" }
+          }
           $start = [DateTime]::Now
-          icacls $tree /grant "*${user}:(OI)(CI)(F)" | Out-Null
-          if ($LASTEXITCODE -ne 0) { throw "icacls $tree exit code $LASTEXITCODE" }
-          icacls $data /grant "*${user}:(OI)(CI)(F)" | Out-Null
-          if ($LASTEXITCODE -ne 0) { throw "icacls $data exit code $LASTEXITCODE" }
-          if (-not (& $userAce $tree) -or -not (& $userAce $data)) { throw 'the test did not open the access' }
+          foreach ($path in $tree, $program, $data, $cache) {
+            icacls $path /grant "*${user}:(OI)(CI)(F)" | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "icacls $path exit code $LASTEXITCODE" }
+          }
+          foreach ($path in $tree, $program, $data, $cache, $previous, $blob) {
+            if (-not (& $userAce $path)) { throw "the test did not open the access of $path" }
+          }
           $since = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
           Restart-Service restichub-agent
           bash scripts/install-smoke.sh connected $since 60
           if ($LASTEXITCODE -ne 0) { throw 'not connected' }
           if ((Get-Service restichub-agent).Status -ne 'Running') { throw 'not running' }
-          foreach ($path in $tree, $data) {
+          # A directory and each child that inherited the entry lose it.
+          foreach ($path in $tree, $program, $data, $cache, $previous, $blob) {
             if (& $userAce $path) { throw "the entry of the administrator stays on $path" }
+          }
+          foreach ($path in $tree, $program, $data, $cache) {
             if (-not (Get-Acl $path).AreAccessRulesProtected) { throw "$path is not protected" }
             $refusal = Get-WinEvent -FilterHashtable @{LogName='ResticHub'; ProviderName='ResticHub Agent'; StartTime=$start} -ErrorAction SilentlyContinue |
               Where-Object { $_.Message -match 'removed the access of' -and $_.Message -match [regex]::Escape($path) } | Select-Object -First 1
             if (-not $refusal) { throw "the ResticHub log holds no warning for $path" }
             Write-Host "event: $($refusal.Message)"
           }
+          Remove-Item $previous, $blob -Force
           # Users read and run the program files; the data stays closed to them.
           $users = (Get-Acl $tree).GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) |
             Where-Object { $_.IdentityReference.Value -eq 'S-1-5-32-545' -and $_.FileSystemRights -match 'ReadAndExecute' }

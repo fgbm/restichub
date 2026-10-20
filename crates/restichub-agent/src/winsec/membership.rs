@@ -193,7 +193,7 @@ mod tests {
     use crate::winsec::tests::current_user_sid;
 
     #[test]
-    fn adr_0048_the_runner_account_is_a_local_administrator() {
+    fn ac_ag_15_the_runner_account_is_a_local_administrator() {
         let text = current_user_sid().expect("cannot read the user SID");
         let sid = sid_from_string(&text).expect("cannot build the SID");
         let account = local_administrator(sid.0).expect("the runner is a local administrator");
@@ -202,7 +202,7 @@ mod tests {
     }
 
     #[test]
-    fn adr_0048_builtin_users_is_not_an_administrator() {
+    fn ac_ag_15_builtin_users_is_not_an_administrator() {
         let sid = sid_from_string("S-1-5-32-545").expect("cannot build the SID");
         assert!(
             local_administrator(sid.0).is_none(),
@@ -211,13 +211,13 @@ mod tests {
     }
 
     #[test]
-    fn adr_0048_a_group_in_the_administrators_group_is_not_a_user_account() {
+    fn ac_ag_15_a_group_in_the_administrators_group_is_not_a_user_account() {
         let sid = sid_from_string(ADMINISTRATORS).expect("cannot build the SID");
         assert!(local_administrator(sid.0).is_none());
     }
 
     #[test]
-    fn adr_0048_an_unresolved_sid_is_not_an_administrator() {
+    fn ac_ag_15_an_unresolved_sid_is_not_an_administrator() {
         let sid = sid_from_string("S-1-5-21-1-2-3-4242").expect("cannot build the SID");
         assert!(local_administrator(sid.0).is_none());
     }

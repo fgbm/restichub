@@ -20,7 +20,7 @@ use windows_sys::Win32::Storage::FileSystem::{
 };
 
 use super::{
-    AGENT_RIGHTS, Foreign, OwnedDescriptor, Tree, descriptor, first_foreign_grant,
+    AGENT_RIGHTS, Foreign, OwnedDescriptor, Removal, Sid, Tree, descriptor, first_foreign_grant,
     grants_user_read, is_trusted_sid, wide_path,
 };
 
@@ -158,6 +158,12 @@ impl Entry {
             tree,
             DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
         )
+    }
+
+    /// Removes the allow entries of `trustees` from this entry only, and keeps every other entry
+    /// (ADR-0048). Needs an entry from [`Entry::open`].
+    pub(crate) fn remove_permits(&self, trustees: &[Sid], removal: Removal) -> Result<bool> {
+        super::remove_permits(self.handle, trustees, removal)
     }
 
     /// Sets the DACL of `tree` and Administrators as the owner too. Needs an entry from

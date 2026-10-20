@@ -250,7 +250,7 @@ fn the_program_files_parent_chain_passes() {
 }
 
 #[test]
-fn adr_0048_the_program_tree_grants_users_read_and_execute() {
+fn ac_ag_15_the_program_tree_grants_users_read_and_execute() {
     let base = temp("program-tree");
     std::fs::create_dir_all(&base).expect("cannot create the base");
     let root = base.join("ResticHub");
@@ -272,7 +272,7 @@ fn adr_0048_the_program_tree_grants_users_read_and_execute() {
 }
 
 #[test]
-fn adr_0048_an_install_adds_the_read_entry_to_an_existing_tree() {
+fn ac_ag_15_an_install_adds_the_read_entry_to_an_existing_tree() {
     // An older build made the program tree for SYSTEM and Administrators only.
     let base = temp("program-old");
     std::fs::create_dir_all(&base).expect("cannot create the base");

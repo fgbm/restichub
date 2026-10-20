@@ -97,13 +97,24 @@ impl std::fmt::Display for Action {
                 to.display(),
                 from.display()
             ),
-            Self::MovedRepositoryRoots { from, to } => write!(
-                f,
-                "moved {} to {}: another account could change it, so the local repository roots are off; an administrator checks the file and moves it back to {} to turn them on again",
-                from.display(),
-                to.display(),
-                from.display()
-            ),
+            Self::MovedRepositoryRoots { from, to } => {
+                if cfg!(windows) {
+                    write!(
+                        f,
+                        "moved {} to {}: another account could change it; the agent reads the local repository roots file on Linux only, so this host ignores it",
+                        from.display(),
+                        to.display()
+                    )
+                } else {
+                    write!(
+                        f,
+                        "moved {} to {}: another account could change it, so the local repository roots are off; an administrator checks the file and moves it back to {} to turn them on again",
+                        from.display(),
+                        to.display(),
+                        from.display()
+                    )
+                }
+            }
             Self::IdentityExposed(path) => write!(
                 f,
                 "warning: another account could read or change {}, so the agent identity may be exposed; {REENROLL_ADVICE}",
@@ -273,6 +284,31 @@ pub(crate) fn repair_agent_tree(
     untrusted: UntrustedIdentity,
     log: &mut dyn FnMut(Action),
 ) -> Result<Vec<PathBuf>> {
+    run(config, root, untrusted, &[], log)
+}
+
+/// Runs the same checks and repairs for the levels whose entry of a local administrator the service
+/// removed at this start (ADR-0048).
+///
+/// The entry gave that account a change of the level, so a name that the agent does not know, a lock
+/// or a leftover of an interrupted write is treated as it is for a level that the repair finds open.
+/// The identity of another account stays as found, so the caller refuses it as before.
+pub(crate) fn repair_after_heal(
+    config: &Path,
+    root: &Path,
+    healed: &[PathBuf],
+    log: &mut dyn FnMut(Action),
+) -> Result<Vec<PathBuf>> {
+    run(config, root, UntrustedIdentity::Keep, healed, log)
+}
+
+fn run(
+    config: &Path,
+    root: &Path,
+    untrusted: UntrustedIdentity,
+    healed: &[PathBuf],
+    log: &mut dyn FnMut(Action),
+) -> Result<Vec<PathBuf>> {
     if !config.starts_with(root) {
         return Ok(Vec::new());
     }
@@ -290,7 +326,8 @@ pub(crate) fn repair_agent_tree(
         doomed: Vec::new(),
     };
     for level in levels {
-        repair.level(level)?;
+        let opened = healed.iter().any(|healed| healed == level);
+        repair.level(level, opened)?;
     }
     for (path, is_dir) in std::mem::take(&mut repair.doomed) {
         if is_dir {
@@ -386,7 +423,9 @@ struct Repair<'a> {
 }
 
 impl Repair<'_> {
-    fn level(&mut self, level: &Path) -> Result<()> {
+    /// `opened` says that the level lost an entry of a local administrator at this start, so its
+    /// checks treat it as a level that another account could write (ADR-0048).
+    fn level(&mut self, level: &Path, opened: bool) -> Result<()> {
         let Some(entry) = Entry::open(level)? else {
             return Ok(());
         };
@@ -399,22 +438,21 @@ impl Repair<'_> {
         } else {
             Rights::Change
         };
-        let open = match entry
+        let exposure = entry
             .exposure(rights)
-            .with_context(|| format!("cannot check {}", level.display()))?
-        {
+            .with_context(|| format!("cannot check {}", level.display()))?;
+        if exposure == Exposure::ForeignOwner {
             // The owner can change the access at any time, also of a level below it through a link.
-            Exposure::ForeignOwner => bail!("{}", crate::winsec::foreign_owner_advice(level)),
-            Exposure::ForeignGrant => true,
-            Exposure::Clean => false,
-        };
+            bail!("{}", crate::winsec::foreign_owner_advice(level));
+        }
+        let open = opened || exposure == Exposure::ForeignGrant;
         let changeable =
             open && is_config && entry.exposure(Rights::Change)? == Exposure::ForeignGrant;
         if changeable && self.untrusted == UntrustedIdentity::Keep {
             // A repaired access would hide the grant, so a later install-service would trust
             // whatever that account wrote. Only a new registration replaces the directory.
             self.changeable.push(level.to_path_buf());
-        } else if open {
+        } else if exposure == Exposure::ForeignGrant {
             // The DACL comes before the listing, so a new handle cannot add an entry after the
             // check. A handle opened before keeps its access until it closes (T20 residual).
             entry
@@ -535,6 +573,13 @@ impl Repair<'_> {
         let aside = path.with_file_name(format!("{name}.untrusted-{stamp}"));
         std::fs::rename(path, &aside)
             .with_context(|| format!("cannot move {} to {}", path.display(), aside.display()))?;
+        // The file keeps the access of the level that it came from, so an administrator who checks
+        // it and moves it back gets a file that the agent trusts again (ADR-0048).
+        if let Some(entry) = Entry::open(&aside)? {
+            entry
+                .protect(Tree::Data)
+                .with_context(|| format!("cannot protect {}", aside.display()))?;
+        }
         let action = if kind == Kind::RepositoryRoots {
             Action::MovedRepositoryRoots {
                 from: path.to_path_buf(),
