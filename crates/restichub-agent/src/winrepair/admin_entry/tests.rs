@@ -25,8 +25,10 @@ fn admin_sid() -> String {
     current_user_sid().expect("cannot read the user SID")
 }
 
-fn heal_level(dir: &Path, rights: Rights) -> Option<Removed> {
-    level(dir, rights).expect("cannot remove the access")
+fn heal_level(dir: &Path, rights: Rights) -> Option<Opened> {
+    let found = level(dir, rights).expect("cannot check the access")?;
+    found.remove(dir).expect("cannot remove the access");
+    Some(found)
 }
 
 /// An unprotected child takes a copy of each entry that the parent grants to the children, as
@@ -152,9 +154,8 @@ fn ac_ag_15_a_child_of_a_healed_program_level_loses_the_copy() {
         check_admin_only(&previous).is_err() && check_admin_only(&old).is_err(),
         "the children must carry the copy before the heal"
     );
-    let removed = level(&program, Rights::Change)
-        .expect("cannot remove the access")
-        .expect("the entry of the administrator must go");
+    let removed =
+        heal_level(&program, Rights::Change).expect("the entry of the administrator must go");
     restamp_children(&program, &removed.trustees).expect("cannot remove the copies");
     check_admin_only(&previous).expect("the file must lose the copy");
     check_admin_only(&old).expect("the file in bin must lose the copy");
@@ -182,9 +183,8 @@ fn ac_ag_15_the_repair_reaches_the_children_of_a_healed_level() {
     );
     let mut healed = Vec::new();
     for path in [&logs, &cache] {
-        let removed = level(path, Rights::Change)
-            .expect("cannot remove the access")
-            .expect("the entry of the administrator must go");
+        let removed =
+            heal_level(path, Rights::Change).expect("the entry of the administrator must go");
         assert_eq!(removed.accounts.len(), 1, "{:?}", removed.accounts);
         healed.push(path.clone());
     }
@@ -201,9 +201,7 @@ fn ac_ag_15_a_name_that_the_agent_does_not_know_stops_the_start() {
     let planted = root.join("planted.txt");
     std::fs::write(&planted, b"x").expect("cannot plant the file");
     grant_sid(&root, &admin_sid(), "(OI)(CI)(F)").expect("cannot add the entry");
-    level(&root, Rights::Change)
-        .expect("cannot remove the access")
-        .expect("the entry of the administrator must go");
+    heal_level(&root, Rights::Change).expect("the entry of the administrator must go");
     let error = format!(
         "{:#}",
         repair_actions(&config, &root, std::slice::from_ref(&root))
@@ -219,9 +217,7 @@ fn ac_ag_15_a_lock_in_a_healed_level_goes() {
     let lock = crate::identity::lock_file(&config);
     std::fs::write(&lock, b"x").expect("cannot write the lock");
     grant_sid(&root, &admin_sid(), "(OI)(CI)(F)").expect("cannot add the entry");
-    level(&root, Rights::Change)
-        .expect("cannot remove the access")
-        .expect("the entry of the administrator must go");
+    heal_level(&root, Rights::Change).expect("the entry of the administrator must go");
     repair_actions(&config, &root, std::slice::from_ref(&root)).expect("the repair must pass");
     assert!(
         !lock.exists(),
@@ -241,9 +237,7 @@ fn ac_ag_15_a_folder_of_another_owner_stops_the_start() {
     )
     .expect("cannot change the owner");
     grant_sid(&root, &admin_sid(), "(OI)(CI)(F)").expect("cannot add the entry");
-    level(&root, Rights::Change)
-        .expect("cannot remove the access")
-        .expect("the entry of the administrator must go");
+    heal_level(&root, Rights::Change).expect("the entry of the administrator must go");
     let error = format!(
         "{:#}",
         repair_actions(&config, &root, std::slice::from_ref(&root))
@@ -306,9 +300,7 @@ fn ac_ag_15_a_planted_library_after_the_heal_stops_the_start() {
         .expect("cannot write the agent");
     grant_sid(&root, &admin_sid(), "(OI)(CI)(F)").expect("cannot add the entry");
     assert!(
-        level(&root, Rights::Change)
-            .expect("cannot remove the access")
-            .is_some(),
+        heal_level(&root, Rights::Change).is_some(),
         "the entry of the administrator must go"
     );
     // A library that the account planted while the entry existed loads before `main`.
@@ -320,4 +312,97 @@ fn ac_ag_15_a_planted_library_after_the_heal_stops_the_start() {
     );
     assert!(error.contains("version.dll"), "{error}");
     let _ = std::fs::remove_dir_all(&base);
+}
+
+fn data_level(root: &Path) -> Vec<(PathBuf, Tree, Rights)> {
+    vec![(root.to_path_buf(), Tree::Data, Rights::Change)]
+}
+
+#[test]
+fn ac_ag_15_a_clean_level_loses_the_entry_and_the_start_continues() {
+    let (base, root, config) = tree("heal-clean");
+    grant_sid(&root, &admin_sid(), "(OI)(CI)(F)").expect("cannot add the entry");
+    let program = base.join("Program").join("Agent");
+    let healed_program =
+        heal_levels(&config, &root, &program, data_level(&root)).expect("the heal must pass");
+    assert!(!healed_program, "no level of the program tree changed");
+    check_admin_only(&root).expect("the entry must go");
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[test]
+fn ac_ag_15_a_refused_heal_keeps_the_entry_for_the_next_start() {
+    let (base, root, config) = tree("heal-refused");
+    std::fs::write(root.join("planted.txt"), b"x").expect("cannot plant the file");
+    grant_sid(&root, &admin_sid(), "(OI)(CI)(F)").expect("cannot add the entry");
+    let program = base.join("Program").join("Agent");
+    for start in ["first", "second"] {
+        let error = format!(
+            "{:#}",
+            heal_levels(&config, &root, &program, data_level(&root))
+                .expect_err("a name that the agent does not know must stop each start")
+        );
+        assert!(error.contains("planted.txt"), "{start} start: {error}");
+        assert!(
+            check_admin_only(&root).is_err(),
+            "the {start} start must keep the entry, so the next start refuses again"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[test]
+fn ac_ag_15_a_refused_program_heal_keeps_the_entry_for_the_next_start() {
+    let base = temp("program-refused");
+    std::fs::create_dir_all(&base).expect("cannot create the base");
+    let root = base.join("ResticHub");
+    let program = root.join("Agent");
+    create_protected_tree(&program, &root).expect("cannot create the tree");
+    create_protected_file(&program.join("restichub-agent.exe"), b"x")
+        .expect("cannot write the agent");
+    std::fs::write(program.join("version.dll"), b"x").expect("cannot plant the library");
+    grant_sid(&root, &admin_sid(), "(OI)(CI)(F)").expect("cannot add the entry");
+    let levels = vec![
+        (root.clone(), Tree::Program, Rights::Change),
+        (program.clone(), Tree::Program, Rights::Change),
+    ];
+    let data = base.join("Data");
+    for start in ["first", "second"] {
+        let error = format!(
+            "{:#}",
+            heal_levels(&data.join("Agent"), &data, &program, levels.clone())
+                .expect_err("a planted library must stop each start")
+        );
+        assert!(error.contains("version.dll"), "{start} start: {error}");
+        assert!(
+            check_admin_only(&root).is_err(),
+            "the {start} start must keep the entry, so the next start refuses again"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[test]
+fn ac_ag_15_a_child_with_inherited_entries_only_keeps_system_and_administrators() {
+    let parent = protected("inherited-only");
+    grant_sid(&parent, &admin_sid(), "(OI)(CI)(F)").expect("cannot add the entry");
+    let child = parent.join("restic.exe");
+    std::fs::write(&child, b"x").expect("cannot write the child");
+    let found = level(&parent, Rights::Change)
+        .expect("cannot check the access")
+        .expect("the parent must hold the entry");
+    let entry = Entry::open(&child)
+        .expect("cannot open the child")
+        .expect("the child must exist");
+    assert!(
+        entry
+            .remove_permits(&found.trustees, Removal::InheritedCopies)
+            .expect("cannot remove the copy"),
+        "the child must carry the copy"
+    );
+    drop(entry);
+    check_admin_only(&child).expect("the child must lose the copy");
+    // An empty DACL passes the check above but denies every access.
+    std::fs::read(&child).expect("SYSTEM and Administrators must keep the access of the child");
+    let _ = std::fs::remove_dir_all(&parent);
 }

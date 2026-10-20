@@ -21,7 +21,9 @@ use crate::winsec::{Entry, Exposure, Rights};
 
 mod in_place;
 
-pub(crate) use in_place::check_tree as check_program_tree;
+pub(crate) use in_place::{
+    check_tree as check_program_tree, check_tree_without as check_program_tree_without,
+};
 
 /// The Restart Manager takes a list of files; a tree larger or deeper than this is not a manual
 /// copy of the agent, and the first files name the holder well enough. The depth bound keeps a

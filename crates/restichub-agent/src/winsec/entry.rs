@@ -142,6 +142,34 @@ impl Entry {
         })
     }
 
+    /// The exposure that stays when `removal` takes the allow entries of `trustees`, so a check can
+    /// run before the heal removes them (ADR-0048).
+    pub(crate) fn exposure_without(
+        &self,
+        rights: Rights,
+        trustees: &[Sid],
+        removal: Removal,
+    ) -> Result<Exposure> {
+        self.security(|owner, dacl| {
+            if owner.is_null() || !is_trusted_sid(owner) {
+                return Ok(Exposure::ForeignOwner);
+            }
+            let open = match super::foreign(dacl, rights.mask())? {
+                Foreign::None => false,
+                Foreign::Unknown => true,
+                Foreign::Grants(grants) => grants.iter().any(|grant| {
+                    let removed = removal == Removal::All || grant.inherited;
+                    !(removed && trustees.contains(&grant.sid))
+                }),
+            };
+            Ok(if open {
+                Exposure::ForeignGrant
+            } else {
+                Exposure::Clean
+            })
+        })
+    }
+
     /// The allow entries that give another account one of the rights, with their trustee.
     pub(crate) fn foreign(&self, rights: Rights) -> Result<Foreign> {
         self.security(|_, dacl| super::foreign(dacl, rights.mask()))

@@ -14,7 +14,7 @@ use std::path::Path;
 use anyhow::{Context as _, Result, bail};
 
 use super::super::Action;
-use crate::winsec::{Entry, Exposure, Rights, Tree};
+use crate::winsec::{Entry, Exposure, Removal, Rights, Sid, Tree};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Kind {
@@ -215,6 +215,12 @@ fn keep_package_file(path: &Path, log: &mut dyn FnMut(Action)) -> Result<()> {
 /// Refuses a program tree with a name that the agent does not know, a link or an open access,
 /// before the service starts from it. Each problem is in the one error.
 pub(crate) fn check_tree(program: &Path, root: &Path) -> Result<()> {
+    check_tree_without(program, root, &[])
+}
+
+/// Runs [`check_tree`] as if the heal had removed the entries of `trustees` from the levels and
+/// their copies from the entries, so a refusal keeps them in place (ADR-0048).
+pub(crate) fn check_tree_without(program: &Path, root: &Path, trustees: &[Sid]) -> Result<()> {
     let mut problems = Vec::new();
     let mut levels: Vec<&Path> = program
         .ancestors()
@@ -230,7 +236,7 @@ pub(crate) fn check_tree(program: &Path, root: &Path) -> Result<()> {
             problems.push(format!("{} is not a plain directory", level.display()));
             break;
         }
-        if entry.exposure(Rights::Change)? != Exposure::Clean {
+        if entry.exposure_without(Rights::Change, trustees, Removal::All)? != Exposure::Clean {
             problems.push(format!(
                 "{} grants another account a change",
                 level.display()
@@ -238,7 +244,7 @@ pub(crate) fn check_tree(program: &Path, root: &Path) -> Result<()> {
         }
     }
     if problems.is_empty() {
-        check_entries(program, false, &mut problems)?;
+        check_entries(program, false, trustees, &mut problems)?;
     }
     if problems.is_empty() {
         return Ok(());
@@ -250,7 +256,12 @@ pub(crate) fn check_tree(program: &Path, root: &Path) -> Result<()> {
     )
 }
 
-fn check_entries(dir: &Path, in_bin: bool, problems: &mut Vec<String>) -> Result<()> {
+fn check_entries(
+    dir: &Path,
+    in_bin: bool,
+    trustees: &[Sid],
+    problems: &mut Vec<String>,
+) -> Result<()> {
     for item in std::fs::read_dir(dir).with_context(|| format!("cannot list {}", dir.display()))? {
         let path = item
             .with_context(|| format!("cannot list {}", dir.display()))?
@@ -266,7 +277,9 @@ fn check_entries(dir: &Path, in_bin: bool, problems: &mut Vec<String>) -> Result
             problems.push(format!("{} is a link", path.display()));
             continue;
         }
-        if entry.exposure(Rights::Change)? != Exposure::Clean {
+        if entry.exposure_without(Rights::Change, trustees, Removal::InheritedCopies)?
+            != Exposure::Clean
+        {
             problems.push(format!(
                 "{} grants another account a change",
                 path.display()
@@ -274,7 +287,7 @@ fn check_entries(dir: &Path, in_bin: bool, problems: &mut Vec<String>) -> Result
         }
         if kind == Kind::LegacyBin && entry.is_dir() {
             drop(entry);
-            check_entries(&path, true, problems)?;
+            check_entries(&path, true, trustees, problems)?;
         }
     }
     Ok(())

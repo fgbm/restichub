@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context as _, Result, bail};
 
 use crate::paths::UntrustedIdentity;
-use crate::winsec::{Entry, Exposure, Rights, Tree};
+use crate::winsec::{Entry, Exposure, Removal, Rights, Sid, Tree};
 
 mod admin_entry;
 mod program;
@@ -284,7 +284,22 @@ pub(crate) fn repair_agent_tree(
     untrusted: UntrustedIdentity,
     log: &mut dyn FnMut(Action),
 ) -> Result<Vec<PathBuf>> {
-    run(config, root, untrusted, &[], log)
+    run(config, root, untrusted, &[], &[], log)
+}
+
+/// Runs the checks and the repair of [`repair_after_heal`] while the entries of `trustees` are still
+/// in place, as if the heal had removed them (ADR-0048).
+///
+/// A refusal leaves the entries, so each later start of the service refuses again until an
+/// administrator runs `install-service`.
+pub(crate) fn repair_before_heal(
+    config: &Path,
+    root: &Path,
+    healed: &[PathBuf],
+    trustees: &[Sid],
+    log: &mut dyn FnMut(Action),
+) -> Result<Vec<PathBuf>> {
+    run(config, root, UntrustedIdentity::Keep, healed, trustees, log)
 }
 
 /// Runs the same checks and repairs for the levels whose entry of a local administrator the service
@@ -299,7 +314,7 @@ pub(crate) fn repair_after_heal(
     healed: &[PathBuf],
     log: &mut dyn FnMut(Action),
 ) -> Result<Vec<PathBuf>> {
-    run(config, root, UntrustedIdentity::Keep, healed, log)
+    run(config, root, UntrustedIdentity::Keep, healed, &[], log)
 }
 
 fn run(
@@ -307,6 +322,7 @@ fn run(
     root: &Path,
     untrusted: UntrustedIdentity,
     healed: &[PathBuf],
+    trustees: &[Sid],
     log: &mut dyn FnMut(Action),
 ) -> Result<Vec<PathBuf>> {
     if !config.starts_with(root) {
@@ -320,14 +336,15 @@ fn run(
     let mut repair = Repair {
         config,
         untrusted,
+        healed,
+        trustees,
         log,
         exposure_told: false,
         changeable: Vec::new(),
         doomed: Vec::new(),
     };
     for level in levels {
-        let opened = healed.iter().any(|healed| healed == level);
-        repair.level(level, opened)?;
+        repair.level(level)?;
     }
     for (path, is_dir) in std::mem::take(&mut repair.doomed) {
         if is_dir {
@@ -415,6 +432,11 @@ fn refuse_exposure(entry: &Entry, path: &Path, rights: Rights) -> Result<()> {
 struct Repair<'a> {
     config: &'a Path,
     untrusted: UntrustedIdentity,
+    /// The levels that lose the entry of a local administrator at this start, so their checks treat
+    /// them as levels that another account could write (ADR-0048).
+    healed: &'a [PathBuf],
+    /// The trustees of those entries while the entries are still in place.
+    trustees: &'a [Sid],
     log: &'a mut dyn FnMut(Action),
     exposure_told: bool,
     changeable: Vec<PathBuf>,
@@ -423,9 +445,17 @@ struct Repair<'a> {
 }
 
 impl Repair<'_> {
-    /// `opened` says that the level lost an entry of a local administrator at this start, so its
-    /// checks treat it as a level that another account could write (ADR-0048).
-    fn level(&mut self, level: &Path, opened: bool) -> Result<()> {
+    fn exposure(&self, entry: &Entry, path: &Path, rights: Rights) -> Result<Exposure> {
+        let removal = if self.healed.iter().any(|healed| healed == path) {
+            Removal::All
+        } else {
+            Removal::InheritedCopies
+        };
+        entry.exposure_without(rights, self.trustees, removal)
+    }
+
+    fn level(&mut self, level: &Path) -> Result<()> {
+        let opened = self.healed.iter().any(|healed| healed == level);
         let Some(entry) = Entry::open(level)? else {
             return Ok(());
         };
@@ -438,16 +468,17 @@ impl Repair<'_> {
         } else {
             Rights::Change
         };
-        let exposure = entry
-            .exposure(rights)
+        let exposure = self
+            .exposure(&entry, level, rights)
             .with_context(|| format!("cannot check {}", level.display()))?;
         if exposure == Exposure::ForeignOwner {
             // The owner can change the access at any time, also of a level below it through a link.
             bail!("{}", crate::winsec::foreign_owner_advice(level));
         }
         let open = opened || exposure == Exposure::ForeignGrant;
-        let changeable =
-            open && is_config && entry.exposure(Rights::Change)? == Exposure::ForeignGrant;
+        let changeable = open
+            && is_config
+            && self.exposure(&entry, level, Rights::Change)? == Exposure::ForeignGrant;
         if changeable && self.untrusted == UntrustedIdentity::Keep {
             // A repaired access would hide the grant, so a later install-service would trust
             // whatever that account wrote. Only a new registration replaces the directory.
@@ -540,7 +571,7 @@ impl Repair<'_> {
             };
             if !entry.is_reparse_point()
                 && entry.links() <= 1
-                && entry.exposure(Rights::Change)? == Exposure::Clean
+                && self.exposure(&entry, path, Rights::Change)? == Exposure::Clean
             {
                 return Ok(());
             }
@@ -556,7 +587,7 @@ impl Repair<'_> {
             return Ok(());
         };
         check_entry(&entry, path, kind)?;
-        if entry.exposure(Rights::Change)? != Exposure::ForeignGrant {
+        if self.exposure(&entry, path, Rights::Change)? != Exposure::ForeignGrant {
             return Ok(());
         }
         drop(entry);
@@ -603,14 +634,15 @@ impl Repair<'_> {
         };
         check_entry(&entry, path, kind)?;
         if kind == Kind::Identity
-            && (in_changeable || entry.exposure(Rights::Change)? == Exposure::ForeignGrant)
+            && (in_changeable
+                || self.exposure(&entry, path, Rights::Change)? == Exposure::ForeignGrant)
         {
             let is_dir = entry.is_dir();
             drop(entry);
             self.untrusted_identity(path, is_dir, in_changeable);
             return Ok(());
         }
-        if entry.exposure(kind.rights())? == Exposure::ForeignGrant {
+        if self.exposure(&entry, path, kind.rights())? == Exposure::ForeignGrant {
             entry
                 .protect(Tree::Data)
                 .with_context(|| format!("cannot protect {}", path.display()))?;

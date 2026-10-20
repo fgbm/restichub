@@ -834,10 +834,13 @@ fn remove_permits(handle: HANDLE, trustees: &[Sid], removal: Removal) -> Result<
             }
         }
         // SAFETY: the header gives the length of this entry inside the DACL.
-        kept.push(
+        let mut bytes =
             unsafe { std::slice::from_raw_parts(ace.cast::<u8>(), usize::from(header.AceSize)) }
-                .to_vec(),
-        );
+                .to_vec();
+        // `SetSecurityInfo` drops an inherited entry from a protected DACL, so a child that held
+        // only inherited entries would end with an empty DACL that denies SYSTEM too.
+        bytes[1] &= !(INHERITED_ACE as u8);
+        kept.push(bytes);
     }
     if !removed {
         return Ok(false);
