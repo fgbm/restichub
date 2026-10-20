@@ -15,10 +15,12 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context as _, Result, bail};
 
 use crate::paths::UntrustedIdentity;
-use crate::winsec::{Entry, Exposure, Rights};
+use crate::winsec::{Entry, Exposure, Rights, Tree};
 
+mod admin_entry;
 mod program;
 
+pub(crate) use admin_entry::heal as heal_admin_entries;
 pub(crate) use program::{check_program_tree, rebuild_open_program_tree};
 
 /// The directory that an older build used as the default restore root. The repair never reads
@@ -34,6 +36,10 @@ pub(crate) enum Action {
     RemovedStaged(PathBuf),
     RemovedTrustMode(PathBuf),
     MovedRestoreRoots {
+        from: PathBuf,
+        to: PathBuf,
+    },
+    MovedRepositoryRoots {
         from: PathBuf,
         to: PathBuf,
     },
@@ -87,6 +93,13 @@ impl std::fmt::Display for Action {
             Self::MovedRestoreRoots { from, to } => write!(
                 f,
                 "moved {} to {}: another account could change it, so the extra restore roots are off; an administrator checks the file and moves it back to {} to turn them on again",
+                from.display(),
+                to.display(),
+                from.display()
+            ),
+            Self::MovedRepositoryRoots { from, to } => write!(
+                f,
+                "moved {} to {}: another account could change it, so the local repository roots are off; an administrator checks the file and moves it back to {} to turn them on again",
                 from.display(),
                 to.display(),
                 from.display()
@@ -229,6 +242,8 @@ enum Kind {
     Lock,
     TrustMode,
     RestoreRoots,
+    /// The repository roots file of ADR-0045, which the agent reads on Linux only.
+    RepositoryRoots,
     Identity,
     Agent,
 }
@@ -403,7 +418,7 @@ impl Repair<'_> {
             // The DACL comes before the listing, so a new handle cannot add an entry after the
             // check. A handle opened before keeps its access until it closes (T20 residual).
             entry
-                .protect()
+                .protect(Tree::Data)
                 .with_context(|| format!("cannot protect {}", level.display()))?;
             (self.log)(Action::Protected(level.to_path_buf()));
             if is_config && !changeable {
@@ -450,7 +465,7 @@ impl Repair<'_> {
                             )
                         })?;
                 }
-                Some(setting @ (Kind::TrustMode | Kind::RestoreRoots)) => {
+                Some(setting @ (Kind::TrustMode | Kind::RestoreRoots | Kind::RepositoryRoots)) => {
                     self.distrust_setting(path, *setting)?;
                 }
                 _ => {}
@@ -510,21 +525,28 @@ impl Repair<'_> {
         if kind == Kind::TrustMode {
             remove_file(path)?;
             (self.log)(Action::RemovedTrustMode(path.to_path_buf()));
-        } else {
-            let name = path
-                .file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            let stamp = time::OffsetDateTime::now_utc().unix_timestamp();
-            let aside = path.with_file_name(format!("{name}.untrusted-{stamp}"));
-            std::fs::rename(path, &aside).with_context(|| {
-                format!("cannot move {} to {}", path.display(), aside.display())
-            })?;
-            (self.log)(Action::MovedRestoreRoots {
+            return Ok(());
+        }
+        let name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let stamp = time::OffsetDateTime::now_utc().unix_timestamp();
+        let aside = path.with_file_name(format!("{name}.untrusted-{stamp}"));
+        std::fs::rename(path, &aside)
+            .with_context(|| format!("cannot move {} to {}", path.display(), aside.display()))?;
+        let action = if kind == Kind::RepositoryRoots {
+            Action::MovedRepositoryRoots {
                 from: path.to_path_buf(),
                 to: aside,
-            });
-        }
+            }
+        } else {
+            Action::MovedRestoreRoots {
+                from: path.to_path_buf(),
+                to: aside,
+            }
+        };
+        (self.log)(action);
         Ok(())
     }
 
@@ -545,7 +567,7 @@ impl Repair<'_> {
         }
         if entry.exposure(kind.rights())? == Exposure::ForeignGrant {
             entry
-                .protect()
+                .protect(Tree::Data)
                 .with_context(|| format!("cannot protect {}", path.display()))?;
             (self.log)(Action::Protected(path.to_path_buf()));
             if kind == Kind::Identity {
@@ -654,6 +676,11 @@ fn root_entries(config: &Path, root: &Path) -> Vec<(String, Kind)> {
     add(
         &crate::restore_roots::roots_file_for(config),
         Kind::RestoreRoots,
+        true,
+    );
+    add(
+        &crate::repository_roots::roots_file_for(config),
+        Kind::RepositoryRoots,
         true,
     );
     add(

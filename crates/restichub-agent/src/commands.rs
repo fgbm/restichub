@@ -743,6 +743,21 @@ pub fn status(dir: &Path) -> Result<()> {
 /// Returns an error when the identity is absent, restic is not the recorded binary, or the runtime
 /// cannot start.
 pub fn run(dir: &Path, shutdown: Option<Receiver<()>>) -> Result<()> {
+    // A non-elevated token of an administrator holds Administrators as deny-only, so File Explorer
+    // asks before it opens an agent folder and then adds an entry for that account. The service
+    // removes that entry and checks the objects again below (ADR-0048, T20).
+    #[cfg(windows)]
+    let healed_program = crate::winrepair::heal_admin_entries(dir);
+    #[cfg(not(windows))]
+    let healed_program = false;
+    if healed_program && let Err(refused) = crate::paths::check_program_files() {
+        // A library that the account planted while the entry existed loads before `main`.
+        let refused = UnsafeProgram {
+            cause: format!("{refused:#}"),
+        };
+        tracing::error!("{refused}");
+        return Err(anyhow::Error::new(refused));
+    }
     // The service never repairs: a connection with an identity that another account could have
     // replaced would trust that account's control plane (T20).
     if let Err(refused) = check_identity(dir) {
@@ -770,7 +785,13 @@ pub fn run(dir: &Path, shutdown: Option<Receiver<()>>) -> Result<()> {
     // Rebuild the key ring, so a job that the current key signed verifies (ADR-0026, ADR-0030).
     let mut keys = crate::keys::KeyState::load(&identity, dir)?;
     let cache = crate::paths::cache_dir();
-    crate::preflight::prepare_cache(&cache)?;
+    // A cache that another account could change would restart the service forever with the exit
+    // code of an ordinary error, so it stops like an identity that another account could change.
+    if let Err(error) = crate::preflight::prepare_cache(&cache) {
+        let refused = unsafe_identity(&cache, &error);
+        tracing::error!("{refused}");
+        return Err(anyhow::Error::new(refused));
+    }
     // An update can replace the agent without a new `register`, so a restic in the Windows
     // location of an earlier version moves first (ADR-0038).
     #[cfg(windows)]

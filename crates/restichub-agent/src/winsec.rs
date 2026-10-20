@@ -25,16 +25,17 @@ use windows_sys::Win32::Foundation::{
     LocalFree,
 };
 use windows_sys::Win32::Security::Authorization::{
-    ConvertStringSecurityDescriptorToSecurityDescriptorW, ConvertStringSidToSidW,
-    GetNamedSecurityInfoW, SDDL_REVISION_1, SE_FILE_OBJECT, SetNamedSecurityInfoW,
+    ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
+    ConvertStringSidToSidW, GetNamedSecurityInfoW, SDDL_REVISION_1, SE_FILE_OBJECT,
+    SetNamedSecurityInfoW,
 };
 use windows_sys::Win32::Security::{
     ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, ACL_SIZE_INFORMATION, AclSizeInformation,
     CheckTokenMembership, DACL_SECURITY_INFORMATION, EqualSid, GENERIC_MAPPING, GetAce,
-    GetAclInformation, GetSecurityDescriptorDacl, GetSecurityDescriptorOwner, GetTokenInformation,
-    INHERIT_ONLY_ACE, MapGenericMask, OWNER_SECURITY_INFORMATION,
-    PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES,
-    TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation,
+    GetAclInformation, GetLengthSid, GetSecurityDescriptorDacl, GetSecurityDescriptorOwner,
+    GetTokenInformation, INHERIT_ONLY_ACE, INHERITED_ACE, MapGenericMask,
+    OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
+    SECURITY_ATTRIBUTES, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation,
 };
 use windows_sys::Win32::Storage::FileSystem::{
     CREATE_NEW, CreateDirectoryW, CreateFileW, DELETE, FILE_ADD_FILE, FILE_ADD_SUBDIRECTORY,
@@ -57,10 +58,12 @@ use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken}
 mod entry;
 mod holders;
 mod image;
+mod membership;
 
 pub(crate) use entry::{Entry, Exposure, Rights};
 pub(crate) use holders::holders;
 pub(crate) use image::open_running_image;
+pub(crate) use membership::{Account, local_administrator};
 
 /// A protected DACL: full control for SYSTEM and Administrators only, inherited by the children,
 /// with Administrators as the owner.
@@ -68,6 +71,42 @@ const DIR_SDDL: &str = "O:BAG:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)";
 
 /// A protected DACL for one file: full control for SYSTEM and Administrators only.
 const FILE_SDDL: &str = "O:BAG:SYD:P(A;;FA;;;SY)(A;;FA;;;BA)";
+
+/// The DACL of a program directory: Users read and run the files, and only SYSTEM and
+/// Administrators change them (ADR-0048).
+const PROGRAM_DIR_SDDL: &str = "O:BAG:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)";
+
+/// The DACL of one program file, with the same read and execute access for Users (ADR-0048).
+const PROGRAM_FILE_SDDL: &str = "O:BAG:SYD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;BU)";
+
+/// The read and execute access that the program tree grants to Users.
+const USER_READ: u32 = FILE_GENERIC_READ | FILE_GENERIC_EXECUTE;
+
+/// The two trees of the agent. The program files are readable by Users, the data never is
+/// (FR-AG-04, ADR-0048).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Tree {
+    /// `%ProgramFiles%\ResticHub`.
+    Program,
+    /// `%ProgramData%\ResticHub`.
+    Data,
+}
+
+impl Tree {
+    fn dir_sddl(self) -> &'static str {
+        match self {
+            Self::Program => PROGRAM_DIR_SDDL,
+            Self::Data => DIR_SDDL,
+        }
+    }
+
+    fn file_sddl(self) -> &'static str {
+        match self {
+            Self::Program => PROGRAM_FILE_SDDL,
+            Self::Data => FILE_SDDL,
+        }
+    }
+}
 
 /// The security identifiers that may own or change the agent: SYSTEM, BUILTIN\Administrators and
 /// the TrustedInstaller service account that the Windows installer uses.
@@ -133,9 +172,22 @@ impl Drop for OwnedSid {
 /// Returns an error when a level cannot be created, when an existing level is a reparse point, has
 /// another owner or a write access for another account, or when the access control cannot be set.
 pub fn create_protected_tree(dir: &Path, root: &Path) -> Result<()> {
+    create_tree(dir, root, Tree::Data)
+}
+
+/// Makes `dir` and every missing ancestor with the DACL of the program tree: Users read and run the
+/// files, and only SYSTEM and Administrators change them (ADR-0048).
+///
+/// The checks are the checks of [`create_protected_tree`], because the read access of Users is no
+/// right to change.
+pub fn create_program_tree(dir: &Path, root: &Path) -> Result<()> {
+    create_tree(dir, root, Tree::Program)
+}
+
+fn create_tree(dir: &Path, root: &Path, tree: Tree) -> Result<()> {
     protect_tree(dir, root, &crate::paths::agent_root(), &mut |level| {
-        create_dir(level)?;
-        apply_descriptor(level, DIR_SDDL)
+        create_dir(level, tree)?;
+        apply_descriptor(level, tree.dir_sddl())
     })
 }
 
@@ -276,9 +328,9 @@ pub fn create_protected_dir(dir: &Path) -> Result<()> {
     if dir.exists() {
         check_admin_only(dir)?;
     } else {
-        create_dir(dir)?;
+        create_dir(dir, Tree::Data)?;
     }
-    apply_descriptor(dir, DIR_SDDL)
+    apply_descriptor(dir, Tree::Data.dir_sddl())
 }
 
 /// Writes a file that only SYSTEM and Administrators can read (FR-AG-04).
@@ -289,8 +341,18 @@ pub fn create_protected_dir(dir: &Path) -> Result<()> {
 ///
 /// Returns an error when the file cannot be created or its access control cannot be set.
 pub fn create_protected_file(path: &Path, contents: &[u8]) -> Result<()> {
+    write_new_file(path, contents, Tree::Data)
+}
+
+/// Writes a program file that Users read and run and that only SYSTEM and Administrators change
+/// (ADR-0048).
+pub fn create_program_file(path: &Path, contents: &[u8]) -> Result<()> {
+    write_new_file(path, contents, Tree::Program)
+}
+
+fn write_new_file(path: &Path, contents: &[u8], tree: Tree) -> Result<()> {
     let _ = std::fs::remove_file(path);
-    let mut file = create_new_protected(path, GENERIC_WRITE, 0)
+    let mut file = create_new_protected(path, GENERIC_WRITE, 0, tree.file_sddl())
         .with_context(|| format!("cannot create {}", path.display()))?;
     file.write_all(contents)
         .with_context(|| format!("cannot write {}", path.display()))?;
@@ -311,6 +373,7 @@ pub(crate) fn open_or_create_protected(path: &Path) -> Result<std::fs::File> {
         path,
         GENERIC_READ | GENERIC_WRITE,
         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        Tree::Data.file_sddl(),
     ) {
         Ok(file) => Ok(file),
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
@@ -324,10 +387,15 @@ pub(crate) fn open_or_create_protected(path: &Path) -> Result<std::fs::File> {
     }
 }
 
-/// Creates a new file with the protected descriptor of a file. The descriptor applies at the
-/// creation, so no handle ever opens the file with the access of the parent.
-fn create_new_protected(path: &Path, access: u32, share: u32) -> std::io::Result<std::fs::File> {
-    let descriptor = descriptor(FILE_SDDL).map_err(std::io::Error::other)?;
+/// Creates a new file with the given descriptor. The descriptor applies at the creation, so no
+/// handle ever opens the file with the access of the parent.
+fn create_new_protected(
+    path: &Path,
+    access: u32,
+    share: u32,
+    sddl: &str,
+) -> std::io::Result<std::fs::File> {
+    let descriptor = descriptor(sddl).map_err(std::io::Error::other)?;
     let attributes = SECURITY_ATTRIBUTES {
         nLength: u32::try_from(std::mem::size_of::<SECURITY_ATTRIBUTES>()).unwrap_or(u32::MAX),
         lpSecurityDescriptor: descriptor.0,
@@ -469,6 +537,25 @@ pub(crate) fn foreign_owner_advice(path: &Path) -> String {
     }
 }
 
+/// The allow entries of one DACL that give another account one of the rights.
+pub(crate) enum Foreign {
+    /// No entry gives another account a right.
+    None,
+    /// Every such entry is an allow entry that this module parses.
+    Grants(Vec<Grant>),
+    /// A missing DACL or an allow entry of another type: another account may hold any right.
+    Unknown,
+}
+
+/// One allow entry that gives another account a right.
+pub(crate) struct Grant {
+    pub(crate) sid: Sid,
+    /// The granted part of the rights that the check asks about.
+    pub(crate) mask: u32,
+    /// Comes from a parent directory: Explorer did not add it here.
+    pub(crate) inherited: bool,
+}
+
 /// Returns the mask that a non-admin holds, or `None` when no entry grants it.
 ///
 /// The mask is the granted part of `rights`, so a full control shows as `0x000d0156` against the
@@ -477,8 +564,109 @@ pub(crate) fn foreign_owner_advice(path: &Path) -> String {
 /// A missing DACL grants everyone full access, so it gives [`u32::MAX`]. An allow entry of a type
 /// this module does not parse also gives [`u32::MAX`], because it may hold any right.
 fn first_foreign_grant(dacl: *mut ACL, rights: u32) -> Result<Option<u32>> {
+    Ok(match foreign(dacl, rights)? {
+        Foreign::Unknown => Some(u32::MAX),
+        Foreign::None => None,
+        Foreign::Grants(grants) => grants.first().map(|grant| grant.mask),
+    })
+}
+
+/// Walks the DACL for the allow entries of another account, with their trustee and origin.
+fn foreign(dacl: *mut ACL, rights: u32) -> Result<Foreign> {
     if dacl.is_null() {
-        return Ok(Some(u32::MAX));
+        return Ok(Foreign::Unknown);
+    }
+    let mut size = ACL_SIZE_INFORMATION::default();
+    // SAFETY: the DACL is a valid ACL and the out parameter is a local.
+    let ok = unsafe {
+        GetAclInformation(
+            dacl,
+            std::ptr::addr_of_mut!(size).cast(),
+            u32::try_from(std::mem::size_of::<ACL_SIZE_INFORMATION>())
+                .context("the ACL size information is too large")?,
+            AclSizeInformation,
+        )
+    };
+    if ok == 0 {
+        bail!(
+            "cannot read an access control list: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+    let mapping = file_generic_mapping();
+    let mut grants = Vec::new();
+    for index in 0..size.AceCount {
+        let mut ace: *mut core::ffi::c_void = std::ptr::null_mut();
+        // SAFETY: the DACL is valid and the index is inside the list.
+        let ok = unsafe { GetAce(dacl, index, &mut ace) };
+        if ok == 0 || ace.is_null() {
+            bail!(
+                "cannot read an access control entry: {}",
+                std::io::Error::last_os_error()
+            );
+        }
+        // SAFETY: every entry starts with an ACE_HEADER.
+        let header = unsafe { *(ace as *const ACE_HEADER) };
+        // An inherit-only entry does not apply to the object itself.
+        if u32::from(header.AceFlags) & INHERIT_ONLY_ACE != 0 {
+            continue;
+        }
+        match u32::from(header.AceType) {
+            ACCESS_ALLOWED_ACE_TYPE => {
+                // SAFETY: the type byte says that the entry is an ACCESS_ALLOWED_ACE.
+                let allowed = unsafe { &*(ace as *const ACCESS_ALLOWED_ACE) };
+                let mut mask = allowed.Mask;
+                // SAFETY: the mapping is a valid file generic mapping.
+                unsafe { MapGenericMask(&mut mask, &mapping) };
+                let granted = mask & rights;
+                // SAFETY: SidStart is the first byte of the security identifier of the entry.
+                let sid = std::ptr::addr_of!(allowed.SidStart).cast::<core::ffi::c_void>() as PSID;
+                if granted != 0 && !is_trusted_sid(sid) {
+                    grants.push(Grant {
+                        sid: Sid::copy(sid).context("cannot copy a security identifier")?,
+                        mask: granted,
+                        inherited: u32::from(header.AceFlags) & INHERITED_ACE != 0,
+                    });
+                }
+            }
+            // An allow entry of a type this module does not parse may hold any right.
+            ACCESS_ALLOWED_OBJECT_ACE_TYPE
+            | ACCESS_ALLOWED_CALLBACK_ACE_TYPE
+            | ACCESS_ALLOWED_CALLBACK_OBJECT_ACE_TYPE => {
+                return Ok(Foreign::Unknown);
+            }
+            ACCESS_DENIED_ACE_TYPE
+            | ACCESS_DENIED_OBJECT_ACE_TYPE
+            | ACCESS_DENIED_CALLBACK_ACE_TYPE
+            | ACCESS_DENIED_CALLBACK_OBJECT_ACE_TYPE
+            | SYSTEM_AUDIT_ACE_TYPE
+            | SYSTEM_AUDIT_OBJECT_ACE_TYPE
+            | SYSTEM_ALARM_ACE_TYPE
+            | SYSTEM_ALARM_OBJECT_ACE_TYPE
+            | SYSTEM_MANDATORY_LABEL_ACE_TYPE
+            | SYSTEM_RESOURCE_ATTRIBUTE_ACE_TYPE
+            | SYSTEM_SCOPED_POLICY_ID_ACE_TYPE => {}
+            // Unknown types fail closed.
+            _ => {
+                return Ok(Foreign::Unknown);
+            }
+        }
+    }
+    Ok(if grants.is_empty() {
+        Foreign::None
+    } else {
+        Foreign::Grants(grants)
+    })
+}
+
+/// Tells whether the DACL grants BUILTIN\Users the read and execute access that the program tree
+/// carries (ADR-0048).
+fn grants_user_read(dacl: *mut ACL) -> Result<bool> {
+    let Some(users) = sid_from_string("S-1-5-32-545") else {
+        bail!("cannot build the Users identifier");
+    };
+    if dacl.is_null() {
+        return Ok(false);
     }
     let mut size = ACL_SIZE_INFORMATION::default();
     // SAFETY: the DACL is a valid ACL and the out parameter is a local.
@@ -510,48 +698,93 @@ fn first_foreign_grant(dacl: *mut ACL, rights: u32) -> Result<Option<u32>> {
         }
         // SAFETY: every entry starts with an ACE_HEADER.
         let header = unsafe { *(ace as *const ACE_HEADER) };
-        // An inherit-only entry does not apply to the object itself.
-        if u32::from(header.AceFlags) & INHERIT_ONLY_ACE != 0 {
+        if u32::from(header.AceFlags) & INHERIT_ONLY_ACE != 0
+            || u32::from(header.AceType) != ACCESS_ALLOWED_ACE_TYPE
+        {
             continue;
         }
-        match u32::from(header.AceType) {
-            ACCESS_ALLOWED_ACE_TYPE => {
-                // SAFETY: the type byte says that the entry is an ACCESS_ALLOWED_ACE.
-                let allowed = unsafe { &*(ace as *const ACCESS_ALLOWED_ACE) };
-                let mut mask = allowed.Mask;
-                // SAFETY: the mapping is a valid file generic mapping.
-                unsafe { MapGenericMask(&mut mask, &mapping) };
-                let granted = mask & rights;
-                // SAFETY: SidStart is the first byte of the security identifier of the entry.
-                let sid = std::ptr::addr_of!(allowed.SidStart).cast::<core::ffi::c_void>() as PSID;
-                if granted != 0 && !is_trusted_sid(sid) {
-                    return Ok(Some(granted));
-                }
-            }
-            // An allow entry of a type this module does not parse may hold any right.
-            ACCESS_ALLOWED_OBJECT_ACE_TYPE
-            | ACCESS_ALLOWED_CALLBACK_ACE_TYPE
-            | ACCESS_ALLOWED_CALLBACK_OBJECT_ACE_TYPE => {
-                return Ok(Some(u32::MAX));
-            }
-            ACCESS_DENIED_ACE_TYPE
-            | ACCESS_DENIED_OBJECT_ACE_TYPE
-            | ACCESS_DENIED_CALLBACK_ACE_TYPE
-            | ACCESS_DENIED_CALLBACK_OBJECT_ACE_TYPE
-            | SYSTEM_AUDIT_ACE_TYPE
-            | SYSTEM_AUDIT_OBJECT_ACE_TYPE
-            | SYSTEM_ALARM_ACE_TYPE
-            | SYSTEM_ALARM_OBJECT_ACE_TYPE
-            | SYSTEM_MANDATORY_LABEL_ACE_TYPE
-            | SYSTEM_RESOURCE_ATTRIBUTE_ACE_TYPE
-            | SYSTEM_SCOPED_POLICY_ID_ACE_TYPE => {}
-            // Unknown types fail closed.
-            _ => {
-                return Ok(Some(u32::MAX));
-            }
+        // SAFETY: the type byte says that the entry is an ACCESS_ALLOWED_ACE.
+        let allowed = unsafe { &*(ace as *const ACCESS_ALLOWED_ACE) };
+        let mut mask = allowed.Mask;
+        // SAFETY: the mapping is a valid file generic mapping.
+        unsafe { MapGenericMask(&mut mask, &mapping) };
+        // SAFETY: SidStart is the first byte of the security identifier of the entry.
+        let sid = std::ptr::addr_of!(allowed.SidStart).cast::<core::ffi::c_void>() as PSID;
+        // SAFETY: both pointers are valid security identifiers.
+        if unsafe { EqualSid(sid, users.0) } != 0 && mask & USER_READ == USER_READ {
+            return Ok(true);
         }
     }
-    Ok(None)
+    Ok(false)
+}
+
+/// Gives Users the read and execute access on an entry of the program tree that another account
+/// cannot change, and returns `true` when it changed the entry (ADR-0048).
+///
+/// A missing entry and an entry that another account can change are left as found, so the caller
+/// keeps its refusal.
+///
+/// # Errors
+///
+/// Returns an error when the entry cannot be read or its access control cannot be set.
+pub(crate) fn add_user_read(path: &Path) -> Result<bool> {
+    let Some(entry) = Entry::open(path)? else {
+        return Ok(false);
+    };
+    if entry.is_reparse_point() || entry.exposure(Rights::Change)? != Exposure::Clean {
+        return Ok(false);
+    }
+    if entry.grants_users_read()? {
+        return Ok(false);
+    }
+    entry
+        .protect(Tree::Program)
+        .with_context(|| format!("cannot add the read access of Users to {}", path.display()))?;
+    Ok(true)
+}
+
+/// A security identifier that the module owns, copied out of a DACL.
+pub(crate) struct Sid(Vec<u8>);
+
+impl Sid {
+    fn copy(sid: PSID) -> Result<Self> {
+        if sid.is_null() {
+            bail!("an access control entry holds no security identifier");
+        }
+        // SAFETY: the caller passes a security identifier of a valid DACL.
+        let length = unsafe { GetLengthSid(sid) };
+        if length == 0 {
+            bail!("an access control entry holds no security identifier");
+        }
+        // SAFETY: the length belongs to this identifier and the pointer is valid for it.
+        let bytes = unsafe { std::slice::from_raw_parts(sid.cast::<u8>(), length as usize) };
+        Ok(Self(bytes.to_vec()))
+    }
+
+    pub(crate) fn as_ptr(&self) -> PSID {
+        self.0.as_ptr().cast_mut().cast()
+    }
+
+    /// Gives the form `S-1-5-21-…`.
+    pub(crate) fn text(&self) -> Option<String> {
+        let mut raw: *mut u16 = std::ptr::null_mut();
+        // SAFETY: the identifier is valid and the out parameter is a local.
+        let ok = unsafe { ConvertSidToStringSidW(self.as_ptr(), &mut raw) };
+        if ok == 0 || raw.is_null() {
+            return None;
+        }
+        let mut length = 0usize;
+        // SAFETY: the string ends with a NUL.
+        while unsafe { *raw.add(length) } != 0 {
+            length += 1;
+        }
+        // SAFETY: the range is inside the string that the call allocated.
+        let text = unsafe { std::slice::from_raw_parts(raw, length) };
+        let text = String::from_utf16(text).ok();
+        // SAFETY: the string comes from the call above and is freed once.
+        unsafe { LocalFree(raw as HLOCAL) };
+        text
+    }
 }
 
 fn is_trusted_sid(sid: PSID) -> bool {
@@ -589,8 +822,8 @@ fn file_generic_mapping() -> GENERIC_MAPPING {
     }
 }
 
-fn create_dir(dir: &Path) -> Result<()> {
-    let descriptor = descriptor(DIR_SDDL)?;
+fn create_dir(dir: &Path, tree: Tree) -> Result<()> {
+    let descriptor = descriptor(tree.dir_sddl())?;
     let attributes = SECURITY_ATTRIBUTES {
         nLength: u32::try_from(std::mem::size_of::<SECURITY_ATTRIBUTES>())
             .context("the security attributes are too large")?,

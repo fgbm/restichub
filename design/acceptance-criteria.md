@@ -63,6 +63,7 @@ Each automated test refers to its criterion ID in its name or in a comment.
 | AC-AG-12 | FR-AG-05 | A backup step reports progress for longer than the stall timeout and for longer than 12 hours. **Expected:** the agent does not stop the step. A step whose status does not change for the stall timeout is stopped in two stages, and the job result has the code `stalled`. | A |
 | AC-AG-13 | FR-AG-05 | A profile sets a maximum duration and the backup is still in progress after that time. **Expected:** the agent stops the step, and the job result has the code `max_duration_exceeded`. A profile without a maximum duration has no wall-clock limit. | A |
 | AC-AG-14 | FR-AG-15 | A step asks for the low priority. **Expected:** on Linux restic starts with a nice value 10 above the agent (19 at most) and the lowest best-effort I/O class. On Windows restic starts in the below-normal priority class. A step without the low priority changes nothing. | A (Linux), M (Windows) |
+| AC-AG-15 | FR-AG-04 | On Windows, a non-elevated administrator opens `C:\Program Files\ResticHub` and `C:\ProgramData\ResticHub` in File Explorer and clicks "Continue". Restart the service. **Expected:** the service runs and connects. Each directory holds no entry of that account, and the `ResticHub` log holds a warning that names the path and the account. The same entry for an account that is not an administrator stops the service with the exit code 78, and `install-service` repairs the tree (ADR-0048). | S |
 
 ## 3. Enrollment, identity, connection
 

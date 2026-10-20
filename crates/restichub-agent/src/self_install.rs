@@ -331,7 +331,7 @@ fn write_file(bytes: &[u8], target: &Path) -> Result<()> {
     let staging = staging_path(target);
     // A killed earlier run with the same process id leaves its staging file, and `create_new` refuses it.
     let _ = std::fs::remove_file(&staging);
-    crate::paths::create_protected_file(&staging, bytes)?;
+    crate::paths::create_program_file(&staging, bytes)?;
     make_executable(&staging)
         .and_then(|()| rename_with_retry(&staging, target))
         .inspect_err(|_| {

@@ -249,6 +249,71 @@ fn the_program_files_parent_chain_passes() {
     }
 }
 
+#[test]
+fn adr_0048_the_program_tree_grants_users_read_and_execute() {
+    let base = temp("program-tree");
+    std::fs::create_dir_all(&base).expect("cannot create the base");
+    let root = base.join("ResticHub");
+    let program = root.join("Agent");
+    create_program_tree(&program, &root).expect("cannot create the program tree");
+    let file = program.join("restichub-agent.exe");
+    create_program_file(&file, b"x").expect("cannot write the program file");
+    for path in [&root, &program, &file] {
+        check_admin_only(path).expect("a read for Users is no right to change");
+        assert!(
+            grants_users_read(path),
+            "{} must grant Users the read and execute access",
+            path.display()
+        );
+    }
+    check_program_directory(&root).expect("the program tree must pass the program check");
+    check_program_directory(&program).expect("the program directory must pass the program check");
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[test]
+fn adr_0048_an_install_adds_the_read_entry_to_an_existing_tree() {
+    // An older build made the program tree for SYSTEM and Administrators only.
+    let base = temp("program-old");
+    std::fs::create_dir_all(&base).expect("cannot create the base");
+    let root = base.join("ResticHub");
+    let program = root.join("Agent");
+    create_protected_tree(&program, &root).expect("cannot create the tree");
+    let file = program.join("restic.exe");
+    create_protected_file(&file, b"x").expect("cannot write the file");
+    for path in [&root, &program, &file] {
+        assert!(
+            !grants_users_read(path),
+            "{} must hold no read",
+            path.display()
+        );
+        assert!(
+            add_user_read(path).expect("cannot add the read access"),
+            "{} must take the read access",
+            path.display()
+        );
+        assert!(
+            !add_user_read(path).expect("cannot check the read access"),
+            "a second call must change nothing"
+        );
+        check_admin_only(path).expect("the entry must stay protected");
+        assert!(
+            grants_users_read(path),
+            "{} must grant a read",
+            path.display()
+        );
+    }
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+fn grants_users_read(path: &Path) -> bool {
+    Entry::open(path)
+        .expect("cannot open")
+        .expect("the entry must exist")
+        .grants_users_read()
+        .expect("cannot read the access control")
+}
+
 /// Reads the security identifier of the account that runs the process.
 pub(crate) fn current_user_sid() -> Result<String> {
     let system_root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_owned());

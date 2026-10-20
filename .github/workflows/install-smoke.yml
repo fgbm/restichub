@@ -382,6 +382,105 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "install-service exit code $LASTEXITCODE" }
           if ((Get-Service restichub-agent).Status -ne 'Running') { throw 'not running' }
           bash scripts/install-smoke.sh connected $since 60
+      # File Explorer adds an entry for a non-elevated administrator who opens an agent folder.
+      # The service removes it at its start and continues (ADR-0048, AC-AG-15).
+      - name: The Explorer access of an administrator does not stop the service (ADR-0048)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $tree = Join-Path $env:ProgramFiles 'ResticHub'
+          $data = Join-Path $env:ProgramData 'ResticHub'
+          $user = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          $userAce = { param($path) (Get-Acl $path).GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) | Where-Object { $_.IdentityReference.Value -eq $user } }
+          $restic = Join-Path $tree 'Agent\restic.exe'
+          $hash = (Get-FileHash $restic).Hash
+          $start = [DateTime]::Now
+          icacls $tree /grant "*${user}:(OI)(CI)(F)" | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "icacls $tree exit code $LASTEXITCODE" }
+          icacls $data /grant "*${user}:(OI)(CI)(F)" | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "icacls $data exit code $LASTEXITCODE" }
+          if (-not (& $userAce $tree) -or -not (& $userAce $data)) { throw 'the test did not open the access' }
+          $since = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+          Restart-Service restichub-agent
+          bash scripts/install-smoke.sh connected $since 60
+          if ($LASTEXITCODE -ne 0) { throw 'not connected' }
+          if ((Get-Service restichub-agent).Status -ne 'Running') { throw 'not running' }
+          foreach ($path in $tree, $data) {
+            if (& $userAce $path) { throw "the entry of the administrator stays on $path" }
+            if (-not (Get-Acl $path).AreAccessRulesProtected) { throw "$path is not protected" }
+            $refusal = Get-WinEvent -FilterHashtable @{LogName='ResticHub'; ProviderName='ResticHub Agent'; StartTime=$start} -ErrorAction SilentlyContinue |
+              Where-Object { $_.Message -match 'removed the access of' -and $_.Message -match [regex]::Escape($path) } | Select-Object -First 1
+            if (-not $refusal) { throw "the ResticHub log holds no warning for $path" }
+            Write-Host "event: $($refusal.Message)"
+          }
+          # Users read and run the program files; the data stays closed to them.
+          $users = (Get-Acl $tree).GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) |
+            Where-Object { $_.IdentityReference.Value -eq 'S-1-5-32-545' -and $_.FileSystemRights -match 'ReadAndExecute' }
+          if (-not $users) { throw 'the program tree grants Users no read and execute access' }
+          $foreign = (Get-Acl $data).GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) |
+            Where-Object { $_.IdentityReference.Value -notin 'S-1-5-18', 'S-1-5-32-544' }
+          if ($foreign) { throw "the data tree grants another account an access: $($foreign.IdentityReference -join ', ')" }
+          # The service verifies restic and the identity again before it continues.
+          if ((Get-FileHash $restic).Hash -ne $hash) { throw 'restic changed' }
+          $record = Get-Content (Join-Path $data 'Agent\restic.json') | ConvertFrom-Json
+          if ($record.sha256 -ne $hash.ToLower()) { throw 'restic does not match its record' }
+      # An entry of an account that is not an administrator stays a refusal: install-service repairs it.
+      - name: The Explorer access of another account stops the service until install-service (ADR-0048)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $tree = Join-Path $env:ProgramFiles 'ResticHub'
+          $installed = Join-Path $tree 'Agent\restichub-agent.exe'
+          # The command cannot replace the directory that holds its own running image.
+          $package = Join-Path $env:RUNNER_TEMP 'acl-selfheal-package'
+          New-Item -ItemType Directory -Force $package | Out-Null
+          Copy-Item $installed $package
+          $agent = Join-Path $package 'restichub-agent.exe'
+          $name = 'rh-smoke-user'
+          $password = ConvertTo-SecureString ('Rh-' + [guid]::NewGuid().ToString() + 'aA1!') -AsPlainText -Force
+          $account = "${env:COMPUTERNAME}\$name"
+          New-LocalUser $name -Password $password | Out-Null
+          try {
+            $sid = (Get-LocalUser $name).SID.Value
+            icacls $tree /grant "${account}:(OI)(CI)(F)" | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "icacls $tree exit code $LASTEXITCODE" }
+            $start = [DateTime]::Now
+            Restart-Service restichub-agent -ErrorAction SilentlyContinue
+            $service = $null
+            for ($i = 0; $i -lt 60; $i++) {
+              $service = Get-CimInstance Win32_Service -Filter "Name='restichub-agent'"
+              if ($service.State -eq 'Stopped' -and $service.ServiceSpecificExitCode -eq 78) { break }
+              Start-Sleep -Seconds 1
+            }
+            $service | Format-List State, ExitCode, ServiceSpecificExitCode
+            if ($service.ServiceSpecificExitCode -ne 78) { throw "the service exit code is $($service.ServiceSpecificExitCode), not 78" }
+            $refused = Get-WinEvent -FilterHashtable @{LogName='ResticHub'; ProviderName='ResticHub Agent'; StartTime=$start} -ErrorAction SilentlyContinue |
+              Where-Object { $_.Message -match 'another account could change the agent program' } | Select-Object -First 1
+            if (-not $refused) { throw 'the service wrote no refusal to the ResticHub log' }
+            Write-Host "event: $($refused.Message)"
+            $entry = (Get-Acl $tree).GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) |
+              Where-Object { $_.IdentityReference.Value -eq $sid }
+            if (-not $entry) { throw 'the heal removed the entry of an account that is not an administrator' }
+            $since = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+            $output = & $agent install-service 2>&1 | Out-String
+            $code = $LASTEXITCODE
+            Write-Host $output
+            if ($code -ne 0) { throw "install-service exit code $code" }
+            if ((Get-Service restichub-agent).Status -ne 'Running') { throw 'not running' }
+            bash scripts/install-smoke.sh connected $since 60
+            if ($LASTEXITCODE -ne 0) { throw 'not connected' }
+            $entry = (Get-Acl $tree).GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) |
+              Where-Object { $_.IdentityReference.Value -eq $sid }
+            if ($entry) { throw 'the repaired program tree keeps the entry of the account' }
+          } finally {
+            icacls $tree /remove:g $account 2>$null | Out-Null
+            Remove-LocalUser $name -ErrorAction SilentlyContinue
+            $global:LASTEXITCODE = 0
+          }
+          bash scripts/install-smoke.sh one-job "$env:SMOKE_DIR/acl-selfheal"
+          if ($LASTEXITCODE -ne 0) { throw 'the job after the repair failed' }
       - name: An upgrade repairs the access of an older agent build (T20)
         shell: pwsh
         run: |

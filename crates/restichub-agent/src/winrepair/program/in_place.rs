@@ -14,7 +14,7 @@ use std::path::Path;
 use anyhow::{Context as _, Result, bail};
 
 use super::super::Action;
-use crate::winsec::{Entry, Exposure, Rights};
+use crate::winsec::{Entry, Exposure, Rights, Tree};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Kind {
@@ -54,7 +54,7 @@ fn own_dir(dir: &Path, log: &mut dyn FnMut(Action)) -> Result<()> {
         );
     }
     entry
-        .own_and_protect()
+        .own_and_protect(Tree::Program)
         .with_context(|| format!("cannot protect {}", dir.display()))?;
     log(Action::Protected(dir.to_path_buf()));
     Ok(())
@@ -181,7 +181,7 @@ fn protect_file(path: &Path) -> Result<()> {
         );
     }
     entry
-        .own_and_protect()
+        .own_and_protect(Tree::Program)
         .with_context(|| format!("cannot protect {}", path.display()))
 }
 
