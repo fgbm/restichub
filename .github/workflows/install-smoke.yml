@@ -812,15 +812,20 @@ jobs:
           # /T puts the entry on each existing item, as the inherited entries of an older build.
           icacls $program /grant "*${user}:(OI)(CI)(M)" /T
           if ($LASTEXITCODE -ne 0) { throw "icacls $program exit code $LASTEXITCODE" }
-          icacls $data /grant "*${user}:(OI)(CI)(M)" /T /Q | Out-Null
-          if ($LASTEXITCODE -ne 0) { throw "icacls $data exit code $LASTEXITCODE" }
+          # An entry of the administrator on the identity directory itself heals (ADR-0049), so the
+          # entries go on the cache and on an identity file only.
+          $cache = Join-Path $data 'cache'
+          icacls $cache /grant "*${user}:(OI)(CI)(M)" /T /Q | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "icacls $cache exit code $LASTEXITCODE" }
+          $identity = Join-Path $data 'identity.json'
           # A file takes no inheritance flags, and its protected DACL takes no inherited entry.
-          icacls $installed /grant "*${user}:(M)"
-          if ($LASTEXITCODE -ne 0) { throw "icacls $installed exit code $LASTEXITCODE" }
+          foreach ($file in $installed, $identity) {
+            icacls $file /grant "*${user}:(M)"
+            if ($LASTEXITCODE -ne 0) { throw "icacls $file exit code $LASTEXITCODE" }
+          }
           Write-Host "the entry of the user on the agent before the repair:"
           & $userAce $installed | Format-List IdentityReference, FileSystemRights, AccessControlType, IsInherited | Out-String | Write-Host
-          if (-not (& $userAce $program) -or -not (& $userAce $data) -or -not (& $userAce $installed)) { throw 'the test did not loosen the access' }
-          $identity = Join-Path $data 'identity.json'
+          if (-not (& $userAce $program) -or -not (& $userAce $cache) -or -not (& $userAce $identity) -or -not (& $userAce $installed)) { throw 'the test did not loosen the access' }
           $before = Get-FileHash $identity
           # install-service makes the program directory again, prints summaries and refuses the identity.
           $output = & $agent install-service 2>&1 | Out-String
@@ -878,6 +883,7 @@ jobs:
           Write-Host $output
           if ($code -ne 0) { throw "register --force exit code $code" }
           if (& $userAce $data) { throw 'the identity directory stays open' }
+          if (& $userAce $cache) { throw 'the cache stays open' }
           if (-not (Test-Path $identity)) { throw 'no new identity' }
           if (-not (Test-Path (Join-Path $env:ProgramFiles 'ResticHub\Agent\restic.exe'))) { throw 'restic was not installed again' }
           if ((Get-Service restichub-agent).Status -ne 'Running') { throw 'not running' }
