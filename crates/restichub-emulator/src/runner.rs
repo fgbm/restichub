@@ -16,7 +16,9 @@ use tokio::task::JoinHandle;
 
 use crate::agent::{AgentConfig, AgentLoad, Backoff, run_agent};
 use crate::executor::Executor;
+use crate::hostile::{HostileLoad, SeenJobs};
 use crate::identity::AgentIdentity;
+use crate::logs::LogLoad;
 use crate::metrics::{Metrics, Summary, bind, serve};
 use crate::profile::{LoadProfile, ramp_delay, storm_selects};
 use crate::random_fraction;
@@ -75,6 +77,13 @@ impl LoadRun {
 
         let agents = config.profile.agents;
         let storm = config.profile.reconnect_storm;
+        let hostile = config.profile.hostile;
+        let seen_jobs = (hostile.agents > 0 && hostile.forged_result_share > 0.0)
+            .then(|| Arc::new(SeenJobs::default()));
+        let log_load = (config.profile.log_lines_per_second > 0.0).then_some(LogLoad {
+            lines_per_second: config.profile.log_lines_per_second,
+            line_bytes: config.profile.log_line_bytes,
+        });
         let mut tasks = Vec::with_capacity(agents);
         for (index, identity) in config.identities.iter().take(agents).cloned().enumerate() {
             let mut load = AgentLoad::new(Arc::clone(&metrics));
@@ -85,6 +94,11 @@ impl LoadRun {
             load.clock_skew_micros = (config.profile.clock_skew_seconds * 1e6) as i64;
             load.ack_delay = Duration::from_millis(config.profile.ack_delay_ms);
             load.os_label = config.profile.os_label(random_fraction());
+            load.log_load = log_load;
+            load.seen_jobs = seen_jobs.clone();
+            if index < hostile.agents {
+                load.hostile = Some(HostileLoad::new(&hostile));
+            }
             let agent = Arc::new(AgentConfig {
                 tenant_id: config.tenant_id.clone(),
                 server_url: config.server_url.clone(),

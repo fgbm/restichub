@@ -16,7 +16,7 @@ The default executor waits for the step time of a load profile. It samples the s
 
 ## The load profile
 
-The option `--profile FILE` reads a load profile. The file is JSON, because the workspace has no YAML crate (ADR-0019 keeps `serde-saphyr` inside the control plane). The profile drives the agent side of the run. The control plane owns the schedule and the job rate (ADR-0002), so the emulator dispatches no job. The profile sets the agents, the ramp-up, the OS labels, the job time, the failure rate, the progress rate, the reconnect storm, the clock offset and the acknowledgement delay.
+The option `--profile FILE` reads a load profile. The file is JSON, because the workspace has no YAML crate (ADR-0019 keeps `serde-saphyr` inside the control plane). The profile drives the agent side of the run. The control plane owns the schedule and the job rate (ADR-0002), so the emulator dispatches no job. The profile sets the agents, the ramp-up, the OS labels, the job time and the failure rate. It also sets the progress rate, the reconnect storm, the clock offset, the acknowledgement delay, the job logs and the hostile agents.
 
 When `--profile` is present, the profile overrides `--agents`, `--duration`, `--step-seconds` and `--progress-ticks`. Without `--profile`, the emulator builds a profile from those options.
 
@@ -34,6 +34,9 @@ When `--profile` is present, the profile overrides `--agents`, `--duration`, `--
 | `reconnect_storm` | A drop of a share of the streams at one time | off |
 | `clock_skew_seconds` | The offset of the agent clock, for job validation | `0` |
 | `ack_delay_ms` | The wait before the `JobAck` of a slow agent | `0` |
+| `log_lines_per_second` | The job log lines that a running step writes each second. `0` writes no log | `0` |
+| `log_line_bytes` | The size of one log line with its newline, from `1` to `8192` | `120` |
+| `hostile` | The hostile agent modes (see "Hostile agents") | off |
 
 The objects `job_duration` and `reconnect_storm` hold these fields:
 
@@ -59,7 +62,35 @@ The emulator refuses a profile with a bad value and names the field. The failure
   "failure_rate": {"1": 0.02, "3": 0.05},
   "reconnect_storm": {"at_seconds": 600, "percent": 20},
   "clock_skew_seconds": 1.5,
-  "ack_delay_ms": 250
+  "ack_delay_ms": 250,
+  "log_lines_per_second": 20,
+  "log_line_bytes": 120
+}
+```
+
+### Job logs
+
+A running step sends its log as `LogChunk` messages (FR-AG-08). The lines are synthetic text with no secret. As in the real agent, a chunk holds at most 8 KiB. A job sends at most 1 MiB, then one truncation marker on the agent stream. Each chunk stays in the spool of the agent until a `LogAck` covers its sequence (FR-LG-07). A new stream sends the spool again. When the control plane does not accept the capability `log-ack-v1`, the agent keeps no chunk. The spool keeps only the position of each chunk, not the text, so a large fleet uses little memory.
+
+### Hostile agents
+
+The object `hostile` makes the first `hostile.agents` agents send messages that the control plane must refuse (AC-PR-05, scenario PR-SEC-06). Only the emulator has these modes.
+
+| Field | Meaning | Default |
+|---|---|---|
+| `hostile.agents` | The number of hostile agents, from the first agent. `0` turns the modes off. | `0` |
+| `hostile.forged_result_share` | The chance, from `0` to `1`, of a forged successful `JobResult` after each real result. It names a job of another agent of the process, else a random job identifier. | `0` |
+| `hostile.flood_per_second` | The `StepProgress` messages for an unknown job that each hostile stream sends each second. | `0` |
+| `hostile.oversize` | One `LogChunk` for each hostile agent with an encoded size of exactly the protocol limit (`at_limit`) or one byte more (`above_limit`). | none |
+
+The messages of an agent hold no tenant field: the control plane takes the tenant from the agent certificate. Thus the emulator has no mode with a wrong tenant identifier.
+
+An example for one hostile agent among 500:
+
+```json
+{
+  "agents": 500,
+  "hostile": {"agents": 1, "forged_result_share": 1, "flood_per_second": 1000, "oversize": "above_limit"}
 }
 ```
 
@@ -80,10 +111,19 @@ The endpoint holds these metrics:
 | `restichub_emulator_jobs_acked_total` | counter | The acknowledged jobs |
 | `restichub_emulator_results_total` | counter | The reported job results |
 | `restichub_emulator_streams` | gauge | The agent streams that are open now |
+| `restichub_emulator_log_chunks_total` | counter | The sent log chunks |
+| `restichub_emulator_log_bytes_total` | counter | The sent log bytes |
+| `restichub_emulator_log_chunks_acked_total` | counter | The log chunks that a `LogAck` removed from a spool |
+| `restichub_emulator_log_chunks_resent_total` | counter | The log chunks that a new stream sent again |
+| `restichub_emulator_log_chunks_unacked` | gauge | The log chunks that wait for a `LogAck` |
+| `restichub_emulator_forged_results_foreign_total` | counter | The forged job results for a job of another agent |
+| `restichub_emulator_forged_results_unknown_total` | counter | The forged job results for a job that does not exist |
+| `restichub_emulator_flood_messages_total` | counter | The flood messages of the hostile agents |
+| `restichub_emulator_oversize_messages_total` | counter | The oversize messages of the hostile agents |
 
 Each summary metric gives the p50, the p95 and the p99. The histogram uses fixed buckets, so a percentile is the upper bound of its bucket. The crate uses no histogram dependency: the workspace lints refuse `unwrap` and `expect`, and every constructor of `hdrhistogram` returns a `Result`.
 
-The summary file holds the same counters and the p50, the p95, the p99 and the maximum of each latency.
+The summary file holds the same counters and the p50, the p95, the p99 and the maximum of each latency. The objects `logs` and `hostile` of the summary hold the log counters and the hostile counters.
 
 ### Which AC-NFR-01 numbers come from where
 
@@ -151,7 +191,9 @@ The workspace has no argument parser. The crate reads its own arguments and prin
 | `fr_sc_09_cancel_stops_a_running_job` | FR-SC-09, FR-AG-10 |
 | `fr_id_08_agents_reconnect_after_a_disconnect` | FR-ID-08 |
 | `ac_nfr_01_short_load_run_reports_the_summary` | AC-NFR-01, NFR-PERF-04 |
+| `fr_lg_07_job_logs_are_sent_and_acknowledged` | FR-AG-08, FR-LG-07 |
+| `ac_pr_05_a_hostile_agent_sends_forged_and_oversize_messages` | AC-PR-05 |
 
 ## Agents of a deployed control plane
 
-The option `--enroll-url` enrolls the agents at a running control plane instead of using test certificates. It needs `--ca FILE` with the installation root CA and one token source: `--token-file FILE` (one token on each line) or `--api-url URL` with `--api-token-file FILE` (the emulator creates one enrollment token for each agent). The control plane accepts 10 enrollments each minute from one address, so the emulator starts 9 each minute (`--enroll-per-minute`). `--identities DIR` keeps the enrolled identities, and a later run enrolls only the missing agents. `--enroll-only` ends the run after the enrollment. `--ramp-up N` starts N agents each second. The load runner of bench S2 is `bench/s2/s2.sh` (see `bench/s2/README.md`).
+The option `--enroll-url` enrolls the agents at a running control plane instead of using test certificates. It needs `--ca FILE` with the installation root CA and one token source. The token source is `--token-file FILE` (one token on each line) or `--api-url URL` with `--api-token-file FILE` (one new enrollment token for each agent). The control plane accepts 10 enrollments each minute from one address, so the emulator starts 9 each minute (`--enroll-per-minute`). `--identities DIR` keeps the enrolled identities, and a later run enrolls only the missing agents. `--enroll-only` ends the run after the enrollment. `--ramp-up N` starts N agents each second. The load runner of bench S2 is `bench/s2/s2.sh` (see `bench/s2/README.md`).

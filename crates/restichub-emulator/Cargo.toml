@@ -39,6 +39,7 @@ serde_json = { workspace = true }
 tokio = { workspace = true, features = ["process", "io-util"] }
 async-trait = "0.1"
 ed25519-dalek = "3.0"
+prost = "0.14"
 prost-types = "0.14"
 rcgen = { version = "0.14", features = ["crypto", "pem", "ring"] }
 tokio-stream = { version = "0.1", features = ["net"] }

@@ -13,9 +13,9 @@ use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
 use restichub_proto::agent::v1::{
-    AgentHello, AgentMessage, CertificateInstalled, CertificateSigningRequest, ErrorDetail, JobAck,
-    JobRejected, JobResult, JobStatus, Pong, RejectReason, SignedJob, StepProgress, StepResult,
-    StepStatus, agent_message, agent_service_client::AgentServiceClient, control_message, step,
+    AgentHello, AgentMessage, CertificateInstalled, CertificateSigningRequest, JobAck, JobRejected,
+    JobResult, JobStatus, Pong, RejectReason, SignedJob, StepProgress, StepResult, StepStatus,
+    agent_message, agent_service_client::AgentServiceClient, control_message, step,
 };
 use restichub_proto::signing::{
     Admission, Expected, InMemoryJournal, JobJournal, KeyRing, admit, verify_job,
@@ -27,8 +27,10 @@ use tonic::transport::{Certificate, ClientTlsConfig, Endpoint, Identity};
 
 use crate::executor::{Executor, StepOutcome};
 use crate::identity::AgentIdentity;
+use crate::logs::{JobLog, LogSink, LogSpool};
 use crate::metrics::Metrics;
 use crate::now_timestamp;
+use crate::outcome::{job_error, job_outcome};
 
 /// Number of outbound messages buffered for one agent.
 const OUT_CHANNEL: usize = 64;
@@ -103,6 +105,11 @@ pub struct AgentLoad {
     /// sends the stored results again, as the real agent does (ADR-0039). Off: a closed stream
     /// cancels the running jobs.
     pub survive_reconnect: bool,
+    /// `None` writes no job log.
+    pub log_load: Option<crate::logs::LogLoad>,
+    pub hostile: Option<crate::hostile::HostileLoad>,
+    /// Shared by the agents of the process; set when a hostile agent forges results.
+    pub seen_jobs: Option<Arc<crate::hostile::SeenJobs>>,
 }
 
 impl AgentLoad {
@@ -121,6 +128,9 @@ impl AgentLoad {
             capabilities: None,
             renewal: crate::renewal::Renewal::default(),
             survive_reconnect: false,
+            log_load: None,
+            hostile: None,
+            seen_jobs: None,
         }
     }
 }
@@ -194,6 +204,7 @@ struct Session {
     journal: Arc<Mutex<InMemoryJournal>>,
     jobs: Arc<Mutex<HashMap<String, CancelHandle>>>,
     results: Arc<Mutex<HashMap<String, JobResult>>>,
+    logs: Arc<LogSpool>,
     config: Arc<AgentConfig>,
 }
 
@@ -203,14 +214,17 @@ struct Carry {
     results: Arc<Mutex<HashMap<String, JobResult>>>,
     out_tx: mpsc::Sender<AgentMessage>,
     out_rx: Arc<tokio::sync::Mutex<mpsc::Receiver<AgentMessage>>>,
+    /// The log chunks wait for their `LogAck` across a reconnect (FR-LG-07).
+    logs: Arc<LogSpool>,
 }
 
 impl Carry {
-    fn new() -> Self {
+    fn new(metrics: Arc<Metrics>) -> Self {
         let (out_tx, out_rx) = mpsc::channel(OUT_CHANNEL);
         Self {
             jobs: Arc::default(),
             results: Arc::default(),
+            logs: Arc::new(LogSpool::new(metrics)),
             out_tx,
             out_rx: Arc::new(tokio::sync::Mutex::new(out_rx)),
         }
@@ -237,7 +251,7 @@ pub async fn run_agent(config: Arc<AgentConfig>, mut shutdown: watch::Receiver<b
     // The journal drops the entries that passed their expiry (ADR-0020). The
     // task starts no job.
     let purge = tokio::spawn(purge_journal(Arc::clone(&journal), shutdown.clone()));
-    let carry = Carry::new();
+    let carry = Carry::new(Arc::clone(&config.load.metrics));
     let mut attempt = 0u32;
     let mut connected = false;
     while !*shutdown.borrow() {
@@ -316,6 +330,7 @@ async fn connect_once(
         Vec::new()
     };
     send_hello(&tx, &config.load, held).await?;
+    let hostile = crate::hostile::start(config, &tx);
     let forwarder = if survive {
         let stored: Vec<JobResult> = crate::lock(&carry.results).values().cloned().collect();
         for result in stored {
@@ -343,6 +358,7 @@ async fn connect_once(
             Arc::new(Mutex::new(HashMap::new()))
         },
         results: Arc::clone(&carry.results),
+        logs: Arc::clone(&carry.logs),
         config: Arc::clone(config),
     };
 
@@ -416,8 +432,9 @@ async fn connect_once(
                     }
                 }
             }
-            // The emulator keeps no log spool, so an acknowledgement frees nothing.
-            Some(control_message::Payload::LogAck(_)) => {}
+            Some(control_message::Payload::LogAck(ack)) => {
+                session.logs.acknowledge(&ack);
+            }
             Some(control_message::Payload::CertificateRejected(rejected)) => {
                 eprintln!(
                     "{}: certificate request refused: {rejected:?}",
@@ -430,8 +447,25 @@ async fn connect_once(
                     "the protocol version is refused: {rejected:?}"
                 ));
             }
-            Some(control_message::Payload::ServerHello(_)) | None => {}
+            Some(control_message::Payload::ServerHello(hello)) => {
+                let acks = restichub_proto::AgentCapability::LogAckV1
+                    .is_listed(&hello.accepted_capabilities);
+                let resend = session.logs.greeted(acks);
+                metrics.log_chunks_resent(resend.len());
+                for chunk in resend {
+                    let message = AgentMessage {
+                        payload: Some(agent_message::Payload::LogChunk(chunk)),
+                    };
+                    if tx.send(message).await.is_err() {
+                        break;
+                    }
+                }
+            }
+            None => {}
         }
+    }
+    if let Some(hostile) = hostile {
+        hostile.abort();
     }
 
     if let Some(forwarder) = forwarder {
@@ -621,6 +655,9 @@ async fn run_job(
 
     let job_id = job.job_id.clone();
     crate::lock(&session.jobs).insert(job_id.clone(), handle);
+    if let Some(seen) = &session.config.load.seen_jobs {
+        seen.add(&session.config.identity.agent_id, &job_id);
+    }
 
     // A slow agent holds the acknowledgement for the profile delay.
     if !session.config.load.ack_delay.is_zero() {
@@ -656,6 +693,16 @@ async fn run_job(
     // 10). Only then does the init step run (FR-RP-02, AC-RP-01).
     let mut probe_missing = false;
     let mut init_succeeded = false;
+    let mut job_log = session
+        .config
+        .load
+        .log_load
+        .map(|load| JobLog::new(&job_id, load));
+    let log_sink = LogSink {
+        tx: &session.tx,
+        spool: &session.logs,
+        metrics: &session.config.load.metrics,
+    };
 
     for step in &job.steps {
         let is_test_access = matches!(step.kind, Some(step::Kind::TestAccess(_)));
@@ -685,7 +732,12 @@ async fn run_job(
             step_id: step.step_id.clone(),
         };
         let outcome = tokio::select! {
-            outcome = session.config.executor.run_step(step, &sink) => outcome,
+            outcome = crate::logs::alongside(
+                session.config.executor.run_step(step, &sink),
+                job_log.as_mut(),
+                &step.step_id,
+                &log_sink,
+            ) => outcome,
             () = token.cancelled() => {
                 cancelled = true;
                 StepOutcome {
@@ -761,6 +813,7 @@ async fn run_job(
     crate::lock(&session.journal).record_completed(&job_id, result.clone());
     crate::lock(&session.results).insert(job_id.clone(), result.clone());
     let _ = session.tx.send(job_result_message(result)).await;
+    crate::hostile::after_result(&session.config, &session.tx).await;
     session
         .config
         .load
@@ -823,113 +876,5 @@ async fn send_step_result(
 fn job_result_message(result: JobResult) -> AgentMessage {
     AgentMessage {
         payload: Some(agent_message::Payload::JobResult(result)),
-    }
-}
-
-/// Maps the step results to the typed outcome of a job (FR-AG-09, AC-RP-01).
-///
-/// The init chain: the agent runs init only after test_access exited with code 10 (a missing
-/// repository). A successful init after that probe is a successful job. A test_access that failed
-/// with any other code (1, 11, 12, a timeout, access denied) stops the job, and a standalone
-/// test_access with exit code 10 is the normal `NOT_INITIALIZED` result.
-fn job_outcome(
-    cancelled: bool,
-    stopped_code: Option<i32>,
-    probe_missing: bool,
-    had_init: bool,
-    init_succeeded: bool,
-) -> JobStatus {
-    if cancelled {
-        return JobStatus::Cancelled;
-    }
-    if let Some(code) = stopped_code {
-        // restic exit code 12 is a wrong password or wrong credentials (AC-RP-01).
-        return if code == 12 {
-            JobStatus::ConfigError
-        } else {
-            JobStatus::Failed
-        };
-    }
-    if probe_missing {
-        if had_init {
-            return if init_succeeded {
-                JobStatus::Succeeded
-            } else {
-                JobStatus::Failed
-            };
-        }
-        return JobStatus::NotInitialized;
-    }
-    JobStatus::Succeeded
-}
-
-/// The stable code that explains a failed or cancelled outcome (NFR-DOC-04). It holds no secret.
-fn job_error(outcome: JobStatus) -> Option<ErrorDetail> {
-    let code = match outcome {
-        JobStatus::ConfigError => "wrong_password",
-        JobStatus::NotInitialized => "repository_missing",
-        JobStatus::Failed => "step_failed",
-        JobStatus::Cancelled => "cancelled",
-        JobStatus::RepositoryLocked => "repository_locked",
-        JobStatus::SucceededWithWarnings => "succeeded_with_warnings",
-        JobStatus::Succeeded | JobStatus::Unspecified => return None,
-    };
-    Some(ErrorDetail {
-        code: code.to_owned(),
-        params: Vec::new(),
-    })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{job_error, job_outcome};
-    use restichub_proto::agent::v1::JobStatus;
-
-    /// AC-RP-01: the init chain runs init only after test_access exit code 10.
-    #[test]
-    fn ac_rp_01_maps_the_init_chain_to_a_job_outcome() {
-        // A repository that exists: test_access exit 0, init skipped.
-        assert_eq!(
-            job_outcome(false, None, false, true, false),
-            JobStatus::Succeeded
-        );
-        // A missing repository with a successful init.
-        assert_eq!(
-            job_outcome(false, None, true, true, true),
-            JobStatus::Succeeded
-        );
-        // A standalone test_access on a missing repository.
-        assert_eq!(
-            job_outcome(false, None, true, false, false),
-            JobStatus::NotInitialized
-        );
-        // A wrong password on an existing repository (exit code 12).
-        assert_eq!(
-            job_outcome(false, Some(12), false, true, false),
-            JobStatus::ConfigError
-        );
-        // Any other failure (exit codes 1, 11, a timeout).
-        assert_eq!(
-            job_outcome(false, Some(1), false, true, false),
-            JobStatus::Failed
-        );
-        assert_eq!(
-            job_outcome(false, Some(11), false, true, false),
-            JobStatus::Failed
-        );
-        // The control plane cancelled the job before any step finished.
-        assert_eq!(
-            job_outcome(true, None, false, true, false),
-            JobStatus::Cancelled
-        );
-        // The error code that a wrong password reports.
-        assert_eq!(
-            job_error(JobStatus::ConfigError).map(|error| error.code),
-            Some("wrong_password".to_owned())
-        );
-        assert_eq!(
-            job_error(JobStatus::NotInitialized).map(|error| error.code),
-            Some("repository_missing".to_owned())
-        );
     }
 }

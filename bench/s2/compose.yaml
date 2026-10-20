@@ -78,7 +78,7 @@ services:
       RESTICHUB_DATABASE_PASSWORD: ${RESTICHUB_RUNTIME_PASSWORD}
       RESTICHUB_SERVER_INSECURE_COOKIES: 'true'
       RESTICHUB_KEK: ${RESTICHUB_KEK}
-      RESTICHUB_TENANCY_MODE: single
+      RESTICHUB_TENANCY_MODE: ${RESTICHUB_TENANCY_MODE:-single}
       RESTICHUB_AGENT_LISTEN: 0.0.0.0:8443
       RESTICHUB_AGENT_ENDPOINT: https://localhost:8443
       # Same defaults as a production install; the bench does not raise any limit.
