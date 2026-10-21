@@ -321,14 +321,24 @@ pub enum JobKind {
     Other,
 }
 
-/// The kinds of [`JobKind::shares_repository`] as the SQL list of a predicate. A statement that
-/// tells an exclusive job uses this list, so the Rust and the SQL rules cannot drift apart.
+/// The kinds that share the repository ([`JobKind::shares_repository`]), as the SQL list of a
+/// predicate. The partial unique index `jobs_active_repository` counts the same kinds, so a change
+/// here also needs a migration that rebuilds the index.
 macro_rules! shared_kinds {
     () => {
         "'backup', 'snapshots', 'ls', 'restore'"
     };
 }
 pub(crate) use shared_kinds;
+
+/// The kinds whose success proves that the repository holds no lock ([`JobKind::holds_exclusive_lock`]),
+/// as the SQL list of a predicate.
+macro_rules! exclusive_lock_kinds {
+    () => {
+        "'check', 'forget', 'prune', 'unlock', 'unlock_all'"
+    };
+}
+pub(crate) use exclusive_lock_kinds;
 
 impl JobKind {
     pub const ALL: [Self; 12] = [
@@ -376,18 +386,35 @@ impl JobKind {
     /// An exclusive kind starts only when no job runs on the repository, and no job starts while it
     /// runs. The other kinds share the repository up to the limit of the queue.
     pub fn is_exclusive(self) -> bool {
-        !self.shares_repository()
+        matches!(
+            self,
+            Self::Init | Self::Check | Self::Forget | Self::Prune | Self::Unlock | Self::UnlockAll
+        )
     }
 
-    /// True for a kind that runs once, so no later job of the same kind may ever follow it
-    /// (ADR-0050).
+    /// True for a kind whose success proves that the repository holds no lock (FR-SC-06).
     ///
-    /// A restore answers one request of a person, and the maintenance schedule runs the other
-    /// kinds. They carry no plan.
+    /// `check`, `forget` and `prune` take the exclusive lock of restic, so a success proves that no
+    /// lock held the repository. `unlock` and `unlock_all` take no lock; they remove the locks, so
+    /// their success proves the same. A kind that shares the repository runs next to a lock, so its
+    /// success proves nothing.
+    pub fn holds_exclusive_lock(self) -> bool {
+        matches!(
+            self,
+            Self::Check | Self::Forget | Self::Prune | Self::Unlock | Self::UnlockAll
+        )
+    }
+
+    /// True for a kind that runs once for a repository (ADR-0050).
+    ///
+    /// A person starts a `restore` and a `test_access`, and an Administrator starts an `init` and an
+    /// `unlock_all`. The control plane starts an `unlock` after an agent loss. The maintenance
+    /// schedule repeats `check`, `forget` and `prune`, so their alerts close at their next success
+    /// (ADR-0036).
     pub fn is_one_time(self) -> bool {
         matches!(
             self,
-            Self::Restore | Self::Check | Self::Forget | Self::Prune
+            Self::Restore | Self::TestAccess | Self::Init | Self::Unlock | Self::UnlockAll
         )
     }
 
@@ -861,6 +888,32 @@ mod tests {
                 kind.as_str()
             );
         }
+    }
+
+    #[test]
+    fn the_sql_list_of_the_exclusive_lock_kinds_holds_the_enum_rule() {
+        let list = exclusive_lock_kinds!();
+        for kind in JobKind::ALL {
+            assert_eq!(
+                list.contains(&format!("'{}'", kind.as_str())),
+                kind.holds_exclusive_lock(),
+                "{}",
+                kind.as_str()
+            );
+        }
+    }
+
+    #[test]
+    fn the_one_time_kinds_skip_the_kinds_of_the_maintenance_schedule() {
+        let one_time: Vec<&str> = JobKind::ALL
+            .iter()
+            .filter(|kind| kind.is_one_time())
+            .map(|kind| kind.as_str())
+            .collect();
+        assert_eq!(
+            one_time,
+            ["init", "test_access", "restore", "unlock", "unlock_all"]
+        );
     }
 
     #[test]

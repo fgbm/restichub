@@ -324,10 +324,13 @@ fn job_findings(
         if !enabled(rules, kind) {
             continue;
         }
-        // A one-time job may never run again, so its alert closes at the end of the window
-        // instead of waiting for a success that cannot come (ADR-0050). The close sends the
-        // recovery notification like any other cleared condition.
-        if job.kind.is_one_time() && now - job.finished_at > ONE_TIME_JOB_ALERT_TTL {
+        // A one-time job of no plan does not run again, so its alert closes at the end of the
+        // window instead of waiting for a success that does not come (ADR-0050). The close sends
+        // the recovery notification like any other cleared condition.
+        if job.plan_id.is_none()
+            && job.kind.is_one_time()
+            && now - job.finished_at > ONE_TIME_JOB_ALERT_TTL
+        {
             for kind in JOB_ALERT_KINDS {
                 findings.cleared.insert((kind, job.subject.clone()));
             }

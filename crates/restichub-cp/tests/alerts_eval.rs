@@ -194,7 +194,7 @@ impl Fixture {
 
     /// Seeds a finished job of a kind that a plan does not run, so its alert subject is the
     /// repository and the kind (ADR-0036).
-    async fn one_time_job(
+    async fn finished_kind_job(
         &self,
         kind: JobKind,
         status: &str,
@@ -622,7 +622,7 @@ async fn ac_mn_02_a_failed_restore_alert_closes_at_the_next_success() {
     };
     let t0 = fx.t0;
     without_rpo(&fx).await;
-    fx.one_time_job(
+    fx.finished_kind_job(
         JobKind::Restore,
         "failed",
         "failed",
@@ -636,7 +636,7 @@ async fn ac_mn_02_a_failed_restore_alert_closes_at_the_next_success() {
     );
 
     // The next restore of the repository succeeds, so the alert closes with the recovery message.
-    fx.one_time_job(
+    fx.finished_kind_job(
         JobKind::Restore,
         "succeeded",
         "succeeded",
@@ -663,7 +663,7 @@ async fn ac_mn_02_a_one_time_job_alert_closes_after_seven_days() {
     };
     let t0 = fx.t0;
     without_rpo(&fx).await;
-    fx.one_time_job(
+    fx.finished_kind_job(
         JobKind::Restore,
         "failed",
         "failed",
@@ -680,6 +680,38 @@ async fn ac_mn_02_a_one_time_job_alert_closes_after_seven_days() {
     fx.run(t0 + Duration::days(6)).await;
     assert_eq!(fx.hooks().len(), 1, "the alert stays open");
 
+    fx.run(t0 + Duration::days(7) + Duration::minutes(5)).await;
+    assert_eq!(
+        fx.events(),
+        vec![
+            ("alert.opened".to_owned(), "job_failed".to_owned()),
+            ("alert.resolved".to_owned(), "job_failed".to_owned())
+        ]
+    );
+
+    // The alert does not come back: the failed job of the kind is old, so it raises no new alert.
+    fx.run(t0 + Duration::days(8)).await;
+    assert_eq!(fx.hooks().len(), 2, "the alert stays closed");
+    fx.db.cleanup().await;
+}
+
+/// AC-MN-02: the control plane starts an unlock after an agent loss, and no schedule repeats it, so
+/// its alert closes after seven days (ADR-0050).
+#[tokio::test]
+async fn ac_mn_02_a_failed_unlock_alert_closes_after_seven_days() {
+    let Some(fx) = fixture("ac-mn-02-unlock-window").await else {
+        return;
+    };
+    let t0 = fx.t0;
+    without_rpo(&fx).await;
+    fx.finished_kind_job(
+        JobKind::Unlock,
+        "failed",
+        "failed",
+        t0 + Duration::minutes(2),
+    )
+    .await;
+    fx.run(t0 + Duration::minutes(3)).await;
     fx.run(t0 + Duration::days(7) + Duration::minutes(5)).await;
     assert_eq!(
         fx.events(),
@@ -714,6 +746,65 @@ async fn ac_mn_02_a_plan_job_alert_ignores_the_one_time_window() {
         fx.events(),
         vec![("alert.opened".to_owned(), "job_failed".to_owned())],
         "the alert of a plan waits for its next job"
+    );
+    fx.db.cleanup().await;
+}
+
+/// AC-MN-02: the maintenance schedule repeats a prune, so its alert waits for the next success of
+/// the kind and never closes by the time (ADR-0050).
+#[tokio::test]
+async fn ac_mn_02_a_failing_weekly_prune_alert_does_not_flap() {
+    let Some(fx) = fixture("ac-mn-02-prune-flap").await else {
+        return;
+    };
+    let t0 = fx.t0;
+    without_rpo(&fx).await;
+    fx.finished_kind_job(
+        JobKind::Prune,
+        "failed",
+        "failed",
+        t0 + Duration::minutes(2),
+    )
+    .await;
+    fx.run(t0 + Duration::minutes(3)).await;
+    assert_eq!(
+        fx.events(),
+        vec![("alert.opened".to_owned(), "job_failed".to_owned())]
+    );
+
+    // The next prune starts at the schedule and fails later than the one of the week before. No
+    // recovery message goes out in between, so the alert does not close and open again.
+    fx.run(t0 + Duration::days(7) + Duration::minutes(1)).await;
+    fx.finished_kind_job(
+        JobKind::Prune,
+        "failed",
+        "failed",
+        t0 + Duration::days(7) + Duration::hours(4),
+    )
+    .await;
+    fx.run(t0 + Duration::days(7) + Duration::hours(4) + Duration::minutes(1))
+        .await;
+    assert_eq!(
+        fx.events(),
+        vec![("alert.opened".to_owned(), "job_failed".to_owned())],
+        "one open message and no recovery message"
+    );
+
+    // A success of the kind closes the alert, as ADR-0036 says.
+    fx.finished_kind_job(
+        JobKind::Prune,
+        "succeeded",
+        "succeeded",
+        t0 + Duration::days(8),
+    )
+    .await;
+    fx.run(t0 + Duration::days(8) + Duration::minutes(1)).await;
+    assert_eq!(
+        fx.events(),
+        vec![
+            ("alert.opened".to_owned(), "job_failed".to_owned()),
+            ("alert.resolved".to_owned(), "job_failed".to_owned())
+        ]
     );
     fx.db.cleanup().await;
 }

@@ -59,6 +59,21 @@ async fn marks(env: &Env, repository: Uuid) -> i64 {
     count
 }
 
+/// Marks a job as succeeded at the current time of the test clock.
+async fn succeeded(env: &Env, job: Uuid) {
+    let mut tx = env.scoped().await;
+    sqlx::query(
+        "UPDATE jobs SET status = 'succeeded', result_code = 'succeeded', started_at = $2, \
+                finished_at = $2, updated_at = $2 WHERE id = $1",
+    )
+    .bind(job)
+    .bind(env.now())
+    .execute(&mut *tx)
+    .await
+    .expect("cannot finish the job");
+    tx.commit().await.expect("cannot end the write");
+}
+
 /// Runs a backup that restic abandons, so its lock becomes a suspect (FR-AG-10).
 async fn killed_backup(
     env: &Env,
@@ -303,6 +318,47 @@ async fn ac_sc_06_a_later_check_success_clears_the_stale_mark() {
         "the check clears the mark"
     );
     assert!(agent.try_job(QUIET).await.is_none(), "no unlock is needed");
+    env.db.cleanup().await;
+}
+
+#[tokio::test]
+async fn ac_sc_06_a_later_test_access_success_keeps_the_stale_mark() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let mut agent = env.connect_agent("read-lock-host").await;
+    let repository = env.create_repository(agent.id, "pw").await;
+    let profile = env.create_profile(json!({})).await;
+    let plan = env.create_plan(profile, agent.id, repository).await;
+    killed_backup(&env, repository, &mut agent, plan).await;
+
+    // A test access reads the configuration under the read lock of restic, so it runs next to the
+    // orphaned lock and its success says nothing about the lock (FR-SC-04). The control plane sends
+    // it without the queue, so the test writes the finished job of the agent.
+    env.clock.advance(31 * 60);
+    let test_access = env
+        .enqueue(
+            restichub_db::JobKind::TestAccess,
+            agent.id,
+            repository,
+            None,
+        )
+        .await;
+    succeeded(&env, test_access).await;
+    assert_eq!(
+        marks(&env, repository).await,
+        1,
+        "the test access keeps the mark"
+    );
+
+    // The mark stays, so the idle repository gets the unlock that the test access cannot replace.
+    env.pass().await;
+    let signed = agent.job().await;
+    let unlock = env.verify(&signed, &agent).await;
+    assert_eq!(unlock.steps.len(), 1);
+    assert!(matches!(unlock.steps[0].kind, Some(step::Kind::Unlock(_))));
+    assert_eq!(marks(&env, repository).await, 0);
     env.db.cleanup().await;
 }
 
