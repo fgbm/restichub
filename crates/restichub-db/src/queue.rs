@@ -10,7 +10,7 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::DbError;
-use crate::enums::JobKind;
+use crate::enums::{JobKind, exclusive_lock_kinds, shared_kinds};
 use crate::ids::{AgentId, JobId, PlanId, RepositoryId, SecretId};
 use crate::jobs::{Job, JobRow, job_columns};
 use crate::tx::TenantTx;
@@ -712,17 +712,20 @@ pub async fn clear_stale_locks(
     Ok(result.rows_affected())
 }
 
-/// True when a job of the repository succeeded after `since`. Such a job proves that no stale lock
-/// blocks the repository.
+/// True when a job of the repository succeeded after `since`, and the kind of that job proves that
+/// no lock blocks the repository (FR-SC-04, FR-SC-06). A success of a kind that shares the
+/// repository proves nothing: it runs next to the stale lock.
 pub async fn has_success_since(
     tx: &mut TenantTx<'_>,
     repository_id: RepositoryId,
     since: OffsetDateTime,
 ) -> Result<bool, DbError> {
-    let (found,): (bool,) = sqlx::query_as(
+    let (found,): (bool,) = sqlx::query_as(concat!(
         "SELECT EXISTS (SELECT 1 FROM jobs WHERE repository_id = $1 AND status = 'succeeded' \
-                        AND finished_at > $2)",
-    )
+                        AND kind IN (",
+        exclusive_lock_kinds!(),
+        ") AND finished_at > $2)"
+    ))
     .bind(repository_id)
     .bind(since)
     .fetch_one(tx.as_conn())
@@ -771,11 +774,12 @@ pub async fn has_active_exclusive_for_repository(
     tx: &mut TenantTx<'_>,
     repository_id: RepositoryId,
 ) -> Result<bool, DbError> {
-    let (active,): (bool,) = sqlx::query_as(
+    let (active,): (bool,) = sqlx::query_as(concat!(
         "SELECT EXISTS (SELECT 1 FROM jobs WHERE repository_id = $1 \
-                        AND kind NOT IN ('backup', 'snapshots', 'ls', 'restore') \
-                        AND status IN ('queued', 'sent', 'running'))",
-    )
+                        AND kind NOT IN (",
+        shared_kinds!(),
+        ") AND status IN ('queued', 'sent', 'running'))"
+    ))
     .bind(repository_id)
     .fetch_one(tx.as_conn())
     .await

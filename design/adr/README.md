@@ -41,7 +41,7 @@ To write a new record, copy [0000-template.md](0000-template.md) and use the nex
 | [0033](0033-enrollment-transport-and-agent-trust-bootstrap.md) | Enrollment transport and agent trust bootstrap | accepted |
 | [0034](0034-repository-maintenance-schedule.md) | Repository maintenance schedule and retention isolation | accepted, partly amended by ADR-0047 (the plans of the repository) |
 | [0035](0035-restore-and-snapshot-browsing.md) | Restore and snapshot browsing | accepted |
-| [0036](0036-alerts-and-notification-channels.md) | Alerts, notification channels and the recovery point objective | accepted |
+| [0036](0036-alerts-and-notification-channels.md) | Alerts, notification channels and the recovery point objective | accepted, the closing of a one-time job alert amended by ADR-0050 |
 | [0037](0037-server-scripts-on-trusted-hosts.md) | Server scripts on trusted hosts | accepted |
 | [0038](0038-agent-downloads-restic.md) | The agent downloads restic | accepted |
 | [0039](0039-stall-watchdog-instead-of-job-time-limit.md) | A stall watchdog instead of a fixed job time limit | accepted, the grace for a fresh job superseded by ADR-0043 |
@@ -55,3 +55,4 @@ To write a new record, copy [0000-template.md](0000-template.md) and use the nex
 | [0047](0047-repository-in-the-plan-and-profile-parameters.md) | The repository in the plan, and profile parameters | accepted |
 | [0048](0048-administrator-access-entries-on-windows.md) | Self-repair of administrator access entries on Windows | accepted, decision 3 superseded by ADR-0049 (the identity directory) |
 | [0049](0049-heal-the-identity-directory-of-an-administrator.md) | Heal the administrator entry on the identity directory | accepted |
+| [0050](0050-closing-of-a-one-time-job-alert.md) | The closing of a one-time job alert | accepted |

@@ -13,7 +13,7 @@ use restichub_cp::alerts::sender::Sender;
 use restichub_cp::alerts::settings::{AlertsSettings, SmtpSecurity, SmtpSettings, WebhookSettings};
 use restichub_cp::alerts::transport::{BoxIo, ResolveFuture, Resolver, tls_config_with_roots};
 use restichub_db::test_util::TestDatabase;
-use restichub_db::{AgentId, JobId, PlanId, RepositoryId, TenantId};
+use restichub_db::{AgentId, JobId, JobKind, PlanId, RepositoryId, TenantId};
 use time::OffsetDateTime;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
@@ -460,6 +460,40 @@ pub async fn backup_job(
 ) -> JobId {
     crate::common::seed_scheduled_job(db.database(), tenant, plan, agent, repository, fire_time)
         .await
+}
+
+/// Seeds a job of a kind that a plan does not run, such as a restore (FR-MN-03).
+pub async fn repository_job(
+    db: &TestDatabase,
+    tenant: TenantId,
+    kind: JobKind,
+    agent: AgentId,
+    repository: RepositoryId,
+) -> JobId {
+    let mut tx = db
+        .database()
+        .begin_tenant(tenant)
+        .await
+        .expect("cannot begin the transaction");
+    let id = JobId::new();
+    restichub_db::jobs::create(
+        &mut tx,
+        &restichub_db::jobs::NewJob {
+            id,
+            kind,
+            agent_id: agent,
+            repository_id: Some(repository),
+            plan_id: None,
+            fire_time: None,
+            expires_at: None,
+            location_fingerprint: None,
+            created_by: None,
+        },
+    )
+    .await
+    .expect("cannot create the job");
+    tx.commit().await.expect("cannot commit the job");
+    id
 }
 
 pub async fn set_last_seen(
