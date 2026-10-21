@@ -101,7 +101,7 @@ fn random_fraction() -> f64 {
 pub struct Timeouts {
     /// The interval between the heartbeat messages of the control plane (FR-ID-07).
     pub ping: Duration,
-    /// The time budget of the TCP connect and the TLS handshake.
+    /// The time budget of the TCP connect and, separately, of the TLS handshake.
     pub connect: Duration,
     /// How often the client pings over HTTP/2.
     pub keepalive_interval: Duration,
@@ -475,7 +475,10 @@ pub async fn connect_once(
     timeouts: Timeouts,
     stop: &mut watch::Receiver<bool>,
 ) -> Result<Disconnect> {
-    let channel = channel(identity, timeouts).await?;
+    let channel = tokio::select! {
+        channel = channel(identity, timeouts) => channel?,
+        Ok(_) = stop.wait_for(|stopped| *stopped) => return Ok(Disconnect::Closed { healthy: false }),
+    };
     let mut client = AgentServiceClient::new(channel)
         .max_decoding_message_size(restichub_proto::MAX_MESSAGE_BYTES)
         .max_encoding_message_size(restichub_proto::MAX_MESSAGE_BYTES);
@@ -926,7 +929,10 @@ async fn channel(identity: &StoredIdentity, timeouts: Timeouts) -> Result<Channe
             client_chain_pem(identity),
             identity.key_pem.clone(),
         ))
-        .domain_name(host);
+        .domain_name(host)
+        // The connect timeout bounds only the TCP connect. A control plane that cannot accept
+        // leaves the connection in the listen backlog, where the TCP connect succeeds.
+        .timeout(timeouts.connect);
     let channel = Endpoint::from_shared(endpoint.to_owned())
         .context("the gRPC endpoint is not a valid URL")?
         .tls_config(tls)
