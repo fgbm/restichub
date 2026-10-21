@@ -42,6 +42,7 @@ use tonic::{Request, Response, Status, Streaming};
 use uuid::Uuid;
 use x509_parser::prelude::{FromDer, GeneralName, X509Certificate};
 
+use crate::job_data::WriteOutcome;
 use crate::job_signing::{JobSigningService, RotationEvent};
 use crate::log_acks::LogAcks;
 use crate::rotation::PresentedCertificate;
@@ -905,7 +906,7 @@ async fn run_stream(
                 Ok(Some(message)) => {
                     last_activity = tokio::time::Instant::now();
                     active = true;
-                    handle_message(
+                    let reconnect = handle_message(
                         &state,
                         &mut identity,
                         generation,
@@ -915,7 +916,7 @@ async fn run_stream(
                         message,
                     )
                     .await;
-                    if log_acks.take_reconnect() {
+                    if reconnect || log_acks.take_reconnect() {
                         break;
                     }
                 }
@@ -1074,6 +1075,8 @@ async fn deliver_rotation(state: &AppState, agent: AgentId, event: RotationEvent
 /// The identity comes from the certificate, never from the message. An acknowledgement is accepted
 /// only for the current key identifier of the signing service and within the length bound, so a
 /// flood of other identifiers cannot grow the registry.
+///
+/// True when the connection must close so that the agent sends the message again (FR-PR-07).
 async fn handle_message(
     state: &AppState,
     identity: &mut PeerIdentity,
@@ -1082,17 +1085,17 @@ async fn handle_message(
     last_request: &mut Option<tokio::time::Instant>,
     log_acks: &mut LogAcks,
     message: AgentMessage,
-) {
+) -> bool {
     match message.payload {
         Some(agent_message::Payload::KeyUpdateAck(ack)) => {
             if ack.key_id.len() > MAX_KEY_ID_LEN {
-                return;
+                return false;
             }
             let Some(signing) = state.job_signing() else {
-                return;
+                return false;
             };
             if signing.current_key_id(state.db()).await.as_deref() != Some(ack.key_id.as_str()) {
-                return;
+                return false;
             }
             if let Some(pending) = state.agent_registry().ack(identity.agent, &ack.key_id) {
                 retire(state, pending);
@@ -1101,7 +1104,7 @@ async fn handle_message(
         Some(agent_message::Payload::CertificateSigningRequest(request)) => {
             if last_request.is_some_and(|at| at.elapsed() < certificate_request_cooldown(state)) {
                 reject_certificate(tx, CertificateRejectReason::TooEarly);
-                return;
+                return false;
             }
             *last_request = Some(tokio::time::Instant::now());
             let now = state.auth().clock.now();
@@ -1168,18 +1171,30 @@ async fn handle_message(
                 .await;
         }
         Some(agent_message::Payload::JobResult(result)) => {
-            crate::job_data::handle_job_result_data(
+            // A result that the database did not take closes the stream, so the agent sends its
+            // stored results again after the reconnect (ADR-0020, FR-PR-07).
+            let stored = crate::job_data::handle_job_result_data(
                 state,
                 identity.tenant,
                 identity.agent,
                 &result,
             )
             .await;
-            crate::jobs::handle_job_result(state, identity.tenant, identity.agent, &result).await;
+            if stored == WriteOutcome::Transient {
+                return true;
+            }
+            return crate::jobs::handle_job_result(state, identity.tenant, identity.agent, &result)
+                .await
+                == WriteOutcome::Transient;
         }
         Some(agent_message::Payload::StepResult(result)) => {
-            crate::job_data::handle_step_result(state, identity.tenant, identity.agent, &result)
-                .await;
+            let stored = crate::job_data::handle_step_result(
+                state,
+                identity.tenant,
+                identity.agent,
+                &result,
+            )
+            .await;
             crate::queue::stale::handle_step_result(
                 state,
                 identity.tenant,
@@ -1187,6 +1202,7 @@ async fn handle_message(
                 &result,
             )
             .await;
+            return stored == WriteOutcome::Transient;
         }
         Some(agent_message::Payload::StepProgress(progress)) => {
             crate::job_data::handle_progress(state, identity.tenant, identity.agent, &progress)
@@ -1194,7 +1210,7 @@ async fn handle_message(
         }
         Some(agent_message::Payload::LogChunk(chunk)) => {
             if !log_acks.admits(&chunk.job_id) {
-                return;
+                return false;
             }
             let outcome =
                 crate::job_data::handle_log_chunk(state, identity.tenant, identity.agent, &chunk)
@@ -1203,6 +1219,7 @@ async fn handle_message(
         }
         None => {}
     }
+    false
 }
 
 fn reject_certificate(tx: &mpsc::Sender<ControlMessage>, reason: CertificateRejectReason) {
