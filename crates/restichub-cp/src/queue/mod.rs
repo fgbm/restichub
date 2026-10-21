@@ -50,6 +50,14 @@ use select::Limits;
 /// The largest number of waiting jobs of one agent that a tenant pass looks at.
 const BATCH_PER_AGENT: i64 = 100;
 
+/// How long the control plane waits before it judges a running job by the absence of its agent
+/// (AC-PR-07).
+///
+/// The agent repeats a stored result at every connection, so a job that still runs is not lost. The
+/// agent waits at most `BACKOFF_MAX` of 60 s between two attempts (`restichub-agent`,
+/// `stream::BACKOFF_MAX`), so the wait holds twice that delay.
+pub const RECONNECT_GRACE: time::Duration = time::Duration::minutes(2);
+
 /// The result message of a job that never got an acknowledgement.
 const NOT_ACKNOWLEDGED: &str = "not_acknowledged";
 
@@ -107,6 +115,44 @@ impl QueueConfig {
     }
 }
 
+/// When the control plane may judge a running job by the absence of its agent (AC-PR-07).
+///
+/// The registry of the online agents starts empty, and a database outage hides every agent, so a
+/// running job looks lost while its agent still runs and holds the result. The wait counts from the
+/// first pass that read the agents again after the start or after a pass that could not read them.
+#[derive(Debug, Default)]
+pub struct AgentView {
+    /// The first pass that read the agents again, while the wait runs.
+    reading_since: std::sync::Mutex<Option<OffsetDateTime>>,
+}
+
+impl AgentView {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Option<OffsetDateTime>> {
+        self.reading_since
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+    }
+
+    /// Records that a pass could not read the agents. The wait starts again with the next pass.
+    pub fn failed(&self) {
+        *self.lock() = None;
+    }
+
+    /// Records a pass that read the agents. Only the first pass after a failure starts the wait.
+    pub fn passed(&self, now: OffsetDateTime) {
+        let mut since = self.lock();
+        if since.is_none() {
+            *since = Some(now);
+        }
+    }
+
+    /// True when the control plane read the agents for at least [`RECONNECT_GRACE`].
+    pub fn judges_absence(&self, now: OffsetDateTime) -> bool {
+        self.lock()
+            .is_some_and(|since| now >= since + RECONNECT_GRACE)
+    }
+}
+
 /// Runs one dispatcher pass over every active tenant.
 ///
 /// The clock is injectable, so a test drives the lease, the backoff and the stale lock wait without
@@ -124,10 +170,23 @@ pub async fn run_with_online(
     online: &[AgentId],
 ) -> Result<(), DbError> {
     let tenant_list = {
-        let mut tx = state.db().begin_platform().await?;
-        let list = tenants::list(&mut tx).await?;
-        tx.commit().await?;
-        list
+        let read = async {
+            let mut tx = state.db().begin_platform().await?;
+            let list = tenants::list(&mut tx).await?;
+            tx.commit().await?;
+            Ok::<_, DbError>(list)
+        }
+        .await;
+        match read {
+            Ok(list) => {
+                state.agent_view().passed(now);
+                list
+            }
+            Err(error) => {
+                state.agent_view().failed();
+                return Err(error);
+            }
+        }
     };
     for tenant in tenant_list {
         // A suspended tenant dispatches nothing; its agents stay connected (AC-TN-03).
@@ -136,9 +195,11 @@ pub async fn run_with_online(
         }
         if let Err(error) = stale::recover_tenant(state, tenant.id, now, online).await {
             tracing::warn!(tenant = %tenant.id, %error, "the stale lock pass of a tenant failed");
+            state.agent_view().failed();
         }
         if let Err(error) = dispatch_tenant(state, tenant.id, now, online).await {
             tracing::warn!(tenant = %tenant.id, %error, "the dispatch pass of a tenant failed");
+            state.agent_view().failed();
         }
     }
     Ok(())
@@ -563,4 +624,43 @@ pub fn spawn(state: AppState, clock: Arc<dyn Clock>) -> tokio::task::JoinHandle<
             }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn at_start() -> OffsetDateTime {
+        OffsetDateTime::from_unix_timestamp(1_800_000_000).expect("a valid time")
+    }
+
+    #[test]
+    fn ac_pr_07_the_absence_of_an_agent_counts_only_after_the_reconnect_grace() {
+        let view = AgentView::default();
+        let start = at_start();
+        assert!(!view.judges_absence(start), "no pass has read the agents");
+        view.passed(start);
+        assert!(!view.judges_absence(start), "the grace runs");
+        assert!(!view.judges_absence(start + RECONNECT_GRACE - time::Duration::SECOND));
+        assert!(view.judges_absence(start + RECONNECT_GRACE));
+        assert!(
+            view.judges_absence(start + time::Duration::hours(3)),
+            "a later pass keeps the start"
+        );
+    }
+
+    #[test]
+    fn ac_pr_07_a_failed_pass_starts_the_reconnect_grace_again() {
+        let view = AgentView::default();
+        let start = at_start();
+        view.passed(start);
+        let back = start + time::Duration::hours(1);
+        assert!(view.judges_absence(back));
+
+        view.failed();
+        assert!(!view.judges_absence(back), "the view is not reliable again");
+        view.passed(back);
+        assert!(!view.judges_absence(back), "the grace counts from here");
+        assert!(view.judges_absence(back + RECONNECT_GRACE));
+    }
 }

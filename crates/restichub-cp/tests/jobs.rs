@@ -189,11 +189,17 @@ async fn setup(db: &TestDatabase) -> Setup {
 }
 
 fn hello() -> AgentMessage {
+    hello_holding(Vec::new())
+}
+
+/// A hello that lists `held` as the jobs of the agent (ADR-0039).
+fn hello_holding(held: Vec<String>) -> AgentMessage {
     AgentMessage {
         payload: Some(agent_message::Payload::AgentHello(AgentHello {
             protocol_version_major: restichub_proto::PROTOCOL_VERSION_MAJOR,
             protocol_version_minor: restichub_proto::PROTOCOL_VERSION_MINOR,
             agent_version: "0.1.0".to_owned(),
+            held_job_ids: held,
             ..AgentHello::default()
         })),
     }
@@ -212,12 +218,30 @@ async fn open_stream_for(
     agent: Uuid,
     client: &mut AgentServiceClient<tonic::transport::Channel>,
 ) -> (mpsc::Sender<AgentMessage>, Streaming<ControlMessage>) {
+    open_stream_hello(setup, agent, client, hello()).await
+}
+
+/// Opens the stream with a hello that lists `held` as the jobs of the agent (ADR-0039).
+async fn open_stream_holding(
+    setup: &Setup,
+    client: &mut AgentServiceClient<tonic::transport::Channel>,
+    held: Vec<String>,
+) -> (mpsc::Sender<AgentMessage>, Streaming<ControlMessage>) {
+    open_stream_hello(setup, setup.agent_id(), client, hello_holding(held)).await
+}
+
+async fn open_stream_hello(
+    setup: &Setup,
+    agent: Uuid,
+    client: &mut AgentServiceClient<tonic::transport::Channel>,
+    greeting: AgentMessage,
+) -> (mpsc::Sender<AgentMessage>, Streaming<ControlMessage>) {
     let (tx, rx) = mpsc::channel::<AgentMessage>(16);
     let response = client
         .connect(ReceiverStream::new(rx))
         .await
         .expect("the stream must open");
-    tx.send(hello()).await.expect("cannot send the hello");
+    tx.send(greeting).await.expect("cannot send the hello");
     let mut inbound = response.into_inner();
     let mut hello_seen = false;
     let mut update_seen = false;
@@ -1569,6 +1593,105 @@ async fn an_init_runs_on_the_maintenance_agent_and_a_test_access_accepts_another
     assert_eq!(
         job.get("agent_id").and_then(Value::as_str),
         Some(second.agent_id.as_str())
+    );
+
+    db.cleanup().await;
+}
+
+/// True when the control plane ends the stream. A heartbeat before the end is skipped.
+async fn stream_closed(inbound: &mut Streaming<ControlMessage>) -> bool {
+    for _ in 0..16 {
+        match tokio::time::timeout(Duration::from_secs(10), inbound.message()).await {
+            Ok(Ok(None)) | Ok(Err(_)) => return true,
+            Ok(Ok(Some(_))) => {}
+            Err(_) => return false,
+        }
+    }
+    false
+}
+
+/// Acknowledges the job through the stream and waits until the control plane shows it as `running`.
+async fn ack(tx: &mpsc::Sender<AgentMessage>, app: &Router, cookie: &str, job_id: &str) {
+    tx.send(AgentMessage {
+        payload: Some(agent_message::Payload::JobAck(JobAck {
+            job_id: job_id.to_owned(),
+        })),
+    })
+    .await
+    .expect("cannot send the acknowledgement");
+    wait_for_job_status(app, cookie, job_id, "running").await;
+}
+
+/// Waits until the job reaches `status` through the API.
+async fn wait_for_job_status(app: &Router, cookie: &str, job_id: &str, status: &str) {
+    for _ in 0..200 {
+        let job = get_job(app, cookie, job_id).await;
+        if job.get("status").and_then(Value::as_str) == Some(status) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    panic!(
+        "the job must reach {status}: {:?}",
+        get_job(app, cookie, job_id).await
+    );
+}
+
+/// FR-PR-07: a result whose flag write fails is not stored, so the control plane closes the stream
+/// and the agent repeats the stored result after the reconnect.
+#[tokio::test]
+async fn fr_pr_07_a_result_that_cannot_set_the_initialized_flag_closes_the_stream() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let setup = setup(&db).await;
+    let app = api_router(setup.listener.state.clone());
+    let repository_id =
+        create_repository(&app, &setup.admin, setup.agent_id(), "correct-password").await;
+    let mut client = setup.listener.channel(&setup.identity).await;
+    let (tx, mut inbound) = open_stream(&setup, &mut client).await;
+
+    let job_id = start_action(&app, &setup, repository_id, "test-access").await;
+    let _ = read_signed_job(&mut inbound).await;
+    ack(&tx, &app, &setup.admin, &job_id).await;
+
+    // An abort marks the transaction, and its commit would report success while it stores nothing.
+    sqlx::query("REVOKE UPDATE ON repositories FROM restichub_app")
+        .execute(db.owner_pool())
+        .await
+        .expect("cannot revoke the write of the repositories");
+    send_result(&tx, &job_id, JobStatus::Succeeded, None).await;
+    assert!(
+        stream_closed(&mut inbound).await,
+        "the control plane must close the stream when the flag is not stored"
+    );
+    let job = get_job(&app, &setup.admin, &job_id).await;
+    assert_eq!(
+        job.get("status").and_then(Value::as_str),
+        Some("running"),
+        "the control plane stored no result"
+    );
+    let repository = get_repository(&app, &setup.admin, repository_id).await;
+    assert_eq!(
+        repository.get("initialized").and_then(Value::as_bool),
+        Some(false)
+    );
+
+    // The database is back. The agent connects again, lists the job as held and repeats the result.
+    sqlx::query("GRANT UPDATE ON repositories TO restichub_app")
+        .execute(db.owner_pool())
+        .await
+        .expect("cannot grant the write of the repositories");
+    drop(tx);
+    let mut client = setup.listener.channel(&setup.identity).await;
+    let (tx, _inbound) = open_stream_holding(&setup, &mut client, vec![job_id.clone()]).await;
+    send_result(&tx, &job_id, JobStatus::Succeeded, None).await;
+    wait_for_job_status(&app, &setup.admin, &job_id, "succeeded").await;
+    let repository = get_repository(&app, &setup.admin, repository_id).await;
+    assert_eq!(
+        repository.get("initialized").and_then(Value::as_bool),
+        Some(true),
+        "the repeated result sets the flag"
     );
 
     db.cleanup().await;
