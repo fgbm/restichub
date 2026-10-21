@@ -11,6 +11,7 @@
 
 pub mod agent;
 pub mod cli;
+mod connect;
 pub mod enroll;
 pub mod executor;
 pub mod fleet;

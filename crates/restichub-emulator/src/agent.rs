@@ -23,7 +23,7 @@ use restichub_proto::signing::{
 use restichub_proto::validate::validate_job;
 use tokio::sync::{mpsc, watch};
 use tokio_stream::wrappers::ReceiverStream;
-use tonic::transport::{Certificate, ClientTlsConfig, Endpoint, Identity};
+use tonic::transport::{Certificate, ClientTlsConfig, Identity};
 
 use crate::executor::{Executor, StepOutcome};
 use crate::identity::AgentIdentity;
@@ -253,16 +253,14 @@ pub async fn run_agent(config: Arc<AgentConfig>, mut shutdown: watch::Receiver<b
     let purge = tokio::spawn(purge_journal(Arc::clone(&journal), shutdown.clone()));
     let carry = Carry::new(Arc::clone(&config.load.metrics));
     let mut attempt = 0u32;
-    let mut connected = false;
+    let mut retry = false;
     while !*shutdown.borrow() {
-        if connected {
+        if retry {
             config.load.metrics.inc_reconnect();
         }
+        retry = true;
         match connect_once(&config, &journal, &carry, &mut shutdown).await {
-            Ok(()) => {
-                attempt = 0;
-                connected = true;
-            }
+            Ok(()) => attempt = 0,
             Err(error) => {
                 // A load generator does not stop on a connection error.
                 eprintln!("{}: {error:#}", config.identity.agent_id);
@@ -310,9 +308,7 @@ async fn connect_once(
         .ca_certificate(Certificate::from_pem(&config.ca_pem))
         .identity(Identity::from_pem(&identity.cert_pem, &identity.key_pem))
         .domain_name(config.server_name.clone());
-    let endpoint = Endpoint::from_shared(config.server_url.clone())
-        .context("invalid server URL")?
-        .tls_config(tls)?;
+    let endpoint = crate::connect::endpoint(config.server_url.clone(), tls)?;
     let started = Instant::now();
     let channel = endpoint.connect().await?;
     let mut client = AgentServiceClient::new(channel);
