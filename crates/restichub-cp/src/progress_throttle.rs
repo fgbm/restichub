@@ -4,6 +4,10 @@
 //! seconds, but a stream can send them as fast as the database answers. The throttle writes the
 //! first message at once. It keeps only the latest message that arrives in the next second and
 //! writes it when the second ends. The protocol does not change.
+//!
+//! The throttle also remembers a job whose message the control plane refused (AC-PR-05). A message
+//! for an unknown or a foreign job makes no slot, so without that memory every repeat would read
+//! the job again. A stream that sends 1000 such messages for one job now reads it a few times.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -21,6 +25,12 @@ const PRUNE_AT: usize = 256;
 /// A hard cap: a job above it is not throttled, so the memory stays bounded. Only a job that the
 /// agent owns gets a slot.
 const MAX_JOBS: usize = 10_000;
+
+/// How long the throttle remembers a refused job.
+pub const REFUSAL_INTERVAL: Duration = Duration::from_secs(60);
+/// A hard cap on the remembered refusals, so a stream that names many unknown jobs stays within a
+/// fixed memory.
+const MAX_REFUSALS: usize = 1_024;
 
 #[derive(Debug)]
 struct Slot<T> {
@@ -43,12 +53,15 @@ pub enum Admit<T> {
 #[derive(Debug)]
 pub struct ProgressThrottle<T> {
     slots: Mutex<HashMap<ProgressKey, Slot<T>>>,
+    /// Expiry of the memo entry that holds a refused job.
+    refusals: Mutex<HashMap<ProgressKey, Instant>>,
 }
 
 impl<T> Default for ProgressThrottle<T> {
     fn default() -> Self {
         Self {
             slots: Mutex::new(HashMap::new()),
+            refusals: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -99,6 +112,33 @@ impl<T> ProgressThrottle<T> {
     /// Drops the slot and the held message of a job that has ended.
     pub fn forget(&self, key: ProgressKey) {
         lock(&self.slots).remove(&key);
+    }
+
+    /// Remembers that the control plane refused a message for this job, so a repeat of the message
+    /// does not read the job again (AC-PR-05). Only a first refusal reaches the audit log: the
+    /// repeat finds the job refused here and stops before any database work.
+    pub fn remember_refusal(&self, key: ProgressKey, now: Instant) {
+        let mut refusals = lock(&self.refusals);
+        if refusals.len() >= MAX_REFUSALS {
+            refusals.retain(|_, until| now < *until);
+            if refusals.len() >= MAX_REFUSALS {
+                return;
+            }
+        }
+        refusals.insert(key, now + REFUSAL_INTERVAL);
+    }
+
+    /// Whether the refusal of a message for this job is still remembered.
+    pub fn refused(&self, key: ProgressKey, now: Instant) -> bool {
+        let mut refusals = lock(&self.refusals);
+        match refusals.get(&key) {
+            Some(until) if now < *until => true,
+            Some(_) => {
+                refusals.remove(&key);
+                false
+            }
+            None => false,
+        }
     }
 
     /// The latest held message, and the start of the next window. `None` when nothing waits.
@@ -235,5 +275,46 @@ mod tests {
         throttle.admit(id, 2, now);
         throttle.forget(id);
         assert_eq!(throttle.take_pending(id, now + INTERVAL), None);
+    }
+
+    #[test]
+    fn ac_pr_05_a_remembered_refusal_covers_the_next_messages_of_the_job() {
+        let throttle: ProgressThrottle<i32> = ProgressThrottle::default();
+        let id = key();
+        let now = Instant::now();
+        assert!(!throttle.refused(id, now));
+        throttle.remember_refusal(id, now);
+        assert!(throttle.refused(id, now));
+        assert!(throttle.refused(id, now + REFUSAL_INTERVAL - Duration::from_millis(1)));
+        assert!(!throttle.refused(id, now + REFUSAL_INTERVAL));
+    }
+
+    #[test]
+    fn ac_pr_05_a_refusal_belongs_to_one_agent_and_one_job() {
+        let throttle: ProgressThrottle<i32> = ProgressThrottle::default();
+        let refused = key();
+        let now = Instant::now();
+        throttle.remember_refusal(refused, now);
+        assert!(throttle.refused(refused, now));
+        assert!(!throttle.refused((AgentId::new(), refused.1), now));
+        assert!(!throttle.refused((refused.0, JobId::new()), now));
+    }
+
+    #[test]
+    fn ac_pr_05_the_refusals_stay_bounded() {
+        let throttle: ProgressThrottle<i32> = ProgressThrottle::default();
+        let now = Instant::now();
+        for _ in 0..(MAX_REFUSALS + 10) {
+            throttle.remember_refusal(key(), now);
+        }
+        assert_eq!(lock(&throttle.refusals).len(), MAX_REFUSALS);
+        // The table holds only live refusals, so it drops the new one.
+        let dropped = key();
+        throttle.remember_refusal(dropped, now);
+        assert!(!throttle.refused(dropped, now));
+        // All entries have expired, so the table takes the new refusal.
+        let later = now + REFUSAL_INTERVAL;
+        throttle.remember_refusal(dropped, later);
+        assert!(throttle.refused(dropped, later));
     }
 }
