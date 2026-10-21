@@ -289,13 +289,14 @@ fn raise_open_file_limit(config: &Config) {
     };
     let needed = restichub_cp::agent_listener::open_files_needed(
         listener_cap,
+        config.events_max_streams,
         config.database_max_connections,
     );
     match restichub_cp::harden::raise_open_file_limit() {
         Ok(open_files) if open_files < needed => tracing::warn!(
             open_files,
             needed,
-            "the open file limit is lower than the agent listener cap and the database pool need; raise the hard limit (the compose ulimits, LimitNOFILE of the service unit or ulimit -n)"
+            "the open file limit is lower than the agent listener cap, the event streams and the database pool need; raise the hard limit (the compose ulimits, LimitNOFILE of the service unit or ulimit -n)"
         ),
         Ok(open_files) => tracing::info!(open_files, "the open file limit"),
         Err(error) => tracing::warn!(%error, needed, "cannot raise the open file limit"),

@@ -141,3 +141,92 @@ async fn fr_mn_05_a_connection_above_the_anonymous_share_counts_with_its_reason(
     assert_eq!(stats.refused(RefusalReason::Cap), 0);
     db.cleanup().await;
 }
+
+#[tokio::test]
+async fn fr_mn_05_a_connection_above_the_anonymous_limit_of_an_address_counts_with_its_reason() {
+    let Some((state, listener, db)) = start(ListenerLimits {
+        max_connections: 100,
+        anonymous_per_ip: 1,
+        anonymous_idle_timeout: Duration::from_secs(30),
+        anonymous_lifetime: Duration::from_secs(30),
+        ..ListenerLimits::default()
+    })
+    .await
+    else {
+        return;
+    };
+
+    let _held = anonymous_tls(&listener).await;
+    let mut refused = anonymous_tls(&listener).await;
+    assert_closed(&mut refused).await;
+
+    let stats = state.listener_stats();
+    assert_eq!(stats.refused(RefusalReason::AnonymousPerIp), 1);
+    assert_eq!(stats.refused(RefusalReason::AnonymousShare), 0);
+    assert_eq!(stats.refused(RefusalReason::Cap), 0);
+    db.cleanup().await;
+}
+
+/// Opens a TCP connection that never starts the TLS handshake, so it holds a handshake slot.
+async fn silent_tcp(listener: &Listener) -> tokio::net::TcpStream {
+    tokio::net::TcpStream::connect(listener.addr)
+        .await
+        .expect("cannot connect")
+}
+
+async fn assert_tcp_closed(stream: &mut tokio::net::TcpStream) {
+    let mut buffer = [0_u8; 1];
+    let result = tokio::time::timeout(Duration::from_secs(5), stream.read(&mut buffer))
+        .await
+        .expect("the refused connection must close");
+    assert!(matches!(result, Ok(0) | Err(_)), "the connection is open");
+}
+
+#[tokio::test]
+async fn fr_mn_05_a_handshake_above_the_limit_of_an_address_counts_with_its_reason() {
+    let Some((state, listener, db)) = start(ListenerLimits {
+        handshakes_per_ip: 1,
+        handshake_timeout: Duration::from_secs(30),
+        ..ListenerLimits::default()
+    })
+    .await
+    else {
+        return;
+    };
+
+    let _held = silent_tcp(&listener).await;
+    let mut refused = silent_tcp(&listener).await;
+    assert_tcp_closed(&mut refused).await;
+
+    let stats = state.listener_stats();
+    assert_eq!(stats.refused(RefusalReason::HandshakesPerIp), 1);
+    assert_eq!(stats.refused(RefusalReason::Handshakes), 0);
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn fr_mn_05_a_handshake_above_the_global_limit_counts_with_its_reason() {
+    // The global limit is 256 handshakes; the per-address limit must not stop the loopback first.
+    const HANDSHAKES: usize = 256;
+    let Some((state, listener, db)) = start(ListenerLimits {
+        handshakes_per_ip: HANDSHAKES * 2,
+        handshake_timeout: Duration::from_secs(30),
+        ..ListenerLimits::default()
+    })
+    .await
+    else {
+        return;
+    };
+
+    let mut held = Vec::with_capacity(HANDSHAKES);
+    for _ in 0..HANDSHAKES {
+        held.push(silent_tcp(&listener).await);
+    }
+    let mut refused = silent_tcp(&listener).await;
+    assert_tcp_closed(&mut refused).await;
+
+    let stats = state.listener_stats();
+    assert_eq!(stats.refused(RefusalReason::Handshakes), 1);
+    assert_eq!(stats.refused(RefusalReason::HandshakesPerIp), 0);
+    db.cleanup().await;
+}

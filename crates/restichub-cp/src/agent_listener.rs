@@ -43,7 +43,7 @@ use tonic::transport::server::Connected;
 use crate::agent_stream::PeerInfo;
 use crate::client_ip::IgnoreForwarded;
 use crate::config::Config;
-use crate::listener_stats::{ListenerStats, RefusalReason};
+use crate::listener_stats::RefusalReason;
 use crate::pki::IssuedServerCertificate;
 use crate::server::{AppState, BODY_LIMIT};
 
@@ -72,14 +72,20 @@ const ANONYMOUS_SHARE_DIVISOR: usize = 10;
 /// The default cap on the established connections. It covers 2000 agents and a margin.
 pub const DEFAULT_MAX_CONNECTIONS: usize = 2200;
 
-/// Descriptors for the HTTP API, the event streams and the files, beside the agent sockets.
+/// Descriptors for the HTTP API requests and the files, beside the agent sockets, the event streams
+/// and the database pool.
 const OPEN_FILE_HEADROOM: usize = 256;
 
-/// The open file limit that the connection cap and the database pool need.
-pub fn open_files_needed(max_connections: usize, database_pool: u32) -> usize {
+/// The open file limit that the connection cap, the event streams and the database pool need.
+pub fn open_files_needed(
+    max_connections: usize,
+    event_streams: usize,
+    database_pool: u32,
+) -> usize {
     let pool = usize::try_from(database_pool).unwrap_or(usize::MAX);
     max_connections
         .saturating_add(HANDSHAKE_CONCURRENCY)
+        .saturating_add(event_streams)
         .saturating_add(pool)
         .saturating_add(OPEN_FILE_HEADROOM)
 }
@@ -411,14 +417,6 @@ impl Load {
             anonymous: !authenticated,
         })
     }
-
-    fn refuse(&self, stats: &ListenerStats, reason: RefusalReason) {
-        stats.record_refusal(
-            reason,
-            self.connections.load(Ordering::Acquire),
-            self.max_connections,
-        );
-    }
 }
 
 /// One in-progress handshake slot of an address.
@@ -582,6 +580,13 @@ pub async fn serve_listener(
     let handshakes = Arc::new(Semaphore::new(HANDSHAKE_CONCURRENCY));
     let load = Arc::new(Load::new(&limits));
     let stats = Arc::clone(state.listener_stats());
+    let report = tokio::spawn({
+        let load = Arc::clone(&load);
+        Arc::clone(&stats).report(
+            move || load.connections.load(Ordering::Acquire),
+            limits.max_connections,
+        )
+    });
     let (tx, rx) = tokio::sync::mpsc::channel::<io::Result<AgentConnection>>(64);
     tokio::spawn(async move {
         loop {
@@ -600,12 +605,12 @@ pub async fn serve_listener(
             // A handshake over the global or the per-IP limit drops the connection, so a flood
             // cannot exhaust memory and one address cannot hold every slot.
             let Ok(permit) = handshakes.clone().try_acquire_owned() else {
-                load.refuse(&stats, RefusalReason::Handshakes);
+                stats.record_refusal(RefusalReason::Handshakes);
                 drop(stream);
                 continue;
             };
             let Some(handshake) = load.try_handshake(ip) else {
-                load.refuse(&stats, RefusalReason::HandshakesPerIp);
+                stats.record_refusal(RefusalReason::HandshakesPerIp);
                 drop(stream);
                 continue;
             };
@@ -634,7 +639,7 @@ pub async fn serve_listener(
                 let guard = match load.try_connect(ip, authenticated) {
                     Ok(guard) => guard,
                     Err(reason) => {
-                        load.refuse(&stats, reason);
+                        stats.record_refusal(reason);
                         return;
                     }
                 };
@@ -670,9 +675,11 @@ pub async fn serve_listener(
         .concurrency_limit_per_connection(8)
         .load_shed(true);
     let router = builder.add_routes(agent_routes(state));
-    router
+    let served = router
         .serve_with_incoming_shutdown(tokio_stream::wrappers::ReceiverStream::new(rx), shutdown)
-        .await?;
+        .await;
+    report.abort();
+    served?;
     Ok(())
 }
 

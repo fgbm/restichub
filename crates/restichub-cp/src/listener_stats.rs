@@ -1,11 +1,11 @@
 //! Process counters of the agent listener for `/metrics` and the operator log.
 
 use std::io;
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
+use std::time::Duration;
 
-/// Repeated refusals, and repeated accept errors, write at most one log line in this interval.
+/// The agent listener writes one log line per interval with the events of that interval.
 pub const LOG_INTERVAL: Duration = Duration::from_secs(60);
 
 /// The limit at which the listener closed a connection.
@@ -36,80 +36,112 @@ impl RefusalReason {
             Self::HandshakesPerIp => "handshakes_per_ip",
         }
     }
+
+    fn index(self) -> usize {
+        match self {
+            Self::Cap => 0,
+            Self::AnonymousShare => 1,
+            Self::AnonymousPerIp => 2,
+            Self::Handshakes => 3,
+            Self::HandshakesPerIp => 4,
+        }
+    }
 }
 
 #[derive(Debug, Default)]
 pub struct ListenerStats {
     refused: [AtomicU64; RefusalReason::ALL.len()],
     accept_errors: AtomicU64,
-    refusal_log: LogThrottle,
-    accept_error_log: LogThrottle,
+    /// The OS error code of the last accept error, 0 when it had none.
+    last_accept_error: AtomicI32,
 }
 
 impl ListenerStats {
-    pub fn record_refusal(
-        &self,
-        reason: RefusalReason,
-        connections: usize,
-        max_connections: usize,
-    ) {
-        self.refused[reason as usize].fetch_add(1, Ordering::Relaxed);
-        if let Some(refused) = self.refusal_log.record(Instant::now()) {
-            tracing::warn!(
-                reason = reason.as_str(),
-                refused,
-                connections,
-                max_connections,
-                "the agent listener closes connections at its limits; refused is the count since the last line"
-            );
-        }
+    pub fn record_refusal(&self, reason: RefusalReason) {
+        self.refused[reason.index()].fetch_add(1, Ordering::Relaxed);
     }
 
     pub fn record_accept_error(&self, error: &io::Error) {
+        self.last_accept_error
+            .store(error.raw_os_error().unwrap_or(0), Ordering::Relaxed);
         self.accept_errors.fetch_add(1, Ordering::Relaxed);
-        if let Some(errors) = self.accept_error_log.record(Instant::now()) {
-            tracing::warn!(
-                %error,
-                errors,
-                "the agent listener cannot accept connections; errors is the count since the last line"
-            );
-        }
     }
 
     pub fn refused(&self, reason: RefusalReason) -> u64 {
-        self.refused[reason as usize].load(Ordering::Relaxed)
+        self.refused[reason.index()].load(Ordering::Relaxed)
     }
 
     pub fn accept_errors(&self) -> u64 {
         self.accept_errors.load(Ordering::Relaxed)
     }
-}
 
-/// Counts events and lets one log line through per [`LOG_INTERVAL`].
-#[derive(Debug, Default)]
-struct LogThrottle {
-    state: Mutex<ThrottleState>,
-}
-
-#[derive(Debug, Default)]
-struct ThrottleState {
-    last_line: Option<Instant>,
-    pending: u64,
-}
-
-impl LogThrottle {
-    /// Returns the events since the last line when a line is due.
-    fn record(&self, now: Instant) -> Option<u64> {
-        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-        state.pending += 1;
-        if state
-            .last_line
-            .is_some_and(|last| now.saturating_duration_since(last) < LOG_INTERVAL)
-        {
-            return None;
+    fn counts(&self) -> Counts {
+        Counts {
+            refused: RefusalReason::ALL.map(|reason| self.refused(reason)),
+            accept_errors: self.accept_errors(),
         }
-        state.last_line = Some(now);
-        Some(std::mem::take(&mut state.pending))
+    }
+
+    /// Writes a warning each [`LOG_INTERVAL`] that had events, with the count of each kind.
+    ///
+    /// A periodic line keeps the hot path free of locks, gives each reason its own count and
+    /// reports the end of a burst at the next tick.
+    pub async fn report(self: Arc<Self>, connections: impl Fn() -> usize, max_connections: usize) {
+        let mut interval =
+            tokio::time::interval_at(tokio::time::Instant::now() + LOG_INTERVAL, LOG_INTERVAL);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut previous = self.counts();
+        loop {
+            interval.tick().await;
+            let current = self.counts();
+            let Some(delta) = current.since(previous) else {
+                continue;
+            };
+            previous = current;
+            let refused = |reason: RefusalReason| delta.refused[reason.index()];
+            let last_error = match self.last_accept_error.load(Ordering::Relaxed) {
+                code if code != 0 && delta.accept_errors > 0 => {
+                    Some(io::Error::from_raw_os_error(code).to_string())
+                }
+                _ => None,
+            };
+            tracing::warn!(
+                cap = refused(RefusalReason::Cap),
+                anonymous_share = refused(RefusalReason::AnonymousShare),
+                anonymous_per_ip = refused(RefusalReason::AnonymousPerIp),
+                handshakes = refused(RefusalReason::Handshakes),
+                handshakes_per_ip = refused(RefusalReason::HandshakesPerIp),
+                accept_errors = delta.accept_errors,
+                last_accept_error = last_error.as_deref(),
+                connections = connections(),
+                max_connections,
+                "the agent listener closed connections at its limits or cannot accept them; the counts are for the last interval"
+            );
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct Counts {
+    refused: [u64; RefusalReason::ALL.len()],
+    accept_errors: u64,
+}
+
+impl Counts {
+    /// Returns the events after `earlier`, or `None` when there are none.
+    fn since(self, earlier: Self) -> Option<Self> {
+        let mut delta = Self {
+            refused: [0; RefusalReason::ALL.len()],
+            accept_errors: self.accept_errors.saturating_sub(earlier.accept_errors),
+        };
+        for (slot, (now, then)) in delta
+            .refused
+            .iter_mut()
+            .zip(self.refused.iter().zip(earlier.refused))
+        {
+            *slot = now.saturating_sub(then);
+        }
+        (delta != Self::default()).then_some(delta)
     }
 }
 
@@ -118,24 +150,57 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_first_event_logs_and_the_next_ones_wait_for_the_interval() {
-        let throttle = LogThrottle::default();
-        let start = Instant::now();
-        assert_eq!(throttle.record(start), Some(1));
-        assert_eq!(throttle.record(start + Duration::from_secs(1)), None);
-        assert_eq!(throttle.record(start + Duration::from_secs(2)), None);
-        assert_eq!(throttle.record(start + LOG_INTERVAL), Some(3));
-        assert_eq!(throttle.record(start + LOG_INTERVAL), None);
+    fn each_reason_has_the_index_of_its_place_in_all() {
+        for (index, reason) in RefusalReason::ALL.into_iter().enumerate() {
+            assert_eq!(reason.index(), index, "{reason:?}");
+        }
     }
 
     #[test]
     fn each_reason_has_its_own_counter() {
         let stats = ListenerStats::default();
-        stats.record_refusal(RefusalReason::Cap, 2, 2);
-        stats.record_refusal(RefusalReason::Cap, 2, 2);
-        stats.record_refusal(RefusalReason::HandshakesPerIp, 0, 2);
+        stats.record_refusal(RefusalReason::Cap);
+        stats.record_refusal(RefusalReason::Cap);
+        stats.record_refusal(RefusalReason::HandshakesPerIp);
         assert_eq!(stats.refused(RefusalReason::Cap), 2);
         assert_eq!(stats.refused(RefusalReason::HandshakesPerIp), 1);
         assert_eq!(stats.refused(RefusalReason::AnonymousShare), 0);
+    }
+
+    #[test]
+    fn mixed_reasons_in_one_interval_count_each_reason() {
+        let stats = ListenerStats::default();
+        let start = stats.counts();
+        for _ in 0..3 {
+            stats.record_refusal(RefusalReason::Cap);
+        }
+        stats.record_refusal(RefusalReason::Handshakes);
+        stats.record_refusal(RefusalReason::HandshakesPerIp);
+        stats.record_accept_error(&io::Error::from_raw_os_error(24));
+
+        let delta = stats
+            .counts()
+            .since(start)
+            .expect("the interval had events");
+        assert_eq!(delta.refused[RefusalReason::Cap.index()], 3);
+        assert_eq!(delta.refused[RefusalReason::Handshakes.index()], 1);
+        assert_eq!(delta.refused[RefusalReason::HandshakesPerIp.index()], 1);
+        assert_eq!(delta.refused[RefusalReason::AnonymousShare.index()], 0);
+        assert_eq!(delta.accept_errors, 1);
+        assert_eq!(stats.last_accept_error.load(Ordering::Relaxed), 24);
+    }
+
+    #[test]
+    fn a_burst_then_silence_shows_in_full_at_the_next_tick() {
+        let stats = ListenerStats::default();
+        let start = stats.counts();
+        for _ in 0..600 {
+            stats.record_accept_error(&io::Error::from_raw_os_error(24));
+        }
+        let first_tick = stats.counts();
+        let delta = first_tick.since(start).expect("the burst");
+        assert_eq!(delta.accept_errors, 600);
+        assert_eq!(delta.refused, [0; RefusalReason::ALL.len()]);
+        assert_eq!(stats.counts().since(first_tick), None);
     }
 }

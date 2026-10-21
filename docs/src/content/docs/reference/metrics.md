@@ -43,7 +43,7 @@ Each sample has the label `tenant` with the tenant identifier. The identifier ho
 
 The control plane reuses the aggregates of a tenant for 15 seconds. A scrape interval below 15 seconds therefore shows the same values twice. The value of `restichub_agent_up` is always current.
 
-The agent listener serves all tenants. In multi mode, the endpoint therefore does not show the listener counters. The control plane log shows the refusals and the accept errors in all modes. It writes one warning a minute at most, with the count since the previous warning.
+The agent listener serves all tenants. In multi mode, the endpoint therefore does not show the listener counters. The control plane log shows the refusals and the accept errors in all modes. Each minute that has refusals or accept errors, the log has one warning. The warning gives the count for each reason and the count of accept errors in that minute.
 
 To alert when a plan does not finish a backup for a day, use this expression:
 
