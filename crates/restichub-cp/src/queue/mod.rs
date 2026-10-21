@@ -253,7 +253,6 @@ async fn dispatch_tenant(
     Ok(())
 }
 
-/// The job signing key set of one tenant pass.
 enum Signer {
     Ready(Arc<KeySet>),
     /// The key set could not be read now. The jobs stay as they are and the next pass tries again.
