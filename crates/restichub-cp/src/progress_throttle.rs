@@ -53,7 +53,7 @@ pub enum Admit<T> {
 #[derive(Debug)]
 pub struct ProgressThrottle<T> {
     slots: Mutex<HashMap<ProgressKey, Slot<T>>>,
-    /// The end of the refusal of a job.
+    /// Expiry of the memo entry that holds a refused job.
     refusals: Mutex<HashMap<ProgressKey, Instant>>,
 }
 
@@ -312,7 +312,7 @@ mod tests {
         let dropped = key();
         throttle.remember_refusal(dropped, now);
         assert!(!throttle.refused(dropped, now));
-        // The expired table takes the new refusal.
+        // All entries have expired, so the table takes the new refusal.
         let later = now + REFUSAL_INTERVAL;
         throttle.remember_refusal(dropped, later);
         assert!(throttle.refused(dropped, later));
