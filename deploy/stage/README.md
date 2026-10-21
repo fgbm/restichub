@@ -146,7 +146,7 @@ Set the public address of the listener in `.env`, so an enrolled agent learns wh
 RESTICHUB_AGENT_ENDPOINT=https://agents.example.com:8443
 ```
 
-The host is the placeholder `agents.example.com` by default. Set the real host and the published port. `RESTICHUB_AGENT_PORT` changes the published port (the default is `8443`). `RESTICHUB_AGENT_MAX_CONNECTIONS` bounds the established connections (the default is `2200`). The control plane issues the listener certificate from the installation CA with the endpoint host and the listen address as the subject alternative names.
+The host is the placeholder `agents.example.com` by default. Set the real host and the published port. `RESTICHUB_AGENT_PORT` changes the published port (the default is `8443`). `RESTICHUB_AGENT_MAX_CONNECTIONS` bounds the established connections (the default is `2200`). Each connection uses one file descriptor, so the `cp` service sets `ulimits: nofile` to 65536. The control plane issues the listener certificate from the installation CA with the endpoint host and the listen address as the subject alternative names.
 
 ## Alerts
 

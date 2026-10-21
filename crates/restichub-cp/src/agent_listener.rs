@@ -43,6 +43,7 @@ use tonic::transport::server::Connected;
 use crate::agent_stream::PeerInfo;
 use crate::client_ip::IgnoreForwarded;
 use crate::config::Config;
+use crate::listener_stats::{ListenerStats, RefusalReason};
 use crate::pki::IssuedServerCertificate;
 use crate::server::{AppState, BODY_LIMIT};
 
@@ -70,6 +71,18 @@ const ANONYMOUS_SHARE_DIVISOR: usize = 10;
 
 /// The default cap on the established connections. It covers 2000 agents and a margin.
 pub const DEFAULT_MAX_CONNECTIONS: usize = 2200;
+
+/// Descriptors for the HTTP API, the event streams and the files, beside the agent sockets.
+const OPEN_FILE_HEADROOM: usize = 256;
+
+/// The open file limit that the connection cap and the database pool need.
+pub fn open_files_needed(max_connections: usize, database_pool: u32) -> usize {
+    let pool = usize::try_from(database_pool).unwrap_or(usize::MAX);
+    max_connections
+        .saturating_add(HANDSHAKE_CONCURRENCY)
+        .saturating_add(pool)
+        .saturating_add(OPEN_FILE_HEADROOM)
+}
 
 /// The load bounds of the listener, checked at start.
 #[derive(Debug, Clone, Copy)]
@@ -367,14 +380,18 @@ impl Load {
         })
     }
 
-    /// Reserves a connection slot. `None` when the cap or an anonymous limit is reached.
-    fn try_connect(self: &Arc<Self>, ip: IpAddr, authenticated: bool) -> Option<ConnectGuard> {
+    /// Reserves a connection slot, or names the cap or the anonymous limit that is reached.
+    fn try_connect(
+        self: &Arc<Self>,
+        ip: IpAddr,
+        authenticated: bool,
+    ) -> Result<ConnectGuard, RefusalReason> {
         if self.connections.load(Ordering::Acquire) >= self.max_connections {
-            return None;
+            return Err(RefusalReason::Cap);
         }
         if !authenticated {
             if self.anonymous.load(Ordering::Acquire) >= self.anonymous_share {
-                return None;
+                return Err(RefusalReason::AnonymousShare);
             }
             let mut by_ip = self
                 .anonymous_by_ip
@@ -382,17 +399,25 @@ impl Load {
                 .unwrap_or_else(|error| error.into_inner());
             let count = by_ip.entry(ip).or_insert(0);
             if *count >= self.anonymous_per_ip {
-                return None;
+                return Err(RefusalReason::AnonymousPerIp);
             }
             *count += 1;
             self.anonymous.fetch_add(1, Ordering::AcqRel);
         }
         self.connections.fetch_add(1, Ordering::AcqRel);
-        Some(ConnectGuard {
+        Ok(ConnectGuard {
             load: Arc::clone(self),
             ip,
             anonymous: !authenticated,
         })
+    }
+
+    fn refuse(&self, stats: &ListenerStats, reason: RefusalReason) {
+        stats.record_refusal(
+            reason,
+            self.connections.load(Ordering::Acquire),
+            self.max_connections,
+        );
     }
 }
 
@@ -556,13 +581,16 @@ pub async fn serve_listener(
     let acceptor = TlsAcceptor::from(tls);
     let handshakes = Arc::new(Semaphore::new(HANDSHAKE_CONCURRENCY));
     let load = Arc::new(Load::new(&limits));
+    let stats = Arc::clone(state.listener_stats());
     let (tx, rx) = tokio::sync::mpsc::channel::<io::Result<AgentConnection>>(64);
     tokio::spawn(async move {
         loop {
             let (stream, peer) = match listener.accept().await {
                 Ok(accepted) => accepted,
-                Err(_) => {
-                    // A transient accept error must not stop the listener.
+                Err(error) => {
+                    stats.record_accept_error(&error);
+                    // A transient error such as EMFILE must not stop the listener, and the pause
+                    // keeps the loop from spinning while the descriptors stay exhausted.
                     tokio::time::sleep(Duration::from_millis(50)).await;
                     continue;
                 }
@@ -572,16 +600,19 @@ pub async fn serve_listener(
             // A handshake over the global or the per-IP limit drops the connection, so a flood
             // cannot exhaust memory and one address cannot hold every slot.
             let Ok(permit) = handshakes.clone().try_acquire_owned() else {
+                load.refuse(&stats, RefusalReason::Handshakes);
                 drop(stream);
                 continue;
             };
             let Some(handshake) = load.try_handshake(ip) else {
+                load.refuse(&stats, RefusalReason::HandshakesPerIp);
                 drop(stream);
                 continue;
             };
             let acceptor = acceptor.clone();
             let tx = tx.clone();
             let load = Arc::clone(&load);
+            let stats = Arc::clone(&stats);
             tokio::spawn(async move {
                 let _permit = permit;
                 let _handshake = handshake;
@@ -600,8 +631,12 @@ pub async fn serve_listener(
                     .map(|certs| Arc::new(certs.to_vec()));
                 let authenticated = certs.is_some();
                 // The cap and the anonymous share of it bound the established connections.
-                let Some(guard) = load.try_connect(ip, authenticated) else {
-                    return;
+                let guard = match load.try_connect(ip, authenticated) {
+                    Ok(guard) => guard,
+                    Err(reason) => {
+                        load.refuse(&stats, reason);
+                        return;
+                    }
                 };
                 // A connection without a client certificate may only enroll, so it must send its
                 // request promptly and it lives for a bounded time.

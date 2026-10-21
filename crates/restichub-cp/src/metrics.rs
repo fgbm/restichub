@@ -23,6 +23,7 @@ use time::OffsetDateTime;
 
 use crate::context::{Operation, RequestContext};
 use crate::error::ApiError;
+use crate::listener_stats::{ListenerStats, RefusalReason};
 use crate::server::AppState;
 
 const CONTENT_TYPE: &str = "text/plain; version=0.0.4; charset=utf-8";
@@ -98,9 +99,14 @@ pub async fn metrics(
         }
     };
     let registry = state.agent_registry();
-    let body = render(context.tenant_id, &snapshot, |agent| {
+    let mut body = render(context.tenant_id, &snapshot, |agent| {
         registry.is_online(agent)
     });
+    // The listener serves every tenant, so in multi mode its counters would show the load of the
+    // other tenants.
+    if state.tenancy().mode.is_single() {
+        render_listener(&mut body, context.tenant_id, state.listener_stats());
+    }
     let mut response = body.into_response();
     response
         .headers_mut()
@@ -232,6 +238,36 @@ pub fn render(
         );
     }
     out
+}
+
+/// Appends the process counters of the agent listener.
+pub fn render_listener(out: &mut String, tenant: TenantId, stats: &ListenerStats) {
+    family(
+        out,
+        "restichub_agent_connections_refused_total",
+        "counter",
+        "Agent connections that the listener closed at a connection or handshake limit, by reason.",
+    );
+    for reason in RefusalReason::ALL {
+        let _ = writeln!(
+            out,
+            "restichub_agent_connections_refused_total{{tenant=\"{tenant}\",reason=\"{}\"}} {}",
+            reason.as_str(),
+            stats.refused(reason)
+        );
+    }
+
+    family(
+        out,
+        "restichub_agent_accept_errors_total",
+        "counter",
+        "Errors of the agent listener when it accepted a connection, for example too many open files.",
+    );
+    let _ = writeln!(
+        out,
+        "restichub_agent_accept_errors_total{{tenant=\"{tenant}\"}} {}",
+        stats.accept_errors()
+    );
 }
 
 fn family(out: &mut String, name: &str, kind: &str, help: &str) {

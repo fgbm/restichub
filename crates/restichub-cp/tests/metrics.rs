@@ -11,8 +11,11 @@ mod queue_support;
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use axum::Router;
 use axum::http::{StatusCode, header};
 use http_body_util::BodyExt as _;
+use restichub_cp::config::TenancyConfig;
+use restichub_cp::listener_stats::RefusalReason;
 use restichub_proto::agent::v1::{AgentMessage, StepResult, StepStatus, agent_message};
 
 use queue_support::{Env, eventually, test_queue};
@@ -172,6 +175,10 @@ fn check_histograms(exposition: &Exposition, family: &str) {
 }
 
 async fn scrape(env: &Env, token: Option<&str>) -> (StatusCode, Option<String>, String) {
+    scrape_app(&env.app, token).await
+}
+
+async fn scrape_app(app: &Router, token: Option<&str>) -> (StatusCode, Option<String>, String) {
     let request = match token {
         Some(token) => common::bearer_request("GET", "/metrics", token, None),
         None => {
@@ -184,7 +191,7 @@ async fn scrape(env: &Env, token: Option<&str>) -> (StatusCode, Option<String>, 
             request
         }
     };
-    let response = common::send_response(&env.app, request).await;
+    let response = common::send_response(app, request).await;
     let status = response.status();
     let content_type = response
         .headers()
@@ -393,6 +400,52 @@ async fn ac_tn_01_the_metrics_show_the_samples_of_the_own_tenant_only() {
     );
     for sample in &exposition.samples {
         assert_eq!(sample.labels["tenant"], other.to_string());
+    }
+    // The listener serves every tenant of a multi-tenant installation.
+    assert!(!text.contains("restichub_agent_connections_refused_total"));
+    assert!(!text.contains("restichub_agent_accept_errors_total"));
+    env.db.cleanup().await;
+}
+
+#[tokio::test]
+async fn fr_mn_05_a_single_tenant_installation_shows_the_listener_refusals() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let single = env
+        .state
+        .clone()
+        .with_tenancy(TenancyConfig::single("queue-tenant"));
+    single
+        .listener_stats()
+        .record_refusal(RefusalReason::Cap, 1, 1);
+    let app = common::api_router(single);
+
+    let (status, _, text) = scrape_app(&app, Some(&env.viewer)).await;
+    assert_eq!(status, StatusCode::OK, "{text}");
+    check_with_promtool(&text);
+    let exposition = parse(&text);
+    assert_eq!(
+        exposition
+            .types
+            .get("restichub_agent_connections_refused_total")
+            .map(String::as_str),
+        Some("counter")
+    );
+    let refused: BTreeMap<_, _> =
+        labelled(&exposition, "restichub_agent_connections_refused_total")
+            .map(|sample| (sample.labels["reason"].clone(), sample.value))
+            .collect();
+    assert_eq!(refused.len(), RefusalReason::ALL.len());
+    assert_eq!(refused["cap"], 1.0);
+    assert_eq!(refused["handshakes"], 0.0);
+    let errors = labelled(&exposition, "restichub_agent_accept_errors_total")
+        .next()
+        .expect("the accept error count");
+    assert_eq!(errors.value, 0.0);
+    for sample in &exposition.samples {
+        assert_eq!(sample.labels["tenant"], env.tenant.to_string());
     }
     env.db.cleanup().await;
 }

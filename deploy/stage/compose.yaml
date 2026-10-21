@@ -144,6 +144,13 @@ services:
       - '${RESTICHUB_AGENT_PORT:-8443}:8443'
     secrets:
       - restichub_kek
+    # Each agent connection uses one file descriptor. The default soft limit of 1024 stops the
+    # agent listener at about 750 agents. The control plane raises its soft limit to the hard
+    # limit at start.
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     healthcheck:
       # The runtime image holds no HTTP client. Bash opens a socket and reads the
       # status line of `/healthz`.
