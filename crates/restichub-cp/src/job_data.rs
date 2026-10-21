@@ -49,6 +49,9 @@ pub async fn handle_progress(
     let Some(job_id) = parse_job_id_value(&progress.job_id) else {
         return;
     };
+    if refused_before(state, agent, job_id) {
+        return;
+    }
     if !valid_step_id(&progress.step_id) {
         return;
     }
@@ -98,6 +101,22 @@ pub struct ProgressUpdate {
     tenant: TenantId,
     agent: AgentId,
     row: JobProgress,
+}
+
+/// Whether the control plane refused a message for this job and still remembers the refusal, so
+/// the repeat must not reach the database (AC-PR-05).
+fn refused_before(state: &AppState, agent: AgentId, job: JobId) -> bool {
+    state
+        .progress_throttle()
+        .refused((agent, job), Instant::now())
+}
+
+/// Remembers a refusal so that the repeats of the message for this job do not read it again
+/// (AC-PR-05). The refused message itself is audited; a repeat inside the window is not.
+fn remember_refusal(state: &AppState, agent: AgentId, job: JobId) {
+    state
+        .progress_throttle()
+        .remember_refusal((agent, job), Instant::now());
 }
 
 /// Whether the progress is now in the database.
@@ -164,6 +183,9 @@ pub async fn handle_step_result(
     let Some(job_id) = parse_job_id_value(&result.job_id) else {
         return WriteOutcome::Ignored;
     };
+    if refused_before(state, agent, job_id) {
+        return WriteOutcome::Ignored;
+    }
     let Some(step) = step_of(result) else {
         return WriteOutcome::Ignored;
     };
@@ -222,6 +244,9 @@ pub async fn handle_log_chunk(
     let Some(job_id) = parse_job_id_value(&chunk.job_id) else {
         return ChunkOutcome::Refused(ChunkRefusal::Malformed);
     };
+    if refused_before(state, agent, job_id) {
+        return ChunkOutcome::Refused(ChunkRefusal::UnknownJob);
+    }
     let new_chunk = match chunk_of(chunk) {
         Ok(new_chunk) => new_chunk,
         Err(refusal) => {
@@ -263,9 +288,12 @@ pub async fn handle_job_result_data(
     let Some(job_id) = parse_job_id_value(&result.job_id) else {
         return WriteOutcome::Ignored;
     };
+    if refused_before(state, agent, job_id) {
+        return WriteOutcome::Ignored;
+    }
     // Only a job that takes writes now keeps its steps and log tail. A queued or foreign job stays
     // as before; a database error reaches `handle_job_result` next and closes the stream (FR-PR-07).
-    if ownership(state, tenant, agent, job_id, "job_result").await != Ownership::Owned {
+    if !job_is_owned(state, tenant, agent, job_id, "job_result").await {
         return WriteOutcome::Ignored;
     }
     state.progress_throttle().forget((agent, job_id));
@@ -314,6 +342,16 @@ enum Ownership {
     Retry,
 }
 
+async fn job_is_owned(
+    state: &AppState,
+    tenant: TenantId,
+    agent: AgentId,
+    job: JobId,
+    kind: &'static str,
+) -> bool {
+    ownership(state, tenant, agent, job, kind).await == Ownership::Owned
+}
+
 async fn ownership(
     state: &AppState,
     tenant: TenantId,
@@ -339,7 +377,11 @@ async fn ownership(
         tracing::warn!(%job, %error, "a refused message could not be audited");
     }
     let _ = tx.commit().await;
-    classify(found.as_ref(), agent, cutoff)
+    let ownership = classify(found.as_ref(), agent, cutoff);
+    if ownership == Ownership::Refused {
+        remember_refusal(state, agent, job);
+    }
+    ownership
 }
 
 /// Why the message of the agent for this job is audited, if it is (AC-PR-05).
@@ -390,7 +432,11 @@ async fn owned_job(
     if let Some(refusal) = refusal_of(found.as_ref(), agent) {
         refusal_audit::refused_message(state, tx, agent, job, kind, refusal).await?;
     }
-    Ok(found.filter(|row| classify(Some(row), agent, cutoff) == Ownership::Owned))
+    let ownership = classify(found.as_ref(), agent, cutoff);
+    if ownership == Ownership::Refused {
+        remember_refusal(state, agent, job);
+    }
+    Ok(found.filter(|_| ownership == Ownership::Owned))
 }
 
 /// Maps a write and its commit to the outcome of the message.
