@@ -110,6 +110,22 @@ impl TestDatabase {
         Ok(Database { pool })
     }
 
+    /// Opens a runtime database with a given pool size and acquire timeout.
+    pub async fn database_with_pool(
+        &self,
+        max: u32,
+        acquire_timeout: std::time::Duration,
+    ) -> Result<Database, sqlx::Error> {
+        let pool = super::with_session_reset(
+            PgPoolOptions::new()
+                .max_connections(max)
+                .acquire_timeout(acquire_timeout),
+        )
+        .connect_with(self.runtime_options.clone())
+        .await?;
+        Ok(Database { pool })
+    }
+
     pub async fn cleanup(&self) {
         self.database.pool().close().await;
         self.owner.close().await;

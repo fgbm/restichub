@@ -557,18 +557,19 @@ async fn authenticate_session_hash(
     if touch && idle_deadline <= now {
         return Err(ApiError::unauthenticated());
     }
-    let mut tx = state.db().begin_tenant(lookup.tenant_id).await?;
-    let tenant = tenants::get(&mut tx, lookup.tenant_id).await?;
-    if tenant.is_none_or(|tenant| tenant.status != restichub_db::TenantStatus::Active) {
-        return Err(ApiError::unauthenticated());
-    }
     // The account holds the Platform Admin right (ADR-0029). A session with no organization has the
-    // internal platform tenant as its session tenant and no membership.
+    // internal platform tenant as its session tenant and no membership. The read goes through the
+    // pool, so it comes before the transaction: one request never holds two pool connections.
     let account = users::find_account_by_id(state.db(), lookup.user_id).await?;
     let Some(account) = account else {
         return Err(ApiError::unauthenticated());
     };
     if account.disabled {
+        return Err(ApiError::unauthenticated());
+    }
+    let mut tx = state.db().begin_tenant(lookup.tenant_id).await?;
+    let tenant = tenants::get(&mut tx, lookup.tenant_id).await?;
+    if tenant.is_none_or(|tenant| tenant.status != restichub_db::TenantStatus::Active) {
         return Err(ApiError::unauthenticated());
     }
     let role = if lookup.tenant_id == restichub_db::PLATFORM_TENANT_ID {
