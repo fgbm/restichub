@@ -57,6 +57,7 @@ use uuid::Uuid;
 use crate::context::{Operation, RequestContext};
 use crate::delivery::{DeliveryError, SecretReader};
 use crate::error::{ApiError, map_write_error};
+use crate::job_data::WriteOutcome;
 use crate::job_result_params::IncompatibleParams;
 use crate::json::ApiJson;
 use crate::queue::retry;
@@ -684,39 +685,39 @@ pub async fn handle_job_result(
     tenant: TenantId,
     agent: AgentId,
     result: &JobResult,
-) {
+) -> WriteOutcome {
     let Some(job_id) = parse_job_id_value(&result.job_id) else {
-        return;
+        return WriteOutcome::Ignored;
     };
     let now = state.auth().clock.now();
     let Ok(mut tx) = state.db().begin_tenant(tenant).await else {
         tracing::warn!(job = %result.job_id, "the job result could not open a transaction");
-        return;
+        return WriteOutcome::Transient;
     };
     let job = match job_repo::get_for_update(&mut tx, job_id).await {
         Ok(Some(job)) => job,
-        Ok(None) => return,
+        Ok(None) => return WriteOutcome::Ignored,
         Err(error) => {
             tracing::warn!(job = %job_id, %error, "the job result could not read the job");
-            return;
+            return WriteOutcome::Transient;
         }
     };
     // `handle_job_result_data` runs first for the same message and has audited the refusal.
     if job.agent_id != agent {
-        return;
+        return WriteOutcome::Ignored;
     }
     if job.status.is_terminal() {
-        return;
+        return WriteOutcome::Ignored;
     }
     let Some(outcome) = outcome_of(result) else {
         tracing::warn!(job = %job_id, "the job result holds an unknown outcome");
-        return;
+        return WriteOutcome::Ignored;
     };
     // The row lock above waits for a progress write in flight. Deleting here, in the same
     // transaction as the status change, leaves no progress on a job that is not running.
     if let Err(error) = restichub_db::job_steps::delete_progress(&mut tx, job_id).await {
         tracing::warn!(job = %job_id, %error, "the job result could not remove the progress");
-        return;
+        return WriteOutcome::Transient;
     }
     // Restic exit code 11 is a held lock, not a failure: the job returns to the queue as a new job
     // or, after the last retry, to the dead-letter status (FR-SC-05). The agent reports the lock on
@@ -729,15 +730,15 @@ pub async fn handle_job_result(
     if lock_held && !job.cancel_requested && retry::is_retryable(job.kind) {
         if let Err(error) = retry::apply_lock(&mut tx, state.queue_config(), &job, now).await {
             tracing::warn!(job = %job_id, %error, "the lock result could not update the job");
-            return;
+            return WriteOutcome::Transient;
         }
         if let Err(error) = tx.commit().await {
             tracing::warn!(job = %job_id, %error, "the lock result could not commit");
-            return;
+            return WriteOutcome::Transient;
         }
         state.events().job_status(tenant, job_id, JobStatus::Queued);
         state.wake_dispatcher();
-        return;
+        return WriteOutcome::Stored;
     }
     let outcome = if lock_held && job.cancel_requested {
         JobOutcome {
@@ -763,7 +764,7 @@ pub async fn handle_job_result(
                 Ok(_) => outcome,
                 Err(error) => {
                     tracing::warn!(job = %job_id, %error, "the job result could not read the repository");
-                    return;
+                    return WriteOutcome::Transient;
                 }
             }
         }
@@ -783,57 +784,51 @@ pub async fn handle_job_result(
     };
     if let Err(error) = job_repo::finish(&mut tx, job_id, &outcome, now).await {
         tracing::warn!(job = %job_id, %error, "the job result could not update the job");
-        return;
+        return WriteOutcome::Transient;
     }
     if matches!(
         outcome.result_code,
         JobResultCode::Succeeded | JobResultCode::SucceededWithWarnings
     ) && let Some(repository_id) = job.repository_id
+        && let Err(error) =
+            apply_initialized(&mut tx, repository_id, job.location_fingerprint.as_deref()).await
     {
-        apply_initialized(
-            &mut tx,
-            job_id,
-            repository_id,
-            job.location_fingerprint.as_deref(),
-        )
-        .await;
+        tracing::warn!(job = %job_id, %error, "the initialized flag could not be stored");
+        return WriteOutcome::Transient;
     }
     if let Err(error) = tx.commit().await {
         tracing::warn!(job = %job_id, %error, "the job result could not commit");
-        return;
+        return WriteOutcome::Transient;
     }
     state.events().job_status(tenant, job_id, outcome.status);
     // A finished job frees its slot, so the queue may start the next job.
     state.wake_dispatcher();
+    WriteOutcome::Stored
 }
 
 /// Sets `repositories.initialized = true` while the location still matches the job.
+///
+/// A failed statement aborts the transaction of the caller: its commit then stores nothing and
+/// still reports success.
 async fn apply_initialized(
     tx: &mut restichub_db::TenantTx<'_>,
-    job_id: JobId,
     repository_id: RepositoryId,
     fingerprint: Option<&str>,
-) {
-    let repository = match repo::get(tx, repository_id).await {
-        Ok(Some(repository)) => repository,
-        Ok(None) => return,
-        Err(error) => {
-            tracing::warn!(job = %job_id, %error, "the initialized flag could not read the repository");
-            return;
-        }
+) -> Result<(), restichub_db::DbError> {
+    let Some(repository) = repo::get(tx, repository_id).await? else {
+        return Ok(());
     };
     if Some(repository_fingerprint(&repository).as_str()) != fingerprint {
         // The location changed between the job and its result: the flag belongs to another
         // location, so the control plane does not set it.
         tracing::warn!(
-            job = %job_id,
+            repository = %repository_id,
             "the repository location changed since the job started; the initialized flag stays"
         );
-        return;
+        return Ok(());
     }
-    if let Err(error) = repo::set_initialized(tx, repository_id, true).await {
-        tracing::warn!(job = %job_id, %error, "the initialized flag could not be set");
-    }
+    repo::set_initialized(tx, repository_id, true).await?;
+    Ok(())
 }
 
 /// Resolves the target agent (FR-RP-08).

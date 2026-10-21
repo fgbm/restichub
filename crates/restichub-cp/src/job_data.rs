@@ -162,27 +162,38 @@ async fn write_progress(state: &AppState, job_id: JobId, update: &ProgressUpdate
     }
 }
 
+/// What became of a message whose loss would lose state (FR-PR-07, ADR-0020).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WriteOutcome {
+    /// Written and committed.
+    Stored,
+    /// The control plane will never store this message: it is a refusal, not a failure.
+    Ignored,
+    /// The database did not take the message. The agent has to send it again.
+    Transient,
+}
+
 /// Records the result of one step.
 pub async fn handle_step_result(
     state: &AppState,
     tenant: TenantId,
     agent: AgentId,
     result: &StepResult,
-) {
+) -> WriteOutcome {
     let Some(job_id) = parse_job_id_value(&result.job_id) else {
-        return;
+        return WriteOutcome::Ignored;
     };
     if refused_before(state, agent, job_id) {
-        return;
+        return WriteOutcome::Ignored;
     }
     let Some(step) = step_of(result) else {
-        return;
+        return WriteOutcome::Ignored;
     };
     let cutoff = write_cutoff(state);
     let now = state.auth().clock.now();
     let Ok(mut tx) = state.db().begin_tenant(tenant).await else {
         tracing::warn!(job = %job_id, "the step result could not open a transaction");
-        return;
+        return WriteOutcome::Transient;
     };
     let outcome = async {
         let Some(job) = owned_job(state, &mut tx, job_id, agent, cutoff, "step_result").await?
@@ -196,9 +207,11 @@ pub async fn handle_step_result(
         Ok(true)
     }
     .await;
-    if finish(tx, outcome, job_id, "step result").await {
+    let written = finish(tx, outcome, job_id, "step result").await;
+    if written == WriteOutcome::Stored {
         state.events().job_progress(tenant, job_id);
     }
+    written
 }
 
 /// Why the control plane never stores a log chunk (FR-LG-07).
@@ -271,20 +284,22 @@ pub async fn handle_job_result_data(
     tenant: TenantId,
     agent: AgentId,
     result: &JobResult,
-) {
+) -> WriteOutcome {
     let Some(job_id) = parse_job_id_value(&result.job_id) else {
-        return;
+        return WriteOutcome::Ignored;
     };
     if refused_before(state, agent, job_id) {
-        return;
+        return WriteOutcome::Ignored;
     }
+    // Only a job that takes writes now keeps its steps and log tail. A queued or foreign job stays
+    // as before; a database error reaches `handle_job_result` next and closes the stream (FR-PR-07).
     if !job_is_owned(state, tenant, agent, job_id, "job_result").await {
-        return;
+        return WriteOutcome::Ignored;
     }
     state.progress_throttle().forget((agent, job_id));
     let Ok(mut tx) = state.db().begin_tenant(tenant).await else {
         tracing::warn!(job = %job_id, "the job result data could not open a transaction");
-        return;
+        return WriteOutcome::Transient;
     };
     let outcome = async {
         for step in result.steps.iter().filter_map(step_of) {
@@ -295,7 +310,10 @@ pub async fn handle_job_result_data(
         job_steps::delete_progress(&mut tx, job_id).await
     }
     .await;
-    finish(tx, outcome.map(|()| true), job_id, "job result data").await;
+    let written = finish(tx, outcome.map(|()| true), job_id, "job result data").await;
+    if written != WriteOutcome::Stored {
+        return written;
+    }
 
     let store = DatabaseLogStore::new(state.db().clone());
     for chunk in result
@@ -308,9 +326,10 @@ pub async fn handle_job_result_data(
             .await
         {
             tracing::warn!(job = %job_id, %error, "the log tail could not be stored");
-            break;
+            return WriteOutcome::Transient;
         }
     }
+    WriteOutcome::Stored
 }
 
 /// Whether a job takes writes from the agent.
@@ -420,24 +439,25 @@ async fn owned_job(
     Ok(found.filter(|_| ownership == Ownership::Owned))
 }
 
-/// True when the write was stored and committed.
+/// Maps a write and its commit to the outcome of the message.
 async fn finish(
     tx: restichub_db::TenantTx<'_>,
     result: Result<bool, restichub_db::DbError>,
     job: JobId,
     what: &str,
-) -> bool {
+) -> WriteOutcome {
     match result {
         Ok(stored) => match tx.commit().await {
-            Ok(()) => stored,
+            Ok(()) if stored => WriteOutcome::Stored,
+            Ok(()) => WriteOutcome::Ignored,
             Err(error) => {
                 tracing::warn!(%job, %error, "the {what} could not commit");
-                false
+                WriteOutcome::Transient
             }
         },
         Err(error) => {
             tracing::warn!(%job, %error, "the {what} could not be stored");
-            false
+            WriteOutcome::Transient
         }
     }
 }
