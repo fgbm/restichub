@@ -235,6 +235,7 @@ pub struct AppState {
     sender: Option<crate::alerts::sender::Sender>,
     progress_throttle:
         Arc<crate::progress_throttle::ProgressThrottle<crate::job_data::ProgressUpdate>>,
+    agent_view: Arc<crate::queue::AgentView>,
 }
 
 impl AppState {
@@ -268,6 +269,7 @@ impl AppState {
             events: Arc::new(crate::events::EventBus::default()),
             sender: None,
             progress_throttle: Arc::default(),
+            agent_view: Arc::default(),
         }
     }
 
@@ -295,6 +297,7 @@ impl AppState {
             events: Arc::new(crate::events::EventBus::default()),
             sender: None,
             progress_throttle: Arc::default(),
+            agent_view: Arc::default(),
         }
     }
 
@@ -491,6 +494,11 @@ impl AppState {
     /// The shared registry, for the batch flush of the `last_seen_at` writes.
     pub fn agent_registry_shared(&self) -> Arc<StreamRegistry> {
         Arc::clone(&self.agent_registry)
+    }
+
+    /// How long the control plane has seen the online agents without a break (AC-PR-07).
+    pub fn agent_view(&self) -> &crate::queue::AgentView {
+        &self.agent_view
     }
 }
 

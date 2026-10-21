@@ -1076,7 +1076,9 @@ async fn deliver_rotation(state: &AppState, agent: AgentId, event: RotationEvent
 /// only for the current key identifier of the signing service and within the length bound, so a
 /// flood of other identifiers cannot grow the registry.
 ///
-/// True when the connection must close so that the agent sends the message again (FR-PR-07).
+/// True when the connection must close so that the agent sends its stored result again after the
+/// reconnect (FR-PR-07). A step result of a job that still runs is in no journal, so it does not
+/// come back.
 async fn handle_message(
     state: &AppState,
     identity: &mut PeerIdentity,
@@ -1195,14 +1197,16 @@ async fn handle_message(
                 &result,
             )
             .await;
-            crate::queue::stale::handle_step_result(
+            // The marks of the lock flags go in a second transaction; its failure loses them as
+            // well, so it closes the stream like a failed step write (FR-PR-07).
+            let marked = crate::queue::stale::handle_step_result(
                 state,
                 identity.tenant,
                 identity.agent,
                 &result,
             )
             .await;
-            return stored == WriteOutcome::Transient;
+            return stored == WriteOutcome::Transient || marked == WriteOutcome::Transient;
         }
         Some(agent_message::Payload::StepProgress(progress)) => {
             crate::job_data::handle_progress(state, identity.tenant, identity.agent, &progress)

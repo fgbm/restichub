@@ -790,14 +790,11 @@ pub async fn handle_job_result(
         outcome.result_code,
         JobResultCode::Succeeded | JobResultCode::SucceededWithWarnings
     ) && let Some(repository_id) = job.repository_id
+        && let Err(error) =
+            apply_initialized(&mut tx, repository_id, job.location_fingerprint.as_deref()).await
     {
-        apply_initialized(
-            &mut tx,
-            job_id,
-            repository_id,
-            job.location_fingerprint.as_deref(),
-        )
-        .await;
+        tracing::warn!(job = %job_id, %error, "the initialized flag could not be stored");
+        return WriteOutcome::Transient;
     }
     if let Err(error) = tx.commit().await {
         tracing::warn!(job = %job_id, %error, "the job result could not commit");
@@ -810,32 +807,28 @@ pub async fn handle_job_result(
 }
 
 /// Sets `repositories.initialized = true` while the location still matches the job.
+///
+/// A failed statement aborts the transaction of the caller: its commit then stores nothing and
+/// still reports success.
 async fn apply_initialized(
     tx: &mut restichub_db::TenantTx<'_>,
-    job_id: JobId,
     repository_id: RepositoryId,
     fingerprint: Option<&str>,
-) {
-    let repository = match repo::get(tx, repository_id).await {
-        Ok(Some(repository)) => repository,
-        Ok(None) => return,
-        Err(error) => {
-            tracing::warn!(job = %job_id, %error, "the initialized flag could not read the repository");
-            return;
-        }
+) -> Result<(), restichub_db::DbError> {
+    let Some(repository) = repo::get(tx, repository_id).await? else {
+        return Ok(());
     };
     if Some(repository_fingerprint(&repository).as_str()) != fingerprint {
         // The location changed between the job and its result: the flag belongs to another
         // location, so the control plane does not set it.
         tracing::warn!(
-            job = %job_id,
+            repository = %repository_id,
             "the repository location changed since the job started; the initialized flag stays"
         );
-        return;
+        return Ok(());
     }
-    if let Err(error) = repo::set_initialized(tx, repository_id, true).await {
-        tracing::warn!(job = %job_id, %error, "the initialized flag could not be set");
-    }
+    repo::set_initialized(tx, repository_id, true).await?;
+    Ok(())
 }
 
 /// Resolves the target agent (FR-RP-08).

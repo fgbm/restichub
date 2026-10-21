@@ -17,6 +17,7 @@ use restichub_proto::agent::v1::{StepResult, StepStatus, step_result};
 use serde_json::json;
 use time::OffsetDateTime;
 
+use crate::job_data::WriteOutcome;
 use crate::server::AppState;
 
 /// How long the control plane waits after it loses an agent that held a lock (FR-SC-06).
@@ -64,17 +65,23 @@ pub async fn recover_tenant(
     }
     let cutoff = now - STALE_LOCK_WAIT;
 
-    // The agent enforces the maximum duration of a job that carries one. A running job far past it
-    // is gone, also when the agent is online again: it restarted and lost the job. Its lock
-    // becomes a suspect. A job without a maximum duration has no wall-clock limit (ADR-0039).
-    for id in queue_repo::timed_out_running(&mut tx, now, TIMEOUT_GRACE, hard_ceiling()).await? {
-        queue_repo::mark_timed_out(&mut tx, id, now).await?;
-    }
+    // The registry is empty after the start and after a database outage that hid the agents. A job
+    // of an agent that reconnects then is not lost, so neither sweep runs before the agent had the
+    // time to connect again (AC-PR-07).
+    if state.agent_view().judges_absence(now) {
+        // The agent enforces the maximum duration of a job that carries one. A running job far past
+        // it is gone, also when the agent is online again: it restarted and lost the job. Its lock
+        // becomes a suspect. A job without a maximum duration has no wall-clock limit (ADR-0039).
+        for id in queue_repo::timed_out_running(&mut tx, now, TIMEOUT_GRACE, hard_ceiling()).await?
+        {
+            queue_repo::mark_timed_out(&mut tx, id, now).await?;
+        }
 
-    // A running job whose agent vanished for the whole wait time holds a lock that nobody will
-    // release. The job fails and its lock becomes a suspect.
-    for lost in queue_repo::lost_running(&mut tx, cutoff, online).await? {
-        queue_repo::mark_agent_lost(&mut tx, lost.id, lost.lost_at, now).await?;
+        // A running job whose agent vanished for the whole wait time holds a lock that nobody will
+        // release. The job fails and its lock becomes a suspect.
+        for lost in queue_repo::lost_running(&mut tx, cutoff, online).await? {
+            queue_repo::mark_agent_lost(&mut tx, lost.id, lost.lost_at, now).await?;
+        }
     }
 
     for stale in queue_repo::stale_repositories(&mut tx, cutoff).await? {
@@ -187,37 +194,44 @@ pub async fn handle_step_result(
     tenant: TenantId,
     agent: AgentId,
     result: &StepResult,
-) {
+) -> WriteOutcome {
     let lock_held = result.status == StepStatus::Retry as i32;
     let empty_forget = selected_nothing(result);
     if !result.possible_stale_lock && !lock_held && !empty_forget {
-        return;
+        return WriteOutcome::Ignored;
     }
     let Some(job_id) = crate::jobs::parse_job_id_value(&result.job_id) else {
-        return;
+        return WriteOutcome::Ignored;
     };
     let now = state.auth().clock.now();
     let outcome = async {
         let mut tx = state.db().begin_tenant(tenant).await?;
         let Some(job) = job_repo::get_for_update(&mut tx, job_id).await? else {
-            return Ok(());
+            return Ok(false);
         };
+        let mut marked = false;
         if job.agent_id == agent && matches!(job.status, JobStatus::Sent | JobStatus::Running) {
             if lock_held {
-                queue_repo::note_lock_reported(&mut tx, job_id).await?;
+                marked |= queue_repo::note_lock_reported(&mut tx, job_id).await?;
             }
             if result.possible_stale_lock {
-                queue_repo::note_stale_lock(&mut tx, job_id, now).await?;
+                marked |= queue_repo::note_stale_lock(&mut tx, job_id, now).await?;
             }
             if empty_forget {
-                queue_repo::note_empty_forget(&mut tx, job_id).await?;
+                marked |= queue_repo::note_empty_forget(&mut tx, job_id).await?;
             }
         }
-        tx.commit().await
+        tx.commit().await?;
+        Ok::<_, DbError>(marked)
     }
     .await;
-    if let Err(error) = outcome {
-        tracing::warn!(job = %job_id, %error, "the step result could not mark the job");
+    match outcome {
+        Ok(true) => WriteOutcome::Stored,
+        Ok(false) => WriteOutcome::Ignored,
+        Err(error) => {
+            tracing::warn!(job = %job_id, %error, "the step result could not mark the job");
+            WriteOutcome::Transient
+        }
     }
 }
 
