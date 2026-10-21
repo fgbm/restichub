@@ -37,6 +37,8 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
     telemetry::init(&config)?;
     // Refuse a core dump before the key encryption key is in memory (T18).
     restichub_cp::harden::disable_core_dumps();
+    #[cfg(unix)]
+    raise_open_file_limit(&config);
     tracing::info!(listen_addr = %config.listen_addr, "starting the control plane");
     if config.auth.insecure_cookies {
         tracing::warn!(
@@ -276,6 +278,29 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
     })
     .await
     .context("the server stopped with an error")
+}
+
+#[cfg(unix)]
+fn raise_open_file_limit(config: &Config) {
+    let listener_cap = if config.agent_listen_addr.is_some() {
+        config.agent_max_connections
+    } else {
+        0
+    };
+    let needed = restichub_cp::agent_listener::open_files_needed(
+        listener_cap,
+        config.events_max_streams,
+        config.database_max_connections,
+    );
+    match restichub_cp::harden::raise_open_file_limit() {
+        Ok(open_files) if open_files < needed => tracing::warn!(
+            open_files,
+            needed,
+            "the open file limit is lower than the agent listener cap, the event streams and the database pool need; raise the hard limit (the compose ulimits, LimitNOFILE of the service unit or ulimit -n)"
+        ),
+        Ok(open_files) => tracing::info!(open_files, "the open file limit"),
+        Err(error) => tracing::warn!(%error, needed, "cannot raise the open file limit"),
+    }
 }
 
 /// Applies the migrations with the owner login and stops.

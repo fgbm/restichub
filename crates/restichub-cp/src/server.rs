@@ -229,6 +229,7 @@ pub struct AppState {
     log_retention_days: u32,
     audit_limiter: Arc<crate::audit_limit::AuditLimiter>,
     metrics_cache: Arc<SnapshotCache>,
+    listener_stats: Arc<crate::listener_stats::ListenerStats>,
     dashboard_cache: Arc<crate::dashboard::DashboardCache>,
     events: Arc<crate::events::EventBus>,
     sender: Option<crate::alerts::sender::Sender>,
@@ -262,6 +263,7 @@ impl AppState {
                 crate::audit_limit::DEFAULT_LIMIT,
             )),
             metrics_cache: Arc::new(SnapshotCache::default()),
+            listener_stats: Arc::default(),
             dashboard_cache: Arc::new(crate::dashboard::DashboardCache::default()),
             events: Arc::new(crate::events::EventBus::default()),
             sender: None,
@@ -288,6 +290,7 @@ impl AppState {
                 crate::audit_limit::DEFAULT_LIMIT,
             )),
             metrics_cache: Arc::new(SnapshotCache::default()),
+            listener_stats: Arc::default(),
             dashboard_cache: Arc::new(crate::dashboard::DashboardCache::default()),
             events: Arc::new(crate::events::EventBus::default()),
             sender: None,
@@ -424,6 +427,10 @@ impl AppState {
 
     pub fn metrics_cache(&self) -> &SnapshotCache {
         &self.metrics_cache
+    }
+
+    pub fn listener_stats(&self) -> &Arc<crate::listener_stats::ListenerStats> {
+        &self.listener_stats
     }
 
     pub fn db(&self) -> &Database {

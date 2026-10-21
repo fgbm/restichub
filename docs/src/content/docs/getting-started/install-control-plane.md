@@ -156,6 +156,8 @@ The agent listener port must be reachable from every agent network. Check the fi
 
 Set `RESTICHUB_AGENT_ENDPOINT` to the address that the agents dial. The control plane issues the listener certificate with that host as a subject alternative name.
 
+Each agent connection uses one file descriptor of the control plane. At start, the control plane sets its soft open file limit to the hard limit and writes the limit to the log. If the limit is too low for `RESTICHUB_AGENT_MAX_CONNECTIONS`, the log has a warning. The `cp` service of the reference compose file sets `ulimits: nofile` to 65536. If you use another runtime, set the same limit (for systemd, `LimitNOFILE=65536`).
+
 Enroll each host as described in [Register an agent](/restichub/getting-started/add-a-host/).
 
 ## Related

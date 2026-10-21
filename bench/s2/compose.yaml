@@ -72,6 +72,13 @@ services:
         condition: service_completed_successfully
     cpus: 2
     mem_limit: 4g
+    # Each agent connection uses one file descriptor. The default soft limit of 1024 stops the
+    # agent listener at about 750 agents. The control plane raises its soft limit to the hard
+    # limit at start.
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     environment:
       RESTICHUB_LISTEN_ADDR: 0.0.0.0:8080
       RESTICHUB_DATABASE_URL: postgres://restichub_runtime@postgres:5432/${POSTGRES_DB}
