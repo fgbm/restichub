@@ -82,7 +82,9 @@ pub async fn recover_tenant(
             queue_repo::clear_stale_locks(&mut tx, stale.repository_id).await?;
             continue;
         };
-        // A later success proves that the lock does not block the repository.
+        // A success of a kind that takes the exclusive lock of restic, or that removes the locks,
+        // proves that no lock blocks the repository. A backup runs next to the orphaned lock
+        // (FR-SC-04).
         if queue_repo::has_success_since(&mut tx, stale.repository_id, stale.stale_since).await? {
             queue_repo::clear_stale_locks(&mut tx, stale.repository_id).await?;
             continue;

@@ -1,6 +1,6 @@
 # ADR-0036: Alerts, notification channels and the recovery point objective
 
-- Status: accepted
+- Status: accepted. See [ADR-0050](0050-closing-of-a-one-time-job-alert.md) for the closing of a one-time job alert.
 - Date: 2026-10-15
 - Requirements: FR-MN-01, FR-MN-03, FR-MN-04, FR-AU-01, AC-MN-01, AC-MN-02, AC-UI-02
 

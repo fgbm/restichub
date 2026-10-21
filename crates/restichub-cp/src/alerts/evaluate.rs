@@ -27,6 +27,17 @@ const NEW_JOB_WINDOW: Duration = Duration::hours(24);
 /// Window of the finished jobs that one pass reads. An open alert whose job is older resolves silently.
 const JOB_LOOKBACK: Duration = Duration::days(30);
 
+/// How long a job alert of a one-time kind stays open without a later job of the same kind
+/// (ADR-0050).
+const ONE_TIME_JOB_ALERT_TTL: Duration = Duration::days(7);
+
+/// The alert kinds that follow the latest finished job of a subject.
+const JOB_ALERT_KINDS: [AlertKind; 3] = [
+    AlertKind::JobFailed,
+    AlertKind::JobDeadLetter,
+    AlertKind::JobWarnings,
+];
+
 /// How long the control plane keeps a resolved alert.
 const RESOLVED_RETENTION: Duration = Duration::days(90);
 
@@ -99,12 +110,7 @@ pub async fn evaluate_tenant(
         let repositories = dashboard::repository_locks(&mut tx).await?;
         lock_findings(&repositories, minutes, now, &mut findings);
     }
-    let job_kinds = [
-        AlertKind::JobFailed,
-        AlertKind::JobDeadLetter,
-        AlertKind::JobWarnings,
-    ];
-    if job_kinds.iter().any(|kind| enabled(&rules, *kind)) {
+    if JOB_ALERT_KINDS.iter().any(|kind| enabled(&rules, *kind)) {
         let jobs = dashboard::latest_jobs(&mut tx, now - JOB_LOOKBACK).await?;
         job_findings(&jobs, &rules, now, &open_keys, &mut findings);
     }
@@ -310,16 +316,24 @@ fn job_findings(
 ) {
     for job in jobs {
         let Some(kind) = job_kind(job) else {
-            for kind in [
-                AlertKind::JobFailed,
-                AlertKind::JobDeadLetter,
-                AlertKind::JobWarnings,
-            ] {
+            for kind in JOB_ALERT_KINDS {
                 findings.cleared.insert((kind, job.subject.clone()));
             }
             continue;
         };
         if !enabled(rules, kind) {
+            continue;
+        }
+        // A one-time job of no plan does not run again, so its alert closes at the end of the
+        // window instead of waiting for a success that does not come (ADR-0050). The close sends
+        // the recovery notification like any other cleared condition.
+        if job.plan_id.is_none()
+            && job.kind.is_one_time()
+            && now - job.finished_at > ONE_TIME_JOB_ALERT_TTL
+        {
+            for kind in JOB_ALERT_KINDS {
+                findings.cleared.insert((kind, job.subject.clone()));
+            }
             continue;
         }
         // An old failure raises no new alert, but an alert that is open stays open.

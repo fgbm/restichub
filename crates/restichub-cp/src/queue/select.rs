@@ -202,6 +202,15 @@ mod tests {
         assert!(select(&backup, &after_prune, &WIDE).is_empty());
     }
 
+    /// FR-SC-04: a read operation is no barrier, so a backup starts next to a running test access.
+    #[test]
+    fn a_backup_starts_next_to_a_running_test_access() {
+        let (agent, repository) = (AgentId::new(), RepositoryId::new());
+        let flights = vec![running(JobKind::TestAccess, agent, repository)];
+        let backup = vec![job(JobKind::Backup, agent, repository, JobStatus::Queued)];
+        assert_eq!(select(&backup, &flights, &WIDE).len(), 1);
+    }
+
     #[test]
     fn ac_sc_03_a_backup_queued_before_a_prune_starts_first() {
         let (agent, repository) = (AgentId::new(), RepositoryId::new());

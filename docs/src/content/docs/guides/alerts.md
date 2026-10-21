@@ -18,7 +18,7 @@ An Admin switches each kind on or off in **Settings**, **Alert rules**.
 | `agent_offline` | Host offline | A host did not contact the control plane for longer than the limit. | On, 30 minutes |
 | `stale_lock` | Stale repository lock | A job waits on a stale repository lock for longer than the limit. | On, 60 minutes |
 
-An alert stays open while its condition holds. The control plane sends one message when it opens the alert. It sends no repeat while the alert is open. A job alert resolves when the next job of the same plan succeeds.
+An alert stays open while its condition holds. The control plane sends one message when it opens the alert. It sends no repeat while the alert is open. A job alert resolves when the next job of the same plan succeeds. A job of a `check`, a `forget` or a `prune` belongs to no plan, and the maintenance schedule repeats the kind. Its alert resolves when a job of the same kind succeeds on the repository. A job of a `restore`, an `init`, a `test_access`, an `unlock` or an `unlock_all` runs once. Its alert resolves in the same way, or 7 days after the failed job ends when no job of the kind succeeds. The control plane sends the recovery message in every case.
 
 A failure that finished more than 24 hours before the first evaluation raises no alert. A cancelled job and an expired job never raise an alert. A disabled plan and a plan of a revoked host raise no RPO alert.
 
