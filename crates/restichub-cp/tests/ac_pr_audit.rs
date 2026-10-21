@@ -8,7 +8,9 @@ mod queue_support;
 
 use std::time::Duration;
 
-use restichub_proto::agent::v1::{JobRejected, RejectReason, StepProgress, agent_message};
+use restichub_proto::agent::v1::{
+    AgentMessage, JobRejected, LogChunk, LogStream, RejectReason, StepProgress, agent_message,
+};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -220,6 +222,72 @@ async fn ac_pr_05_a_message_for_an_unknown_job_is_audited_in_the_tenant_of_the_a
     assert_eq!(rows[0].object_id, None);
     assert_eq!(rows[0].diff["new"]["reason"], "unknown_job");
     assert_eq!(rows[0].diff["new"]["message"], "job_ack");
+    env.db.cleanup().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn ac_pr_05_a_repeated_message_for_a_refused_job_reads_the_job_once() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let agent = env.connect_agent("repeat-host").await;
+    let unknown = Uuid::new_v4().to_string();
+    for files_done in 1..=5u64 {
+        agent
+            .tx
+            .send(AgentMessage {
+                payload: Some(agent_message::Payload::StepProgress(StepProgress {
+                    job_id: unknown.clone(),
+                    step_id: "backup".to_owned(),
+                    files_done,
+                    ..StepProgress::default()
+                })),
+            })
+            .await
+            .expect("cannot send the progress");
+    }
+    assert_eq!(wait_for_rows(&env, "agent_message_refused").await.len(), 1);
+
+    // The refusal covers the job, not only the kind of the refused message.
+    agent
+        .tx
+        .send(AgentMessage {
+            payload: Some(agent_message::Payload::LogChunk(LogChunk {
+                job_id: unknown.clone(),
+                step_id: "backup".to_owned(),
+                stream: LogStream::Stdout as i32,
+                sequence: 1,
+                data: b"a line\n".to_vec(),
+            })),
+        })
+        .await
+        .expect("cannot send the log chunk");
+    for files_done in 6..=10u64 {
+        agent
+            .tx
+            .send(AgentMessage {
+                payload: Some(agent_message::Payload::StepProgress(StepProgress {
+                    job_id: unknown.clone(),
+                    step_id: "backup".to_owned(),
+                    files_done,
+                    ..StepProgress::default()
+                })),
+            })
+            .await
+            .expect("cannot send the progress");
+    }
+    // The settle time lets a record for a repeat show up.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let rows = audit_rows(&env, "agent_message_refused").await;
+    assert_eq!(
+        rows.len(),
+        1,
+        "one record for the job of the refused messages"
+    );
+    assert_eq!(rows[0].diff["new"]["reason"], "unknown_job");
+    assert_eq!(rows[0].diff["new"]["message"], "step_progress");
+    assert_eq!(rows[0].diff["new"]["job_id"], unknown);
     env.db.cleanup().await;
 }
 
