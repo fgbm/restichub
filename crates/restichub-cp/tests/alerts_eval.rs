@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use alert_support::{
     HookRequest, SmtpSink, WebhookSink, backup_job, finish_job, local_sender, plan_created_at,
-    scoped, set_last_seen,
+    repository_job, scoped, set_last_seen,
 };
 use axum::Router;
 use axum::http::StatusCode;
@@ -21,7 +21,7 @@ use restichub_cp::alerts::sender::Sender;
 use restichub_cp::config::TenancyConfig;
 use restichub_cp::server::{AppState, router};
 use restichub_db::test_util::TestDatabase;
-use restichub_db::{AgentId, PlanId, RepositoryId, TenantId};
+use restichub_db::{AgentId, JobKind, PlanId, RepositoryId, TenantId};
 use serde_json::{Value, json};
 use time::{Duration, OffsetDateTime};
 
@@ -189,6 +189,20 @@ impl Fixture {
             finished_at,
         )
         .await;
+        job
+    }
+
+    /// Seeds a finished job of a kind that a plan does not run, so its alert subject is the
+    /// repository and the kind (ADR-0036).
+    async fn one_time_job(
+        &self,
+        kind: JobKind,
+        status: &str,
+        code: &str,
+        finished_at: OffsetDateTime,
+    ) -> restichub_db::JobId {
+        let job = repository_job(&self.db, self.tenant, kind, self.agent, self.repository).await;
+        finish_job(&self.db, self.tenant, job, status, code, None, finished_at).await;
         job
     }
 
@@ -589,6 +603,119 @@ async fn ac_mn_07_dead_letter_warnings_and_rule_toggles() {
             .iter()
             .any(|rule| rule["kind"] == "agent_offline" && rule["threshold_minutes"] == 90)
     );
+}
+
+/// Turns the RPO rule off, so a test of the job alerts reads its own messages only.
+async fn without_rpo(fx: &Fixture) {
+    let (status, body) = fx
+        .put_rules(json!({"items": [{"kind": "rpo_violated", "enabled": false}]}))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+}
+
+/// AC-MN-02: a restore runs once, so its alert closes at the next success of the same kind
+/// (ADR-0050).
+#[tokio::test]
+async fn ac_mn_02_a_failed_restore_alert_closes_at_the_next_success() {
+    let Some(fx) = fixture("ac-mn-02-one-time").await else {
+        return;
+    };
+    let t0 = fx.t0;
+    without_rpo(&fx).await;
+    fx.one_time_job(
+        JobKind::Restore,
+        "failed",
+        "failed",
+        t0 + Duration::minutes(2),
+    )
+    .await;
+    fx.run(t0 + Duration::minutes(3)).await;
+    assert_eq!(
+        fx.events(),
+        vec![("alert.opened".to_owned(), "job_failed".to_owned())]
+    );
+
+    // The next restore of the repository succeeds, so the alert closes with the recovery message.
+    fx.one_time_job(
+        JobKind::Restore,
+        "succeeded",
+        "succeeded",
+        t0 + Duration::hours(2),
+    )
+    .await;
+    fx.run(t0 + Duration::hours(2) + Duration::minutes(1)).await;
+    assert_eq!(
+        fx.events(),
+        vec![
+            ("alert.opened".to_owned(), "job_failed".to_owned()),
+            ("alert.resolved".to_owned(), "job_failed".to_owned())
+        ]
+    );
+    fx.db.cleanup().await;
+}
+
+/// AC-MN-02: a one-time job alert closes 7 days after the failed job, with the recovery message
+/// (ADR-0050).
+#[tokio::test]
+async fn ac_mn_02_a_one_time_job_alert_closes_after_seven_days() {
+    let Some(fx) = fixture("ac-mn-02-window").await else {
+        return;
+    };
+    let t0 = fx.t0;
+    without_rpo(&fx).await;
+    fx.one_time_job(
+        JobKind::Restore,
+        "failed",
+        "failed",
+        t0 + Duration::minutes(2),
+    )
+    .await;
+    fx.run(t0 + Duration::minutes(3)).await;
+    assert_eq!(
+        fx.events(),
+        vec![("alert.opened".to_owned(), "job_failed".to_owned())]
+    );
+
+    // Inside the window the alert stays open, because a later restore can still succeed.
+    fx.run(t0 + Duration::days(6)).await;
+    assert_eq!(fx.hooks().len(), 1, "the alert stays open");
+
+    fx.run(t0 + Duration::days(7) + Duration::minutes(5)).await;
+    assert_eq!(
+        fx.events(),
+        vec![
+            ("alert.opened".to_owned(), "job_failed".to_owned()),
+            ("alert.resolved".to_owned(), "job_failed".to_owned())
+        ]
+    );
+    fx.db.cleanup().await;
+}
+
+/// ADR-0050: the window belongs to a one-time job. An alert of a plan keeps its rule.
+#[tokio::test]
+async fn ac_mn_02_a_plan_job_alert_ignores_the_one_time_window() {
+    let Some(fx) = fixture("ac-mn-02-plan-window").await else {
+        return;
+    };
+    let t0 = fx.t0;
+    without_rpo(&fx).await;
+    fx.finished_job(
+        fx.plan,
+        t0 + Duration::minutes(1),
+        "failed",
+        "failed",
+        Some("boom"),
+        t0 + Duration::minutes(2),
+    )
+    .await;
+    fx.run(t0 + Duration::minutes(3)).await;
+    fx.run(t0 + Duration::days(7) + Duration::minutes(5)).await;
+    assert_eq!(
+        fx.events(),
+        vec![("alert.opened".to_owned(), "job_failed".to_owned())],
+        "the alert of a plan waits for its next job"
+    );
+    fx.db.cleanup().await;
 }
 
 /// AC-MN-02: a repository lock that stays stale raises an alert, and its end sends a recovery.
