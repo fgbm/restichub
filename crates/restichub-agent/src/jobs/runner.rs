@@ -438,7 +438,7 @@ impl Jobs {
             watchdog: Watchdog::new(limits.stall, tokio::time::Instant::now()),
             // A backup and a restore report their progress as status messages on the standard
             // output. A line on the standard error is a warning or a retry of an unreachable
-            // backend, so it does not restart the stall timeout (ADR-0039, AC-AG-12).
+            // backend, so it does not restart the stall timeout (ADR-0051, AC-AG-12).
             stderr_is_progress: !matches!(
                 step.kind,
                 Some(step::Kind::Backup(_) | step::Kind::Restore(_))

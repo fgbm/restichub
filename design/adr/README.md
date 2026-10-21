@@ -44,7 +44,7 @@ To write a new record, copy [0000-template.md](0000-template.md) and use the nex
 | [0036](0036-alerts-and-notification-channels.md) | Alerts, notification channels and the recovery point objective | accepted, the closing of a one-time job alert amended by ADR-0050 |
 | [0037](0037-server-scripts-on-trusted-hosts.md) | Server scripts on trusted hosts | accepted |
 | [0038](0038-agent-downloads-restic.md) | The agent downloads restic | accepted |
-| [0039](0039-stall-watchdog-instead-of-job-time-limit.md) | A stall watchdog instead of a fixed job time limit | accepted, the grace for a fresh job superseded by ADR-0043 |
+| [0039](0039-stall-watchdog-instead-of-job-time-limit.md) | A stall watchdog instead of a fixed job time limit | accepted, the grace for a fresh job superseded by ADR-0043, the rule of progress of a backup and a restore refined by ADR-0051 |
 | [0040](0040-remove-allow-list-hooks.md) | Remove the allow-list hooks | accepted |
 | [0041](0041-re-registration-and-duplicate-detection.md) | Re-registration that keeps the agent ID, and duplicate detection | accepted |
 | [0042](0042-agent-log-spool-and-acknowledgements.md) | The agent log spool and the log acknowledgements | accepted |
@@ -56,3 +56,4 @@ To write a new record, copy [0000-template.md](0000-template.md) and use the nex
 | [0048](0048-administrator-access-entries-on-windows.md) | Self-repair of administrator access entries on Windows | accepted, decision 3 superseded by ADR-0049 (the identity directory) |
 | [0049](0049-heal-the-identity-directory-of-an-administrator.md) | Heal the administrator entry on the identity directory | accepted |
 | [0050](0050-closing-of-a-one-time-job-alert.md) | The closing of a one-time job alert | accepted |
+| [0051](0051-a-restic-retry-is-not-progress.md) | A retry of restic is not progress | accepted |
