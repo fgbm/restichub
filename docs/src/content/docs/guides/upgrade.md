@@ -94,7 +94,7 @@ The command stops the service, copies the new program, starts the service and wa
    .\restichub-agent.exe install-service
    ```
 
-The command stops the service, copies the new program to `%ProgramFiles%\ResticHub\Agent` and starts the service. It also repairs the access control of `%ProgramData%\ResticHub` that an older agent left. If an older agent or a manual copy left `%ProgramFiles%\ResticHub` open, the command makes it again. If an administrator opened `%ProgramData%\ResticHub\Agent` in File Explorer, the command removes the entry that File Explorer added for that account and prints a warning. You do not register the host again for this entry. If the command stops with a message, see [Agent commands and files](/restichub/reference/agent-commands/#upgrade-the-agent).
+The command stops the service, copies the new program to `%ProgramFiles%\ResticHub\Agent` and starts the service. It also repairs the access control of `%ProgramData%\ResticHub` that an older agent left. If an older agent or a manual copy left `%ProgramFiles%\ResticHub` open, the command makes it again. If an administrator opened `%ProgramData%\ResticHub\Agent` in File Explorer, the command removes the entry that File Explorer added for that account and prints a warning. You do not register the host again for this entry (see [Agent folders in File Explorer](/restichub/reference/agent-commands/#agent-folders-in-file-explorer)). If the command stops with a message, see [Agent commands and files](/restichub/reference/agent-commands/#upgrade-the-agent).
 
 If a job runs, the command cannot stop the service. Wait for the job, then run the command again.
 
