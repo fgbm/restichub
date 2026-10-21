@@ -139,7 +139,7 @@ impl Env {
         queue: QueueConfig,
         browse_rate: Option<u32>,
     ) -> Self {
-        Self::start_configured(db, queue, browse_rate, None).await
+        Self::start_configured(db, queue, browse_rate, None, None).await
     }
 
     /// Like [`Env::start`], with a short certificate lifetime for the agents (FR-ID-03).
@@ -148,7 +148,22 @@ impl Env {
         queue: QueueConfig,
         lifetime: Duration,
     ) -> Self {
-        Self::start_configured(db, queue, None, Some(lifetime)).await
+        Self::start_configured(db, queue, None, Some(lifetime), None).await
+    }
+
+    /// Like [`Env::start`], with the control plane on its own small pool. The setup uses the pool
+    /// of the test database.
+    pub async fn start_with_pool(
+        db: TestDatabase,
+        queue: QueueConfig,
+        max: u32,
+        acquire_timeout: Duration,
+    ) -> Self {
+        let pool = db
+            .database_with_pool(max, acquire_timeout)
+            .await
+            .expect("cannot open the small pool");
+        Self::start_configured(db, queue, None, None, Some(pool)).await
     }
 
     async fn start_configured(
@@ -156,6 +171,7 @@ impl Env {
         queue: QueueConfig,
         browse_rate: Option<u32>,
         lifetime: Option<Duration>,
+        pool: Option<restichub_db::Database>,
     ) -> Self {
         let clock = Arc::new(ManualClock::new(time::OffsetDateTime::now_utc()));
         let provider = common::test_kek();
@@ -176,7 +192,8 @@ impl Env {
         if let Some(rate) = browse_rate {
             auth = auth.with_browse_rate(rate);
         }
-        let state = AppState::with_auth(db.database().clone(), auth)
+        let pool = pool.unwrap_or_else(|| db.database().clone());
+        let state = AppState::with_auth(pool, auth)
             .with_kek(provider)
             .with_tenancy(TenancyConfig::multi())
             .with_queue(queue)

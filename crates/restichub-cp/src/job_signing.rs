@@ -337,14 +337,12 @@ impl JobSigningService {
         Ok(self.current_set(db).await?.sign_job(job))
     }
 
-    /// Signs serialized job bytes with the current key, with the same version check as
-    /// [`Self::sign_job`].
-    pub async fn sign_job_bytes(
-        &self,
-        db: &Database,
-        bytes: Vec<u8>,
-    ) -> Result<SignedJob, JobSigningError> {
-        Ok(self.current_set(db).await?.sign_job_bytes(bytes))
+    /// The current key set after the same version check as [`Self::sign_job`].
+    ///
+    /// A caller that signs inside its own transaction reads the set before the transaction, so it
+    /// never waits for a second pool connection. Its revoked identifiers are the retired keys.
+    pub async fn key_set(&self, db: &Database) -> Result<Arc<KeySet>, JobSigningError> {
+        self.current_set(db).await
     }
 
     /// Builds the signed set update for an agent (FR-PR-11).
@@ -432,22 +430,6 @@ impl JobSigningService {
         db: &Database,
     ) -> Result<(Vec<EnrollmentKey>, Vec<u8>), JobSigningError> {
         Ok(self.current_set(db).await?.enrollment_keys())
-    }
-
-    /// The identifiers of the keys that are retired, for a compromise or a rotation. A stored
-    /// signed job with such a signer is signed again before it goes out (ADR-0030).
-    pub async fn retired_key_ids(
-        &self,
-        db: &Database,
-    ) -> Result<std::collections::HashSet<String>, JobSigningError> {
-        let mut tx = db.begin_tenant(PLATFORM_TENANT_ID).await?;
-        let rows = signing::list(&mut tx).await?;
-        tx.commit().await?;
-        Ok(rows
-            .iter()
-            .filter(|row| row.retired_at.is_some())
-            .map(|row| row.id.to_string())
-            .collect())
     }
 
     /// The identifier of the current signing key, or `None` when the set is absent.

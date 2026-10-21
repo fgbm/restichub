@@ -9,7 +9,9 @@
 //! instances never count the limits against each other. The rows are locked with
 //! `FOR UPDATE SKIP LOCKED`. The transaction builds and signs each job, marks it `sent`, stores the
 //! signed bytes encrypted, starts its lease and reads the secrets; it commits before the control
-//! plane sends the first byte (AC-RP-03). A job without an acknowledgement goes out again when its
+//! plane sends the first byte (AC-RP-03). The pass reads the job signing key set before the
+//! transaction and signs in memory: it never waits for a second pool connection while it holds the
+//! lock. A job without an acknowledgement goes out again when its
 //! lease expires (AC-PR-04). The redelivery sends the stored signed bytes and builds nothing, and
 //! the agent journal dedupes by `job_id` (ADR-0020).
 //!
@@ -40,6 +42,7 @@ use crate::agent_stream::JobSend;
 use crate::clock::Clock;
 use crate::delivery::{self, DeliveryError};
 use crate::job_result_params::{INCOMPATIBLE_CODE, IncompatibleParams};
+use crate::job_signing::{JobSigningError, KeySet};
 use crate::server::AppState;
 use build::BuildError;
 use select::Limits;
@@ -159,6 +162,11 @@ async fn dispatch_tenant(
     online: &[AgentId],
 ) -> Result<(), DbError> {
     let config = state.queue_config();
+    let signer = if online.is_empty() {
+        Signer::Retry
+    } else {
+        load_signer(state).await
+    };
     let mut tx = state.db().begin_tenant(tenant).await?;
     queue_repo::fail_for_revoked_agents(&mut tx, now).await?;
     if !queue_repo::try_lock_tenant(&mut tx).await? {
@@ -199,9 +207,9 @@ async fn dispatch_tenant(
         }
         tx.savepoint(SAVEPOINT).await?;
         let prepared = if job.status == JobStatus::Sent {
-            redeliver(state, &mut tx, &job, now, now + lease).await
+            redeliver(state, &signer, &mut tx, &job, now, now + lease).await
         } else {
-            first_send(state, &mut tx, &job, now, now + lease).await
+            first_send(state, &signer, &mut tx, &job, now, now + lease).await
         };
         match prepared? {
             Prepared::Send(signed, required) => {
@@ -245,6 +253,32 @@ async fn dispatch_tenant(
     Ok(())
 }
 
+enum Signer {
+    Ready(Arc<KeySet>),
+    /// The key set could not be read now. The jobs stay as they are and the next pass tries again.
+    Retry,
+    /// The installation holds no valid key set. A job that needs a new signature fails.
+    Failed,
+}
+
+async fn load_signer(state: &AppState) -> Signer {
+    let Some(signing) = state.job_signing() else {
+        tracing::error!("the server holds no job signing key set");
+        return Signer::Retry;
+    };
+    match signing.key_set(state.db()).await {
+        Ok(set) => Signer::Ready(set),
+        Err(JobSigningError::Database(error)) => {
+            tracing::warn!(%error, "the queue could not read the job signing key set");
+            Signer::Retry
+        }
+        Err(error) => {
+            tracing::warn!(%error, "the queue could not load the job signing key set");
+            Signer::Failed
+        }
+    }
+}
+
 /// What the pass does with one selected job.
 enum Prepared {
     Send(SignedJob, Vec<restichub_proto::AgentCapability>),
@@ -258,6 +292,7 @@ enum Prepared {
 /// Builds, signs and stores the first send of a queued job (FR-PR-03).
 async fn first_send(
     state: &AppState,
+    signer: &Signer,
     tx: &mut TenantTx<'_>,
     job: &Job,
     now: OffsetDateTime,
@@ -274,14 +309,15 @@ async fn first_send(
             return Ok(Prepared::Skip);
         }
     };
-    let (Some(signing), Some(provider)) = (state.job_signing(), state.kek()) else {
-        tracing::error!("the server holds no job signing key set or key provider");
+    let Some(provider) = state.kek() else {
+        tracing::error!("the server holds no key provider");
         return Ok(Prepared::Skip);
     };
-    let signed = match signing.sign_job(state.db(), built.job.job()).await {
-        Ok(signed) => signed,
-        Err(error) => {
-            tracing::warn!(job = %job.id, %error, "the queue could not sign a job");
+    let signed = match signer {
+        Signer::Ready(set) => set.sign_job(built.job.job()),
+        Signer::Retry => return Ok(Prepared::Skip),
+        Signer::Failed => {
+            tracing::warn!(job = %job.id, "the queue could not sign a job");
             return Ok(Prepared::Fail(
                 SIGNING_FAILED,
                 restichub_db::JobResultCode::Failed,
@@ -325,6 +361,7 @@ async fn first_send(
 /// (AC-RP-03).
 async fn redeliver(
     state: &AppState,
+    signer: &Signer,
     tx: &mut TenantTx<'_>,
     job: &Job,
     now: OffsetDateTime,
@@ -361,11 +398,8 @@ async fn redeliver(
             ));
         }
     };
-    let signed = match resign_if_retired(state, tx, job, signed, &stored).await? {
+    let signed = match resign_if_retired(state, signer, tx, job, signed, &stored).await? {
         Resigned::Current(signed) => signed,
-        Resigned::Fail(code) => {
-            return Ok(Prepared::Fail(code, restichub_db::JobResultCode::Failed));
-        }
         Resigned::Skip => return Ok(Prepared::Skip),
     };
     // The stored job may carry a field that only a newer agent reads. The agent may have come back
@@ -407,7 +441,6 @@ async fn redeliver(
 
 enum Resigned {
     Current(SignedJob),
-    Fail(&'static str),
     Skip,
 }
 
@@ -415,32 +448,24 @@ enum Resigned {
 /// never sends a blob of a retired or a compromised key (ADR-0030).
 async fn resign_if_retired(
     state: &AppState,
+    signer: &Signer,
     tx: &mut TenantTx<'_>,
     job: &Job,
     signed: SignedJob,
     stored: &queue_repo::StoredSignedJob,
 ) -> Result<Resigned, DbError> {
-    let (Some(signing), Some(provider)) = (state.job_signing(), state.kek()) else {
-        tracing::error!("the server holds no job signing key set or key provider");
+    let Some(provider) = state.kek() else {
+        tracing::error!("the server holds no key provider");
         return Ok(Resigned::Skip);
     };
-    let retired = match signing.retired_key_ids(state.db()).await {
-        Ok(retired) => retired,
-        Err(error) => {
-            tracing::warn!(job = %job.id, %error, "the queue could not read the retired keys");
-            return Ok(Resigned::Skip);
-        }
+    // Without a readable key set the retired keys are unknown, so the job waits for the next pass.
+    let Signer::Ready(set) = signer else {
+        return Ok(Resigned::Skip);
     };
-    if !retired.contains(&signed.signer_key_id) {
+    if !set.revoked_key_ids().contains(&signed.signer_key_id) {
         return Ok(Resigned::Current(signed));
     }
-    let fresh = match signing.sign_job_bytes(state.db(), signed.job.clone()).await {
-        Ok(fresh) => fresh,
-        Err(error) => {
-            tracing::warn!(job = %job.id, %error, "the queue could not sign a stored job again");
-            return Ok(Resigned::Fail(SIGNING_FAILED));
-        }
-    };
+    let fresh = set.sign_job_bytes(signed.job.clone());
     let bytes = Zeroizing::new(fresh.encode_to_vec());
     let sealed = match delivery::seal_signed_job(tx, provider, job.id, &bytes).await {
         Ok(sealed) => sealed,

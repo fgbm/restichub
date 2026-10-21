@@ -148,7 +148,7 @@ impl Metrics {
         self.streams.fetch_sub(1, Ordering::Relaxed);
     }
 
-    /// Counts one reconnect after a dropped stream.
+    /// Counts one connection attempt after a dropped stream or a failed attempt.
     pub fn inc_reconnect(&self) {
         self.reconnects.fetch_add(1, Ordering::Relaxed);
     }
@@ -302,7 +302,7 @@ impl Metrics {
         write_counter(
             &mut out,
             "restichub_emulator_reconnects_total",
-            "Streams established again after a drop.",
+            "Connection attempts after a dropped stream or a failed attempt.",
             self.reconnects(),
         );
         write_counter(
