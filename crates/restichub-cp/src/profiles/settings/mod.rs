@@ -21,10 +21,10 @@ use std::collections::BTreeMap;
 use restichub_compiler::{
     BackupOptions as CompilerBackupOptions, CheckOptions as CompilerCheckOptions,
     GroupBy as CompilerGroupBy, JobLimits as CompilerJobLimits, OperatingSystem,
-    Profile as CompilerProfile, ProfilePaths as CompilerProfilePaths,
+    Priority as CompilerPriority, Profile as CompilerProfile, ProfilePaths as CompilerProfilePaths,
     Retention as CompilerRetention, SnapshotFilter as CompilerSnapshotFilter,
 };
-use restichub_db::profiles::{NewProfile, Profile, ProfileUpdate};
+use restichub_db::profiles::{NewProfile, Profile, ProfilePriority, ProfileUpdate};
 use restichub_db::{ProfileId, UserId};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -85,6 +85,11 @@ pub struct BackupOptions {
     /// Download limit in kibibytes each second. Zero means no limit (FR-AG-15).
     #[serde(default)]
     pub limit_download_kib: u64,
+    /// `low` runs the backup and the `forget` step of the profile at a lower process priority, and
+    /// on Linux at a lower I/O priority (FR-AG-15). The `prune` and `check` steps of a repository
+    /// keep the normal priority. A missing value gives `normal`, also in an update.
+    #[serde(default)]
+    pub priority: ProfilePriority,
     /// Minutes without progress after which the agent stops a step. From 5 to 10080. A missing
     /// value gives the default of a new profile and keeps the stored value of an update (ADR-0039).
     #[serde(default)]
@@ -419,6 +424,7 @@ impl TryFrom<&Profile> for ProfileView {
                 exclude_caches: profile.exclude_caches,
                 limit_upload_kib: u64::try_from(profile.limit_upload_kib).unwrap_or(0),
                 limit_download_kib: u64::try_from(profile.limit_download_kib).unwrap_or(0),
+                priority: profile.priority,
                 stall_timeout_minutes: Some(
                     u32::try_from(profile.stall_timeout_minutes)
                         .unwrap_or(DEFAULT_STALL_TIMEOUT_MINUTES),
@@ -504,6 +510,7 @@ impl ValidatedProfile {
             exclude_caches: self.options.exclude_caches,
             limit_upload_kib: i64::try_from(self.options.limit_upload_kib).unwrap_or(i64::MAX),
             limit_download_kib: i64::try_from(self.options.limit_download_kib).unwrap_or(i64::MAX),
+            priority: self.options.priority,
             stall_timeout_minutes: i32::try_from(self.options.stall_minutes()).unwrap_or(i32::MAX),
             max_duration_minutes: i32::try_from(self.options.max_minutes()).unwrap_or(i32::MAX),
             retention: self.retention_value(),
@@ -529,6 +536,7 @@ impl ValidatedProfile {
             exclude_caches: self.options.exclude_caches,
             limit_upload_kib: i64::try_from(self.options.limit_upload_kib).unwrap_or(i64::MAX),
             limit_download_kib: i64::try_from(self.options.limit_download_kib).unwrap_or(i64::MAX),
+            priority: self.options.priority,
             stall_timeout_minutes: self
                 .options
                 .stall_timeout_minutes
@@ -593,6 +601,7 @@ impl ValidatedProfile {
                 exclude_caches: self.options.exclude_caches,
                 limit_upload_kib: self.options.limit_upload_kib,
                 limit_download_kib: self.options.limit_download_kib,
+                priority: compiler_priority(self.options.priority),
             },
             limits: CompilerJobLimits {
                 stall_timeout_seconds: self.options.stall_minutes().saturating_mul(60),
@@ -643,6 +652,7 @@ pub fn compiler_profile_from_row(profile: &Profile) -> Result<CompilerProfile, A
             exclude_caches: profile.exclude_caches,
             limit_upload_kib: u64::try_from(profile.limit_upload_kib).unwrap_or(0),
             limit_download_kib: u64::try_from(profile.limit_download_kib).unwrap_or(0),
+            priority: profile.priority,
             stall_timeout_minutes: Some(
                 u32::try_from(profile.stall_timeout_minutes)
                     .unwrap_or(DEFAULT_STALL_TIMEOUT_MINUTES),
@@ -657,6 +667,13 @@ pub fn compiler_profile_from_row(profile: &Profile) -> Result<CompilerProfile, A
     let mut compiler_profile = validated.to_compiler_profile();
     compiler_profile.profile_tag = Some(profile_tag(profile.id));
     Ok(compiler_profile)
+}
+
+fn compiler_priority(priority: ProfilePriority) -> CompilerPriority {
+    match priority {
+        ProfilePriority::Normal => CompilerPriority::Normal,
+        ProfilePriority::Low => CompilerPriority::Low,
+    }
 }
 
 fn compiler_retention(retention: &Retention) -> CompilerRetention {

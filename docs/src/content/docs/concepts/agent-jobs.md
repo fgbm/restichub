@@ -58,10 +58,10 @@ The agent finishes a job when the connection to the control plane is down. It ke
 
 A `backup` step can set an upload limit and a download limit in kibibytes each second. The agent passes them to restic as `--limit-upload` and `--limit-download`. The value 0 means no limit.
 
-A `backup`, `check`, `forget` or `prune` step can set the low priority.
+A `backup` or `forget` step can set the low priority. A profile sets it with the option "Low priority" in the section "Backup options". The option applies to the `backup` step of the profile and to its `forget` step in the maintenance job of a repository. The `prune` and `check` steps, the restore and the other jobs keep the priority of the operating system. Without the option, the steps keep the priority of the operating system.
 
-- On Linux, the agent starts restic with nice value 10 and the best-effort I/O class at level 7.
-- On Windows, the agent starts restic in the `BELOW_NORMAL_PRIORITY_CLASS` priority class.
+- On Linux, the agent starts restic with a nice value 10 above its own nice value. The nice value is 19 at most. The I/O class is best-effort at level 7.
+- On Windows, the agent starts restic in the `BELOW_NORMAL_PRIORITY_CLASS` priority class. This changes the CPU priority only. The disk priority does not change.
 
 ## Related
 

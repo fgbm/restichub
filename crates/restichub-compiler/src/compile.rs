@@ -4,13 +4,13 @@
 //! variables, and never in the retention or the check fields (FR-PF-10, ADR-0047).
 
 use restichub_proto::agent::v1::{
-    BackupStep, CheckStep, ForgetGroupBy, ForgetStep, Job, PruneStep, RepositoryAccess,
-    SnapshotsFilter, Step, step,
+    BackupStep, CheckStep, ForgetGroupBy, ForgetStep, Job, ProcessPriority, PruneStep,
+    RepositoryAccess, SnapshotsFilter, Step, step,
 };
 
 use crate::error::{CompileError, FieldPath};
 use crate::option::ResticOption;
-use crate::profile::{CheckOptions, GroupBy, HookPhase, JobLimits, Profile, Retention};
+use crate::profile::{CheckOptions, GroupBy, HookPhase, JobLimits, Priority, Profile, Retention};
 use crate::target::{OperatingSystem, ResticVersion, TargetFacts};
 use crate::template::{self, TemplateError};
 
@@ -223,14 +223,14 @@ fn build_steps(
             maintenance: true,
         });
         steps.push(PlannedStep {
-            step: prune_step(repository_id),
+            step: prune_step(repository_id, profile.options.priority),
             maintenance: true,
         });
     }
 
     if let Some(check) = &profile.check {
         steps.push(PlannedStep {
-            step: check_step(repository_id, check, target)?,
+            step: check_step(repository_id, check, profile.options.priority, target)?,
             maintenance: true,
         });
     }
@@ -316,9 +316,16 @@ fn backup_step(
             limit_upload_kib: options.limit_upload_kib,
             limit_download_kib: options.limit_download_kib,
             retry_lock: true,
-            priority: 0,
+            priority: process_priority(options.priority) as i32,
         })),
     })
+}
+
+fn process_priority(priority: Priority) -> ProcessPriority {
+    match priority {
+        Priority::Normal => ProcessPriority::Unspecified,
+        Priority::Low => ProcessPriority::Low,
+    }
 }
 
 fn forget_step(
@@ -385,12 +392,12 @@ fn forget_step(
                 .collect(),
             filter: Some(filter),
             retry_lock: true,
-            priority: 0,
+            priority: process_priority(profile.options.priority) as i32,
         })),
     })
 }
 
-fn prune_step(repository_id: &str) -> Step {
+fn prune_step(repository_id: &str, priority: Priority) -> Step {
     Step {
         step_id: "prune".to_owned(),
         timeout_seconds: 0,
@@ -399,7 +406,7 @@ fn prune_step(repository_id: &str) -> Step {
             max_unused: String::new(),
             max_repack_size: String::new(),
             retry_lock: true,
-            priority: 0,
+            priority: process_priority(priority) as i32,
         })),
     }
 }
@@ -407,6 +414,7 @@ fn prune_step(repository_id: &str) -> Step {
 fn check_step(
     repository_id: &str,
     check: &CheckOptions,
+    priority: Priority,
     target: &TargetFacts,
 ) -> Result<Step, CompileError> {
     Ok(Step {
@@ -420,7 +428,7 @@ fn check_step(
                 "check.read_data_subset",
             )?,
             retry_lock: true,
-            priority: 0,
+            priority: process_priority(priority) as i32,
         })),
     })
 }
@@ -532,5 +540,7 @@ fn check_contract(steps: &[PlannedStep], repository_id: &str) -> Result<(), Comp
         })
 }
 
+#[cfg(test)]
+mod priority_tests;
 #[cfg(test)]
 mod tests;

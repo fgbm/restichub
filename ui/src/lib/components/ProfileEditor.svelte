@@ -809,6 +809,11 @@
 				help={t('pe.options.cachesHelp')}
 				bind:checked={draft.excludeCaches}
 			/>
+			<Checkbox
+				label={t('profiles.options.lowPriority')}
+				help={t('pe.options.lowPriorityHelp')}
+				bind:checked={draft.lowPriority}
+			/>
 		</div>
 		<div class="grid2">
 			<TextField

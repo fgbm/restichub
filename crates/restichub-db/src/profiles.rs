@@ -12,8 +12,10 @@
 //! The general tenant policy of the `profiles` table shows the rows of the tenant of the
 //! transaction only (ADR-0023, section Tenant isolation).
 
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use time::OffsetDateTime;
+use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::DbError;
@@ -23,6 +25,21 @@ use crate::tx::TenantTx;
 pub const DEFAULT_PAGE_LIMIT: i64 = 50;
 
 pub const MAX_PAGE_LIMIT: i64 = 200;
+
+/// The process and I/O priority of the restic steps of a profile (FR-AG-15). The string value of
+/// each variant is stored: do not change a string.
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type,
+)]
+#[serde(rename_all = "snake_case")]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
+pub enum ProfilePriority {
+    /// The agent keeps the priority of the operating system default.
+    #[default]
+    Normal,
+    /// Lower process and I/O priority (AC-AG-14).
+    Low,
+}
 
 /// One backup definition of a tenant (FR-PF-01).
 #[derive(Debug, Clone)]
@@ -41,6 +58,7 @@ pub struct Profile {
     pub exclude_caches: bool,
     pub limit_upload_kib: i64,
     pub limit_download_kib: i64,
+    pub priority: ProfilePriority,
     /// Minutes without progress after which the agent stops a step (ADR-0039).
     pub stall_timeout_minutes: i32,
     /// Minutes after which the agent stops the job. Zero means no limit (ADR-0039).
@@ -102,6 +120,7 @@ pub struct NewProfile<'a> {
     pub exclude_caches: bool,
     pub limit_upload_kib: i64,
     pub limit_download_kib: i64,
+    pub priority: ProfilePriority,
     pub stall_timeout_minutes: i32,
     pub max_duration_minutes: i32,
     pub retention: Option<Value>,
@@ -129,6 +148,7 @@ pub struct ProfileUpdate<'a> {
     pub exclude_caches: bool,
     pub limit_upload_kib: i64,
     pub limit_download_kib: i64,
+    pub priority: ProfilePriority,
     /// `None` keeps the stored value.
     pub stall_timeout_minutes: Option<i32>,
     pub max_duration_minutes: Option<i32>,
@@ -145,9 +165,9 @@ pub async fn create(tx: &mut TenantTx<'_>, new: &NewProfile<'_>) -> Result<Profi
          (id, tenant_id, name, paths_all, paths_windows, paths_linux, paths_macos, \
           excludes, exclude_files, tags, use_fs_snapshot, one_file_system, exclude_caches, \
           limit_upload_kib, limit_download_kib, retention, check_options, scripts, \
-          created_by, stall_timeout_minutes, max_duration_minutes, parameters) \
+          created_by, stall_timeout_minutes, max_duration_minutes, parameters, priority) \
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, \
-                 $18, $19, $20, $21, $22)",
+                 $18, $19, $20, $21, $22, $23)",
     )
     .bind(new.id)
     .bind(tx.tenant())
@@ -171,6 +191,7 @@ pub async fn create(tx: &mut TenantTx<'_>, new: &NewProfile<'_>) -> Result<Profi
     .bind(new.stall_timeout_minutes)
     .bind(new.max_duration_minutes)
     .bind(&new.parameters)
+    .bind(new.priority)
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
@@ -187,7 +208,7 @@ pub async fn list(tx: &mut TenantTx<'_>, page: &ProfilePage) -> Result<ProfilePa
     let rows = sqlx::query_as::<_, ProfileRow>(
         "SELECT id, name, paths_all, paths_windows, paths_linux, paths_macos, \
                 excludes, exclude_files, tags, use_fs_snapshot, one_file_system, exclude_caches, \
-                limit_upload_kib, limit_download_kib, stall_timeout_minutes, \
+                limit_upload_kib, limit_download_kib, priority, stall_timeout_minutes, \
                 max_duration_minutes, retention, check_options, scripts, parameters, \
                 created_at, updated_at, created_by \
          FROM profiles \
@@ -212,7 +233,7 @@ pub async fn get(tx: &mut TenantTx<'_>, id: ProfileId) -> Result<Option<Profile>
     let row = sqlx::query_as::<_, ProfileRow>(
         "SELECT id, name, paths_all, paths_windows, paths_linux, paths_macos, \
                 excludes, exclude_files, tags, use_fs_snapshot, one_file_system, exclude_caches, \
-                limit_upload_kib, limit_download_kib, stall_timeout_minutes, \
+                limit_upload_kib, limit_download_kib, priority, stall_timeout_minutes, \
                 max_duration_minutes, retention, check_options, scripts, parameters, \
                 created_at, updated_at, created_by \
          FROM profiles WHERE id = $1",
@@ -235,7 +256,7 @@ pub async fn get_for_update(
     let row = sqlx::query_as::<_, ProfileRow>(
         "SELECT id, name, paths_all, paths_windows, paths_linux, paths_macos, \
                 excludes, exclude_files, tags, use_fs_snapshot, one_file_system, exclude_caches, \
-                limit_upload_kib, limit_download_kib, stall_timeout_minutes, \
+                limit_upload_kib, limit_download_kib, priority, stall_timeout_minutes, \
                 max_duration_minutes, retention, check_options, scripts, parameters, \
                 created_at, updated_at, created_by \
          FROM profiles WHERE id = $1 FOR UPDATE",
@@ -258,7 +279,7 @@ pub async fn update(
                 paths_linux = $5, paths_macos = $6, excludes = $7, exclude_files = $8, tags = $9, \
                 use_fs_snapshot = $10, one_file_system = $11, exclude_caches = $12, \
                 limit_upload_kib = $13, limit_download_kib = $14, retention = $15, \
-                check_options = $16, scripts = $17, parameters = $20, \
+                check_options = $16, scripts = $17, parameters = $20, priority = $21, \
                 stall_timeout_minutes = COALESCE($18, stall_timeout_minutes), \
                 max_duration_minutes = COALESCE($19, max_duration_minutes), updated_at = now() \
          WHERE id = $1",
@@ -283,6 +304,7 @@ pub async fn update(
     .bind(patch.stall_timeout_minutes)
     .bind(patch.max_duration_minutes)
     .bind(&patch.parameters)
+    .bind(patch.priority)
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
@@ -315,6 +337,7 @@ struct ProfileRow {
     exclude_caches: bool,
     limit_upload_kib: i64,
     limit_download_kib: i64,
+    priority: ProfilePriority,
     stall_timeout_minutes: i32,
     max_duration_minutes: i32,
     retention: Option<Value>,
@@ -343,6 +366,7 @@ impl From<ProfileRow> for Profile {
             exclude_caches: row.exclude_caches,
             limit_upload_kib: row.limit_upload_kib,
             limit_download_kib: row.limit_download_kib,
+            priority: row.priority,
             stall_timeout_minutes: row.stall_timeout_minutes,
             max_duration_minutes: row.max_duration_minutes,
             retention: row.retention,

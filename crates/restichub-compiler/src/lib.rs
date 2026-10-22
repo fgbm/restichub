@@ -32,8 +32,8 @@ pub use job::ValidatedJob;
 pub use option::ResticOption;
 pub use preview::{PreviewError, PreviewStep, masked_command, preview};
 pub use profile::{
-    BackupOptions, CheckOptions, GroupBy, HookPhase, JobLimits, Profile, ProfilePaths, Retention,
-    SnapshotFilter,
+    BackupOptions, CheckOptions, GroupBy, HookPhase, JobLimits, Priority, Profile, ProfilePaths,
+    Retention, SnapshotFilter,
 };
 pub use script::{
     FailurePolicy, ScriptEnvRef, ScriptEnvValue, ScriptInterpreter, ScriptRef, ServerScripts,

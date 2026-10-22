@@ -313,6 +313,22 @@ describe('settingsOf', () => {
 		expect(settingsOf(draft, context).parameters[0].default_value).toBeUndefined();
 	});
 
+	it('ac_ag_14_maps_the_low_priority_between_the_draft_and_the_request', () => {
+		const low = draftFromProfile(stored({ options: { priority: 'low' } as Profile['options'] }));
+		expect(low.lowPriority).toBe(true);
+		expect(low.enabled.options).toBe(true);
+		expect(settingsOf(low, context).options.priority).toBe('low');
+		const normal = draftFromProfile(stored());
+		expect(normal.lowPriority).toBe(false);
+		expect(settingsOf(normal, context).options.priority).toBe('normal');
+	});
+
+	it('ac_ag_14_a_switched_off_options_section_sends_the_normal_priority', () => {
+		const draft = draftFromProfile(stored({ options: { priority: 'low' } as Profile['options'] }));
+		draft.enabled.options = false;
+		expect(settingsOf(draft, context).options.priority).toBe('normal');
+	});
+
 	it('fills a new draft with the server defaults and shows the stored limits', () => {
 		const defaults = { stall_timeout_minutes: 60, max_duration_minutes: 2880 };
 		const fresh = emptyDraft(defaults);
