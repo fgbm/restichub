@@ -422,7 +422,7 @@ jobs:
             }
             if (-not (Test-Path "$path.restichub-argv")) { throw "the job $id did not reach restic" }
             $state = (bash scripts/install-smoke.sh job-state $id).Trim()
-            Write-Host "job $id at $path: $state"
+            Write-Host "job $id at ${path}: $state"
             if ($state -notmatch '^running') { throw "the job is not running: $state" }
             return $id
           }
