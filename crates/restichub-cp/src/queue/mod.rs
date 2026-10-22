@@ -25,6 +25,7 @@ pub mod retry;
 pub mod select;
 pub mod stale;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -50,13 +51,19 @@ use select::Limits;
 /// The largest number of waiting jobs of one agent that a tenant pass looks at.
 const BATCH_PER_AGENT: i64 = 100;
 
-/// How long the control plane waits before it judges a running job by the absence of its agent
-/// (AC-PR-07).
+/// How long the control plane waits before it judges a running job by the absence of its agent, and
+/// before it judges the absence of an agent for the alert "Host offline" (AC-PR-07, AC-ID-06).
 ///
 /// The agent repeats a stored result at every connection, so a job that still runs is not lost. The
 /// agent waits at most `BACKOFF_MAX` of 60 s between two attempts (`restichub-agent`,
 /// `stream::BACKOFF_MAX`), so the wait holds twice that delay.
 pub const RECONNECT_GRACE: time::Duration = time::Duration::minutes(2);
+
+/// How long a tenant may stay in the reconnect grace without one pass that reads its agents before
+/// the control plane warns about it. A pass of one tenant that keeps failing keeps every absence
+/// test of that tenant off (see [`AgentView`]); the warning tells the operator why no absence
+/// arrives. It repeats at that interval while the failures continue.
+const LONG_GRACE_WARN: time::Duration = time::Duration::minutes(15);
 
 /// The result message of a job that never got an acknowledgement.
 const NOT_ACKNOWLEDGED: &str = "not_acknowledged";
@@ -115,40 +122,92 @@ impl QueueConfig {
     }
 }
 
-/// When the control plane may judge a running job by the absence of its agent (AC-PR-07).
+/// When the control plane may judge an agent by its absence (AC-PR-07, AC-ID-06).
 ///
 /// The registry of the online agents starts empty, and a database outage hides every agent, so a
-/// running job looks lost while its agent still runs and holds the result. The wait counts from the
-/// first pass that read the agents again after the start or after a pass that could not read them.
+/// running job looks lost and a host looks silent while its agent is still on its way back. The
+/// wait starts again with the first pass that read the agents after the start of the process or
+/// after a pass that could not read them.
+///
+/// The wait is kept for each tenant. A pass that fails in the tenant of one organization must not
+/// hide a host of another organization for as long as it fails. The dispatcher and the alert
+/// evaluation both read the wait of the tenant, so the process holds one wait and not a second
+/// timer.
 #[derive(Debug, Default)]
 pub struct AgentView {
+    tenants: std::sync::Mutex<HashMap<TenantId, TenantGrace>>,
+}
+
+/// The wait of one tenant, and the run of failed passes that keeps it running.
+#[derive(Debug, Default, Clone, Copy)]
+struct TenantGrace {
     /// The first pass that read the agents again, while the wait runs.
-    reading_since: std::sync::Mutex<Option<OffsetDateTime>>,
+    reading_since: Option<OffsetDateTime>,
+    /// The first pass that failed in the current run of failures.
+    failing_since: Option<OffsetDateTime>,
+    /// When the warning about a run of failures that does not end last went out.
+    warned_at: Option<OffsetDateTime>,
+}
+
+impl TenantGrace {
+    fn passed(&mut self, now: OffsetDateTime) {
+        if self.reading_since.is_none() {
+            self.reading_since = Some(now);
+        }
+        self.failing_since = None;
+        self.warned_at = None;
+    }
+
+    fn failed(&mut self, tenant: TenantId, now: OffsetDateTime) {
+        self.reading_since = None;
+        let failing_since = *self.failing_since.get_or_insert(now);
+        let warn = now >= failing_since + LONG_GRACE_WARN
+            && self
+                .warned_at
+                .is_none_or(|warned| now >= warned + LONG_GRACE_WARN);
+        if warn {
+            tracing::warn!(
+                tenant = %tenant,
+                minutes = (now - failing_since).whole_minutes(),
+                "the pass of a tenant keeps failing, so the control plane judges no absent agent there"
+            );
+            self.warned_at = Some(now);
+        }
+    }
 }
 
 impl AgentView {
-    fn lock(&self) -> std::sync::MutexGuard<'_, Option<OffsetDateTime>> {
-        self.reading_since
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<TenantId, TenantGrace>> {
+        self.tenants
             .lock()
             .unwrap_or_else(|error| error.into_inner())
     }
 
-    /// Records that a pass could not read the agents. The wait starts again with the next pass.
-    pub fn failed(&self) {
-        *self.lock() = None;
+    /// Records a pass that read the agents of the tenant. Only the first pass after a failure
+    /// starts the wait.
+    pub fn passed(&self, tenant: TenantId, now: OffsetDateTime) {
+        self.lock().entry(tenant).or_default().passed(now);
     }
 
-    /// Records a pass that read the agents. Only the first pass after a failure starts the wait.
-    pub fn passed(&self, now: OffsetDateTime) {
-        let mut since = self.lock();
-        if since.is_none() {
-            *since = Some(now);
+    /// Records that a pass of the tenant could not read or write. The wait of that tenant starts
+    /// again with its next pass.
+    pub fn failed(&self, tenant: TenantId, now: OffsetDateTime) {
+        self.lock().entry(tenant).or_default().failed(tenant, now);
+    }
+
+    /// Records that a pass could not read the list of the tenants. The wait of every tenant starts
+    /// again with its next pass.
+    pub fn all_failed(&self, now: OffsetDateTime) {
+        for (tenant, grace) in self.lock().iter_mut() {
+            grace.failed(*tenant, now);
         }
     }
 
-    /// True when the control plane read the agents for at least [`RECONNECT_GRACE`].
-    pub fn judges_absence(&self, now: OffsetDateTime) -> bool {
+    /// True when the control plane read the agents of the tenant for at least [`RECONNECT_GRACE`].
+    pub fn judges_absence(&self, tenant: TenantId, now: OffsetDateTime) -> bool {
         self.lock()
+            .get(&tenant)
+            .and_then(|grace| grace.reading_since)
             .is_some_and(|since| now >= since + RECONNECT_GRACE)
     }
 }
@@ -178,12 +237,9 @@ pub async fn run_with_online(
         }
         .await;
         match read {
-            Ok(list) => {
-                state.agent_view().passed(now);
-                list
-            }
+            Ok(list) => list,
             Err(error) => {
-                state.agent_view().failed();
+                state.agent_view().all_failed(now);
                 return Err(error);
             }
         }
@@ -193,13 +249,17 @@ pub async fn run_with_online(
         if tenant.status != TenantStatus::Active {
             continue;
         }
-        if let Err(error) = stale::recover_tenant(state, tenant.id, now, online).await {
+        state.agent_view().passed(tenant.id, now);
+        let recovered = stale::recover_tenant(state, tenant.id, now, online).await;
+        if let Err(error) = &recovered {
             tracing::warn!(tenant = %tenant.id, %error, "the stale lock pass of a tenant failed");
-            state.agent_view().failed();
         }
-        if let Err(error) = dispatch_tenant(state, tenant.id, now, online).await {
+        let dispatched = dispatch_tenant(state, tenant.id, now, online).await;
+        if let Err(error) = &dispatched {
             tracing::warn!(tenant = %tenant.id, %error, "the dispatch pass of a tenant failed");
-            state.agent_view().failed();
+        }
+        if recovered.is_err() || dispatched.is_err() {
+            state.agent_view().failed(tenant.id, now);
         }
     }
     Ok(())
@@ -634,17 +694,25 @@ mod tests {
         OffsetDateTime::from_unix_timestamp(1_800_000_000).expect("a valid time")
     }
 
+    fn tenant() -> TenantId {
+        TenantId::new()
+    }
+
     #[test]
     fn ac_pr_07_the_absence_of_an_agent_counts_only_after_the_reconnect_grace() {
         let view = AgentView::default();
         let start = at_start();
-        assert!(!view.judges_absence(start), "no pass has read the agents");
-        view.passed(start);
-        assert!(!view.judges_absence(start), "the grace runs");
-        assert!(!view.judges_absence(start + RECONNECT_GRACE - time::Duration::SECOND));
-        assert!(view.judges_absence(start + RECONNECT_GRACE));
+        let tenant = tenant();
         assert!(
-            view.judges_absence(start + time::Duration::hours(3)),
+            !view.judges_absence(tenant, start + time::Duration::hours(1)),
+            "no pass has read the agents of the tenant"
+        );
+        view.passed(tenant, start);
+        assert!(!view.judges_absence(tenant, start), "the grace runs");
+        assert!(!view.judges_absence(tenant, start + RECONNECT_GRACE - time::Duration::SECOND));
+        assert!(view.judges_absence(tenant, start + RECONNECT_GRACE));
+        assert!(
+            view.judges_absence(tenant, start + time::Duration::hours(3)),
             "a later pass keeps the start"
         );
     }
@@ -653,14 +721,73 @@ mod tests {
     fn ac_pr_07_a_failed_pass_starts_the_reconnect_grace_again() {
         let view = AgentView::default();
         let start = at_start();
-        view.passed(start);
+        let tenant = tenant();
+        view.passed(tenant, start);
         let back = start + time::Duration::hours(1);
-        assert!(view.judges_absence(back));
+        assert!(view.judges_absence(tenant, back));
 
-        view.failed();
-        assert!(!view.judges_absence(back), "the view is not reliable again");
-        view.passed(back);
-        assert!(!view.judges_absence(back), "the grace counts from here");
-        assert!(view.judges_absence(back + RECONNECT_GRACE));
+        view.failed(tenant, back);
+        assert!(
+            !view.judges_absence(tenant, back),
+            "the view is not reliable again"
+        );
+        view.passed(tenant, back);
+        assert!(
+            !view.judges_absence(tenant, back),
+            "the grace counts from here"
+        );
+        assert!(view.judges_absence(tenant, back + RECONNECT_GRACE));
+    }
+
+    #[test]
+    fn ac_pr_07_a_failed_pass_of_one_tenant_keeps_the_grace_of_another() {
+        let view = AgentView::default();
+        let start = at_start();
+        let (first, second) = (tenant(), tenant());
+        view.passed(first, start);
+        view.passed(second, start);
+        let back = start + time::Duration::hours(1);
+        assert!(view.judges_absence(first, back));
+        assert!(view.judges_absence(second, back));
+
+        view.failed(second, back);
+        assert!(!view.judges_absence(second, back));
+        assert!(
+            view.judges_absence(first, back),
+            "the failure of one tenant does not hide the agents of another"
+        );
+
+        // A tenant whose pass keeps failing stays in the grace, and the control plane warns about it.
+        let later = back + time::Duration::hours(3);
+        view.failed(second, later);
+        assert!(!view.judges_absence(second, later));
+        view.passed(second, later);
+        assert!(
+            !view.judges_absence(second, later),
+            "the next pass that reads the agents starts the grace again"
+        );
+        assert!(view.judges_absence(second, later + RECONNECT_GRACE));
+    }
+
+    #[test]
+    fn ac_id_06_a_failed_read_of_the_tenant_list_starts_every_grace_again() {
+        let view = AgentView::default();
+        let start = at_start();
+        let (first, second) = (tenant(), tenant());
+        view.passed(first, start);
+        view.passed(second, start);
+        let back = start + time::Duration::hours(1);
+        assert!(view.judges_absence(first, back));
+
+        view.all_failed(back);
+        assert!(!view.judges_absence(first, back));
+        assert!(!view.judges_absence(second, back));
+
+        view.passed(first, back);
+        assert!(
+            !view.judges_absence(first, back),
+            "the grace counts from here"
+        );
+        assert!(view.judges_absence(first, back + RECONNECT_GRACE));
     }
 }

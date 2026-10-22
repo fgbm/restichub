@@ -143,9 +143,15 @@ async fn ac_mn_09_dashboard_overview() {
     // Open the alerts with a pass at the current time.
     let kek = test_kek();
     let clock = restichub_cp::clock::ManualClock::new(now).shared();
-    restichub_cp::alerts::run_once(db.database(), &sender, kek, clock, judged_view(now))
-        .await
-        .expect("pass");
+    restichub_cp::alerts::run_once(
+        db.database(),
+        &sender,
+        kek,
+        clock,
+        judged_view(&db, now).await,
+    )
+    .await
+    .expect("pass");
 
     let (status, _, body) = send(
         &app,

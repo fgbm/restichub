@@ -498,10 +498,17 @@ pub async fn repository_job(
 }
 
 /// The view of an instance that has read the agents without a break for longer than the reconnect
-/// grace, so an evaluation judges an absence.
-pub fn judged_view(now: OffsetDateTime) -> Arc<AgentView> {
+/// grace, so an evaluation judges an absence in every tenant.
+pub async fn judged_view(db: &TestDatabase, now: OffsetDateTime) -> Arc<AgentView> {
     let view = AgentView::default();
-    view.passed(now - RECONNECT_GRACE);
+    let mut tx = db.database().begin_platform().await.expect("begin");
+    let list = restichub_db::tenants::list(&mut tx)
+        .await
+        .expect("the tenant list");
+    tx.commit().await.expect("commit");
+    for tenant in list {
+        view.passed(tenant.id, now - RECONNECT_GRACE);
+    }
     Arc::new(view)
 }
 

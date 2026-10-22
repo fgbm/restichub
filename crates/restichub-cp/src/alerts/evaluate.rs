@@ -79,16 +79,18 @@ struct Findings {
 /// Runs one evaluation of the tenant. A second instance that runs the same pass at the same time
 /// skips it.
 ///
-/// The view says how long this instance read the agents without a break. A database outage hides
-/// the contact of every agent, so the pass judges no absence before the agent had the time to
-/// connect again (AC-ID-06, AC-PR-07).
+/// The view says how long this instance read the agents of the tenant without a break. A database
+/// outage hides the contact of every agent, so the pass judges no absence before the agent had the
+/// time to connect again (AC-ID-06, AC-PR-07). In that time it neither opens nor closes an alert of
+/// an absent host: the host may be on its way back, and a close would send a recovery message for a
+/// fault that never went away.
 pub async fn evaluate_tenant(
     db: &Database,
     tenant: TenantId,
     now: OffsetDateTime,
     view: &AgentView,
 ) -> Result<Report, DbError> {
-    let judges_absence = view.judges_absence(now);
+    let judges_absence = view.judges_absence(tenant, now);
     let mut tx = db.begin_tenant(tenant).await?;
     if !alerts::try_lock_tenant(&mut tx).await? {
         drop(tx);

@@ -97,7 +97,7 @@ async fn ac_mn_07_a_slow_target_does_not_delay_another_tenant() {
     };
     let now = OffsetDateTime::now_utc() + time::Duration::hours(3);
     let clock = ManualClock::new(now).shared();
-    let view = judged_view(now);
+    let view = judged_view(&db, now).await;
     let (database, sender, kek) = (db.database().clone(), local_sender(None), test_kek());
     let pass = tokio::spawn(async move {
         restichub_cp::alerts::run_once_with(
@@ -165,7 +165,7 @@ async fn ac_mn_07_the_evaluation_reads_more_than_two_thousand_agents() {
     let tenant = create_tenant_with_key(db.database(), "many-agents").await;
     bulk_agents(&db, tenant, 2000).await;
     let now = OffsetDateTime::now_utc() + time::Duration::hours(3);
-    let view = judged_view(now);
+    let view = judged_view(&db, now).await;
     let first = restichub_cp::alerts::evaluate::evaluate_tenant(db.database(), tenant, now, &view)
         .await
         .expect("evaluation");

@@ -144,7 +144,7 @@ async fn ac_id_06_the_offline_alert_still_waits_for_its_threshold() {
     // This test covers the threshold only, so the grace has already run out.
     env.state
         .agent_view()
-        .passed(env.now() - restichub_cp::queue::RECONNECT_GRACE);
+        .passed(env.tenant, env.now() - restichub_cp::queue::RECONNECT_GRACE);
     let evaluate = |at| {
         restichub_cp::alerts::evaluate::evaluate_tenant(
             env.db.database(),

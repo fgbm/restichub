@@ -319,7 +319,8 @@ async fn fr_mn_01_one_unreadable_alert_row_does_not_stop_the_evaluation() {
     let agent = seed_agent(db.database(), tenant, "silent-host").await;
     set_last_seen(&db, tenant, agent, Some(now - time::Duration::days(2))).await;
 
-    evaluate::evaluate_tenant(db.database(), tenant, now, &judged_view(now))
+    let view = judged_view(&db, now).await;
+    evaluate::evaluate_tenant(db.database(), tenant, now, &view)
         .await
         .expect("evaluation");
 

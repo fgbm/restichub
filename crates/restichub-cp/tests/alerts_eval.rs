@@ -136,9 +136,15 @@ impl Fixture {
     async fn run_with(&self, sender: &Sender, now: OffsetDateTime) {
         let kek = test_kek();
         let clock = restichub_cp::clock::ManualClock::new(now).shared();
-        restichub_cp::alerts::run_once(self.db.database(), sender, kek, clock, judged_view(now))
-            .await
-            .expect("the alert pass works");
+        restichub_cp::alerts::run_once(
+            self.db.database(),
+            sender,
+            kek,
+            clock,
+            judged_view(&self.db, now).await,
+        )
+        .await
+        .expect("the alert pass works");
     }
 
     fn hooks(&self) -> Vec<HookRequest> {
