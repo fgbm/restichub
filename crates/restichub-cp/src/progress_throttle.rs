@@ -7,7 +7,7 @@
 //!
 //! The throttle also remembers a job whose message the control plane refused (AC-PR-05). A message
 //! for an unknown or a foreign job makes no slot, so without that memory every repeat would read
-//! the job again. A stream that sends 1000 such messages for one job now reads it a few times.
+//! the job again. A stream that sends 1000 such messages for one job reads it a few times.
 
 use std::collections::HashMap;
 use std::sync::Mutex;

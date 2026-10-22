@@ -59,10 +59,11 @@ const BATCH_PER_AGENT: i64 = 100;
 /// `stream::BACKOFF_MAX`), so the wait holds twice that delay.
 pub const RECONNECT_GRACE: time::Duration = time::Duration::minutes(2);
 
-/// How long a tenant may stay in the reconnect grace without one pass that reads its agents before
-/// the control plane warns about it. A pass of one tenant that keeps failing keeps every absence
-/// test of that tenant off (see [`AgentView`]); the warning tells the operator why no absence
-/// arrives. It repeats at that interval while the failures continue.
+/// How long the run of failed passes of a tenant may last before the control plane warns about it.
+/// A pass of one tenant that keeps failing keeps every absence test of that tenant off (see
+/// [`AgentView`]), so the warning tells the operator why no absence arrives. The run ends only
+/// after passes that read the agents for the whole [`RECONNECT_GRACE`], and the warning repeats at
+/// this interval while the run continues.
 const LONG_GRACE_WARN: time::Duration = time::Duration::minutes(15);
 
 /// The result message of a job that never got an acknowledgement.
@@ -864,14 +865,25 @@ mod tests {
 
     #[test]
     fn ac_pr_07_a_tenant_that_fails_once_each_90_seconds_warns_after_the_long_grace() {
+        // The first pass fails, and the passes in between read the agents. Each read is shorter
+        // than the grace, so the run of failures does not end and the warning still arrives.
         let mut grace = TenantGrace::default();
         let start = at_start();
-        let warnings = passes(
-            &mut grace,
-            start,
-            start + time::Duration::minutes(16),
-            time::Duration::seconds(90),
-        );
+        let step = time::Duration::seconds(2);
+        let mut since_failure = time::Duration::seconds(90);
+        let mut warnings = 0;
+        let mut now = start;
+        while now < start + time::Duration::minutes(16) {
+            grace.passed(now);
+            if since_failure >= time::Duration::seconds(90) {
+                since_failure = time::Duration::ZERO;
+                if grace.failed(now).is_some() {
+                    warnings += 1;
+                }
+            }
+            since_failure += step;
+            now += step;
+        }
         assert_eq!(warnings, 1, "the grace of the tenant never ends");
     }
 

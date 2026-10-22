@@ -1,7 +1,7 @@
 //! Shared types for ResticHub.
 
-/// Looks like `0.1.0-rc.2+<short sha>` for a release, or `0.1.0+dev` for a local build. Version
-/// comparisons ignore the pre-release part and the part after `+`.
+/// Looks like `0.1.0-rc.2+<short sha>` for a release, or `0.1.0+dev` for a local build. A comparison
+/// keeps the pre-release, where `0.1.0-rc.2` is lower than `0.1.0`, and ignores the part after `+`.
 pub const BUILD_VERSION: &str = env!("RESTICHUB_FULL_VERSION");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

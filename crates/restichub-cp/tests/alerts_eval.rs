@@ -779,8 +779,9 @@ async fn ac_mn_02_a_failing_weekly_prune_alert_does_not_flap() {
     );
 
     // The next prune starts at the schedule and fails later than the one of the week before. No
-    // recovery message goes out in between, so the alert does not close and open again.
-    fx.run(t0 + Duration::days(7) + Duration::minutes(1)).await;
+    // recovery message goes out in between, so the alert does not close and open again. The pass
+    // runs after the 7 days of a failed job, so a close by time would show here.
+    fx.run(t0 + Duration::days(7) + Duration::minutes(5)).await;
     fx.finished_kind_job(
         JobKind::Prune,
         "failed",

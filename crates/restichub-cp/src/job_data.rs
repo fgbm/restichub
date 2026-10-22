@@ -165,9 +165,9 @@ async fn write_progress(state: &AppState, job_id: JobId, update: &ProgressUpdate
 /// What became of a message whose loss would lose state (FR-PR-07, ADR-0020).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WriteOutcome {
-    /// Written and committed.
     Stored,
-    /// The control plane will never store this message: it is a refusal, not a failure.
+    /// The control plane stored nothing: it refused the message, or the job is not sent yet and
+    /// takes it at the next connection of the agent.
     Ignored,
     /// The database did not take the message. The agent has to send it again.
     Transient,
@@ -291,8 +291,9 @@ pub async fn handle_job_result_data(
     if refused_before(state, agent, job_id) {
         return WriteOutcome::Ignored;
     }
-    // Only a job that takes writes now keeps its steps and log tail. A queued or foreign job stays
-    // as before; a database error reaches `handle_job_result` next and closes the stream (FR-PR-07).
+    // Only a job that takes writes now keeps its steps and log tail. A queued or a foreign job
+    // gets nothing here; a database error reaches `handle_job_result` next and closes the stream
+    // (FR-PR-07).
     if !job_is_owned(state, tenant, agent, job_id, "job_result").await {
         return WriteOutcome::Ignored;
     }
