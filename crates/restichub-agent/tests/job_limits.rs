@@ -267,8 +267,9 @@ async fn ac_ag_12_a_restore_that_only_skips_files_is_not_stalled() {
     );
 }
 
-/// AC-AG-12, ADR-0039: a restore with `--verify` prints nothing while it verifies its files. The
-/// agent does not stop that phase as stalled.
+/// AC-AG-12, ADR-0051: a restore with `--verify` prints nothing while it verifies its files, so
+/// the agent gives that phase the long window of `check` and `prune` and does not stop it as
+/// stalled while it verifies.
 #[tokio::test(flavor = "multi_thread")]
 async fn ac_ag_12_a_restore_with_verify_is_not_stalled_while_it_verifies() {
     let path = directory("limits-restore-verify");
@@ -295,14 +296,15 @@ async fn ac_ag_12_a_restore_with_verify_is_not_stalled_while_it_verifies() {
     );
 }
 
-/// FR-SC-05, ADR-0039: restic waits for a lock of another host without a status line. The wait is
-/// shorter than the stall timeout, so the step ends with the lock code and the control plane can
-/// retry the job.
+/// FR-SC-05, ADR-0039: restic waits for a lock of another host without a status line. The agent
+/// asks restic to end the wait before the stall timeout, so the step ends with the lock code and
+/// the control plane can retry the job.
 #[tokio::test(flavor = "multi_thread")]
 async fn fr_sc_05_a_lock_wait_ends_with_the_lock_code_and_not_as_stalled() {
     let path = directory("limits-lock-wait");
-    // restic prints its retry clock only to the standard error, and it stops before the window.
-    common::script_stdout(&path, "backup", "#sleep 1000\n");
+    // The window is 3 seconds, so the test is short. restic prints its retry clock only to the
+    // standard error, which is not progress, and it stops one second before the window closes.
+    common::script_stdout(&path, "backup", "#sleep 2000\n");
     common::script_code(&path, "backup", 11);
     let job = backup_job("job-lock-wait", &path, 3, 0);
 
@@ -312,5 +314,19 @@ async fn fr_sc_05_a_lock_wait_ends_with_the_lock_code_and_not_as_stalled() {
     assert!(
         elapsed > Duration::from_secs(1),
         "restic must end the wait itself, took {elapsed:?}"
+    );
+    // The wait of the command is the one of production, in minutes. It must fit in the shortest
+    // stall timeout of a profile, 5 minutes, or the watchdog stops the step before restic gives
+    // up and the control plane reads `stalled` instead of `repository_locked`.
+    let arguments = common::recorded_arguments(&path);
+    let minutes = arguments
+        .split_whitespace()
+        .find_map(|argument| argument.strip_prefix("--retry-lock="))
+        .and_then(|value| value.strip_suffix('m'))
+        .and_then(|value| value.parse::<u64>().ok())
+        .expect("the agent must pass --retry-lock to restic");
+    assert!(
+        minutes * 60 < 5 * 60,
+        "the lock wait of {minutes} minutes must be shorter than the shortest stall timeout of a profile"
     );
 }

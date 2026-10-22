@@ -14,7 +14,10 @@ use crate::output::Progress;
 /// The stall timeout of a step kind when the job gives none (ADR-0039).
 const DEFAULT_STALL: Duration = Duration::from_secs(60 * 60);
 
-const MIN_STALL_VARIABLE_SECS: u64 = 60;
+/// The smallest stall timeout that the variable may set. restic waits 4 minutes for a held lock
+/// and the shortest window of a profile is 5 minutes, so a shorter window would stop the step as
+/// stalled while restic still waits (FR-SC-05, ADR-0039).
+const MIN_STALL_VARIABLE_SECS: u64 = 5 * 60;
 const MAX_STALL_VARIABLE_SECS: u64 = 7 * 24 * 60 * 60;
 
 const STALL_VARIABLE: &str = "RESTICHUB_JOB_STALL_TIMEOUT_SECS";
@@ -82,7 +85,6 @@ pub(super) struct Watchdog {
     last_progress: Instant,
     seen: Option<Seen>,
     last_status_line: Option<String>,
-    disarmed: bool,
 }
 
 impl Watchdog {
@@ -92,7 +94,6 @@ impl Watchdog {
             last_progress: now,
             seen: None,
             last_status_line: None,
-            disarmed: false,
         }
     }
 
@@ -129,18 +130,18 @@ impl Watchdog {
         }
     }
 
-    /// Ends the judgement of this step: the rest of it never counts as stalled.
+    /// The verify phase of a restore starts: it prints nothing until it ends.
     ///
-    /// A restore with `--verify` prints its last status and its summary before it verifies the
-    /// files, and prints nothing while it verifies (restic `cmd/restore.go`). The agent cannot tell
-    /// a slow disk from a hung one there, so the maximum duration and a cancel remain the only
-    /// stops (ADR-0039).
-    pub(super) fn disarm(&mut self) {
-        self.disarmed = true;
+    /// restic prints the last status and the summary before it verifies the files and prints
+    /// nothing while it verifies (`cmd/restore.go`). The step keeps the long window of `check` and
+    /// `prune`, so a verify over a target that hangs still stops the step (ADR-0051).
+    pub(super) fn verify(&mut self, now: Instant) {
+        self.stall = self.stall.max(LONG_STALL);
+        self.last_progress = now;
     }
 
     pub(super) fn is_stalled(&self, now: Instant) -> bool {
-        !self.disarmed && now.saturating_duration_since(self.last_progress) >= self.stall
+        now.saturating_duration_since(self.last_progress) >= self.stall
     }
 }
 
@@ -175,6 +176,12 @@ mod tests {
         assert_eq!(
             default_stall(&backup, Some("1")),
             Duration::from_secs(MIN_STALL_VARIABLE_SECS)
+        );
+        // A window shorter than the lock wait of restic would stop the step as stalled while
+        // restic still waits for the lock (FR-SC-05).
+        assert_eq!(
+            default_stall(&backup, Some("240")),
+            Duration::from_secs(300)
         );
     }
 
@@ -279,16 +286,28 @@ mod tests {
         }
     }
 
-    /// The verify phase of a restore prints nothing and has no stall judgement (ADR-0039).
+    /// The verify phase of a restore prints nothing until it ends, so the step waits the long
+    /// window of `check` and `prune` there (ADR-0051).
     #[test]
-    fn ac_ag_12_a_disarmed_step_never_stalls() {
+    fn ac_ag_12_the_verify_phase_of_a_restore_has_the_long_window() {
         let start = Instant::now();
         let mut watchdog = Watchdog::new(Duration::from_secs(60), start);
-        watchdog.status(&status(100, "file"), start);
-        watchdog.disarm();
-        assert!(!watchdog.is_stalled(start + Duration::from_secs(24 * 3600)));
-        watchdog.output(start + Duration::from_secs(3600));
-        assert!(!watchdog.is_stalled(start + Duration::from_secs(10 * 3600)));
+        watchdog.status(&status(1000, "file"), start);
+        watchdog.verify(start);
+        let almost = start + LONG_STALL - Duration::from_secs(1);
+        assert!(!watchdog.is_stalled(almost), "the verify phase still runs");
+        assert!(watchdog.is_stalled(start + LONG_STALL));
+    }
+
+    /// A step that already has a longer window keeps it: the verify phase only raises the window.
+    #[test]
+    fn ac_ag_12_the_verify_phase_keeps_a_longer_stall_timeout() {
+        let start = Instant::now();
+        let longer = LONG_STALL + Duration::from_secs(3600);
+        let mut watchdog = Watchdog::new(longer, start);
+        watchdog.verify(start);
+        assert!(!watchdog.is_stalled(start + LONG_STALL));
+        assert!(watchdog.is_stalled(start + longer));
     }
 
     #[test]

@@ -1005,7 +1005,7 @@ export const en = {
 	'jobDetail.limit': 'Limit',
 	'jobDetail.limit.noProgress': 'Stops when restic makes no progress',
 	'jobDetail.limit.stall': 'No progress: {stall}',
-	'jobDetail.limit.stallDefault': 'No progress: {stall} (agent default)',
+	'jobDetail.limit.stallAgentDefault': 'No progress: the default of the agent',
 	'jobDetail.limit.max': 'Maximum: {max}',
 	'jobDetail.limit.noMax': 'No maximum',
 	'jobDetail.attempt': 'Attempt',

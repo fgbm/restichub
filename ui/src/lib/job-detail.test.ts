@@ -246,7 +246,7 @@ describe('limitLines', () => {
 	it('ac_ag_12_shows_the_window_that_a_restore_takes_from_the_agent', () => {
 		expect(limitLines(detail({ kind: 'restore', limits: limits(null, null) }))).toEqual([
 			'No maximum',
-			'No progress: 1h (agent default)'
+			'No progress: the default of the agent'
 		]);
 		expect(limitLines(detail({ kind: 'backup', limits: limits(null, null) }))).toEqual([
 			'No maximum',
