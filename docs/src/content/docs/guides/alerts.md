@@ -22,7 +22,7 @@ An alert stays open while its condition holds. The control plane sends one messa
 
 A failure that finished more than 24 hours before the first evaluation raises no alert. A cancelled job and an expired job never raise an alert. A disabled plan and a plan of a revoked host raise no RPO alert.
 
-The control plane raises no host offline alert during the two minutes after it starts. It also raises none after a time when it could not read the database. The hosts can connect again in that time, so the control plane reads their state first.
+The control plane raises no **Host offline** alert during the two minutes after it starts and after a pause in the work with the database. An open **Host offline** alert also stays open in that time, so its recovery message comes later. The hosts can connect again in that time. When the work of one organization fails, the two minutes start again for that organization only.
 
 When an alert resolves because its plan, host or rule is gone, the control plane sends no recovery message.
 

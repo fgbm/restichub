@@ -41,7 +41,7 @@ To write a new record, copy [0000-template.md](0000-template.md) and use the nex
 | [0033](0033-enrollment-transport-and-agent-trust-bootstrap.md) | Enrollment transport and agent trust bootstrap | accepted |
 | [0034](0034-repository-maintenance-schedule.md) | Repository maintenance schedule and retention isolation | accepted, partly amended by ADR-0047 (the plans of the repository) |
 | [0035](0035-restore-and-snapshot-browsing.md) | Restore and snapshot browsing | accepted |
-| [0036](0036-alerts-and-notification-channels.md) | Alerts, notification channels and the recovery point objective | accepted, the closing of a one-time job alert amended by ADR-0050 |
+| [0036](0036-alerts-and-notification-channels.md) | Alerts, notification channels and the recovery point objective | accepted, the closing of a one-time job alert amended by ADR-0050, the reconnect grace of the absence tests amended by ADR-0052 |
 | [0037](0037-server-scripts-on-trusted-hosts.md) | Server scripts on trusted hosts | accepted |
 | [0038](0038-agent-downloads-restic.md) | The agent downloads restic | accepted |
 | [0039](0039-stall-watchdog-instead-of-job-time-limit.md) | A stall watchdog instead of a fixed job time limit | accepted, the grace for a fresh job superseded by ADR-0043, the rule of progress of a backup and a restore refined by ADR-0051 |
@@ -49,7 +49,7 @@ To write a new record, copy [0000-template.md](0000-template.md) and use the nex
 | [0041](0041-re-registration-and-duplicate-detection.md) | Re-registration that keeps the agent ID, and duplicate detection | accepted |
 | [0042](0042-agent-log-spool-and-acknowledgements.md) | The agent log spool and the log acknowledgements | accepted |
 | [0043](0043-no-grace-for-unlisted-running-jobs.md) | No grace for a running job that the hello omits | accepted |
-| [0044](0044-host-online-state.md) | The host online state is an open stream recorded in the database | accepted |
+| [0044](0044-host-online-state.md) | The host online state is an open stream recorded in the database | accepted, the threshold of the alert "Host offline" amended by ADR-0052 |
 | [0045](0045-repository-roots-for-local-repositories.md) | Repository roots for local repositories | accepted |
 | [0046](0046-local-repository-bound-to-its-host.md) | A local repository is bound to its host | accepted, partly amended by ADR-0047 (the plan holds the repository) |
 | [0047](0047-repository-in-the-plan-and-profile-parameters.md) | The repository in the plan, and profile parameters | accepted |
@@ -57,3 +57,4 @@ To write a new record, copy [0000-template.md](0000-template.md) and use the nex
 | [0049](0049-heal-the-identity-directory-of-an-administrator.md) | Heal the administrator entry on the identity directory | accepted |
 | [0050](0050-closing-of-a-one-time-job-alert.md) | The closing of a one-time job alert | accepted |
 | [0051](0051-a-restic-retry-is-not-progress.md) | A retry of restic is not progress | accepted |
+| [0052](0052-reconnect-grace-of-the-absence-tests.md) | The reconnect grace of the absence tests | accepted |
