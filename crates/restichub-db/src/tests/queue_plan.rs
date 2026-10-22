@@ -20,14 +20,17 @@ const HISTORY: i64 = 50_000;
 
 const DUE: i64 = 20;
 
-/// A scan of one of these costs what the queue holds and never what the history holds, because each
-/// index holds only the queued and active rows of a tenant.
-const WAITING_INDEXES: [&str; 4] = [
-    "jobs_waiting_idx",
-    "jobs_tenant_kind_status_idx",
-    "jobs_in_flight_idx",
-    "jobs_pkey",
-];
+/// The longest time that one statement of a pass may run. The control plane sets the same limit.
+const PASS_TIMEOUT: time::Duration = time::Duration::seconds(10);
+
+/// A prepared statement outlives the transaction that created it on a pooled connection, so the
+/// test removes it when it is done.
+const PREPARED: &str = "dispatch_pass";
+
+/// Both partial indexes hold the queued and active rows of a tenant only, so a scan of one of them
+/// costs what the queue holds and never what the history holds. A scan of `jobs_pkey` would say
+/// nothing here: the whole history is in it.
+const WAITING_INDEXES: [&str; 2] = ["jobs_waiting_idx", "jobs_in_flight_idx"];
 
 /// Writes the history and the due jobs of the tenant, and returns the agent that owns them.
 async fn seed_queue(db: &Database, tenant: TenantId) -> Result<Uuid, Box<dyn std::error::Error>> {
@@ -74,69 +77,137 @@ async fn seed_queue(db: &Database, tenant: TenantId) -> Result<Uuid, Box<dyn std
     Ok(agent)
 }
 
-/// Explains the dispatch statement as the runtime role would plan it, and returns the plan text.
-async fn explain(
+async fn agent_of(db: &Database, tenant: TenantId) -> Result<Uuid, Box<dyn std::error::Error>> {
+    let mut tx = db.begin_tenant(tenant).await?;
+    let agent = sqlx::query_scalar("SELECT id FROM agents WHERE tenant_id = $1")
+        .bind(tenant)
+        .fetch_one(tx.as_conn())
+        .await?;
+    tx.commit().await?;
+    Ok(agent)
+}
+
+/// Opens the transaction of a queue pass: the tenant scope, the statement timeout and the plan mode
+/// that the dispatcher and the stale lock recovery set.
+async fn pass_tx(
     db: &Database,
     tenant: TenantId,
-    agent: Uuid,
-    mode: &str,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<TenantTx<'_>, Box<dyn std::error::Error>> {
+    let mut tx = db.begin_tenant(tenant).await?;
+    tx.statement_timeout(PASS_TIMEOUT).await?;
+    tx.force_custom_plan().await?;
+    Ok(tx)
+}
+
+async fn prepare(
+    tx: &mut TenantTx<'_>,
+    name: &'static str,
+) -> Result<(), Box<dyn std::error::Error>> {
     let sql = format!(
-        "SET ROLE restichub_app; \
-         SET restichub.tenant_id = '{tenant}'; \
-         SET plan_cache_mode = {mode}; \
-         PREPARE dispatch_pass(timestamptz, uuid[], bigint) AS {}; \
-         EXPLAIN EXECUTE dispatch_pass(now(), '{{{agent}}}', 100)",
+        "PREPARE {name}(timestamptz, uuid[], bigint) AS {}",
         queue::DISPATCHABLE_SQL
     );
+    sqlx::raw_sql(AssertSqlSafe(sql))
+        .execute(tx.as_conn())
+        .await?;
+    Ok(())
+}
+
+async fn execute(
+    tx: &mut TenantTx<'_>,
+    name: &'static str,
+    agent: Uuid,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let sql = format!("EXECUTE {name}(now(), '{{{agent}}}', 100)");
+    sqlx::raw_sql(AssertSqlSafe(sql))
+        .execute(tx.as_conn())
+        .await?;
+    Ok(())
+}
+
+async fn explain_execute(
+    tx: &mut TenantTx<'_>,
+    name: &'static str,
+    agent: Uuid,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let sql = format!("EXPLAIN (FORMAT TEXT) EXECUTE {name}(now(), '{{{agent}}}', 100)");
     let rows = sqlx::raw_sql(AssertSqlSafe(sql))
-        .fetch_all(db.pool())
+        .fetch_all(tx.as_conn())
         .await?;
     Ok(rows
         .iter()
         .map(|row| row.get::<String, _>(0))
         .collect::<Vec<_>>()
-        .concat())
+        .join("\n"))
 }
 
+/// The plan of the statement must follow the tenant that runs it, not the tenant that happened to
+/// build the plan of the connection first.
 #[tokio::test]
-async fn ac_nfr_01_the_dispatch_statement_reads_the_waiting_rows_and_not_the_history() -> TestResult
-{
+async fn ac_nfr_01_the_dispatch_statement_plans_for_the_tenant_that_runs_it() -> TestResult {
     let Some(db) = test_database().await else {
         return Ok(());
     };
-    let (_, tenant) = two_tenants(db.database()).await?;
-    seed_tenant(db.database(), tenant).await?;
-    let agent = seed_queue(db.database(), tenant).await?;
+    let (small, big) = two_tenants(db.database()).await?;
+    // The small tenant holds one agent, one repository and one job of a kind that the queue never
+    // dispatches: it looks like a new organization to the planner.
+    seed_tenant(db.database(), small).await?;
+    seed_tenant(db.database(), big).await?;
+    let small_agent = agent_of(db.database(), small).await?;
+    let big_agent = seed_queue(db.database(), big).await?;
+    // The estimates of the planner decide the plan, so the statistics of the two tenants must be
+    // there. Autovacuum does not run within one test.
+    sqlx::query("ANALYZE jobs").execute(db.owner_pool()).await?;
 
-    // Both plans of the same statement, so the choice of the planner cannot switch it to a walk
-    // over the history of the tenant.
-    for mode in ["force_generic_plan", "force_custom_plan"] {
-        let plan = explain(db.database(), tenant, agent, mode).await?;
-        assert!(
-            WAITING_INDEXES.iter().any(|index| plan.contains(index)),
-            "the {mode} plan must read the waiting rows through {WAITING_INDEXES:?}: {plan}"
-        );
-        assert!(
-            !plan.contains("jobs_tenant_created_idx"),
-            "the {mode} plan must not read the history: {plan}"
-        );
-        assert!(
-            !plan.contains("Seq Scan"),
-            "the {mode} plan must not scan the table: {plan}"
-        );
+    // One connection: PostgreSQL caches the plan of a prepared statement for each connection, so
+    // the plan that the small tenant builds is the one that the big tenant gets.
+    let single = db.database_with_max(1).await?;
+    let mut tx = pass_tx(&single, small).await?;
+    prepare(&mut tx, PREPARED).await?;
+    tx.commit().await?;
+
+    // The first executions plan for their own values. The sixth may build a generic plan from the
+    // estimates of the small tenant, and the plan cache of the connection then keeps that plan for
+    // the next tenant. `force_custom_plan` in the pass transaction is what stops this.
+    for _ in 0..6 {
+        let mut tx = pass_tx(&single, small).await?;
+        execute(&mut tx, PREPARED, small_agent).await?;
+        tx.commit().await?;
     }
 
-    // The sixth execution and the ones after it may use the generic plan, which the estimate of
-    // the ranked set decides. The statement stays cheap after it.
+    let mut tx = pass_tx(&single, big).await?;
+    let plan = explain_execute(&mut tx, PREPARED, big_agent).await?;
+    sqlx::raw_sql("DEALLOCATE ALL")
+        .execute(tx.as_conn())
+        .await?;
+    tx.commit().await?;
+
+    assert!(
+        !plan.contains("jobs_tenant_created_idx"),
+        "the plan of the big tenant reads its history: {plan}"
+    );
+    assert!(
+        !plan.contains("SubPlan"),
+        "the plan of the big tenant ranks the history again for each row: {plan}"
+    );
+    assert!(
+        WAITING_INDEXES.iter().any(|index| plan.contains(index)),
+        "the plan of the big tenant reads the waiting rows through {WAITING_INDEXES:?}: {plan}"
+    );
+    assert!(
+        !plan.contains("Seq Scan"),
+        "the plan of the big tenant scans the table: {plan}"
+    );
+
+    // The statement stays cheap for each tenant, also when the connection ran it for another one.
     let mut last = Duration::ZERO;
     for _ in 0..8 {
-        let mut tx = db.database().begin_tenant(tenant).await?;
+        let mut tx = pass_tx(db.database(), big).await?;
         let started = Instant::now();
         let rows = queue::dispatchable(
             &mut tx,
             time::OffsetDateTime::now_utc(),
-            &[AgentId::from_uuid(agent)],
+            &[AgentId::from_uuid(big_agent)],
             100,
         )
         .await?;
@@ -146,9 +217,10 @@ async fn ac_nfr_01_the_dispatch_statement_reads_the_waiting_rows_and_not_the_his
     }
     assert!(
         last < Duration::from_secs(1),
-        "the dispatch statement takes {last:?} after the plan is generic"
+        "the dispatch statement takes {last:?} for the big tenant"
     );
 
+    single.pool().close().await;
     db.cleanup().await;
     Ok(())
 }

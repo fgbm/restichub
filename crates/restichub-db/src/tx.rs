@@ -102,6 +102,16 @@ impl<'a> TenantTx<'a> {
         set_config(&mut self.tx, "statement_timeout", &value).await
     }
 
+    /// Plans each statement of the rest of the transaction again for the values that it gets.
+    ///
+    /// The planner evaluates the Row-Level Security condition of a generic plan once, with the
+    /// tenant of the first execution, and the plan keeps the estimates of that tenant for every
+    /// later one. A plan that a tenant with a short job history built prices the long history of
+    /// the next tenant as a single row.
+    pub async fn force_custom_plan(&mut self) -> Result<(), DbError> {
+        set_config(&mut self.tx, "plan_cache_mode", "force_custom_plan").await
+    }
+
     pub async fn commit(self) -> Result<(), DbError> {
         self.tx.commit().await.map_err(DbError::Query)
     }

@@ -71,9 +71,10 @@ pub async fn try_lock_tenant(tx: &mut TenantTx<'_>) -> Result<bool, DbError> {
 
 /// The statement of [`dispatchable`], so a test can explain it.
 ///
-/// The ranking is a subquery of the `FROM` clause rather than the right side of `IN`: a planner
-/// that underestimates the ranked set must not walk `jobs_tenant_created_idx`, the index over the
-/// whole history of the tenant, and run the ranking again for each row it reads.
+/// The ranking and the rank filter stay in a subquery, and the outer query joins the chosen rows
+/// back to `jobs`: a window function and `FOR UPDATE` cannot share one query level. The estimates
+/// of the plan come from the tenant that plans it, because Row-Level Security hides the rows of the
+/// others, so the caller forces a custom plan for each pass (see [`TenantTx::force_custom_plan`]).
 pub(crate) const DISPATCHABLE_SQL: &str = concat!(
     "SELECT ",
     job_columns!("j."),
