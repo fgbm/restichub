@@ -163,6 +163,10 @@ impl DbError {
 
     /// True for a cancelled statement (SQLSTATE 57014), for example one that passed its
     /// `statement_timeout`.
+    ///
+    /// A manual `pg_cancel_backend` cancels a statement with the same code, so the caller counts
+    /// such a cancel as a timeout. The two need the same handling: the transaction no longer
+    /// commits.
     pub fn is_statement_timeout(&self) -> bool {
         self.sqlstate().as_deref() == Some("57014")
     }
