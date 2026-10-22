@@ -552,6 +552,56 @@ fn ac_pr_04_a_lease_below_fifteen_seconds_is_refused() {
 }
 
 #[test]
+fn ac_pr_04_a_lease_above_one_day_is_refused() {
+    let load = |lease: &str| {
+        let env = MapEnv::new(&[
+            ("RESTICHUB_DATABASE_URL", "postgres://host/db"),
+            ("RESTICHUB_QUEUE_LEASE_SECS", lease),
+        ]);
+        Config::load_with(&Cli::default(), &env)
+    };
+    let u64_max = u64::MAX.to_string();
+    for too_long in ["86401", u64_max.as_str()] {
+        let error = load(too_long).expect_err("a lease above one day must be refused");
+        assert!(
+            matches!(
+                error,
+                ConfigError::Invalid {
+                    name: "RESTICHUB_QUEUE_LEASE_SECS",
+                    ..
+                }
+            ),
+            "{error}"
+        );
+    }
+    assert_eq!(
+        load("86400")
+            .ok()
+            .map(|config| config.queue.lease.as_secs()),
+        Some(86_400)
+    );
+}
+
+#[test]
+fn a_session_lifetime_above_one_year_is_refused() {
+    for name in [
+        "RESTICHUB_AUTH_SESSION_IDLE_SECS",
+        "RESTICHUB_AUTH_SESSION_ABSOLUTE_SECS",
+    ] {
+        let load = |value: &str| {
+            let env = MapEnv::new(&[
+                ("RESTICHUB_DATABASE_URL", "postgres://host/db"),
+                (name, value),
+            ]);
+            Config::load_with(&Cli::default(), &env)
+        };
+        let error = load("31536001").expect_err("a lifetime above one year must be refused");
+        assert!(error.to_string().contains(name), "{error}");
+        assert!(load("31536000").is_ok());
+    }
+}
+
+#[test]
 fn fr_lg_02_the_log_retention_defaults_to_thirty_days_and_never_drops_below_one() {
     let load = |value: Option<&str>| {
         let mut pairs = vec![("RESTICHUB_DATABASE_URL", "postgres://host/db")];

@@ -47,6 +47,7 @@ use crate::job_signing::{JobSigningService, RotationEvent};
 use crate::log_acks::LogAcks;
 use crate::rotation::PresentedCertificate;
 use crate::server::AppState;
+use crate::supervisor::Supervisor;
 
 /// Application heartbeat period (FR-ID-07, spike P4).
 pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
@@ -1367,16 +1368,19 @@ pub async fn sweep_revoked(state: &AppState) {
 
 /// Starts the periodic revocation sweep of the streams of this instance (FR-ID-04).
 pub fn spawn_revocation_sweep(state: AppState, interval: Duration) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        let mut ticker = tokio::time::interval(interval);
-        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        // The first tick of `interval` fires immediately. Skip it.
-        ticker.tick().await;
-        loop {
-            ticker.tick().await;
-            sweep_revoked(&state).await;
-            if let Some(signing) = state.job_signing() {
-                signing.announce_remote_change(state.db()).await;
+    let supervisor = state.supervisor().clone();
+    supervisor.spawn_loop("revocation_sweep", move |start| {
+        let state = state.clone();
+        async move {
+            let mut ticker = tokio::time::interval(interval);
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            start.skip_first_tick(&mut ticker).await;
+            loop {
+                ticker.tick().await;
+                sweep_revoked(&state).await;
+                if let Some(signing) = state.job_signing() {
+                    signing.announce_remote_change(state.db()).await;
+                }
             }
         }
     })
@@ -1414,18 +1418,21 @@ pub async fn flush_last_seen(db: &Database, registry: &StreamRegistry, now: time
 
 /// Starts the periodic flush of the buffered `last_seen_at` writes.
 pub fn spawn_last_seen_flush(
+    supervisor: &Supervisor,
     db: Database,
     registry: Arc<StreamRegistry>,
     clock: Arc<dyn crate::clock::Clock>,
     interval: Duration,
 ) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        let mut ticker = tokio::time::interval(interval);
-        // The first tick of `interval` fires immediately. Skip it.
-        ticker.tick().await;
-        loop {
-            ticker.tick().await;
-            flush_last_seen(&db, &registry, clock.now()).await;
+    supervisor.spawn_loop("last_seen_flush", move |start| {
+        let (db, registry, clock) = (db.clone(), registry.clone(), clock.clone());
+        async move {
+            let mut ticker = tokio::time::interval(interval);
+            start.skip_first_tick(&mut ticker).await;
+            loop {
+                ticker.tick().await;
+                flush_last_seen(&db, &registry, clock.now()).await;
+            }
         }
     })
 }

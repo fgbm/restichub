@@ -27,6 +27,7 @@ use time::OffsetDateTime;
 
 use crate::clock::Clock;
 use crate::schedule::{Schedule, ScheduleError};
+use crate::supervisor::Supervisor;
 
 /// How often the scheduler looks for a due plan (ADR-0010).
 pub const SCHEDULER_INTERVAL: Duration = Duration::from_secs(5);
@@ -215,18 +216,21 @@ fn select_fires(
 
 /// Starts the periodic scheduler pass.
 pub fn spawn(
+    supervisor: &Supervisor,
     db: Database,
     clock: Arc<dyn Clock>,
     interval: Duration,
 ) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        let mut ticker = tokio::time::interval(interval);
-        // The first tick of `interval` fires immediately. Skip it.
-        ticker.tick().await;
-        loop {
-            ticker.tick().await;
-            if let Err(error) = run_once(&db, clock.as_ref()).await {
-                tracing::warn!(%error, "the scheduler pass failed");
+    supervisor.spawn_loop("scheduler", move |start| {
+        let (db, clock) = (db.clone(), clock.clone());
+        async move {
+            let mut ticker = tokio::time::interval(interval);
+            start.skip_first_tick(&mut ticker).await;
+            loop {
+                ticker.tick().await;
+                if let Err(error) = run_once(&db, clock.as_ref()).await {
+                    tracing::warn!(%error, "the scheduler pass failed");
+                }
             }
         }
     })

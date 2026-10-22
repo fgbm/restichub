@@ -17,6 +17,7 @@ use restichub_db::{Database, DbError, JobId, LogLevel, TenantId, tenants};
 use time::OffsetDateTime;
 
 use crate::clock::Clock;
+use crate::supervisor::Supervisor;
 
 /// The days for which the control plane keeps the log text.
 pub const DEFAULT_RETENTION_DAYS: u32 = 30;
@@ -241,6 +242,7 @@ pub async fn sweep(
 
 /// Starts the periodic log retention sweep.
 pub fn spawn_retention(
+    supervisor: &Supervisor,
     db: Database,
     clock: Arc<dyn Clock>,
     retention_days: u32,
@@ -248,12 +250,15 @@ pub fn spawn_retention(
 ) -> tokio::task::JoinHandle<()> {
     let store = DatabaseLogStore::new(db.clone());
     let retention = time::Duration::days(i64::from(retention_days));
-    tokio::spawn(async move {
-        let mut ticker = tokio::time::interval(interval);
-        loop {
-            ticker.tick().await;
-            if let Err(error) = sweep(&db, &store, retention, clock.now()).await {
-                tracing::warn!(%error, "the log retention sweep failed");
+    supervisor.spawn_loop("log_retention", move |_| {
+        let (db, store, clock) = (db.clone(), store.clone(), clock.clone());
+        async move {
+            let mut ticker = tokio::time::interval(interval);
+            loop {
+                ticker.tick().await;
+                if let Err(error) = sweep(&db, &store, retention, clock.now()).await {
+                    tracing::warn!(%error, "the log retention sweep failed");
+                }
             }
         }
     })

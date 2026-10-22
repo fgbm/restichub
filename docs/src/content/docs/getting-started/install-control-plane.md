@@ -140,6 +140,10 @@ Do not pass the key in the environment variable `RESTICHUB_KEK`. `docker inspect
 
 See [Upgrade](/restichub/guides/upgrade/). Make a backup before each upgrade.
 
+## Monitoring
+
+Poll `/readyz` with an external monitor. Use `/healthz` for the container and the load balancer. See [Monitor the control plane](/restichub/operations/monitor-the-control-plane/).
+
 ## Backup
 
 Back up the database and the key encryption key, and keep them apart. See [Back up the control plane](/restichub/operations/back-up-the-control-plane/).
