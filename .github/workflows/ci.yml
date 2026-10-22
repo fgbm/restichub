@@ -115,8 +115,10 @@ jobs:
           components: rustfmt, clippy
       - name: Format
         run: cargo fmt --all --check
+      # --locked fails the job when a manifest and Cargo.lock disagree. The release builds of the
+      # agent pass --locked, so a stale lock file would break them after the merge.
       - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
       # A broken doc link or an invalid doc comment fails the build, so it never reaches the site.
       - name: Rustdoc
         env:
