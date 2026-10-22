@@ -33,10 +33,10 @@ When you turn the trust mode on, the control plane can run any command on this h
 2. Run the command:
 
    ```sh
-   sudo restichub-agent trust-server-scripts --enable
+   sudo /opt/restichub-agent/bin/restichub-agent trust-server-scripts --enable
    ```
 
-   On Windows, start an elevated PowerShell and run `restichub-agent.exe trust-server-scripts --enable`.
+   On Windows, start an elevated PowerShell and run `& "$env:ProgramFiles\ResticHub\Agent\restichub-agent.exe" trust-server-scripts --enable`.
 3. Wait for the command to finish. The new state applies to the next job. The agent reports the state to the control plane each time it connects. Thus, when the service is idle, the command restarts it and waits until the agent is connected again. When a job is in progress, the command does not restart the service, because a restart stops the job. It tells you to restart the service after the job: `systemctl restart restichub-agent` on Linux, `Restart-Service restichub-agent` on Windows. If no service is running, the control plane sees the new state when the service starts. To skip the restart, use `--no-restart`.
 4. Open **Hosts** in the web interface, and select the name of the host. The section **Server scripts** of the host page shows **Enabled** and the interpreters that the agent found. A host that has not reported yet shows **Unknown**. The filter **Server scripts** of the host list finds the hosts by this value.
 
