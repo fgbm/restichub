@@ -85,8 +85,9 @@ pub struct BackupOptions {
     /// Download limit in kibibytes each second. Zero means no limit (FR-AG-15).
     #[serde(default)]
     pub limit_download_kib: u64,
-    /// `low` runs the backup and its maintenance steps at a lower process and I/O priority
-    /// (FR-AG-15). A missing value gives `normal`.
+    /// `low` runs the backup and the `forget` step of the profile at a lower process priority, and
+    /// on Linux at a lower I/O priority (FR-AG-15). The `prune` and `check` steps of a repository
+    /// keep the normal priority. A missing value gives `normal`, also in an update.
     #[serde(default)]
     pub priority: ProfilePriority,
     /// Minutes without progress after which the agent stops a step. From 5 to 10080. A missing

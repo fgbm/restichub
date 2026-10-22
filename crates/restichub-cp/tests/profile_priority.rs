@@ -18,7 +18,8 @@ fn body(name: &str, options: Value) -> Value {
 }
 
 /// FR-AG-15: a profile without a priority runs at the normal priority, and the low priority is
-/// stored, read back and kept by an update that names no priority.
+/// stored and read back. An update replaces the options as a whole, so one that names no priority
+/// gives the normal priority again.
 #[tokio::test]
 async fn ac_ag_14_a_profile_stores_its_priority() {
     let Some(db) = common::test_db().await else {
@@ -79,6 +80,32 @@ async fn ac_ag_14_a_profile_stores_its_priority() {
     assert_eq!(status, StatusCode::OK, "{updated}");
     assert_eq!(updated["profile"]["options"]["priority"], "normal");
 
+    let (status, _, updated) = send(
+        &app,
+        request(
+            "PATCH",
+            &format!("/api/v1/profiles/{id}"),
+            Some(&cookie),
+            Some(body("quiet", json!({"priority": "low"}))),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+    assert_eq!(updated["profile"]["options"]["priority"], "low");
+
+    let (status, _, updated) = send(
+        &app,
+        request(
+            "PATCH",
+            &format!("/api/v1/profiles/{id}"),
+            Some(&cookie),
+            Some(body("quiet", json!({}))),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+    assert_eq!(updated["profile"]["options"]["priority"], "normal");
+
     db.cleanup().await;
 }
 
@@ -102,7 +129,8 @@ async fn ac_ag_14_the_save_refuses_an_unknown_priority() {
         ),
     )
     .await;
-    assert!(status.is_client_error(), "{status} {problem}");
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
+    assert_eq!(problem["field"], "options.priority", "{problem}");
 
     db.cleanup().await;
 }

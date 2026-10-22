@@ -1932,7 +1932,7 @@ export const en = {
 	'pe.options.oneFsHelp': 'Mounted volumes inside the paths are skipped.',
 	'pe.options.cachesHelp': 'Directories with a CACHEDIR.TAG file are skipped.',
 	'pe.options.lowPriorityHelp':
-		'The backup and the maintenance steps of this profile run with a lower process and disk priority. Other programs on the host stay fast. The steps can take more time.',
+		'The backup and the deletion of expired snapshots of this profile run with a lower CPU priority, and on Linux also with a lower disk priority. The steps can take more time.',
 	'pe.check.lead':
 		'A check of the repository after the backup. Without a read-data share, the check reads the structure only, which is fast.',
 	'pe.check.help':

@@ -59,7 +59,9 @@ pub struct BackupOptions {
     pub limit_upload_kib: u64,
     /// Download limit in kibibytes each second. Zero means no limit (FR-AG-15).
     pub limit_download_kib: u64,
-    /// Process and I/O priority of the backup, the forget, the prune and the check (FR-AG-15).
+    /// Low asks the agent to lower the process and I/O priority of the compiled steps (FR-AG-15).
+    /// The maintenance job of a repository builds its own `prune` and `check` steps, which do not
+    /// carry it.
     pub priority: Priority,
 }
 

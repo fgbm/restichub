@@ -1914,8 +1914,9 @@ export interface components {
             max_duration_minutes?: number | null;
             one_file_system?: boolean;
             /**
-             * @description `low` runs the backup and its maintenance steps at a lower process and I/O priority
-             *     (FR-AG-15). A missing value gives `normal`.
+             * @description `low` runs the backup and the `forget` step of the profile at a lower process priority, and
+             *     on Linux at a lower I/O priority (FR-AG-15). The `prune` and `check` steps of a repository
+             *     keep the normal priority. A missing value gives `normal`, also in an update.
              */
             priority?: components["schemas"]["ProfilePriority"];
             /**
