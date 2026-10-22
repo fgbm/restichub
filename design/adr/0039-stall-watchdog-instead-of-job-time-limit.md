@@ -1,6 +1,6 @@
 # ADR-0039: A stall watchdog instead of a fixed job time limit
 
-- Status: accepted, the grace for a fresh job superseded by ADR-0043
+- Status: accepted, the grace for a fresh job superseded by ADR-0043, the rule of progress of a backup and a restore refined by ADR-0051
 - Date: 2026-10-15
 - Requirements: FR-AG-05, FR-AG-10, FR-SC-06
 - Refines: ADR-0020, ADR-0021 (job fields), the queue decisions of ADR-0017
@@ -43,6 +43,10 @@ Each queued job carried `timeout_seconds` of 12 hours. The agent enforced it as 
 ## Note of 2026-10-16
 
 ADR-0043 removes the grace rule for a job that started a short time ago. The agent lists a job before it acknowledges it, so the CP fails each running job that the hello omits.
+
+## Note of 2026-10-22
+
+ADR-0051 refines the rule of progress. For a `backup` and a `restore` step, a line on the standard error is not progress. restic prints the retry of an unreachable backend there, and the stall timeout never expired.
 
 ## Consequences
 

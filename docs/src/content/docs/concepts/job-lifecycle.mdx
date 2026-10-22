@@ -80,7 +80,7 @@ A job in the queue has an acceptance window. A manual job has a window of one ho
 
 ### Stall timeout
 
-The agent watches the progress of each step. restic makes progress when the number of bytes or files changes, when the current files change, or when it prints a line of text. A repeated status line is not progress.
+The agent watches the progress of each step. restic makes progress when the number of bytes or files changes, when the current files change, or when it prints a line of text. A repeated status line is not progress. At a `backup` or a `restore` step, a line on the standard error is not progress. restic reports a warning about one file or a retry of a repository that it cannot reach there. Such a line says nothing about the work. The other steps print their only output on the standard error, so a line there is progress.
 
 The agent stops a step that makes no progress for the stall timeout. It stops the step in two stages: first the graceful signal, then the forced stop of the process tree after the grace period. The job fails with the reason `stalled`.
 

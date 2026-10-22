@@ -144,6 +144,34 @@ async fn ac_ag_12_a_stalled_step_is_stopped_with_the_reason_stalled() {
     );
 }
 
+/// ADR-0039, AC-AG-12: restic reports a refused backend on the standard error and retries it; a
+/// retry line is not progress, so the stall timeout of the job still stops the step.
+#[tokio::test(flavor = "multi_thread")]
+async fn ac_ag_12_a_retry_of_an_unreachable_backend_is_not_progress() {
+    let path = directory("limits-retry");
+    let mut retries = String::new();
+    for attempt in 0..40 {
+        writeln!(
+            retries,
+            "Save(<data>/e5/{attempt:04x}): dial tcp 192.0.2.10:8000: connect: connection refused"
+        )
+        .expect("write to a string");
+        writeln!(retries, "#sleep 500").expect("write to a string");
+    }
+    common::script_stderr(&path, "backup", &retries);
+    // The script would retry for 20 seconds; the watchdog must end the step well before.
+    let script_length = Duration::from_secs(20);
+    let job = backup_job("job-retry", &path, 2, 0);
+
+    let (result, elapsed) = run(&job, &path, "limits-retry-dir").await;
+    assert_eq!(result.outcome, JobStatus::Failed as i32);
+    assert_eq!(error_code(&result), Some("stalled"));
+    assert!(
+        elapsed < script_length,
+        "the watchdog must stop the step, took {elapsed:?}"
+    );
+}
+
 /// ADR-0039: a step that makes progress for longer than the stall timeout is not stopped, and the
 /// job has no maximum duration.
 #[tokio::test(flavor = "multi_thread")]

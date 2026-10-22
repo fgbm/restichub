@@ -125,6 +125,51 @@ async fn fr_sc_05_every_restic_step_carries_retry_lock() {
     env.db.cleanup().await;
 }
 
+/// AC-AG-12, AC-AG-13, AC-AG-10: the job carries the stall timeout and the maximum duration of its
+/// profile, and the backup step carries the transfer limits of the profile.
+#[tokio::test]
+async fn ac_ag_12_the_job_carries_the_limits_of_its_profile() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let mut agent = env.connect_agent("limits-host").await;
+    let repository = env.create_repository(agent.id, "pw").await;
+    let profile = env
+        .create_profile(json!({
+            "options": {
+                "stall_timeout_minutes": 5,
+                "max_duration_minutes": 7,
+                "limit_upload_kib": 1000,
+                "limit_download_kib": 500,
+            }
+        }))
+        .await;
+    let plan = env.create_plan(profile, agent.id, repository).await;
+    let job_id = env.run_plan(plan).await;
+    env.pass().await;
+
+    let signed = agent.job().await;
+    let job = env.verify(&signed, &agent).await;
+    assert_eq!(job.stall_timeout_seconds, 5 * 60);
+    assert_eq!(job.timeout_seconds, 7 * 60);
+    let backup = job
+        .steps
+        .iter()
+        .find_map(|step| match &step.kind {
+            Some(step::Kind::Backup(backup)) => Some(backup),
+            _ => None,
+        })
+        .expect("the job holds a backup step");
+    assert_eq!(backup.limit_upload_kib, 1000);
+    assert_eq!(backup.limit_download_kib, 500);
+
+    let detail = env.job(job_id).await;
+    assert_eq!(detail["limits"]["stall_timeout_seconds"], 5 * 60);
+    assert_eq!(detail["limits"]["max_duration_seconds"], 7 * 60);
+    env.db.cleanup().await;
+}
+
 #[tokio::test]
 async fn ac_rp_03_the_delivery_record_commits_before_the_job_is_sent() {
     let Some(db) = common::test_db().await else {

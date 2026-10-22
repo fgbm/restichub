@@ -312,6 +312,7 @@ struct StepOutput {
     /// The newest progress message that the agent did not send yet.
     progress: Option<StepProgress>,
     watchdog: Watchdog,
+    stderr_is_progress: bool,
     last_progress: Option<tokio::time::Instant>,
     last_log: tokio::time::Instant,
     /// The local repository locations of the job, to recognize a write that the sandbox refused.
@@ -342,7 +343,9 @@ impl StepOutput {
                 Accepted::Consumed => self.watchdog.output(now),
             },
             Pipe::Stderr => {
-                self.watchdog.output(now);
+                if self.stderr_is_progress {
+                    self.watchdog.output(now);
+                }
                 self.read_only |= names_read_only_repository(&text, &self.local_repositories);
                 let text = crate::output::stderr_text(&text, line.truncated);
                 log.push(
@@ -433,6 +436,13 @@ impl Jobs {
             scrubber,
             progress: None,
             watchdog: Watchdog::new(limits.stall, tokio::time::Instant::now()),
+            // A backup and a restore report their progress as status messages on the standard
+            // output. A line on the standard error is a warning or a retry of an unreachable
+            // backend, so it does not restart the stall timeout (ADR-0051, AC-AG-12).
+            stderr_is_progress: !matches!(
+                step.kind,
+                Some(step::Kind::Backup(_) | step::Kind::Restore(_))
+            ),
             last_progress: None,
             last_log: tokio::time::Instant::now(),
             local_repositories: validated
