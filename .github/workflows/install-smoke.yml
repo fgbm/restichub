@@ -177,6 +177,8 @@ jobs:
               -E RESTIC_PASSWORD=smoke-sandbox -E RESTIC_REPOSITORY="$repository" \
               /opt/restichub-agent/bin/restic "$@"
           }
+          sudo install -o root -g root -m 4755 /bin/true "$SMOKE_DIR/source/suid"
+          sudo install -o root -g tty -m 2755 /bin/true "$SMOKE_DIR/source/sgid"
           sandboxed init
           sandboxed backup "$SMOKE_DIR/source"
           sandboxed backup "$SMOKE_DIR/source"
@@ -184,6 +186,8 @@ jobs:
           sandboxed ls latest
           sandboxed restore latest --target "$target"
           sudo test -f "$target$SMOKE_DIR/source/file.txt"
+          test "$(sudo stat -c '%a %U:%G' "$target$SMOKE_DIR/source/suid")" = "4755 root:root"
+          test "$(sudo stat -c '%a %U:%G' "$target$SMOKE_DIR/source/sgid")" = "2755 root:tty"
           sandboxed forget --keep-last 1
           sandboxed prune
           sandboxed check
