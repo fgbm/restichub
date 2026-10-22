@@ -341,8 +341,6 @@ impl StepOutput {
                     self.watchdog.status(&progress, now);
                     self.progress = Some(progress.message);
                 }
-                // The verify phase of a restore prints nothing, so it gets a window of 24 hours
-                // from the summary line (ADR-0051).
                 Accepted::Verifying => self.watchdog.verify(now),
                 Accepted::Status(line) => self.watchdog.status_line(&line, now),
                 Accepted::Consumed => self.watchdog.output(now),

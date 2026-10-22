@@ -20,7 +20,7 @@ The registry of the online agents of an instance starts empty and needs the same
 - In the grace the alert "Host offline" neither opens nor closes. An alert that is open when the grace starts stays open, and it sends one recovery message after the grace, when its host is back.
 - Each instance keeps the grace in its own memory. Two instances can therefore alert a host up to 2 minutes apart. The grace is not in the database, so a restart of an instance starts it again, as FR-ID-08 requires.
 - The grace is kept for each organization. A failed read of the list of the organizations restarts the grace of every organization. A failed pass of one organization restarts the grace of that organization only. No organization waits for the failure of another.
-- An organization whose pass keeps failing stays in the grace, so its absence tests stay off. The grace of an organization ends only after passes that read its agents for the whole 2 minutes. The control plane warns about a run of failed passes of an organization that lasts 15 minutes. It repeats the warning at that interval while the run continues.
+- An organization whose pass keeps failing stays in the grace, so its absence tests stay off. The grace of an organization ends only after passes that read its agents for the whole 2 minutes. The run of failed passes ends with that grace, so one clean pass alone does not end the run. The control plane logs a warning when the run lasts 15 minutes, and it repeats the warning at that interval while the run continues.
 - The threshold of the alert "Host offline" keeps its meaning from ADR-0036 and ADR-0044. The reconnect grace comes on top of it: the alert opens when the threshold and the grace have both passed.
 
 ## Consequences

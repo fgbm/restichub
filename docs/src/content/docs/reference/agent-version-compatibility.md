@@ -34,9 +34,9 @@ The agents API has the same facts: `agent_version`, `protocol_version`, `control
 
 ## Build revision in the version
 
-A release build has the package version of the workspace, for example `0.1.0`. The build adds the short revision after a plus sign, for example `0.1.0+3b21922`. A local build adds `+dev`. The command `restichub-agent --version` prints the version and the protocol version, for example `restichub-agent 0.1.0+3b21922 (protocol 1.1)`. The agent sends the same version when it enrolls and in the first message of each stream. The control plane exposes its own version in the same format.
+A release build has the package version of the workspace, for example `0.1.0`. A pre-release build has the suffix of its tag, for example `0.1.0-rc.4`. The build adds the short revision after a plus sign, for example `0.1.0+3b21922`. A local build adds `+dev`. The command `restichub-agent --version` prints the version and the protocol version, for example `restichub-agent 0.1.0+3b21922 (protocol 1.1)`. The agent sends the same version when it enrolls and in the first message of each stream. The control plane exposes its own version in the same format.
 
-A pre-release is older than its release, so `0.1.0-rc.4` is older than `0.1.0`. The revision does not change the comparison. The mark "Update available" depends on the package version only.
+A pre-release is lower than its release, so `0.1.0-rc.4` is lower than `0.1.0`. The revision does not change the comparison. The mark "Update available" depends on the package version only.
 
 ## Upgrade notes
 

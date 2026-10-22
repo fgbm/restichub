@@ -42,6 +42,6 @@ A `restore` over a target that already holds the snapshot reads and hashes the f
 | Alternative | Why we did not select it |
 |---|---|
 | Count a retry line as progress by its text (`returned error, retrying after`) | The text belongs to restic, not to the product. A newer restic can change it, and the watchdog counts the retry as progress again. |
-| Ignore the standard error for every step | `check` and `prune` print their only output there. A long `prune` would stop after 6 hours although it advances. |
+| Ignore the standard error for every step | A `check` prints its errors there and no status message. A `check` that finds errors then has no line at all, so the watchdog stops it after 6 hours. |
 | Judge the verify phase of a restore by its restored counters | restic prints no counter while it verifies, so the step stops although the disk is only slow. |
 | Give the lock wait a grace period before the first status line | The grace is a second time value next to the stall timeout, and the operator cannot see it. A shorter `--retry-lock` keeps one value. |
