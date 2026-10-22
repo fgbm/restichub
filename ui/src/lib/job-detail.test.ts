@@ -243,6 +243,17 @@ describe('limitLines', () => {
 		expect(limitLines(detail({ status: 'succeeded', limits: limits(null, 3600) }))).toBeNull();
 	});
 
+	it('ac_ag_12_shows_the_window_that_a_restore_takes_from_the_agent', () => {
+		expect(limitLines(detail({ kind: 'restore', limits: limits(null, null) }))).toEqual([
+			'No maximum',
+			'No progress: 1h (agent default)'
+		]);
+		expect(limitLines(detail({ kind: 'backup', limits: limits(null, null) }))).toEqual([
+			'No maximum',
+			'Stops when restic makes no progress'
+		]);
+	});
+
 	it('ac_ag_12_speaks_russian', () => {
 		setLocale('ru');
 		expect(limitLines(detail({ limits: limits(172800, 3600) }))).toEqual([

@@ -17,9 +17,12 @@ use crate::job::ValidatedJob;
 /// Text that replaces a secret in the preview.
 pub const MASK: &str = "***";
 
-/// How long restic waits for a held lock when a step sets `retry_lock` (FR-SC-05). restic needs a
-/// value: a bare `--retry-lock` swallows the next argument.
-const RETRY_LOCK: &str = "--retry-lock=5m";
+/// How long restic waits for a held lock when a step sets `retry_lock` (FR-SC-05).
+///
+/// It stays below the shortest stall timeout of a profile, so restic ends the wait with exit code
+/// 11 before the watchdog of the step stops it as stalled (ADR-0039). restic needs a value: a bare
+/// `--retry-lock` swallows the next argument.
+pub const RETRY_LOCK_MINUTES: u32 = 4;
 
 /// Environment variables that the preview shows without a mask. Every other
 /// value is masked, so a new secret variable is masked by default (AC-PF-01).
@@ -130,13 +133,13 @@ pub fn build_command(validated: &ValidatedJob, step: &Step) -> Result<CommandLin
             push_flag(&mut args, backup.exclude_caches, "--exclude-caches");
             push_rate(&mut args, "--limit-upload", backup.limit_upload_kib);
             push_rate(&mut args, "--limit-download", backup.limit_download_kib);
-            push_flag(&mut args, backup.retry_lock, RETRY_LOCK);
+            push_retry_lock(&mut args, backup.retry_lock);
             positional(&mut args, &backup.paths);
         }
         step::Kind::Check(check) => {
             args.push("check".to_owned());
             push_value(&mut args, "--read-data-subset", &check.read_data_subset);
-            push_flag(&mut args, check.retry_lock, RETRY_LOCK);
+            push_retry_lock(&mut args, check.retry_lock);
         }
         step::Kind::Snapshots(snapshots) => {
             args.push("snapshots".to_owned());
@@ -221,13 +224,13 @@ pub fn build_command(validated: &ValidatedJob, step: &Step) -> Result<CommandLin
                     args.push(attached("--path", path));
                 }
             }
-            push_flag(&mut args, forget.retry_lock, RETRY_LOCK);
+            push_retry_lock(&mut args, forget.retry_lock);
         }
         step::Kind::Prune(prune) => {
             args.push("prune".to_owned());
             push_value(&mut args, "--max-unused", &prune.max_unused);
             push_value(&mut args, "--max-repack-size", &prune.max_repack_size);
-            push_flag(&mut args, prune.retry_lock, RETRY_LOCK);
+            push_retry_lock(&mut args, prune.retry_lock);
         }
         step::Kind::Stats(stats) => {
             args.push("stats".to_owned());
@@ -377,6 +380,12 @@ fn push_flag(args: &mut Vec<String>, present: bool, flag: &str) {
     }
 }
 
+fn push_retry_lock(args: &mut Vec<String>, present: bool) {
+    if present {
+        args.push(format!("--retry-lock={RETRY_LOCK_MINUTES}m"));
+    }
+}
+
 fn push_value(args: &mut Vec<String>, flag: &str, value: &str) {
     if !value.is_empty() {
         args.push(attached(flag, value));
@@ -449,7 +458,10 @@ mod tests {
         repository_access::BackendCredentials, step,
     };
 
-    use super::{ArgError, MASK, build_command, build_ls_tree_command, is_safe_env, mask_secrets};
+    use super::{
+        ArgError, MASK, RETRY_LOCK_MINUTES, build_command, build_ls_tree_command, is_safe_env,
+        mask_secrets,
+    };
     use crate::job::ValidatedJob;
 
     const BAD_OPTION: &str = "--password-command=cmd /c calc";
@@ -712,7 +724,10 @@ mod tests {
             backup.retry_lock = true;
         }
         let line = line(&step);
-        assert!(line.args().contains(&"--retry-lock=5m".to_owned()));
+        assert!(
+            line.args()
+                .contains(&format!("--retry-lock={RETRY_LOCK_MINUTES}m"))
+        );
         assert!(!line.args().contains(&"--retry-lock".to_owned()));
     }
 

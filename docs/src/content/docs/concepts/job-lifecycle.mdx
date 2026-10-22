@@ -34,7 +34,7 @@ The dispatcher builds each job when it sends the job for the first time. It comp
 
 A job carries the secrets of its own repository only. The control plane reads each secret when it sends the job and writes a `secret_delivered` audit record. The record holds no secret value.
 
-The control plane always sends `--retry-lock` with a restic command.
+The control plane always sends `--retry-lock` with a restic command. The value is 4 minutes. Four minutes is shorter than the shortest stall timeout of a profile. restic then ends a held lock with exit code 11 before the agent stops the step as stalled, and the control plane retries the job.
 
 The control plane signs each job. The agent checks the signature before it runs the job. The control plane keeps the signed job, encrypted with the key of the tenant, until the job reaches a final state.
 
@@ -80,7 +80,9 @@ A job in the queue has an acceptance window. A manual job has a window of one ho
 
 ### Stall timeout
 
-The agent watches the progress of each step. restic makes progress when the number of bytes or files changes, when the current files change, or when it prints a line of text. A repeated status line is not progress. At a `backup` or a `restore` step, a line on the standard error is not progress. restic reports a warning about one file or a retry of a repository that it cannot reach there. Such a line says nothing about the work. The other steps print their only output on the standard error, so a line there is progress.
+The agent watches the progress of each step. restic makes progress when the number of bytes or files changes. It also makes progress when the total number of bytes or files changes. A changed list of current files and a new line of text are progress too. A repeated status line is not progress. At a `restore` step, the number of skipped files or bytes is progress too. restic reads and hashes the files that the target already holds, and it counts them there. At a `backup` or a `restore` step, a line on the standard error is not progress. restic reports a warning about one file or a retry of a repository that it cannot reach there. Such a line says nothing about the work. The other steps print their only output on the standard error, so a line there is progress.
+
+A `restore` step that verifies its files prints its last status line and its summary before the verification. It prints no line while it verifies. The agent does not stop this phase as stalled; the maximum duration of the job and a cancel still stop it.
 
 The agent stops a step that makes no progress for the stall timeout. It stops the step in two stages: first the graceful signal, then the forced stop of the process tree after the grace period. The job fails with the reason `stalled`.
 
@@ -90,6 +92,8 @@ The agent stops a step that makes no progress for the stall timeout. It stops th
 | `check`, `prune` | 6 hours, also inside a backup job |
 
 A profile sets the stall timeout for its jobs. The setting is "Stop after no progress (minutes)" in the section "Run limits" of the profile. The value is from 5 to 10080 minutes. A `check` or `prune` step in the job waits for the longer of this value and 6 hours. A status line that repeats the same content is not progress.
+
+A `restore` job has no profile, so it carries no stall timeout. Its card shows the default stall timeout of a restore, unless the agent sets another value.
 
 ### Maximum duration
 

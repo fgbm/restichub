@@ -15,6 +15,13 @@ export function isLive(status: JobStatus): boolean {
 }
 
 /**
+ * The stall timeout of a restore that the control plane sends without one. The agent stops a step
+ * after this time without progress, unless its own `RESTICHUB_JOB_STALL_TIMEOUT_SECS` changes it
+ * (ADR-0039).
+ */
+const RESTORE_DEFAULT_STALL_SECONDS = 3600;
+
+/**
  * The limits of a running job as lines for the about panel (ADR-0039). A run has no fixed time
  * limit by default: the host stops a step that makes no progress, and a profile can set a maximum
  * duration. Null for a job that does not run.
@@ -26,6 +33,12 @@ export function limitLines(job: JobDetail): string[] | null {
 		max ? t('jobDetail.limit.max', { max: formatSeconds(max) }) : t('jobDetail.limit.noMax')
 	];
 	if (stall) lines.push(t('jobDetail.limit.stall', { stall: formatSeconds(stall) }));
+	else if (job.kind === 'restore')
+		lines.push(
+			t('jobDetail.limit.stallDefault', {
+				stall: formatSeconds(RESTORE_DEFAULT_STALL_SECONDS)
+			})
+		);
 	else if (!max) lines.push(t('jobDetail.limit.noProgress'));
 	return lines;
 }

@@ -6,8 +6,10 @@
 
 use std::time::Duration;
 
-use restichub_proto::agent::v1::{Step, StepProgress, step};
+use restichub_proto::agent::v1::{Step, step};
 use tokio::time::Instant;
+
+use crate::output::Progress;
 
 /// The stall timeout of a step kind when the job gives none (ADR-0039).
 const DEFAULT_STALL: Duration = Duration::from_secs(60 * 60);
@@ -64,6 +66,10 @@ fn default_stall(step: &Step, variable: Option<&str>) -> Duration {
 struct Seen {
     bytes_done: u64,
     files_done: u64,
+    bytes_skipped: u64,
+    files_skipped: u64,
+    total_bytes: u64,
+    total_files: u64,
     current_files: Vec<String>,
 }
 
@@ -76,6 +82,7 @@ pub(super) struct Watchdog {
     last_progress: Instant,
     seen: Option<Seen>,
     last_status_line: Option<String>,
+    disarmed: bool,
 }
 
 impl Watchdog {
@@ -85,6 +92,7 @@ impl Watchdog {
             last_progress: now,
             seen: None,
             last_status_line: None,
+            disarmed: false,
         }
     }
 
@@ -94,13 +102,18 @@ impl Watchdog {
         self.last_progress = now;
     }
 
-    /// A status line is progress only when its counters or its current files changed. restic
-    /// repeats the same status while it waits on a backend.
-    pub(super) fn status(&mut self, progress: &StepProgress, now: Instant) {
+    /// A status line is progress only when one of its counters or its current files changed. A
+    /// restore grows `files_skipped` and `bytes_skipped` while it reads the files that the target
+    /// already holds, and `total_files` and `total_bytes` while it scans the tree (ADR-0039).
+    pub(super) fn status(&mut self, progress: &Progress, now: Instant) {
         let seen = Seen {
-            bytes_done: progress.bytes_done,
-            files_done: progress.files_done,
-            current_files: progress.current_files.clone(),
+            bytes_done: progress.message.bytes_done,
+            files_done: progress.message.files_done,
+            bytes_skipped: progress.bytes_skipped,
+            files_skipped: progress.files_skipped,
+            total_bytes: progress.message.total_bytes,
+            total_files: progress.message.total_files,
+            current_files: progress.message.current_files.clone(),
         };
         if self.seen.as_ref() != Some(&seen) {
             self.seen = Some(seen);
@@ -116,21 +129,37 @@ impl Watchdog {
         }
     }
 
+    /// Ends the judgement of this step: the rest of it never counts as stalled.
+    ///
+    /// A restore with `--verify` prints its last status and its summary before it verifies the
+    /// files, and prints nothing while it verifies (restic `cmd/restore.go`). The agent cannot tell
+    /// a slow disk from a hung one there, so the maximum duration and a cancel remain the only
+    /// stops (ADR-0039).
+    pub(super) fn disarm(&mut self) {
+        self.disarmed = true;
+    }
+
     pub(super) fn is_stalled(&self, now: Instant) -> bool {
-        now.saturating_duration_since(self.last_progress) >= self.stall
+        !self.disarmed && now.saturating_duration_since(self.last_progress) >= self.stall
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use restichub_proto::agent::v1::StepProgress;
+
     use super::*;
 
-    fn status(bytes_done: u64, file: &str) -> StepProgress {
-        StepProgress {
-            bytes_done,
-            files_done: bytes_done / 10,
-            current_files: vec![file.to_owned()],
-            ..StepProgress::default()
+    fn status(bytes_done: u64, file: &str) -> Progress {
+        Progress {
+            message: StepProgress {
+                bytes_done,
+                files_done: bytes_done / 10,
+                current_files: vec![file.to_owned()],
+                ..StepProgress::default()
+            },
+            files_skipped: 0,
+            bytes_skipped: 0,
         }
     }
 
@@ -201,6 +230,65 @@ mod tests {
         assert!(watchdog.is_stalled(later));
         watchdog.status_line("{\"message_type\":\"status\",\"percent_done\":0.5}", later);
         assert!(!watchdog.is_stalled(later));
+    }
+
+    /// A restore over a target that holds the same data skips every file, so only the skipped
+    /// counters grow (ADR-0039).
+    #[test]
+    fn ac_ag_12_a_restore_that_skips_files_makes_progress() {
+        let start = Instant::now();
+        let mut watchdog = Watchdog::new(Duration::from_secs(60), start);
+        for second in 0..600 {
+            let at = start + Duration::from_secs(second);
+            watchdog.status(
+                &Progress {
+                    message: StepProgress {
+                        total_files: 1_000,
+                        total_bytes: 10_000_000,
+                        ..StepProgress::default()
+                    },
+                    files_skipped: second * 2,
+                    bytes_skipped: second * 15_000,
+                },
+                at,
+            );
+            assert!(!watchdog.is_stalled(at), "a skipped file is progress");
+        }
+    }
+
+    /// The scan of the tree grows the totals before restic restores the first file.
+    #[test]
+    fn ac_ag_12_a_tree_scan_makes_progress() {
+        let start = Instant::now();
+        let mut watchdog = Watchdog::new(Duration::from_secs(60), start);
+        for step in 0..600 {
+            let at = start + Duration::from_secs(step);
+            watchdog.status(
+                &Progress {
+                    message: StepProgress {
+                        total_files: step * 100,
+                        total_bytes: step * 1_000_000,
+                        ..StepProgress::default()
+                    },
+                    files_skipped: 0,
+                    bytes_skipped: 0,
+                },
+                at,
+            );
+            assert!(!watchdog.is_stalled(at), "a growing total is progress");
+        }
+    }
+
+    /// The verify phase of a restore prints nothing and has no stall judgement (ADR-0039).
+    #[test]
+    fn ac_ag_12_a_disarmed_step_never_stalls() {
+        let start = Instant::now();
+        let mut watchdog = Watchdog::new(Duration::from_secs(60), start);
+        watchdog.status(&status(100, "file"), start);
+        watchdog.disarm();
+        assert!(!watchdog.is_stalled(start + Duration::from_secs(24 * 3600)));
+        watchdog.output(start + Duration::from_secs(3600));
+        assert!(!watchdog.is_stalled(start + Duration::from_secs(10 * 3600)));
     }
 
     #[test]

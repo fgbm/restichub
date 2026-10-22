@@ -702,7 +702,7 @@ fn format_time(value: time::OffsetDateTime) -> String {
 
 #[cfg(test)]
 mod limit_variable_tests {
-    use super::minutes_from_seconds;
+    use super::{MIN_STALL_TIMEOUT_MINUTES, minutes_from_seconds};
 
     #[test]
     fn fr_pf_01_variable_gives_minutes_in_range() {
@@ -711,5 +711,16 @@ mod limit_variable_tests {
         assert_eq!(minutes_from_seconds(Some("61"), 60, 5..=100), 60);
         assert_eq!(minutes_from_seconds(Some("junk"), 60, 5..=100), 60);
         assert_eq!(minutes_from_seconds(Some("0"), 2880, 0..=43_200), 0);
+    }
+
+    /// FR-SC-05, ADR-0039: restic ends a held lock with exit code 11 before the shortest stall
+    /// timeout of a profile closes the window (ADR-0051).
+    #[test]
+    fn fr_sc_05_restic_ends_a_held_lock_before_the_stall_timeout() {
+        let retry_lock = restichub_compiler::arg::RETRY_LOCK_MINUTES;
+        assert!(
+            retry_lock < MIN_STALL_TIMEOUT_MINUTES,
+            "the lock wait of {retry_lock} minutes must be shorter than the shortest stall timeout of {MIN_STALL_TIMEOUT_MINUTES} minutes"
+        );
     }
 }
