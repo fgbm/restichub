@@ -126,6 +126,20 @@ impl TestDatabase {
         Ok(Database { pool })
     }
 
+    /// Opens a runtime database whose connections start with the given default
+    /// `statement_timeout`, as the control plane does.
+    pub async fn database_with_statement_timeout(
+        &self,
+        max: u32,
+        timeout: std::time::Duration,
+    ) -> Result<Database, sqlx::Error> {
+        let options = super::with_statement_timeout(self.runtime_options.clone(), Some(timeout));
+        let pool = super::with_session_reset(PgPoolOptions::new().max_connections(max))
+            .connect_with(options)
+            .await?;
+        Ok(Database { pool })
+    }
+
     pub async fn cleanup(&self) {
         self.database.pool().close().await;
         self.owner.close().await;

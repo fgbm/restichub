@@ -22,6 +22,11 @@ use super::rpo::{self, RpoState};
 use crate::queue::AgentView;
 use time::format_description::well_known::Rfc3339;
 
+/// The statement limit of one evaluation. The pass reads the job history of the whole look-back
+/// window, which takes longer than the default limit of a request on a large installation. The
+/// value stays below the budget of a tenant, so the budget still ends a stuck pass.
+pub const EVALUATION_STATEMENT_TIMEOUT: Duration = Duration::seconds(120);
+
 /// A job failure older than this at the first look raises no alert.
 const NEW_JOB_WINDOW: Duration = Duration::hours(24);
 
@@ -93,6 +98,7 @@ pub async fn evaluate_tenant(
     let judges_absence = view.judges_absence(tenant, now);
     let mut tx = db.begin_tenant(tenant).await?;
     tx.force_custom_plan().await?;
+    tx.statement_timeout(EVALUATION_STATEMENT_TIMEOUT).await?;
     if !alerts::try_lock_tenant(&mut tx).await? {
         drop(tx);
         return Ok(Report {

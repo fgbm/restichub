@@ -122,8 +122,11 @@ fn remember_refusal(state: &AppState, agent: AgentId, job: JobId) {
 /// Whether the progress is now in the database.
 async fn write_progress(state: &AppState, job_id: JobId, update: &ProgressUpdate) -> bool {
     let cutoff = write_cutoff(state);
-    let Ok(mut tx) = state.db().begin_tenant(update.tenant).await else {
-        tracing::warn!(job = %job_id, "the progress could not open a transaction");
+    let Some(mut tx) = state
+        .db()
+        .begin_tenant_or_log(update.tenant, "progress")
+        .await
+    else {
         return false;
     };
     let result = async {
@@ -191,8 +194,7 @@ pub async fn handle_step_result(
     };
     let cutoff = write_cutoff(state);
     let now = state.auth().clock.now();
-    let Ok(mut tx) = state.db().begin_tenant(tenant).await else {
-        tracing::warn!(job = %job_id, "the step result could not open a transaction");
+    let Some(mut tx) = state.db().begin_tenant_or_log(tenant, "step result").await else {
         return WriteOutcome::Transient;
     };
     let outcome = async {
@@ -298,8 +300,11 @@ pub async fn handle_job_result_data(
         return WriteOutcome::Ignored;
     }
     state.progress_throttle().forget((agent, job_id));
-    let Ok(mut tx) = state.db().begin_tenant(tenant).await else {
-        tracing::warn!(job = %job_id, "the job result data could not open a transaction");
+    let Some(mut tx) = state
+        .db()
+        .begin_tenant_or_log(tenant, "job result data")
+        .await
+    else {
         return WriteOutcome::Transient;
     };
     let outcome = async {
@@ -361,7 +366,11 @@ async fn ownership(
     kind: &'static str,
 ) -> Ownership {
     let cutoff = write_cutoff(state);
-    let Ok(mut tx) = state.db().begin_tenant(tenant).await else {
+    let Some(mut tx) = state
+        .db()
+        .begin_tenant_or_log(tenant, "job ownership")
+        .await
+    else {
         return Ownership::Retry;
     };
     let found = match job_repo::get(&mut tx, job).await {

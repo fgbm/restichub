@@ -21,6 +21,7 @@ mod restore;
 mod rls;
 mod roles;
 mod secrets;
+mod statement_timeout;
 mod tenants;
 
 use sqlx::postgres::PgPoolOptions;

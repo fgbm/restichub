@@ -124,7 +124,7 @@ pub struct ApiError {
     reason: Option<Reason>,
     /// The name of the repository that holds the location. Only `repository_location_taken` sets it.
     existing_name: Option<String>,
-    /// The `Retry-After` header value in seconds. Only `rate_limited` and `busy` set it.
+    /// The `Retry-After` header value in seconds. Set by `rate_limited`, `busy` and a timeout.
     retry_after: Option<u64>,
     // Boxed so that `Result<_, ApiError>` stays below the `result_large_err` limit.
     records: Option<Box<Records>>,
@@ -290,7 +290,8 @@ impl ApiError {
         error
     }
 
-    /// The control plane returns this error when the password hash semaphore is saturated.
+    /// The control plane returns this error when the password hash semaphore is saturated or a
+    /// database statement passes its timeout.
     pub fn busy(retry_after: u64) -> Self {
         let mut error = Self::new(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -518,8 +519,15 @@ fn cause_chain(error: &dyn StdError) -> String {
     message
 }
 
+/// In seconds.
+const STATEMENT_TIMEOUT_RETRY_AFTER: u64 = 5;
+
 impl From<DbError> for ApiError {
     fn from(error: DbError) -> Self {
+        if error.is_statement_timeout() {
+            tracing::warn!(cause = %cause_chain(&error), "a request query passed its statement timeout");
+            return Self::busy(STATEMENT_TIMEOUT_RETRY_AFTER);
+        }
         Self::internal(cause_chain(&error))
     }
 }
@@ -534,6 +542,7 @@ impl From<crate::job_signing::JobSigningError> for ApiError {
     fn from(error: crate::job_signing::JobSigningError) -> Self {
         match error {
             crate::job_signing::JobSigningError::StaleCurrentKey => Self::conflict(),
+            crate::job_signing::JobSigningError::Database(error) => Self::from(error),
             other => Self::internal(cause_chain(&other)),
         }
     }
@@ -545,6 +554,7 @@ impl From<crate::delivery::DeliveryError> for ApiError {
             crate::delivery::DeliveryError::NotFound => {
                 Self::internal("the repository binds a secret that does not exist")
             }
+            crate::delivery::DeliveryError::Database(error) => Self::from(error),
             other => Self::internal(cause_chain(&other)),
         }
     }
