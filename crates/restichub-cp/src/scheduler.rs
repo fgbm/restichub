@@ -26,6 +26,7 @@ use restichub_db::{
 use time::OffsetDateTime;
 
 use crate::clock::Clock;
+use crate::dashboard::is_online;
 use crate::schedule::{Schedule, ScheduleError};
 
 /// How often the scheduler looks for a due plan (ADR-0010).
@@ -136,7 +137,21 @@ async fn process_plan(
         MAX_MISSED_RUNS,
         SCHEDULED_JOB_LIFETIME,
     )?;
-    for fire_time in select_fires(plan.missed_run_policy, &missed, now) {
+    let host_online = is_online(
+        plan.agent_first_connected_at,
+        plan.agent_stream_open,
+        plan.agent_last_seen_at,
+        now,
+    );
+    // A job for an offline host would wait in the queue and run late; the policy `skip` runs
+    // nothing late (FR-SC-07).
+    let fires = if plan.missed_run_policy == MissedRunPolicy::Skip && !host_online {
+        Vec::new()
+    } else {
+        select_fires(plan.missed_run_policy, &missed, now)
+    };
+    let mut earliest_created: Option<OffsetDateTime> = None;
+    for fire_time in fires {
         let job = jobs::NewJob {
             id: JobId::new(),
             kind: JobKind::Backup,
@@ -148,7 +163,16 @@ async fn process_plan(
             location_fingerprint: None,
             created_by: None,
         };
-        jobs::create_scheduled(tx, &job).await?;
+        if jobs::create_scheduled(tx, &job).await?.is_some() {
+            earliest_created = earliest_created.or(Some(fire_time));
+        }
+    }
+    // The jobs that an offline host did not take yet are older than the new one. The latest run
+    // replaces them, so the host does not run them back to back when it returns (FR-SC-07).
+    if plan.missed_run_policy == MissedRunPolicy::LatestOnly
+        && let Some(earliest) = earliest_created
+    {
+        jobs::expire_superseded(tx, plan.id, earliest, now).await?;
     }
 
     let last_fire_time = missed.last().copied().unwrap_or(plan.next_run_at);

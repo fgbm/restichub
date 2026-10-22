@@ -1201,6 +1201,31 @@ pub async fn exec(db: &TestDatabase, tenant: TenantId, sql: &str, id: uuid::Uuid
     tx.commit().await.expect("cannot commit the statement");
 }
 
+/// Gives the agent an open stream and a sign of life at `seen`, as the stream layer does.
+pub async fn set_agent_online(
+    db: &restichub_db::test_util::TestDatabase,
+    tenant: TenantId,
+    agent: restichub_db::AgentId,
+    seen: OffsetDateTime,
+) {
+    let mut tx = db.owner_pool().begin().await.expect("cannot begin");
+    sqlx::query("SELECT set_config('restichub.tenant_id', $1, true)")
+        .bind(tenant.to_string())
+        .execute(&mut *tx)
+        .await
+        .expect("cannot set the tenant scope");
+    sqlx::query(
+        "UPDATE agents SET stream_id = gen_random_uuid(), last_seen_at = $2, \
+                first_connected_at = COALESCE(first_connected_at, $2) WHERE id = $1",
+    )
+    .bind(agent.as_uuid())
+    .bind(seen)
+    .execute(&mut *tx)
+    .await
+    .expect("cannot mark the agent online");
+    tx.commit().await.expect("cannot commit the presence");
+}
+
 /// Builds an instant of the tests without the `time` macros feature.
 pub fn utc(year: i32, month: time::Month, day: u8, hour: u8, minute: u8) -> OffsetDateTime {
     let date = time::Date::from_calendar_date(year, month, day).expect("a valid date");

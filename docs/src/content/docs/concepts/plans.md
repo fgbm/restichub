@@ -48,6 +48,12 @@ A fire time is missed when the control plane does not run a job for it, for exam
 | Run the latest missed run | One job, for the latest older missed fire time. |
 | Skip the missed runs | No job for an older missed fire time. |
 
+The policy also applies when the host is offline. The control plane keeps the queued jobs of an offline host, so the host does not run them one after the other when it returns:
+
+- With the policy "Run the latest missed run", a new scheduled job replaces the older scheduled jobs of the plan that the host did not take. The replaced jobs get the `expired` status. The host runs the newest job only. A job that the queue already sent, and a job that you started with Run now, stay as they are.
+- With the policy "Skip the missed runs", the control plane creates no job while the host is offline.
+- With the policy "Run every missed run", the host runs each queued job.
+
 Every scheduled job has an expiry time, 24 hours after its fire time. The control plane creates no job for a fire time that the job would outlive at once, because such a job expires at once. The control plane moves an overdue job to the `expired` status.
 
 A suspended tenant creates no job. A plan whose agent is revoked creates no job.
