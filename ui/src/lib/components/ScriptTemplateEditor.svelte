@@ -252,6 +252,7 @@
 			await service.deleteScriptTemplate(existing.id);
 			pushToast('success', t('scriptTemplates.deleted'));
 			deleteOpen = false;
+			baseline = snapshot();
 			toList();
 		} catch (problem) {
 			pushToast('danger', messageOf(problem));

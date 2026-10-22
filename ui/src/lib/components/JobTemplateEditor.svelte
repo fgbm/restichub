@@ -160,6 +160,7 @@
 			await service.deleteJobTemplate(existing.id);
 			pushToast('success', t('jobTemplates.deleted'));
 			deleteOpen = false;
+			baseline = snapshot();
 			toList();
 		} catch (problem) {
 			pushToast('danger', messageOf(problem));

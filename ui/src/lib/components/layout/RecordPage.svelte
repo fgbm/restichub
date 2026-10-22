@@ -53,13 +53,21 @@
 	const stateId = `record-save-${uid}`;
 	let stuck = $state(false);
 
+	// "Cancel" of the save bar drops the changes on purpose, so it leaves without a question.
+	let discarding = false;
+
 	// Every editor of a record saves on its own, so the record holds the guard for the changes that
 	// are not saved. A save in flight may leave without a question (UI principles 5.5).
 	beforeNavigate(({ type, cancel }) => {
-		if (!(save?.dirty || unsaved) || save?.saving) return;
+		if (discarding || !(save?.dirty || unsaved) || save?.saving) return;
 		// A leave shows the dialog of the browser, so the page does not ask a second time.
 		if (type === 'leave' || !window.confirm(t('rp.unsaved'))) cancel();
 	});
+
+	function discard(): void {
+		discarding = true;
+		save?.oncancel();
+	}
 
 	// The bar casts a shadow only while the sections scroll under it, that is while the end of the
 	// sections is below the top edge of the bar.
@@ -129,7 +137,7 @@
 				</span>
 				{#if !save.readonly}
 					{#if save.dirty}
-						<Button onclick={save.oncancel}>{t('common.cancel')}</Button>
+						<Button onclick={discard}>{t('common.cancel')}</Button>
 					{/if}
 					<Button
 						type="submit"

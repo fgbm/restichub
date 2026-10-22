@@ -189,15 +189,18 @@
 		parameterRows = rows;
 		// The first read fills the draft; a later refresh keeps the values that the person typed.
 		if (parameterBaseline !== '' && parameterDirty) return;
-		parameterValues = draftOf(rows);
+		adoptParameters();
+	}
+
+	// The form takes the values that the server holds and has no change after that.
+	function adoptParameters(): void {
+		parameterValues = draftOf(parameterRows);
 		removedParameters = [];
 		parameterBaseline = JSON.stringify([parameterValues, removedParameters]);
 	}
 
 	function cancelParameters(): void {
-		parameterValues = draftOf(parameterRows);
-		removedParameters = [];
-		parameterBaseline = JSON.stringify([parameterValues, removedParameters]);
+		adoptParameters();
 	}
 
 	const parameterDirty = $derived(
@@ -275,7 +278,8 @@
 				}
 			}
 			const response = await service.replaceAgentParameters(hostId, body);
-			applyParameters(response.parameters);
+			parameterRows = response.parameters;
+			adoptParameters();
 			pushToast('success', t('hp.param.saved'));
 		} catch (problem) {
 			if (problem && typeof problem === 'object' && 'problem' in problem) {

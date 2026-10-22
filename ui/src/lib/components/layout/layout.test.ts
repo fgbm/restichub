@@ -200,6 +200,18 @@ describe('RecordPage unsaved changes', () => {
 		expect(confirm).toHaveBeenCalledOnce();
 	});
 
+	it('leaves without a question when the save bar drops the changes', async () => {
+		const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+		const oncancel = vi.fn();
+		record({ dirty: true, oncancel });
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+		navigationEvent();
+
+		expect(oncancel).toHaveBeenCalledOnce();
+		expect(confirm).not.toHaveBeenCalled();
+	});
+
 	it('gives the question of a page leave to the browser', () => {
 		const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
 		record({ dirty: true, oncancel: vi.fn() });

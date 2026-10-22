@@ -623,6 +623,7 @@
 			await service.deletePlan(existing.id);
 			pushToast('success', t('plans.deleted'));
 			deleteOpen = false;
+			baseline = stateKey;
 			await goto(resolve('/(app)/plans'));
 		} catch (problem) {
 			pushToast('danger', messageOf(problem));
