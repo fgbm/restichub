@@ -394,6 +394,14 @@ mod tests {
         );
         assert!(unit.contains("NoNewPrivileges=true\n"));
         assert!(unit.contains("CapabilityBoundingSet=CAP_DAC_READ_SEARCH"));
+        assert!(
+            unit.contains("CAP_FOWNER"),
+            "chmod of a file of another owner"
+        );
+        assert!(
+            unit.contains("CAP_FSETID"),
+            "setgid of a file of a foreign group"
+        );
     }
 
     #[test]
