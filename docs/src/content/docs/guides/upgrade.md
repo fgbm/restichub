@@ -167,7 +167,7 @@ Upgrade the agents only after the new control plane works.
 
 ### All agents
 
-- The service stops with the exit code 78 when its identity, its program or its restic is not safe. A restic that is missing or that differs from its record also stops the service. The service checks the identity again at each new connection. It does not restart after the exit code 78. `restichub-agent status` shows the cause. For a missing restic, run `install-service --restic-archive <ARCHIVE>`.
+- The service stops with the exit code 78 when its identity, its program or its restic is not safe. A restic that is missing or that differs from its record also stops the service. The service checks the identity again at each new connection. It does not restart after the exit code 78. `status` shows the cause. For a missing restic, run `install-service --restic-archive <ARCHIVE>`.
 
 ### Windows agents
 
@@ -186,7 +186,7 @@ On such a host, do these steps one time:
 
 1. Run `install-service` of the new package as Administrator.
 2. If the command says `the identity of this host could be changed by another account`, create a token with "Re-register" on the host page.
-3. Run `restichub-agent register --force --url <URL> --token <TOKEN>` as Administrator. The command repairs all the directories first. It removes the old identity only after all the checks pass.
+3. Run `.\restichub-agent.exe register --force --url <URL> --token <TOKEN>` in the folder of the package, as Administrator. The command repairs all the directories first. It removes the old identity only after all the checks pass.
 4. If a command printed `repaired the access control of ... under C:\ProgramData\ResticHub...`, restart the computer. A program that opened that directory before the repair keeps the access of its handle until the restart. With that handle it can put back its access entry. The service then refuses the identity and stops with the exit code 78.
 5. After the restart, run `install-service` again. Its output must not show a line that starts with `repaired`. If it shows such a line, a program with administrator rights changes the rights of the directory. An example is a management tool or a sync tool. Find that program and stop it. Then do the steps 4 and 5 again.
 
@@ -215,7 +215,7 @@ Do these steps on each Linux host that keeps a local repository:
    ```
 
 3. Write each parent directory of the repositories on one line of the file `/etc/restichub-agent-repository-roots.txt`, for example `/srv/restichub`. Root must own the file, and no other account may write it: `sudo chmod 0644 /etc/restichub-agent-repository-roots.txt`.
-4. Run `sudo restichub-agent install-service`. The command adds each root to `ReadWritePaths` and starts the service.
+4. Run `sudo /opt/restichub-agent/bin/restichub-agent install-service`. The command adds each root to `ReadWritePaths` and starts the service.
 5. If you moved a repository, open it in "Repositories" and enter the new path in the field "Path".
 6. Start "Test access" for each local repository. The result must be "The repository is ready.".
 
