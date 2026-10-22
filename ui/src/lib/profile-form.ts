@@ -47,6 +47,7 @@ export interface ProfileDraft {
 	excludeCaches: boolean;
 	limitUpload: string;
 	limitDownload: string;
+	lowPriority: boolean;
 	keepLast: string;
 	keepHourly: string;
 	keepDaily: string;
@@ -166,6 +167,7 @@ export function emptyDraft(defaults?: JobLimitDefaults): ProfileDraft {
 		excludeCaches: false,
 		limitUpload: '',
 		limitDownload: '',
+		lowPriority: false,
 		...PRESETS.standard,
 		keepWithin: '',
 		keepTags: [],
@@ -212,6 +214,7 @@ export function draftFromProfile(profile: Profile): ProfileDraft {
 	draft.excludeCaches = options?.exclude_caches ?? false;
 	draft.limitUpload = options?.limit_upload_kib ? String(options.limit_upload_kib) : '';
 	draft.limitDownload = options?.limit_download_kib ? String(options.limit_download_kib) : '';
+	draft.lowPriority = options?.priority === 'low';
 	if (options?.stall_timeout_minutes != null) {
 		draft.stallMinutes = String(options.stall_timeout_minutes);
 	}
@@ -254,7 +257,8 @@ export function draftFromProfile(profile: Profile): ProfileDraft {
 			draft.oneFileSystem ||
 			draft.excludeCaches ||
 			draft.limitUpload !== '' ||
-			draft.limitDownload !== '',
+			draft.limitDownload !== '' ||
+			draft.lowPriority,
 		retention: Boolean(retention),
 		check: Boolean(profile.check),
 		scripts: draft.scripts.length > 0
@@ -295,6 +299,7 @@ export function settingsOf(
 			exclude_caches: on.options && draft.excludeCaches,
 			limit_upload_kib: on.options ? numberOrZero(draft.limitUpload) : 0,
 			limit_download_kib: on.options ? numberOrZero(draft.limitDownload) : 0,
+			priority: on.options && draft.lowPriority ? ('low' as const) : ('normal' as const),
 			stall_timeout_minutes: optionalMinutes(draft.stallMinutes),
 			max_duration_minutes: optionalHoursAsMinutes(draft.maxDurationHours)
 		},
@@ -638,6 +643,7 @@ export function summarize(
 	if (numberOrZero(draft.limitDownload)) {
 		optionParts.push(t('pe.sum.download', { count: numberOrZero(draft.limitDownload) }));
 	}
+	if (draft.lowPriority) optionParts.push(t('pe.sum.lowPriority'));
 
 	const retention = retentionParts(draft);
 	const retentionSummary: Summary = !draft.enabled.retention

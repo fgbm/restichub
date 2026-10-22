@@ -1914,6 +1914,11 @@ export interface components {
             max_duration_minutes?: number | null;
             one_file_system?: boolean;
             /**
+             * @description Process and I/O priority of the restic steps. `low` runs them at a lower priority
+             *     (FR-AG-15). A missing value gives `normal`.
+             */
+            priority?: components["schemas"]["ProfilePriority"];
+            /**
              * Format: int32
              * @description Minutes without progress after which the agent stops a step. From 5 to 10080. A missing
              *     value gives the default of a new profile and keeps the stored value of an update (ADR-0039).
@@ -3156,6 +3161,12 @@ export interface components {
             macos?: string[];
             windows?: string[];
         };
+        /**
+         * @description The process and I/O priority of the restic steps of a profile (FR-AG-15). The string value of
+         *     each variant is stored: do not change a string.
+         * @enum {string}
+         */
+        ProfilePriority: "normal" | "low";
         /**
          * @description The result of a profile create or update: the stored profile and the save-time warnings
          *     (FR-PF-05).

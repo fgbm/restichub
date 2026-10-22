@@ -643,6 +643,37 @@ describe('Profile editor tags and limits', () => {
 		expect(options.max_duration_minutes).toBe(120);
 	});
 
+	it('ac_ag_14_sends_the_low_priority_that_the_operator_chooses', async () => {
+		const u = user();
+		render(ProfileEditor, { profileId: 'p_1' });
+		await screen.findByLabelText(/^Profile/);
+		await u.click(screen.getByRole('switch', { name: 'Turn on the section "Backup options"' }));
+		await u.click(screen.getByLabelText(/^Low priority/));
+		await u.click(screen.getByRole('button', { name: 'Save' }));
+		await waitFor(() => expect(mocks.updateProfile).toHaveBeenCalledTimes(1));
+		expect(mocks.updateProfile.mock.calls[0][1].options.priority).toBe('low');
+	});
+
+	it('ac_ag_14_shows_the_stored_low_priority_when_the_profile_is_edited', async () => {
+		const u = user();
+		mocks.listProfiles.mockResolvedValue([
+			profile({
+				options: {
+					use_fs_snapshot: false,
+					one_file_system: false,
+					exclude_caches: false,
+					limit_upload_kib: 0,
+					limit_download_kib: 0,
+					priority: 'low'
+				}
+			})
+		]);
+		render(ProfileEditor, { profileId: 'p_1' });
+		await screen.findByLabelText(/^Profile/);
+		await expand(u, /^Backup options/);
+		expect(screen.getByLabelText(/^Low priority/)).toBeChecked();
+	});
+
 	it('shows the stored limits when the profile is edited', async () => {
 		const u = user();
 		mocks.listProfiles.mockResolvedValue([

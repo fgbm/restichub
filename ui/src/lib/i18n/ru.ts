@@ -700,6 +700,7 @@ export const ru: Record<MessageKey, string> = {
 	'profiles.options.excludeCaches': 'Исключить каталоги кэша',
 	'profiles.options.limitUpload': 'Ограничение отдачи (КиБ/с)',
 	'profiles.options.limitDownload': 'Ограничение приёма (КиБ/с)',
+	'profiles.options.lowPriority': 'Низкий приоритет',
 	'profiles.options.limitNone': 'Без ограничения',
 	'profiles.retention': 'Хранение',
 	'profiles.retention.groupBy.host': 'Хост',
@@ -1936,6 +1937,8 @@ export const ru: Record<MessageKey, string> = {
 	'pe.options.vssHelp': 'Только Windows: копия согласованного снимка тома.',
 	'pe.options.oneFsHelp': 'Подключённые тома внутри путей пропускаются.',
 	'pe.options.cachesHelp': 'Пропускаются каталоги с файлом CACHEDIR.TAG.',
+	'pe.options.lowPriorityHelp':
+		'Резервное копирование и шаги обслуживания этого профиля работают с пониженным приоритетом процессора и диска. Остальные программы на хосте не тормозят. Шаги могут занять больше времени.',
 	'pe.check.lead':
 		'Проверка целостности репозитория после копирования. Без доли чтения проверяется только структура: это быстро.',
 	'pe.check.help':
@@ -2062,6 +2065,7 @@ export const ru: Record<MessageKey, string> = {
 	'pe.sum.caches': 'без каталогов кэша',
 	'pe.sum.upload': 'отдача до {count} КиБ/с',
 	'pe.sum.download': 'приём до {count} КиБ/с',
+	'pe.sum.lowPriority': 'низкий приоритет',
 	'pe.sum.retentionOff': 'Выключено: снимки не удаляются',
 	'pe.sum.retentionNone': 'Правил нет: ничего не удаляется',
 	'pe.sum.last': 'последние {count}',
