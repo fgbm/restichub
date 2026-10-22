@@ -263,7 +263,7 @@ describe('FilterBar in a list view', () => {
 			},
 			context
 		});
-		const user = userEvent.setup({ pointerEventsCheck: 0 });
+		const user = userEvent.setup();
 		await user.click(screen.getByRole('button', { name: 'Reset' }));
 		expect(onchange).toHaveBeenLastCalledWith({ q: '', state: '' });
 	});
