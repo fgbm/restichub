@@ -62,7 +62,9 @@ Use this procedure when the agent lost its identity, or when you must move the a
 1. Open the Hosts screen as an Admin.
 2. Open the menu "…" of the host row and select "Re-register". The host page has the same button in the section "Dangerous actions".
 3. Select "Create token". The screen shows the token one time.
-4. Run the shown command as `root` or Administrator on the computer of the host. Use the full path of the agent, because the installer adds no link on `PATH`: `/opt/restichub-agent/bin/restichub-agent register --force --url <url> --token <token>` on Linux, or `& "$env:ProgramFiles\ResticHub\Agent\restichub-agent.exe" register --force --url <url> --token <token>` in an elevated PowerShell on Windows. You can run it from any folder.
+4. Run the shown command as `root` or Administrator on the computer of the host. The installer adds no link on `PATH`, so use the full path of the agent. You can run it from any folder.
+   - Linux: `sudo /opt/restichub-agent/bin/restichub-agent register --force --url <url> --token <token>`
+   - Windows, in an elevated PowerShell: `& "$env:ProgramFiles\ResticHub\Agent\restichub-agent.exe" register --force --url <url> --token <token>`
 
 The token is bound to the host. The command prints that it replaced the host record. The control plane then refuses the old certificate at once, and it closes the open stream of the old agent. The audit log gets the action `agent_reenroll`.
 

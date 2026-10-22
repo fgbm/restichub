@@ -62,7 +62,9 @@ the agent certificate is expired and cannot rotate; register the agent again wit
 1. Откройте экран «Хосты» от имени администратора.
 2. Откройте меню «…» в строке хоста и выберите «Зарегистрировать заново». Та же кнопка есть на странице хоста в разделе «Опасные действия».
 3. Выберите «Создать токен». Экран показывает токен один раз.
-4. Выполните показанную команду на компьютере хоста от имени `root` или администратора. Укажите полный путь агента, потому что команда установки не создаёт ссылку в `PATH`: в Linux — `/opt/restichub-agent/bin/restichub-agent register --force --url <url> --token <token>`, в Windows — `& "$env:ProgramFiles\ResticHub\Agent\restichub-agent.exe" register --force --url <url> --token <token>` в PowerShell с повышенными правами. Папка запуска не важна.
+4. Выполните показанную команду на компьютере хоста от имени `root` или администратора. Команда установки не создаёт ссылку в `PATH`, поэтому укажите полный путь агента. Папка запуска не важна.
+   - Linux: `sudo /opt/restichub-agent/bin/restichub-agent register --force --url <url> --token <token>`
+   - Windows, в PowerShell с повышенными правами: `& "$env:ProgramFiles\ResticHub\Agent\restichub-agent.exe" register --force --url <url> --token <token>`
 
 Токен привязан к хосту. Команда сообщает, что заменила запись хоста. Сервер управления сразу перестаёт принимать старый сертификат и закрывает открытый поток старого агента. В журнале аудита появляется действие `agent_reenroll`.
 
