@@ -77,6 +77,13 @@ use watchdog::StepLimits;
 /// (FR-AG-10, AC-AG-06).
 pub const STOP_GRACE: Duration = Duration::from_secs(30);
 
+/// How long a stopping service waits for its jobs before the process ends (FR-AG-10, AC-AG-06).
+///
+/// A job that the stop cancels needs its own forced kill inside this wait, so the wait exceeds
+/// [`STOP_GRACE`]. The Windows service reports it as the wait hint of the pending stop, so the
+/// service control manager waits for the drain.
+pub const STOP_DRAIN: Duration = Duration::from_secs(STOP_GRACE.as_secs() + 15);
+
 /// How long past the job deadline the cleanup scripts (`after`, `on_*` and `finally`) may run
 /// (FR-HK-05).
 pub const CLEANUP_GRACE: Duration = Duration::from_secs(10 * 60);
@@ -164,6 +171,9 @@ impl Jobs {
     ) -> Result<Self> {
         let mut journal = FileJournal::load(dir.join(JOURNAL_FILE))?;
         journal.prune(now_timestamp());
+        // No job of this process runs yet, so an entry without a result belongs to the process
+        // that ended before this start (FR-IN-08).
+        journal.mark_orphans();
         journal.persist()?;
         let restore = RestoreAccess::for_host(dir, &cache, &program);
         crate::service::warn_about_read_only_roots(restore.roots());
@@ -490,6 +500,9 @@ impl Jobs {
         let snapshot = match admit(job, &mut *journal, expires_at) {
             // The journal changes only for a new admission (ADR-0020).
             Admission::New => Some(journal.snapshot()),
+            // A job that the previous process left without a result and this process runs again
+            // is no orphan any more (FR-IN-08).
+            Admission::InProgress if journal.revive(&job.job_id) => Some(journal.snapshot()),
             Admission::InProgress | Admission::AlreadyCompleted(_) => None,
         };
         let cancel = CancelHandle::new();
@@ -534,6 +547,39 @@ impl Jobs {
         if let Some(handle) = lock(&self.running).get(job_id) {
             handle.cancel();
         }
+    }
+
+    /// Stops every running job the way a cancel does, so that restic removes its repository lock
+    /// before the service ends, and waits at most `wait` for their results (FR-AG-10, AC-AG-06).
+    ///
+    /// Zero when no job runs.
+    pub async fn stop_running(&self, wait: Duration) -> usize {
+        let running: Vec<String> = lock(&self.running).keys().cloned().collect();
+        if running.is_empty() {
+            return 0;
+        }
+        for job_id in &running {
+            self.cancel(job_id);
+        }
+        tracing::info!(
+            jobs = running.len(),
+            "the agent stops the running jobs before it stops"
+        );
+        let deadline = tokio::time::Instant::now() + wait;
+        while running
+            .iter()
+            .any(|job_id| lock(&self.running).contains_key(job_id))
+        {
+            if tokio::time::Instant::now() >= deadline {
+                tracing::warn!(
+                    jobs = running.len(),
+                    "a job did not stop in time; its restic may keep the repository lock"
+                );
+                break;
+            }
+            tokio::time::sleep(runner::POLL_INTERVAL).await;
+        }
+        running.len()
     }
 
     /// Re-sends the results that the control plane may have missed (ADR-0020).

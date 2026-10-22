@@ -17,8 +17,9 @@ restichub-agent status
 restichub-agent uninstall-service
 ```
 
+- `install-service`, `register`, `restic update` and `uninstall-service` refuse to run while a job runs in the service. The message `cannot stop the service` names the cause and the next step.
 - `status` prints the agent ID and the organization ID. It prints the certificate expiry, the restic version and path, and the service state. It also prints the control plane URL, the connection state, the time of the last connection and the last error. It prints no secret. It exits with the code 1 when the agent is not connected.
-- `uninstall-service` stops and removes the service. It keeps the data, so `install-service` can install the service again.
+- `uninstall-service` stops and removes the service. It keeps the data, so `install-service` can install the service again. It refuses while a job runs, as `install-service` does.
 
 A `status` output looks like this:
 
@@ -158,7 +159,7 @@ The exit code is 0 on success and 1 on an error. The exit code is 78 when the se
 | `warning: another account could read or change ..., so the agent identity may be exposed` | An older agent let another account read or change the identity. The repair stopped that access, but the key can be already known. | Register the host again (see [Enroll a host again](/restichub/guides/agent-certificates/)). |
 | `... is owned by an account that is not SYSTEM or Administrators, so that account may have put files there` | Another account owns a directory of the agent. The agent does not repair it. | Check the files in the directory. Then run the two PowerShell lines from the message: `icacls <directory> /setowner *S-1-5-32-544` and `Set-Acl` with the SDDL `O:BAG:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)`. Run the command again. |
 | The command refuses a directory or file | Another account owns the item or can write it. | Reset the owner and the access to SYSTEM and Administrators (Linux: `root`, mode 0755). Run the command again. |
-| `cannot stop the service` on Windows | A job still runs. | Wait for the job, or stop the service by hand. Run the command again. |
+| `cannot stop the service` | A job runs in the service. `install-service`, `register`, `restic update` and `uninstall-service` refuse, so the job is not cut short. | Wait for the job to end. Run the command again. A job of a crashed agent does not refuse the command. |
 | `the restic binary ... is missing` on Windows after an update | An older agent kept restic in the `bin` directory, and the service could not move it. The log of the service shows `cannot remove` or `cannot replace`. | Close the program that holds the old file, or clear its read-only attribute. Then run `restichub-agent install-service` as Administrator. The command moves restic to `%ProgramFiles%\ResticHub\Agent\restic.exe`. |
 | A job on a local repository fails with `read-only file system`, or with the reason `repository_path_denied` or `repository_read_only` | The systemd unit makes the file system read-only. The repository path is not below a repository root, or the installed unit does not list the root yet. | Add the root to `/etc/restichub-agent-repository-roots.txt` and run `sudo restichub-agent install-service` (see [A local repository on Linux](/restichub/getting-started/add-a-repository/#a-local-repository-on-linux)). |
 | `restic differs from its record after the move` | The old file changed before the move. | Run `restichub-agent restic update` as Administrator. |

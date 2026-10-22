@@ -14,6 +14,10 @@
 #                                 back up SOURCE into a local repository below ROOT
 #   install-smoke.sh local-repository ROOT SOURCE OUTSIDE
 #                                 back up into a local repository below ROOT; refuse OUTSIDE
+#   install-smoke.sh slow-job PATH MS
+#                                 start a test-access job at PATH whose restic waits in the job and
+#                                 MS milliseconds after the graceful stop signal; print its id
+#   install-smoke.sh job-state ID print the status and the result code of a job
 #   install-smoke.sh cp-logs      print the log of the control plane
 #
 # The state lives in $SMOKE_DIR. The values are for a throw-away control plane on the loopback
@@ -213,6 +217,28 @@ one_job() {
 	echo "the job succeeded"
 }
 
+# Starts the test-access job of a new local repository at $1. The restic double waits ten minutes in
+# the job and $2 milliseconds after the graceful stop signal, so a stop of the service lasts that
+# long (FR-AG-10, AC-AG-06). Prints the job id, so the caller can read its state while the job runs.
+slow_job() {
+	local path="${1:?the repository path}" delay="${2:-0}" name agent repository id
+	name="${path##*/}"
+	name="${name##*\\}"
+	agent="$(agent_json | jq -r '.items[0].id')"
+	repository="$(create_local_repository "$name" "$path" "$agent")"
+	printf '600000\n' >"$path.restichub-sleep"
+	printf '%s\n' "$delay" >"$path.restichub-exit-delay"
+	: >"$path.restichub-signal"
+	id="$(start_job "$repository" test-access)"
+	printf '%s\n' "$id"
+}
+
+# Prints the status and the result code of job $1, for example "failed cancelled".
+job_state() {
+	curl -fsS -b "$jar" "$web/api/v1/jobs/$1" |
+		jq -r '"\(.status) \(.result_code // "-")"'
+}
+
 # Prints the id of a new local repository $1 at the path $2 with the maintenance agent $3.
 create_local_repository() {
 	printf '%s' "smoke-local-password" |
@@ -281,6 +307,8 @@ canary-jobs) shift; canary_jobs "$@" ;;
 one-job) shift; one_job "$@" ;;
 backup) shift; backup "$@" ;;
 local-repository) shift; local_repository "$@" ;;
+slow-job) shift; slow_job "$@" ;;
+job-state) shift; job_state "$@" ;;
 cp-logs) cat "$smoke_dir/cp.log" ;;
 *) echo "unknown command: ${1:-}" >&2; exit 2 ;;
 esac

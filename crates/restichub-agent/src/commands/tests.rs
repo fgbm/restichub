@@ -140,6 +140,18 @@ mod trust_mode {
         journal.persist().expect("persist");
     }
 
+    /// Starts the service on the journal: it marks every unfinished entry as an orphan of the
+    /// process that ended.
+    fn service_started(dir: &Path) {
+        crate::jobs::Jobs::open(
+            PathBuf::from("restic"),
+            String::new(),
+            dir.join("cache"),
+            dir,
+        )
+        .expect("the service opens the journal");
+    }
+
     #[test]
     fn fr_hk_08_trust_enable_restarts_an_idle_service_and_waits_for_the_connection() {
         let dir = config_dir("restart");
@@ -169,6 +181,68 @@ mod trust_mode {
         let fake = Fake::new(&dir, RUNNING);
         apply(&fake, &dir, true, false).expect("apply");
         assert!(fake.events().is_empty());
+        cleanup(&dir);
+    }
+
+    /// FR-AG-10, FR-IN-08: a command that would stop the service refuses while a job runs, because
+    /// the stop cuts restic short and it can keep its repository lock.
+    #[test]
+    fn fr_ag_10_a_command_that_stops_the_service_is_refused_while_a_job_runs() {
+        let dir = config_dir("busy-stop");
+        let fake = Fake::new(&dir, RUNNING);
+        refuse_running_job(&fake, &dir).expect("an idle service is no refusal");
+
+        accept_job(&dir, false);
+        let error = refuse_running_job(&fake, &dir).expect_err("a running job must refuse");
+        let text = format!("{error:#}");
+        assert!(text.starts_with("cannot stop the service: "), "{text}");
+        assert!(
+            text.contains("the job journal shows a job in progress"),
+            "{text}"
+        );
+        assert!(text.contains("then run the command again"), "{text}");
+        assert!(fake.events().is_empty(), "a refusal touches no service");
+
+        let stopped = Fake::new(&dir, STOPPED);
+        refuse_running_job(&stopped, &dir).expect("a stopped service runs no job");
+
+        accept_job(&dir, true);
+        refuse_running_job(&fake, &dir).expect("a finished job is no refusal");
+
+        std::fs::write(dir.join(JOURNAL_FILE), b"not json").expect("write");
+        let error = refuse_running_job(&fake, &dir).expect_err("a bad journal must refuse");
+        assert!(
+            format!("{error:#}").contains("the job journal cannot be read"),
+            "{error:#}"
+        );
+        cleanup(&dir);
+    }
+
+    /// FR-IN-08: an entry that the previous process left without a result runs no job, so it does
+    /// not refuse the command; a job of the live service does.
+    #[test]
+    fn fr_in_08_an_entry_of_the_previous_process_does_not_refuse_a_command() {
+        let dir = config_dir("stale-job");
+        let fake = Fake::new(&dir, RUNNING);
+        accept_job(&dir, false);
+        service_started(&dir);
+        refuse_running_job(&fake, &dir).expect("no job of the live service runs");
+
+        let mut journal = FileJournal::load(dir.join(JOURNAL_FILE)).expect("journal");
+        let expires = Timestamp {
+            seconds: OffsetDateTime::now_utc().unix_timestamp() + 3600,
+            nanos: 0,
+        };
+        journal.record_accepted("job-2", expires);
+        journal.persist().expect("persist");
+        let error = refuse_running_job(&fake, &dir).expect_err("a job of the live service refuses");
+        let text = format!("{error:#}");
+        assert!(
+            text.contains("the job journal shows a job in progress"),
+            "{text}"
+        );
+        assert!(text.contains("wait for the job to end"), "{text}");
+        assert!(!text.contains("by hand"), "{text}");
         cleanup(&dir);
     }
 

@@ -3,7 +3,9 @@
 use std::process::ExitCode;
 
 use restichub_agent::cli::{self, Command};
-use restichub_agent::{commands, logging, paths, service};
+#[cfg(windows)]
+use restichub_agent::service;
+use restichub_agent::{commands, logging, paths};
 
 fn main() -> ExitCode {
     match run() {
@@ -63,7 +65,7 @@ fn run() -> anyhow::Result<()> {
         }
         Command::UninstallService => {
             logging::init_console();
-            service::uninstall()
+            commands::uninstall_service()
         }
     }
 }
