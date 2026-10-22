@@ -1,30 +1,34 @@
 //! AC-SC-07: the missed run policy also applies to an offline agent (FR-SC-07).
 //!
 //! A host that is offline takes no job. With `latest_only`, a newer scheduled job replaces the older
-//! queued ones, so the host runs one backup when it returns. With `skip`, an offline host gets no
-//! job.
+//! queued ones, so the host runs one backup when it returns. With `skip`, the on-time job lives for
+//! the reconnect grace only (ADR-0052).
 
 #![allow(clippy::expect_used)]
 
 mod common;
 
 use restichub_cp::clock::ManualClock;
+use restichub_cp::queue::RECONNECT_GRACE;
 use restichub_cp::scheduler;
 use restichub_db::test_util::TestDatabase;
 use restichub_db::{
-    AgentId, Database, JobKind, JobStatus, MissedRunPolicy, PlanId, TenantId, jobs, plans,
+    AgentId, Database, JobId, JobKind, JobStatus, MissedRunPolicy, PlanId, ProfileId, RepositoryId,
+    TenantId, jobs, plans,
 };
 use time::{Duration, Month, OffsetDateTime};
 
 use common::{
-    create_tenant_with_key, plan_jobs, seed_agent, seed_profile, seed_repository,
-    seed_scheduled_plan, seed_secret, set_agent_online, utc,
+    create_tenant_with_key, exec, plan_jobs, seed_agent, seed_profile, seed_repository,
+    seed_scheduled_plan, seed_secret, utc,
 };
 
 struct Fixture {
     tenant: TenantId,
     agent: AgentId,
     plan: PlanId,
+    profile: ProfileId,
+    repository: RepositoryId,
 }
 
 async fn fixture(
@@ -56,7 +60,31 @@ async fn fixture(
         tenant,
         agent,
         plan,
+        profile,
+        repository,
     }
+}
+
+/// A plan that shares the profile, host and repository of `one`, so only the plan id tells the jobs apart.
+async fn second_plan(
+    db: &TestDatabase,
+    one: &Fixture,
+    policy: MissedRunPolicy,
+    start: OffsetDateTime,
+) -> PlanId {
+    seed_scheduled_plan(
+        db.database(),
+        one.tenant,
+        "second",
+        one.profile,
+        one.agent,
+        "0 * * * *",
+        "UTC",
+        policy,
+        Some(start),
+        one.repository,
+    )
+    .await
 }
 
 /// One scheduler pass, five seconds after the fire time at `start + offset`.
@@ -88,26 +116,26 @@ async fn ac_sc_07_latest_only_expires_the_queued_jobs_of_an_offline_host() {
     let database = db.database();
     let start = utc(2025, Month::January, 1, 0, 0);
     let one = fixture(&db, "offline", MissedRunPolicy::LatestOnly, start).await;
-    // Another tenant with the same plan keeps its queue: the replacement is per tenant (ADR-0006).
-    let other = fixture(&db, "other-tenant", MissedRunPolicy::LatestOnly, start).await;
+    // The replacement is per plan: the queue of another plan of the tenant stays whole.
+    let other = second_plan(&db, &one, MissedRunPolicy::RunAll, start).await;
 
     // The host is offline for three fire times. The control plane runs on time each hour.
     pass(database, start, Duration::ZERO).await;
     pass(database, start, Duration::hours(1)).await;
     pass(database, start, Duration::hours(2)).await;
 
-    for fixture in [&one, &other] {
-        let state = statuses(database, fixture.tenant, fixture.plan).await;
-        // Only the latest job waits for the host; the older ones expired.
-        assert_eq!(
-            state,
-            vec![
-                (start, JobStatus::Expired),
-                (start + Duration::hours(1), JobStatus::Expired),
-                (start + Duration::hours(2), JobStatus::Queued),
-            ]
-        );
-    }
+    // Only the latest job waits for the host; the older ones expired.
+    assert_eq!(
+        statuses(database, one.tenant, one.plan).await,
+        vec![
+            (start, JobStatus::Expired),
+            (start + Duration::hours(1), JobStatus::Expired),
+            (start + Duration::hours(2), JobStatus::Queued),
+        ]
+    );
+    let kept = statuses(database, one.tenant, other).await;
+    assert_eq!(kept.len(), 3);
+    assert!(kept.iter().all(|(_, status)| *status == JobStatus::Queued));
 
     // A replaced job is not a failure: no failed job and no latest job of the plan counts for an
     // alert or for the dashboard (FR-AL-01).
@@ -130,7 +158,33 @@ async fn ac_sc_07_latest_only_expires_the_queued_jobs_of_an_offline_host() {
 }
 
 #[tokio::test]
-async fn ac_sc_07_a_replacement_keeps_manual_sent_and_run_all_jobs() {
+async fn ac_sc_07_a_pass_with_an_on_time_and_an_older_run_keeps_both_jobs() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let database = db.database();
+    let start = utc(2025, Month::January, 1, 0, 0);
+    let one = fixture(&db, "downtime", MissedRunPolicy::LatestOnly, start).await;
+
+    pass(database, start, Duration::ZERO).await;
+    // The control plane was down for longer than the interval: the pass at 02:00:05 finds the
+    // missed 01:00 run and the on-time 02:00 run.
+    pass(database, start, Duration::hours(2)).await;
+
+    assert_eq!(
+        statuses(database, one.tenant, one.plan).await,
+        vec![
+            (start, JobStatus::Expired),
+            (start + Duration::hours(1), JobStatus::Queued),
+            (start + Duration::hours(2), JobStatus::Queued),
+        ]
+    );
+
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn ac_sc_07_a_replacement_keeps_manual_sent_retried_and_run_all_jobs() {
     let Some(db) = common::test_db().await else {
         return;
     };
@@ -138,11 +192,52 @@ async fn ac_sc_07_a_replacement_keeps_manual_sent_and_run_all_jobs() {
     let start = utc(2025, Month::January, 1, 0, 0);
     let latest = fixture(&db, "keep", MissedRunPolicy::LatestOnly, start).await;
     let run_all = fixture(&db, "run-all", MissedRunPolicy::RunAll, start).await;
+    let job_at = |hours: i64| {
+        let fire_time = start + Duration::hours(hours);
+        async move {
+            plan_jobs(database, latest.tenant, latest.plan)
+                .await
+                .into_iter()
+                .find(|job| job.fire_time == Some(fire_time))
+                .expect("the job of the fire time")
+                .id
+        }
+    };
 
     pass(database, start, Duration::ZERO).await;
-    pass(database, start, Duration::hours(1)).await;
+    let retried = job_at(0).await;
+    exec(
+        &db,
+        latest.tenant,
+        "UPDATE jobs SET attempt = 1 WHERE id = $1",
+        retried.as_uuid(),
+    )
+    .await;
 
-    // A manual job of the plan (no fire time) and a job that the queue already sent.
+    pass(database, start, Duration::hours(1)).await;
+    let sent = job_at(1).await;
+    let mut tx = database
+        .begin_tenant(latest.tenant)
+        .await
+        .expect("cannot begin the transaction");
+    assert!(
+        jobs::mark_sent(&mut tx, sent, start + Duration::hours(1), 3600)
+            .await
+            .expect("cannot send the job")
+    );
+    tx.commit().await.expect("cannot commit the setup");
+
+    pass(database, start, Duration::hours(2)).await;
+    let delivered = job_at(2).await;
+    exec(
+        &db,
+        latest.tenant,
+        "UPDATE jobs SET deliveries = 1 WHERE id = $1",
+        delivered.as_uuid(),
+    )
+    .await;
+
+    pass(database, start, Duration::hours(3)).await;
     let mut tx = database
         .begin_tenant(latest.tenant)
         .await
@@ -150,7 +245,7 @@ async fn ac_sc_07_a_replacement_keeps_manual_sent_and_run_all_jobs() {
     let manual = jobs::create(
         &mut tx,
         &jobs::NewJob {
-            id: restichub_db::JobId::new(),
+            id: JobId::new(),
             kind: JobKind::Backup,
             agent_id: latest.agent,
             repository_id: None,
@@ -163,76 +258,111 @@ async fn ac_sc_07_a_replacement_keeps_manual_sent_and_run_all_jobs() {
     )
     .await
     .expect("cannot create the manual job");
-    let sent_id = plan_jobs(database, latest.tenant, latest.plan)
-        .await
-        .into_iter()
-        .find(|job| job.fire_time == Some(start + Duration::hours(1)))
-        .expect("the job of the second fire time")
-        .id;
-    assert!(
-        jobs::mark_sent(&mut tx, sent_id, start + Duration::hours(1), 3600)
-            .await
-            .expect("cannot send the job")
-    );
     tx.commit().await.expect("cannot commit the setup");
 
-    pass(database, start, Duration::hours(2)).await;
+    pass(database, start, Duration::hours(4)).await;
 
     let jobs_of_plan = plan_jobs(database, latest.tenant, latest.plan).await;
-    let status_of = |id: restichub_db::JobId| {
+    let status_of = |id: JobId| {
         jobs_of_plan
             .iter()
             .find(|job| job.id == id)
             .map(|job| job.status)
     };
+    assert_eq!(status_of(retried), Some(JobStatus::Queued));
+    assert_eq!(status_of(sent), Some(JobStatus::Sent));
+    assert_eq!(status_of(delivered), Some(JobStatus::Queued));
     assert_eq!(status_of(manual), Some(JobStatus::Queued));
-    assert_eq!(status_of(sent_id), Some(JobStatus::Sent));
-    let first = jobs_of_plan
-        .iter()
-        .find(|job| job.fire_time == Some(start))
-        .expect("the first scheduled job");
-    assert_eq!(first.status, JobStatus::Expired);
+    // The plain queued job is the control: the replacement ran.
+    assert_eq!(status_of(job_at(3).await), Some(JobStatus::Expired));
 
     // Under this policy every queued job stays.
     let kept = statuses(database, run_all.tenant, run_all.plan).await;
-    assert_eq!(kept.len(), 3);
+    assert_eq!(kept.len(), 5);
     assert!(kept.iter().all(|(_, status)| *status == JobStatus::Queued));
 
     db.cleanup().await;
 }
 
 #[tokio::test]
-async fn ac_sc_07_skip_queues_no_job_for_an_offline_host() {
+async fn ac_sc_07_a_replacement_never_reaches_the_plan_of_another_tenant() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let database = db.database();
+    let start = utc(2025, Month::January, 1, 0, 0);
+    let one = fixture(&db, "tenant-a", MissedRunPolicy::LatestOnly, start).await;
+    let other = fixture(&db, "tenant-b", MissedRunPolicy::LatestOnly, start).await;
+    pass(database, start, Duration::ZERO).await;
+    pass(database, start, Duration::hours(1)).await;
+
+    // Tenant A names the plan of tenant B: Row-Level Security hides its jobs (ADR-0006).
+    let mut tx = database
+        .begin_tenant(one.tenant)
+        .await
+        .expect("cannot begin the transaction");
+    let changed = jobs::expire_superseded(
+        &mut tx,
+        other.plan,
+        start + Duration::days(10),
+        start - Duration::days(10),
+        start + Duration::days(10),
+    )
+    .await
+    .expect("cannot run the replacement");
+    tx.commit().await.expect("cannot commit the replacement");
+
+    assert_eq!(changed, 0);
+    assert_eq!(
+        statuses(database, other.tenant, other.plan).await,
+        vec![
+            (start, JobStatus::Expired),
+            (start + Duration::hours(1), JobStatus::Queued),
+        ]
+    );
+
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn ac_sc_07_skip_gives_the_on_time_job_the_reconnect_grace() {
     let Some(db) = common::test_db().await else {
         return;
     };
     let database = db.database();
     let start = utc(2025, Month::January, 1, 0, 0);
     let offline = fixture(&db, "skip-offline", MissedRunPolicy::Skip, start).await;
-    let online = fixture(&db, "skip-online", MissedRunPolicy::Skip, start).await;
-    set_agent_online(
-        &db,
-        online.tenant,
-        online.agent,
-        start + Duration::seconds(3),
-    )
-    .await;
 
-    pass(database, start, Duration::ZERO).await;
+    // The control plane was down for three intervals; the host is offline.
+    let fire_time = start + Duration::hours(3);
+    pass(database, start, Duration::hours(3)).await;
 
-    assert!(
-        plan_jobs(database, offline.tenant, offline.plan)
-            .await
-            .is_empty(),
-        "an offline host queues nothing under skip"
-    );
+    let queued = plan_jobs(database, offline.tenant, offline.plan).await;
+    assert_eq!(queued.len(), 1, "the older fire times are skipped");
+    assert_eq!(queued[0].fire_time, Some(fire_time));
+    assert_eq!(queued[0].status, JobStatus::Queued);
+    assert_eq!(queued[0].expires_at, Some(fire_time + RECONNECT_GRACE));
+
+    // A host that returns in the grace finds the job; the sweep ends it after the grace.
+    let mut tx = database
+        .begin_tenant(offline.tenant)
+        .await
+        .expect("cannot begin the transaction");
+    let early = jobs::expire_overdue(&mut tx, fire_time + RECONNECT_GRACE - Duration::SECOND)
+        .await
+        .expect("cannot sweep");
+    assert_eq!(early, 0);
+    let late = jobs::expire_overdue(&mut tx, fire_time + RECONNECT_GRACE)
+        .await
+        .expect("cannot sweep");
+    assert_eq!(late, 1);
+    tx.commit().await.expect("cannot commit the sweep");
     assert_eq!(
-        statuses(database, online.tenant, online.plan).await,
-        vec![(start, JobStatus::Queued)],
-        "an online host runs its on-time fire time"
+        statuses(database, offline.tenant, offline.plan).await,
+        vec![(fire_time, JobStatus::Expired)]
     );
 
-    // The plan still advances, so the skipped fire time does not return.
+    // The plan advances, so the fire time does not return.
     let mut tx = database
         .begin_tenant(offline.tenant)
         .await
@@ -242,11 +372,7 @@ async fn ac_sc_07_skip_queues_no_job_for_an_offline_host() {
         .expect("cannot read the plan")
         .expect("the plan exists");
     tx.commit().await.expect("cannot commit the read");
-    assert!(
-        stored
-            .next_run_at
-            .is_some_and(|next| next > start + Duration::minutes(1))
-    );
+    assert!(stored.next_run_at.is_some_and(|next| next > fire_time));
 
     db.cleanup().await;
 }

@@ -524,7 +524,11 @@ async fn first_send(
         .filter(|seconds| *seconds > 0);
     let stall = Some(i32::try_from(built.job.job().stall_timeout_seconds).unwrap_or(i32::MAX))
         .filter(|seconds| *seconds > 0);
-    queue_repo::mark_dispatched(tx, job.id, now, lease_until, timeout, stall, &stored).await?;
+    // The row can change between the select and this update, for example when the scheduler
+    // replaces the job. The rollback of the savepoint removes the secret delivery records.
+    if !queue_repo::mark_dispatched(tx, job.id, now, lease_until, timeout, stall, &stored).await? {
+        return Ok(Prepared::Skip);
+    }
     let required = compat::required_capabilities(&built.job.job().steps);
     restichub_db::job_steps::plan_described(
         tx,

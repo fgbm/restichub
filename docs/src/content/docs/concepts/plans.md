@@ -40,7 +40,7 @@ The control plane applies the daylight saving rules of the accepted decision:
 
 ## Missed runs
 
-A fire time is missed when the control plane does not run a job for it, for example after a downtime. A fire time within a short grace window of the pass is on time, and it always runs. The missed run policy applies to the older fire times only. The policy of the plan decides the result:
+A fire time is missed when the control plane does not run a job for it, for example after a downtime. A fire time within a short grace window of the pass is on time. The control plane creates a job for it under every policy. The missed run policy applies to the older fire times only. The policy of the plan decides the result:
 
 | Policy | Result |
 |---|---|
@@ -48,13 +48,13 @@ A fire time is missed when the control plane does not run a job for it, for exam
 | Run the latest missed run | One job, for the latest older missed fire time. |
 | Skip the missed runs | No job for an older missed fire time. |
 
-The policy also applies when the host is offline. The control plane keeps the queued jobs of an offline host, so the host does not run them one after the other when it returns:
+The policy also decides what happens to the jobs that wait for an offline host:
 
 - With the policy "Run the latest missed run", a new scheduled job replaces the older scheduled jobs of the plan. The host did not take these jobs. The replaced jobs get the `expired` status. The host runs the newest job only. A job that the queue already sent does not change. A job that you started with Run now does not change.
-- With the policy "Skip the missed runs", the control plane creates no job while the host is offline.
+- With the policy "Skip the missed runs", the job of an on-time fire time expires 2 minutes after the fire time. A host that reconnects in that time runs the job. Otherwise the job gets the `expired` status.
 - With the policy "Run every missed run", the host runs each queued job.
 
-Every scheduled job has an expiry time, 24 hours after its fire time. The control plane creates no job for a fire time that the job would outlive at once, because such a job expires at once. The control plane moves an overdue job to the `expired` status.
+Every scheduled job has an expiry time, 24 hours after its fire time. The policy "Skip the missed runs" is the exception, as described above. The control plane creates no job for a fire time that the job would outlive at once, because such a job expires at once. The control plane moves an overdue job to the `expired` status.
 
 A suspended tenant creates no job. A plan whose agent is revoked creates no job.
 

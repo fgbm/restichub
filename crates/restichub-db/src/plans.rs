@@ -146,10 +146,6 @@ pub struct DuePlan {
     /// The next fire time in UTC. Not null for a claimed row.
     pub next_run_at: OffsetDateTime,
     pub agent_status: AgentStatus,
-    /// The time of the first stream open of the agent. `None` while the host waits for it.
-    pub agent_first_connected_at: Option<OffsetDateTime>,
-    pub agent_stream_open: bool,
-    pub agent_last_seen_at: Option<OffsetDateTime>,
     /// The repository of the plan. A scheduled job names it (FR-SC-04).
     pub repository_id: RepositoryId,
 }
@@ -467,8 +463,7 @@ pub async fn claim_due(
 ) -> Result<Vec<DuePlan>, DbError> {
     let rows = sqlx::query_as::<_, DuePlanRow>(
         "SELECT p.id, p.agent_id, p.repository_id, p.cron, p.time_zone, p.missed_run_policy, \
-                p.next_run_at, a.status, a.first_connected_at, \
-                a.stream_id IS NOT NULL AS stream_open, a.last_seen_at \
+                p.next_run_at, a.status \
          FROM plans p \
          JOIN agents a ON a.tenant_id = p.tenant_id AND a.id = p.agent_id \
          WHERE p.enabled AND p.next_run_at IS NOT NULL AND p.next_run_at <= $1 \
@@ -492,9 +487,6 @@ pub async fn claim_due(
                 missed_run_policy: row.missed_run_policy,
                 next_run_at: row.next_run_at?,
                 agent_status: row.status,
-                agent_first_connected_at: row.first_connected_at,
-                agent_stream_open: row.stream_open,
-                agent_last_seen_at: row.last_seen_at,
                 repository_id: row.repository_id,
             })
         })
@@ -582,8 +574,5 @@ struct DuePlanRow {
     missed_run_policy: MissedRunPolicy,
     next_run_at: Option<OffsetDateTime>,
     status: AgentStatus,
-    first_connected_at: Option<OffsetDateTime>,
-    stream_open: bool,
-    last_seen_at: Option<OffsetDateTime>,
     repository_id: RepositoryId,
 }

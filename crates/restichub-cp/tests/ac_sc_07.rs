@@ -14,7 +14,7 @@ use restichub_db::{JobStatus, MissedRunPolicy, agents, plans};
 
 use common::{
     create_tenant_with_key, create_user, plan_fire_times, plan_jobs, seed_agent, seed_profile,
-    seed_repository, seed_scheduled_plan, seed_secret, set_agent_online, set_tenant_status, utc,
+    seed_repository, seed_scheduled_plan, seed_secret, set_tenant_status, utc,
 };
 use time::{Duration, Month};
 
@@ -235,8 +235,6 @@ async fn ac_sc_07_an_on_time_run_creates_one_job_for_every_policy() {
     let agent = seed_agent(database, tenant, "h").await;
 
     let start = utc(2025, Month::January, 1, 0, 0);
-    // The policy skip queues nothing for an offline host, so the host is online.
-    set_agent_online(&db, tenant, agent, start + Duration::seconds(3)).await;
     let mut plan_list = Vec::new();
     for (name, policy) in [
         ("run-all", MissedRunPolicy::RunAll),
