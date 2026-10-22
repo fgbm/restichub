@@ -322,6 +322,97 @@ async fn ac_pr_05_a_message_for_a_job_that_is_not_sent_is_audited() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn ac_pr_05_a_repeated_result_for_a_refused_job_reads_the_job_once() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let attacker = env.connect_agent("repeat-result-host").await;
+    let mut victim = env.connect_agent("victim-result-host").await;
+    let repository = env.create_repository(victim.id, "pw").await;
+    let backup = env.run_fresh_plan(repository, victim.id).await;
+    env.pass().await;
+    let job = decode_job_id(&victim.job().await);
+    victim.start(&env, &job).await;
+
+    // The first result of the attacker for the job of the victim is refused and audited.
+    attacker
+        .result(
+            &job,
+            restichub_proto::agent::v1::JobStatus::Failed,
+            restichub_proto::agent::v1::StepStatus::Failed,
+        )
+        .await;
+    let first = wait_for_rows(&env, "agent_message_refused").await;
+    assert_eq!(first.len(), 1);
+    assert_eq!(first[0].diff["new"]["reason"], "foreign_job");
+
+    // While the test holds the row, a message that reads the job waits on it.
+    let mut row = env.scoped().await;
+    sqlx::query("SELECT 1 FROM jobs WHERE id = $1 FOR UPDATE")
+        .bind(backup)
+        .fetch_optional(&mut *row)
+        .await
+        .expect("cannot lock the job row");
+
+    for _ in 0..5 {
+        attacker
+            .result(
+                &job,
+                restichub_proto::agent::v1::JobStatus::Failed,
+                restichub_proto::agent::v1::StepStatus::Failed,
+            )
+            .await;
+        attacker.stale_lock_step(&job).await;
+        attacker.lock_held(&job).await;
+    }
+    // The stream handles the messages one by one, so the audit of this later message shows that
+    // the repeats are behind it.
+    let later = Uuid::new_v4();
+    attacker
+        .tx
+        .send(AgentMessage {
+            payload: Some(agent_message::Payload::StepProgress(StepProgress {
+                job_id: later.to_string(),
+                step_id: "backup".to_owned(),
+                ..StepProgress::default()
+            })),
+        })
+        .await
+        .expect("cannot send the progress");
+    let mut reached = Vec::new();
+    for _ in 0..50 {
+        reached = audit_rows(&env, "agent_message_refused")
+            .await
+            .into_iter()
+            .filter(|row| row.diff["new"]["job_id"] == later.to_string())
+            .collect();
+        if !reached.is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    row.commit().await.expect("cannot release the job row");
+
+    assert_eq!(
+        reached.len(),
+        1,
+        "the repeats of a refused result wait on the job row, so they reach the database"
+    );
+    let refused = audit_rows(&env, "agent_message_refused").await;
+    assert_eq!(
+        refused
+            .iter()
+            .filter(|row| row.object_id == Some(backup))
+            .count(),
+        1,
+        "one record for the job of the refused messages"
+    );
+    assert_eq!(env.job_status(backup).await, "running");
+    env.db.cleanup().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn ac_pr_01_a_flood_of_rejections_writes_a_bounded_number_of_records() {
     let Some(db) = common::test_db().await else {
         return;
