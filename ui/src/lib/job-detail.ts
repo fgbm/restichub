@@ -26,6 +26,9 @@ export function limitLines(job: JobDetail): string[] | null {
 		max ? t('jobDetail.limit.max', { max: formatSeconds(max) }) : t('jobDetail.limit.noMax')
 	];
 	if (stall) lines.push(t('jobDetail.limit.stall', { stall: formatSeconds(stall) }));
+	// A restore job carries no stall timeout, and the agent sets it from its own variable, so the
+	// control plane cannot show the value (ADR-0039).
+	else if (job.kind === 'restore') lines.push(t('jobDetail.limit.stallAgentDefault'));
 	else if (!max) lines.push(t('jobDetail.limit.noProgress'));
 	return lines;
 }

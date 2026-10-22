@@ -11,8 +11,9 @@ use std::time::{Duration, Instant};
 
 use ed25519_dalek::SigningKey;
 use restichub_proto::agent::v1::{
-    AgentMessage, BackupStep, Job, JobResult, JobStatus, LocalCredentials, RepositoryAccess, Step,
-    agent_message, repository_access::BackendCredentials, step,
+    AgentMessage, BackupStep, Job, JobResult, JobStatus, LocalCredentials, OverwriteMode,
+    RepositoryAccess, RestoreStep, Step, agent_message, repository_access::BackendCredentials,
+    step,
 };
 use restichub_proto::signing::{KeyRing, sign_job};
 use tokio::sync::mpsc;
@@ -70,6 +71,30 @@ fn backup_job(job_id: &str, repository: &Path, stall_seconds: u32, max_seconds: 
             })),
             ..Step::default()
         }],
+    }
+}
+
+fn restore_job(
+    job_id: &str,
+    repository: &Path,
+    target: &Path,
+    verify: bool,
+    stall_seconds: u32,
+) -> Job {
+    Job {
+        steps: vec![Step {
+            step_id: "restore".to_owned(),
+            kind: Some(step::Kind::Restore(RestoreStep {
+                repository_id: "repo-1".to_owned(),
+                snapshot_id: "0123abcd".to_owned(),
+                target: target.to_string_lossy().into_owned(),
+                overwrite: OverwriteMode::Always as i32,
+                verify,
+                ..RestoreStep::default()
+            })),
+            ..Step::default()
+        }],
+        ..backup_job(job_id, repository, stall_seconds, 0)
     }
 }
 
@@ -204,5 +229,104 @@ async fn ac_ag_13_the_maximum_duration_stops_a_step_that_makes_progress() {
     assert!(
         elapsed < script_length,
         "the maximum duration must stop the step, took {elapsed:?}"
+    );
+}
+
+/// AC-AG-12, ADR-0039: a restore over a target that holds the same snapshot skips those files and
+/// prints no restored byte. Only the skipped counters grow, and the step is not stalled.
+#[tokio::test(flavor = "multi_thread")]
+async fn ac_ag_12_a_restore_that_only_skips_files_is_not_stalled() {
+    let path = directory("limits-restore-skip");
+    let target = directory("limits-restore-skip-target");
+    let mut text = String::new();
+    for index in 0..12 {
+        writeln!(
+            text,
+            r#"{{"message_type":"status","percent_done":0,"total_files":1000000,"files_restored":0,"files_skipped":{},"total_bytes":8600000000,"bytes_restored":0,"bytes_skipped":{}}}"#,
+            index * 1_900,
+            index * 15_000_000
+        )
+        .expect("write to a string");
+        writeln!(text, "#sleep 300").expect("write to a string");
+    }
+    writeln!(
+        text,
+        r#"{{"message_type":"summary","total_files":1000000,"files_restored":0,"files_skipped":22800,"total_bytes":8600000000,"bytes_restored":0,"bytes_skipped":180000000}}"#
+    )
+    .expect("write to a string");
+    common::script_stdout(&path, "restore", &text);
+    // The script runs for 3.6 seconds, longer than the stall timeout.
+    let job = restore_job("job-restore-skip", &path, &target, false, 2);
+
+    let (result, elapsed) = run(&job, &path, "limits-restore-skip-dir").await;
+    assert_eq!(result.outcome, JobStatus::Succeeded as i32);
+    assert_eq!(error_code(&result), None);
+    assert!(
+        elapsed > Duration::from_secs(2),
+        "the run must outlast the stall timeout, took {elapsed:?}"
+    );
+}
+
+/// AC-AG-12, ADR-0051: a restore with `--verify` prints nothing while it verifies its files, so
+/// the agent gives that phase the long window of `check` and `prune` and does not stop it as
+/// stalled while it verifies.
+#[tokio::test(flavor = "multi_thread")]
+async fn ac_ag_12_a_restore_with_verify_is_not_stalled_while_it_verifies() {
+    let path = directory("limits-restore-verify");
+    let target = directory("limits-restore-verify-target");
+    common::script_stdout(
+        &path,
+        "restore",
+        concat!(
+            r#"{"message_type":"status","percent_done":1,"total_files":10,"files_restored":10,"total_bytes":2000,"bytes_restored":2000}"#,
+            "\n",
+            r#"{"message_type":"summary","total_files":10,"files_restored":10,"total_bytes":2000,"bytes_restored":2000}"#,
+            "\n#sleep 3000\n",
+        ),
+    );
+    // The verification takes three seconds without a line, longer than the stall timeout.
+    let job = restore_job("job-restore-verify", &path, &target, true, 2);
+
+    let (result, elapsed) = run(&job, &path, "limits-restore-verify-dir").await;
+    assert_eq!(result.outcome, JobStatus::Succeeded as i32);
+    assert_eq!(error_code(&result), None);
+    assert!(
+        elapsed > Duration::from_secs(2),
+        "the verification must outlast the stall timeout, took {elapsed:?}"
+    );
+}
+
+/// FR-SC-05, ADR-0039: restic waits for a lock of another host without a status line. The agent
+/// asks restic to end the wait before the stall timeout, so the step ends with the lock code and
+/// the control plane can retry the job.
+#[tokio::test(flavor = "multi_thread")]
+async fn fr_sc_05_a_lock_wait_ends_with_the_lock_code_and_not_as_stalled() {
+    let path = directory("limits-lock-wait");
+    // The window is 3 seconds, so the test is short. restic prints its retry clock only to the
+    // standard error, which is not progress, and it stops one second before the window closes.
+    common::script_stdout(&path, "backup", "#sleep 2000\n");
+    common::script_code(&path, "backup", 11);
+    let job = backup_job("job-lock-wait", &path, 3, 0);
+
+    let (result, elapsed) = run(&job, &path, "limits-lock-wait-dir").await;
+    assert_eq!(result.outcome, JobStatus::RepositoryLocked as i32);
+    assert_eq!(error_code(&result), Some("repository_locked"));
+    assert!(
+        elapsed > Duration::from_secs(1),
+        "restic must end the wait itself, took {elapsed:?}"
+    );
+    // The wait of the command is the one of production, in minutes. It must fit in the shortest
+    // stall timeout of a profile, 5 minutes, or the watchdog stops the step before restic gives
+    // up and the control plane reads `stalled` instead of `repository_locked`.
+    let arguments = common::recorded_arguments(&path);
+    let minutes = arguments
+        .split_whitespace()
+        .find_map(|argument| argument.strip_prefix("--retry-lock="))
+        .and_then(|value| value.strip_suffix('m'))
+        .and_then(|value| value.parse::<u64>().ok())
+        .expect("the agent must pass --retry-lock to restic");
+    assert!(
+        minutes * 60 < 5 * 60,
+        "the lock wait of {minutes} minutes must be shorter than the shortest stall timeout of a profile"
     );
 }

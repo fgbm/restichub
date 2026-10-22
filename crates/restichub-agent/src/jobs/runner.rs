@@ -287,7 +287,9 @@ fn collector_for(step: &Step, kind: OutputKind, job_id: &str) -> Collector {
     let collector = Collector::new(kind, job_id, &step.step_id);
     match step.kind.as_ref() {
         Some(step::Kind::Ls(ls)) => collector.with_window(&ls.path, ls.offset, ls.limit),
-        Some(step::Kind::Restore(restore)) => collector.with_dry_run(restore.dry_run),
+        Some(step::Kind::Restore(restore)) => collector
+            .with_dry_run(restore.dry_run)
+            .with_verify(restore.verify),
         _ => collector,
     }
 }
@@ -337,8 +339,11 @@ impl StepOutput {
                 }
                 Accepted::Progress(progress) => {
                     self.watchdog.status(&progress, now);
-                    self.progress = Some(progress);
+                    self.progress = Some(progress.message);
                 }
+                // The verify phase of a restore prints nothing, so it gets the long window
+                // (ADR-0051).
+                Accepted::Verifying => self.watchdog.verify(now),
                 Accepted::Status(line) => self.watchdog.status_line(&line, now),
                 Accepted::Consumed => self.watchdog.output(now),
             },

@@ -1011,6 +1011,7 @@ export const ru: Record<MessageKey, string> = {
 	'jobDetail.limit': 'Ограничение',
 	'jobDetail.limit.noProgress': 'Остановка, если restic не продвигается',
 	'jobDetail.limit.stall': 'Без прогресса: {stall}',
+	'jobDetail.limit.stallAgentDefault': 'Без прогресса: значение по умолчанию на агенте',
 	'jobDetail.limit.max': 'Предел: {max}',
 	'jobDetail.limit.noMax': 'Без предела',
 	'jobDetail.attempt': 'Попытка',

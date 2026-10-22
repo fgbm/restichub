@@ -221,7 +221,7 @@ async fn adr_0021_the_backup_arguments_come_from_the_compiler() {
         fixture.argv(),
         vec![
             "backup --json --exclude=*.tmp --tag=nightly --limit-upload=1024 \
-             --limit-download=2048 --retry-lock=5m -- --password-command=calc -x"
+             --limit-download=2048 --retry-lock=4m -- --password-command=calc -x"
         ]
     );
 }

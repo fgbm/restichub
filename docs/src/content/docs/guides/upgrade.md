@@ -117,10 +117,22 @@ The command removes each file that the agent does not know from an open folder, 
 
 If the new control plane does not start, go back to the old release:
 
-1. Stop the stack with `docker compose down`.
-2. Check out the old release tag, and set the old image reference in `.env`.
-3. Restore the database from the backup of the step "Before you start". See [Back up the control plane](/restichub/operations/back-up-the-control-plane/#restore-on-a-new-host).
-4. Start the stack with `docker compose up -d`.
+:::danger
+The step 4 deletes the database of the new release. The jobs and the changes after the backup are lost. A host that enrolled after the backup must enroll again.
+:::
+
+1. Make sure that the backup of the step "Before you start" is available.
+2. Stop the stack with `docker compose down`.
+3. Check out the old release tag, and set the old image reference in `.env`.
+4. Remove the volume of the database:
+
+   ```sh
+   docker volume rm restichub_pgdata
+   ```
+
+   The project name is `restichub`, as the file `compose.yaml` gives it. A stack with another project name has another volume, `<project>_pgdata`. Do not run `docker compose down -v`: it also removes the volumes of Caddy.
+5. Restore the database from the backup. See [Restore on a new host](/restichub/operations/back-up-the-control-plane/#restore-on-a-new-host). The volume is empty now, so the restore runs as on a new host.
+6. Start the stack with `docker compose up -d`.
 
 Upgrade the agents only after the new control plane works.
 

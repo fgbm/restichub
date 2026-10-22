@@ -96,7 +96,7 @@ async fn fr_ag_08_a_signed_backup_job_from_the_control_plane_runs_and_is_journal
     let arguments = recorded_arguments(&repository);
     assert_eq!(
         arguments.trim(),
-        "backup --json --limit-upload=512 --retry-lock=5m -- /srv/data"
+        "backup --json --limit-upload=512 --retry-lock=4m -- /srv/data"
     );
     assert!(!arguments.contains(&canary));
     let journal = std::fs::read(&journal_path).expect("the journal file");
