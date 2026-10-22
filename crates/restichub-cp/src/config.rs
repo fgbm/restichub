@@ -81,6 +81,12 @@ pub const QUEUE_GLOBAL_LIMIT_ENV: &str = "RESTICHUB_QUEUE_GLOBAL_LIMIT";
 pub const QUEUE_LEASE_SECS_ENV: &str = "RESTICHUB_QUEUE_LEASE_SECS";
 /// The shortest lease that the configuration accepts.
 const MIN_QUEUE_LEASE: Duration = Duration::from_secs(15);
+/// The longest lease that the configuration accepts. A larger value overflows the date arithmetic
+/// of the dispatcher.
+const MAX_QUEUE_LEASE: Duration = Duration::from_secs(24 * 60 * 60);
+/// The longest session lifetime that the configuration accepts. A larger value overflows the date
+/// arithmetic of the sign-in.
+const MAX_SESSION_LIFETIME: Duration = Duration::from_secs(365 * 24 * 60 * 60);
 /// The lock results after which a job goes to the dead-letter status (FR-SC-05).
 pub const QUEUE_LOCK_RETRY_LIMIT_ENV: &str = "RESTICHUB_QUEUE_LOCK_RETRY_LIMIT";
 /// The seconds before the first lock retry. The delay doubles for each retry (FR-SC-05).
@@ -785,6 +791,20 @@ fn auth_config(
             reason: "the value must be at least 1".to_owned(),
         });
     }
+    for (name, secs) in [
+        (SESSION_IDLE_ENV, session_idle_secs),
+        (SESSION_ABSOLUTE_ENV, session_absolute_secs),
+    ] {
+        if secs > MAX_SESSION_LIFETIME.as_secs() {
+            return Err(ConfigError::Invalid {
+                name,
+                reason: format!(
+                    "the session lifetime must be at most {} seconds",
+                    MAX_SESSION_LIFETIME.as_secs()
+                ),
+            });
+        }
+    }
     Ok(AuthConfig {
         session_idle: Duration::from_secs(session_idle_secs),
         session_absolute: Duration::from_secs(session_absolute_secs),
@@ -878,12 +898,13 @@ fn queue_config(
 
 /// A short lease makes the queue send a job again before the agent can acknowledge it.
 fn lease(value: Duration) -> Result<Duration, ConfigError> {
-    if value < MIN_QUEUE_LEASE {
+    if value < MIN_QUEUE_LEASE || value > MAX_QUEUE_LEASE {
         return Err(ConfigError::Invalid {
             name: QUEUE_LEASE_SECS_ENV,
             reason: format!(
-                "the lease must be at least {} seconds",
-                MIN_QUEUE_LEASE.as_secs()
+                "the lease must be from {} to {} seconds",
+                MIN_QUEUE_LEASE.as_secs(),
+                MAX_QUEUE_LEASE.as_secs()
             ),
         });
     }

@@ -128,6 +128,8 @@ pub enum ListenerError {
     Bind(#[source] std::io::Error),
     #[error("the agent listener stopped with an error")]
     Serve(#[from] tonic::transport::Error),
+    #[error("the agent listener ended without a shutdown signal")]
+    Stopped,
     #[error("cannot build the TLS configuration of the agent listener")]
     Tls(#[from] rustls::Error),
     #[error("the client certificate verifier of the agent listener is not valid")]
@@ -588,7 +590,7 @@ pub async fn serve_listener(
         )
     });
     let (tx, rx) = tokio::sync::mpsc::channel::<io::Result<AgentConnection>>(64);
-    tokio::spawn(async move {
+    let accept = tokio::spawn(async move {
         loop {
             let (stream, peer) = match listener.accept().await {
                 Ok(accepted) => accepted,
@@ -679,6 +681,8 @@ pub async fn serve_listener(
         .serve_with_incoming_shutdown(tokio_stream::wrappers::ReceiverStream::new(rx), shutdown)
         .await;
     report.abort();
+    // The accept loop owns the socket, so a restart of the listener can bind the address again.
+    accept.abort();
     served?;
     Ok(())
 }

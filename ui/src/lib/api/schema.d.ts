@@ -10289,14 +10289,14 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The database is ready. */
+            /** @description The database is ready and no background task is failing. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description The database is not ready. */
+            /** @description The database is not ready, or a background task stopped and has not run for a stable period since its restart. */
             503: {
                 headers: {
                     [name: string]: unknown;

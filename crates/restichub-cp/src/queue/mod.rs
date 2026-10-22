@@ -733,17 +733,21 @@ async fn revert(state: &AppState, tenant: TenantId, job: JobId) {
 
 /// Starts the dispatcher loop. A wake from [`AppState::wake_dispatcher`] runs a pass at once.
 pub fn spawn(state: AppState, clock: Arc<dyn Clock>) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        let wake = state.dispatch_wake();
-        let mut ticker = tokio::time::interval(state.queue_config().interval);
-        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        loop {
-            tokio::select! {
-                _ = ticker.tick() => {}
-                _ = wake.notified() => {}
-            }
-            if let Err(error) = run_once(&state, clock.now()).await {
-                tracing::warn!(%error, "the dispatcher pass failed");
+    let supervisor = state.supervisor().clone();
+    supervisor.spawn_loop("dispatcher", move || {
+        let (state, clock) = (state.clone(), clock.clone());
+        async move {
+            let wake = state.dispatch_wake();
+            let mut ticker = tokio::time::interval(state.queue_config().interval);
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                tokio::select! {
+                    _ = ticker.tick() => {}
+                    _ = wake.notified() => {}
+                }
+                if let Err(error) = run_once(&state, clock.now()).await {
+                    tracing::warn!(%error, "the dispatcher pass failed");
+                }
             }
         }
     })
