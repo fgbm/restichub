@@ -14,10 +14,11 @@ pub const CACHE_DIR: &str = "/var/cache/restichub-agent";
 /// The capabilities restic needs on a backup source and on a local repository.
 ///
 /// Restic runs as `root`, so the capability bounding set is the only limit. It drops every other
-/// capability. Without these five, restic cannot read a file of another account (CAP_DAC_READ_SEARCH,
-/// CAP_DAC_OVERRIDE) or keep an ownership and a mode of a restored file (CAP_CHOWN, CAP_FOWNER,
-/// CAP_FSETID).
-const CAPABILITIES: &str = "CAP_DAC_READ_SEARCH CAP_DAC_OVERRIDE CAP_CHOWN CAP_FOWNER CAP_FSETID";
+/// capability. Without these six, restic cannot read a file of another account (CAP_DAC_READ_SEARCH,
+/// CAP_DAC_OVERRIDE), keep an ownership and a mode of a restored file (CAP_CHOWN, CAP_FOWNER,
+/// CAP_FSETID) or restore its file capabilities (CAP_SETFCAP).
+const CAPABILITIES: &str =
+    "CAP_DAC_READ_SEARCH CAP_DAC_OVERRIDE CAP_CHOWN CAP_FOWNER CAP_FSETID CAP_SETFCAP";
 
 fn unit_path() -> PathBuf {
     PathBuf::from("/etc/systemd/system").join(format!("{SERVICE_NAME}.service"))
@@ -401,6 +402,10 @@ mod tests {
         assert!(
             unit.contains("CAP_FSETID"),
             "setgid of a file of a foreign group"
+        );
+        assert!(
+            unit.contains("CAP_SETFCAP"),
+            "setxattr of security.capability"
         );
     }
 
