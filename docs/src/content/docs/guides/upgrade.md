@@ -198,6 +198,8 @@ A host that you registered first with 0.1.0-rc.2 or a later release on a clean c
 
 The new unit also does not set `RestrictSUIDSGID`. A restore of a file with a setuid or setgid mode failed on a host with the older unit. Such a restore wrote the file without the setuid or setgid bit. Do the restore again after you run `install-service`. Then the restore keeps the mode.
 
+The new unit also keeps the `CAP_SETFCAP` capability. A restore of a file with a file capability, for example `ping`, failed on a host with the older unit. The job ended with the status failed. Run `install-service` from the new package. Then do the restore again.
+
 ### Local repositories on Linux
 
 The new agent on Linux writes a local repository only below a repository root. The systemd unit now also sets `ProtectHome=read-only`, so `/home`, `/root` and `/run/user` are read-only for the service. An older unit left these directories writable. Thus a local repository below `/home` or `/root` worked before, and after the upgrade the agent rejects its jobs with `repository_path_denied`. `install-service` also writes the unit again and removes a change that you made by hand.
