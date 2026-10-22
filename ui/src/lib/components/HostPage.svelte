@@ -565,6 +565,7 @@
 	description={t('hosts.description')}
 	{loading}
 	error={loadError ?? (!loading && !agent ? t('table.error') : null)}
+	unsaved={parameterDirty && !parameterSaving}
 >
 	{#snippet status()}
 		{#if connection}

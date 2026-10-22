@@ -102,6 +102,13 @@ function agent(id: string, hostname: string, status = 'active') {
 	};
 }
 
+// An answer that the test holds back, so it can arrive after the answer of a newer request.
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	const promise = new Promise<T>((done) => (resolve = done));
+	return { promise, resolve };
+}
+
 const input = (selector: string) =>
 	document.querySelector<HTMLInputElement>(selector) as HTMLInputElement;
 
@@ -788,5 +795,110 @@ describe('the parameters of the profile on the plan page (FR-PF-10, FR-PF-11, AD
 
 		await user.click(screen.getByRole('button', { name: 'Set the value of pg_host on the host' }));
 		expect(mocks.goto).toHaveBeenCalledWith('/(app)/hosts/a_1#parameters');
+	});
+});
+
+describe('the plan page takes the newest answer only', () => {
+	const pgHost = (value: string) => ({
+		name: 'pg_host',
+		kind: 'text',
+		required: true,
+		default_value: null,
+		description: null,
+		needed_by: ['web-daily'],
+		value: { kind: 'text', value, secret_id: null, secret_name: null },
+		unused: false,
+		hidden: false
+	});
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		session.role = 'admin';
+		mocks.listPlans.mockResolvedValue([plan()]);
+		mocks.listAgents.mockResolvedValue([agent('a_1', 'win-fs01'), agent('a_2', 'win-fs02')]);
+		mocks.listRepositories.mockResolvedValue([
+			{
+				id: 'r_1',
+				name: 'repo-a',
+				backend: { kind: 'rest', endpoint: 'https://rest.example.net/a' },
+				maintenance_agent_id: 'a_1',
+				initialized: true
+			}
+		]);
+		mocks.listSecrets.mockResolvedValue([]);
+		mocks.listProfiles.mockResolvedValue([
+			{
+				id: 'p_1',
+				name: 'web-daily',
+				paths: { all: ['/srv'] },
+				retention: null,
+				parameters: [
+					{
+						name: 'pg_host',
+						kind: 'text',
+						required: true,
+						default_value: null,
+						description: null,
+						needed_by: ['web-daily']
+					}
+				]
+			}
+		]);
+		mocks.previewSchedule.mockResolvedValue({ time_zone: 'Europe/Berlin', runs: [] });
+	});
+
+	it('keeps the values of the newest host when the answer of the older host comes last', async () => {
+		const user = userEvent.setup();
+		const slow = deferred<{ agent_id: string; parameters: unknown[] }>();
+		mocks.getAgentParameters.mockImplementation((id: string) =>
+			id === 'a_1'
+				? slow.promise
+				: Promise.resolve({ agent_id: 'a_2', parameters: [pgHost('fs02.local')] })
+		);
+		render(PlanEditor, { planId: 'pl_1' });
+		await screen.findByRole('heading', { level: 1, name: 'nightly-web' });
+		await openHosts(user);
+		await user.click(optionOf('win-fs02'));
+		const section = screen.getByRole('button', { name: /^Profile parameters/ });
+		if (section.getAttribute('aria-expanded') !== 'true') await user.click(section);
+		expect(await screen.findByText('fs02.local')).toBeInTheDocument();
+
+		slow.resolve({ agent_id: 'a_1', parameters: [pgHost('fs01.local')] });
+		await new Promise((done) => setTimeout(done, 20));
+
+		expect(screen.queryByText('fs01.local')).not.toBeInTheDocument();
+		expect(screen.getByText('fs02.local')).toBeInTheDocument();
+	});
+
+	it('keeps the next runs of the newest cron when the answer of the older cron comes last', async () => {
+		const user = userEvent.setup();
+		const slow = deferred<{ time_zone: string; runs: string[] }>();
+		mocks.previewSchedule.mockImplementation((request: { cron: string }) =>
+			request.cron === '0 2 * * *'
+				? slow.promise
+				: Promise.resolve({ time_zone: 'Europe/Berlin', runs: ['2026-10-23T03:00:00Z'] })
+		);
+		render(PlanEditor);
+		await screen.findByRole('heading', { level: 1, name: 'New plan' });
+		const schedule = screen.getByRole('button', { name: /^Schedule/ });
+		if (schedule.getAttribute('aria-expanded') !== 'true') await user.click(schedule);
+
+		await user.type(input('#plan-cron'), '0 2 * * *');
+		await waitFor(() =>
+			expect(mocks.previewSchedule).toHaveBeenCalledWith(
+				expect.objectContaining({ cron: '0 2 * * *' })
+			)
+		);
+		await user.clear(input('#plan-cron'));
+		await user.type(input('#plan-cron'), '0 3 * * *');
+		await waitFor(() => expect(document.querySelectorAll('.runs li')).toHaveLength(1));
+
+		slow.resolve({
+			time_zone: 'Europe/Berlin',
+			runs: ['2026-10-23T02:00:00Z', '2026-10-24T02:00:00Z', '2026-10-25T02:00:00Z']
+		});
+		await new Promise((done) => setTimeout(done, 20));
+
+		expect(document.querySelectorAll('.runs li')).toHaveLength(1);
 	});
 });
