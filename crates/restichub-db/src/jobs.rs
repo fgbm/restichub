@@ -468,7 +468,7 @@ pub async fn cancel_for_plan(
 /// Moves the scheduled jobs of a plan that no delivery reached and whose fire time is in
 /// `(not_before, before)` to the terminal `expired` status (FR-SC-07).
 ///
-/// A newer job of a `latest_only` plan replaces them. A job that the queue sent once, a job that a
+/// A newer job of a `latest_only` or `skip` plan replaces them. A job that the queue sent once, a job that a
 /// lock retry delayed and an on-demand job (no fire time) keep their lifecycle. The lower bound
 /// keeps the index range short on a plan with a long history. The update is idempotent.
 pub async fn expire_superseded(

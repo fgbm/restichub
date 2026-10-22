@@ -1,15 +1,13 @@
 //! AC-SC-07: the missed run policy also applies to an offline agent (FR-SC-07).
 //!
-//! A host that is offline takes no job. With `latest_only`, a newer scheduled job replaces the older
-//! queued ones, so the host runs one backup when it returns. With `skip`, the on-time job lives for
-//! the reconnect grace only (ADR-0052).
+//! A host that is offline takes no job. With `latest_only` or `skip`, a newer scheduled job
+//! replaces the older queued ones, so the host runs one backup when it returns.
 
 #![allow(clippy::expect_used)]
 
 mod common;
 
 use restichub_cp::clock::ManualClock;
-use restichub_cp::queue::RECONNECT_GRACE;
 use restichub_cp::scheduler;
 use restichub_db::test_util::TestDatabase;
 use restichub_db::{
@@ -325,7 +323,7 @@ async fn ac_sc_07_a_replacement_never_reaches_the_plan_of_another_tenant() {
 }
 
 #[tokio::test]
-async fn ac_sc_07_skip_gives_the_on_time_job_the_reconnect_grace() {
+async fn ac_sc_07_skip_replaces_the_queued_jobs_of_an_offline_host() {
     let Some(db) = common::test_db().await else {
         return;
     };
@@ -333,33 +331,42 @@ async fn ac_sc_07_skip_gives_the_on_time_job_the_reconnect_grace() {
     let start = utc(2025, Month::January, 1, 0, 0);
     let offline = fixture(&db, "skip-offline", MissedRunPolicy::Skip, start).await;
 
-    // The control plane was down for three intervals; the host is offline.
-    let fire_time = start + Duration::hours(3);
-    pass(database, start, Duration::hours(3)).await;
+    // The host is offline for three fire times. The control plane runs on time each hour.
+    pass(database, start, Duration::ZERO).await;
+    pass(database, start, Duration::hours(1)).await;
+    pass(database, start, Duration::hours(2)).await;
 
-    let queued = plan_jobs(database, offline.tenant, offline.plan).await;
-    assert_eq!(queued.len(), 1, "the older fire times are skipped");
-    assert_eq!(queued[0].fire_time, Some(fire_time));
-    assert_eq!(queued[0].status, JobStatus::Queued);
-    assert_eq!(queued[0].expires_at, Some(fire_time + RECONNECT_GRACE));
+    let all = plan_jobs(database, offline.tenant, offline.plan).await;
+    let newest = start + Duration::hours(2);
+    let states: Vec<_> = all
+        .iter()
+        .filter_map(|job| Some((job.fire_time?, job.status)))
+        .collect();
+    assert_eq!(
+        states,
+        vec![
+            (start, JobStatus::Expired),
+            (start + Duration::hours(1), JobStatus::Expired),
+            (newest, JobStatus::Queued),
+        ]
+    );
+    // No job has a short deadline: a host that waits for a limit slot keeps its job.
+    for job in &all {
+        let fire_time = job.fire_time.expect("a scheduled job has a fire time");
+        assert_eq!(job.expires_at, Some(fire_time + Duration::hours(24)));
+    }
 
-    // A host that returns in the grace finds the job; the sweep ends it after the grace.
-    let mut tx = database
-        .begin_tenant(offline.tenant)
-        .await
-        .expect("cannot begin the transaction");
-    let early = jobs::expire_overdue(&mut tx, fire_time + RECONNECT_GRACE - Duration::SECOND)
-        .await
-        .expect("cannot sweep");
-    assert_eq!(early, 0);
-    let late = jobs::expire_overdue(&mut tx, fire_time + RECONNECT_GRACE)
-        .await
-        .expect("cannot sweep");
-    assert_eq!(late, 1);
-    tx.commit().await.expect("cannot commit the sweep");
+    // The control plane was down for longer than the interval: the missed runs are skipped and
+    // the on-time run replaces the queued job.
+    pass(database, start, Duration::hours(5)).await;
     assert_eq!(
         statuses(database, offline.tenant, offline.plan).await,
-        vec![(fire_time, JobStatus::Expired)]
+        vec![
+            (start, JobStatus::Expired),
+            (start + Duration::hours(1), JobStatus::Expired),
+            (newest, JobStatus::Expired),
+            (start + Duration::hours(5), JobStatus::Queued),
+        ]
     );
 
     // The plan advances, so the fire time does not return.
@@ -372,7 +379,11 @@ async fn ac_sc_07_skip_gives_the_on_time_job_the_reconnect_grace() {
         .expect("cannot read the plan")
         .expect("the plan exists");
     tx.commit().await.expect("cannot commit the read");
-    assert!(stored.next_run_at.is_some_and(|next| next > fire_time));
+    assert!(
+        stored
+            .next_run_at
+            .is_some_and(|next| next > start + Duration::hours(5))
+    );
 
     db.cleanup().await;
 }

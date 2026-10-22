@@ -26,7 +26,6 @@ use restichub_db::{
 use time::OffsetDateTime;
 
 use crate::clock::Clock;
-use crate::queue::RECONNECT_GRACE;
 use crate::schedule::{Schedule, ScheduleError};
 
 /// How often the scheduler looks for a due plan (ADR-0010).
@@ -137,12 +136,6 @@ async fn process_plan(
         MAX_MISSED_RUNS,
         SCHEDULED_JOB_LIFETIME,
     )?;
-    // A `skip` job is for the on-time run only. A host that reconnects in the grace of ADR-0052
-    // runs it; the expiry sweep ends it otherwise (FR-SC-07).
-    let lifetime = match plan.missed_run_policy {
-        MissedRunPolicy::Skip => RECONNECT_GRACE,
-        MissedRunPolicy::RunAll | MissedRunPolicy::LatestOnly => SCHEDULED_JOB_LIFETIME,
-    };
     let mut earliest_created: Option<OffsetDateTime> = None;
     for fire_time in select_fires(plan.missed_run_policy, &missed, now) {
         let job = jobs::NewJob {
@@ -152,7 +145,7 @@ async fn process_plan(
             repository_id: Some(plan.repository_id),
             plan_id: Some(plan.id),
             fire_time: Some(fire_time),
-            expires_at: Some(fire_time + lifetime),
+            expires_at: Some(fire_time + SCHEDULED_JOB_LIFETIME),
             location_fingerprint: None,
             created_by: None,
         };
@@ -164,7 +157,7 @@ async fn process_plan(
     // The jobs that an offline host did not take yet are older than the new ones. The latest run
     // replaces them, so the host does not run them back to back when it returns (FR-SC-07). A job
     // older than its lifetime expires in the sweep, so the search stops there.
-    if plan.missed_run_policy == MissedRunPolicy::LatestOnly
+    if plan.missed_run_policy != MissedRunPolicy::RunAll
         && let Some(earliest) = earliest_created
     {
         jobs::expire_superseded(tx, plan.id, earliest, now - SCHEDULED_JOB_LIFETIME, now).await?;
