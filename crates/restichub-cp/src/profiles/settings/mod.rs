@@ -85,7 +85,7 @@ pub struct BackupOptions {
     /// Download limit in kibibytes each second. Zero means no limit (FR-AG-15).
     #[serde(default)]
     pub limit_download_kib: u64,
-    /// Process and I/O priority of the restic steps. `low` runs them at a lower priority
+    /// `low` runs the backup and its maintenance steps at a lower process and I/O priority
     /// (FR-AG-15). A missing value gives `normal`.
     #[serde(default)]
     pub priority: ProfilePriority,

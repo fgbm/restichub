@@ -60,7 +60,7 @@ A `backup` step can set an upload limit and a download limit in kibibytes each s
 
 A `backup`, `check`, `forget` or `prune` step can set the low priority. A profile sets it with the option "Low priority" in the section "Backup options". The option applies to the `backup` step of the profile and to its `forget`, `prune` and `check` steps. Without the option, the steps keep the priority of the operating system. A restore does not set the priority.
 
-- On Linux, the agent starts restic with a nice value 10 above its own nice value (19 at most) and the best-effort I/O class at level 7.
+- On Linux, the agent starts restic with a nice value 10 above its own nice value. The nice value is 19 at most. The I/O class is best-effort at level 7.
 - On Windows, the agent starts restic in the `BELOW_NORMAL_PRIORITY_CLASS` priority class.
 
 ## Related

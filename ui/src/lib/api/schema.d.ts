@@ -1914,7 +1914,7 @@ export interface components {
             max_duration_minutes?: number | null;
             one_file_system?: boolean;
             /**
-             * @description Process and I/O priority of the restic steps. `low` runs them at a lower priority
+             * @description `low` runs the backup and its maintenance steps at a lower process and I/O priority
              *     (FR-AG-15). A missing value gives `normal`.
              */
             priority?: components["schemas"]["ProfilePriority"];
