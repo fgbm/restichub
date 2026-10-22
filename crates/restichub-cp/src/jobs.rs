@@ -786,8 +786,8 @@ pub async fn handle_job_result(
         tracing::warn!(job = %job_id, %error, "the job result could not update the job");
         return WriteOutcome::Transient;
     }
-    // A job without a fingerprint makes no claim about the location: a plan backup and an unlock
-    // job carry none (FR-SC-04).
+    // A job without a fingerprint makes no claim about the location: only an init and a test_access
+    // carry one (ADR-0021, FR-RP-08).
     if matches!(
         outcome.result_code,
         JobResultCode::Succeeded | JobResultCode::SucceededWithWarnings
