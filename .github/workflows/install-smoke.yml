@@ -179,6 +179,8 @@ jobs:
           }
           sudo install -o root -g root -m 4755 /bin/true "$SMOKE_DIR/source/suid"
           sudo install -o root -g tty -m 2755 /bin/true "$SMOKE_DIR/source/sgid"
+          sudo install -o root -g root -m 0755 /bin/true "$SMOKE_DIR/source/fcap"
+          sudo setcap cap_net_raw=ep "$SMOKE_DIR/source/fcap"
           sandboxed init
           sandboxed backup "$SMOKE_DIR/source"
           sandboxed backup "$SMOKE_DIR/source"
@@ -188,6 +190,7 @@ jobs:
           sudo test -f "$target$SMOKE_DIR/source/file.txt"
           test "$(sudo stat -c '%a %U:%G' "$target$SMOKE_DIR/source/suid")" = "4755 root:root"
           test "$(sudo stat -c '%a %U:%G' "$target$SMOKE_DIR/source/sgid")" = "2755 root:tty"
+          sudo getcap "$target$SMOKE_DIR/source/fcap" | grep -q 'cap_net_raw[=+]ep'
           sandboxed forget --keep-last 1
           sandboxed prune
           sandboxed check
