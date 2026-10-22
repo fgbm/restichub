@@ -786,12 +786,14 @@ pub async fn handle_job_result(
         tracing::warn!(job = %job_id, %error, "the job result could not update the job");
         return WriteOutcome::Transient;
     }
+    // A job without a fingerprint makes no claim about the location: a plan backup and an unlock
+    // job carry none (FR-SC-04).
     if matches!(
         outcome.result_code,
         JobResultCode::Succeeded | JobResultCode::SucceededWithWarnings
     ) && let Some(repository_id) = job.repository_id
-        && let Err(error) =
-            apply_initialized(&mut tx, repository_id, job.location_fingerprint.as_deref()).await
+        && let Some(fingerprint) = job.location_fingerprint.as_deref()
+        && let Err(error) = apply_initialized(&mut tx, repository_id, fingerprint).await
     {
         tracing::warn!(job = %job_id, %error, "the initialized flag could not be stored");
         return WriteOutcome::Transient;
@@ -813,12 +815,12 @@ pub async fn handle_job_result(
 async fn apply_initialized(
     tx: &mut restichub_db::TenantTx<'_>,
     repository_id: RepositoryId,
-    fingerprint: Option<&str>,
+    fingerprint: &str,
 ) -> Result<(), restichub_db::DbError> {
     let Some(repository) = repo::get(tx, repository_id).await? else {
         return Ok(());
     };
-    if Some(repository_fingerprint(&repository).as_str()) != fingerprint {
+    if repository_fingerprint(&repository) != fingerprint {
         // The location changed between the job and its result: the flag belongs to another
         // location, so the control plane does not set it.
         tracing::warn!(
