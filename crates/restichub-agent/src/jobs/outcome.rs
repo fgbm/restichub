@@ -122,3 +122,12 @@ pub(super) fn interrupted_error() -> ErrorDetail {
         params: Vec::new(),
     }
 }
+
+/// The error of a job whose task ended without a result, for example after a panic. The agent
+/// stopped restic, so the job is over (FR-AG-09).
+pub(super) fn task_failed_error() -> ErrorDetail {
+    ErrorDetail {
+        code: "agent_internal_error".to_owned(),
+        params: Vec::new(),
+    }
+}

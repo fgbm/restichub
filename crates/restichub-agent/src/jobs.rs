@@ -41,8 +41,9 @@ use anyhow::{Context as _, Result};
 use prost_types::Timestamp;
 use restichub_compiler::ValidatedJob;
 use restichub_proto::agent::v1::{
-    AgentMessage, JobAck, JobRejected, JobResult, JobStatus, RejectReason, ScriptInterpreter,
-    ServerScriptsState, SignedJob, Step, StepResult, StepStatus, agent_message, step, step_result,
+    AgentMessage, ErrorDetail, JobAck, JobRejected, JobResult, JobStatus, RejectReason,
+    ScriptInterpreter, ServerScriptsState, SignedJob, Step, StepResult, StepStatus, agent_message,
+    step, step_result,
 };
 use restichub_proto::signing::{
     Admission, Expected, JobJournal as _, JournalState, KeyRing, Rejection, admit, verify_job,
@@ -67,7 +68,7 @@ mod spooling;
 mod watchdog;
 
 use log::JobLog;
-use outcome::{Progress, interrupted_error, job_error, job_outcome};
+use outcome::{Progress, interrupted_error, job_error, job_outcome, task_failed_error};
 use phases::{PhaseMode, Phased, ScriptFailure, Sink};
 use runner::{CancelHandle, StepError, StepOutcome};
 use spooling::LogMode;
@@ -155,6 +156,9 @@ pub struct Jobs {
     /// Wakes the drain task when a chunk waits in the spool.
     log_wake: Arc<tokio::sync::Notify>,
     log_drain: Arc<Mutex<Option<tokio::task::AbortHandle>>>,
+    /// Makes the job task panic right after restic starts, to cover the loss of a job task.
+    #[cfg(feature = "test-util")]
+    panic_after_spawn: bool,
 }
 
 impl Jobs {
@@ -202,7 +206,17 @@ impl Jobs {
             log_mode: Arc::new(AtomicU8::new(LogMode::Direct as u8)),
             log_wake: Arc::new(tokio::sync::Notify::new()),
             log_drain: Arc::new(Mutex::new(None)),
+            #[cfg(feature = "test-util")]
+            panic_after_spawn: false,
         })
+    }
+
+    /// Makes the job task panic while restic runs (FR-AG-09, FR-AG-10).
+    #[cfg(feature = "test-util")]
+    #[must_use]
+    pub fn with_panic_after_spawn(mut self) -> Self {
+        self.panic_after_spawn = true;
+        self
     }
 
     /// Replaces the log spool, for a test that needs a small cap (FR-LG-07).
@@ -404,7 +418,7 @@ impl Jobs {
                 if self.send(ack(job_id.clone())).await {
                     let jobs = self.clone();
                     tokio::spawn(async move {
-                        jobs.execute(validated, cancel).await;
+                        jobs.run_supervised(validated, cancel).await;
                     });
                 } else {
                     // The stream dropped after the admission; the control plane delivers the job
@@ -431,7 +445,8 @@ impl Jobs {
                 JournalState::Completed(result) => return Some(Known::Stored(result)),
                 _ if running.contains_key(&job.job_id) => return Some(Known::Running),
                 JournalState::InProgress if runs_programs(job) => {
-                    let result = interrupted_result(job);
+                    let steps_total = u32::try_from(job.steps.len()).unwrap_or(u32::MAX);
+                    let result = failed_result(&job.job_id, steps_total, interrupted_error());
                     journal.record_completed(&job.job_id, result.clone());
                     (result, journal.snapshot())
                 }
@@ -969,6 +984,47 @@ impl Jobs {
             steps: step_results.iter().map(compact).collect(),
             log_tail: log.tail(),
         };
+        self.finish(result).await;
+    }
+
+    /// Runs the job in its own task and ends the job when that task dies without a result.
+    ///
+    /// A panic in a dependency unwinds the task of the job. Without this wait the job would stay in
+    /// `running` for good: it keeps a slot, and the agent lists it in each hello, so the control
+    /// plane never fails it (ADR-0039, ADR-0043).
+    async fn run_supervised(&self, validated: ValidatedJob, cancel: CancelHandle) {
+        let job_id = validated.job().job_id.clone();
+        let steps_total = u32::try_from(validated.job().steps.len()).unwrap_or(u32::MAX);
+        let jobs = self.clone();
+        let task_cancel = cancel.clone();
+        let task = tokio::spawn(async move { jobs.execute(validated, task_cancel).await });
+        let Err(error) = task.await else {
+            return;
+        };
+        let cause = match error.try_into_panic() {
+            Ok(payload) => panic_text(payload.as_ref()),
+            Err(error) => error.to_string(),
+        };
+        tracing::error!(%job_id, %cause, "the task of a job ended without a result");
+        // The restic child belongs to the dead task, and nothing else would stop it (FR-AG-10).
+        runner::kill_tree(&cancel.child);
+        *lock(&cancel.child) = None;
+        self.finish_log(&job_id);
+        if matches!(
+            lock(&self.journal).lookup(&job_id),
+            JournalState::Completed(_)
+        ) {
+            // The task died after it stored the result, so the stored result stands (ADR-0020).
+            self.release(&job_id);
+            return;
+        }
+        self.finish(failed_result(&job_id, steps_total, task_failed_error()))
+            .await;
+    }
+
+    /// Stores the final result, frees the slot of the job and sends the result (ADR-0020).
+    async fn finish(&self, result: JobResult) {
+        let job_id = result.job_id.clone();
         // The result is durable before the job leaves `running`, so a redelivery in between gets the
         // acknowledgement and a later one gets the stored result, never a second run (ADR-0020).
         let snapshot = {
@@ -1090,19 +1146,28 @@ fn runs_programs(job: &restichub_proto::agent::v1::Job) -> bool {
         .any(|step| matches!(step.kind, Some(step::Kind::Script(_))))
 }
 
-/// A restart cut the job short, so no step result exists for it (ADR-0037).
-fn interrupted_result(job: &restichub_proto::agent::v1::Job) -> JobResult {
+/// The final result of a job that failed without a step result.
+fn failed_result(job_id: &str, steps_total: u32, error: ErrorDetail) -> JobResult {
     JobResult {
-        job_id: job.job_id.clone(),
+        job_id: job_id.to_owned(),
         status: StepStatus::Failed as i32,
-        steps_total: u32::try_from(job.steps.len()).unwrap_or(u32::MAX),
+        steps_total,
         steps_succeeded: 0,
         steps_failed: 0,
         outcome: JobStatus::Failed as i32,
-        error: Some(interrupted_error()),
+        error: Some(error),
         steps: Vec::new(),
         log_tail: Vec::new(),
     }
+}
+
+/// The text of a panic payload; a payload of another type has none.
+fn panic_text(payload: &(dyn std::any::Any + Send)) -> String {
+    payload
+        .downcast_ref::<&str>()
+        .map(|text| (*text).to_owned())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "a panic without a text".to_owned())
 }
 
 /// True for a job that only lists snapshots or the files of one (ADR-0035).

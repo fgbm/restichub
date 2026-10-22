@@ -184,7 +184,12 @@ impl Jobs {
         {
             tracing::warn!(%error, "cannot write the log spool");
         }
-        self.log_spool.finish(log.job_id());
+        self.finish_log(log.job_id());
+    }
+
+    /// Tells the spool that no more lines follow for the job.
+    pub(super) fn finish_log(&self, job_id: &str) {
+        self.log_spool.finish(job_id);
         self.log_wake.notify_one();
     }
 

@@ -460,6 +460,8 @@ impl Jobs {
         };
 
         *lock(&cancel.child) = Some(child);
+        #[cfg(feature = "test-util")]
+        assert!(!self.panic_after_spawn, "the job task panics on purpose");
         let started = tokio::time::Instant::now();
         let step_deadline = limits.max.map(|max| started + max);
         let mut limit_stop: Option<LimitStop> = None;
