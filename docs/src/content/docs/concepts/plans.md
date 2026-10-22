@@ -15,7 +15,7 @@ A plan binds one profile to one agent and one repository with a schedule. The co
 | Host | The agent that runs the plan. |
 | Cron expression | Five fields: minute, hour, day of month, month, day of week. |
 | Time zone | An IANA name, for example `Europe/Berlin`. |
-| Missed runs | The rule for a fire time that the control plane missed. |
+| Missed runs | The rule for a fire time that the control plane missed, and for the jobs that wait for an offline host. |
 | Run on schedule | The switch in the header of the section **Schedule**. When it is off, the scheduler creates no job for the plan, and the plan shows the pill **Disabled** next to its name. **Run now** still starts a job, and the alerts about a missed backup and the recovery point stay silent. |
 
 The profile, the repository and the agent belong to the same tenant. The control plane compiles the stored profile for the operating system of the agent before it writes the plan. A profile without a path for that operating system is refused. The plans of a repository block the delete of the repository.
@@ -40,13 +40,18 @@ The control plane applies the daylight saving rules of the accepted decision:
 
 ## Missed runs
 
-A fire time is missed when the control plane does not run a job for it, for example after a downtime. A fire time within a short grace window of the pass is on time, and it always runs. The missed run policy applies to the older fire times only. The policy of the plan decides the result:
+A fire time is missed when the control plane does not run a job for it, for example after a downtime. A fire time within a short grace window of the pass is on time. The control plane creates a job for it under every policy. The missed run policy applies to the older fire times only. The policy of the plan decides the result:
 
 | Policy | Result |
 |---|---|
 | Run every missed run | One job for each older missed fire time. One pass keeps the latest 100 fire times. |
 | Run the latest missed run | One job, for the latest older missed fire time. |
 | Skip the missed runs | No job for an older missed fire time. |
+
+The policy also decides what happens to the jobs that wait for an offline host:
+
+- With the policy "Run the latest missed run" or "Skip the missed runs", a new scheduled job replaces the older scheduled jobs of the plan. The host did not take these jobs. The replaced jobs get the `expired` status. A host that was offline runs one backup when it returns, for the newest fire time. A job that the queue already sent does not change. A job that you started with Run now does not change.
+- With the policy "Run every missed run", the host runs each queued job.
 
 Every scheduled job has an expiry time, 24 hours after its fire time. The control plane creates no job for a fire time that the job would outlive at once, because such a job expires at once. The control plane moves an overdue job to the `expired` status.
 

@@ -465,6 +465,34 @@ pub async fn cancel_for_plan(
     Ok(result.rows_affected())
 }
 
+/// Moves the scheduled jobs of a plan that no delivery reached and whose fire time is in
+/// `(not_before, before)` to the terminal `expired` status (FR-SC-07).
+///
+/// A newer job of a `latest_only` or `skip` plan replaces them. A job that the queue sent once, a job that a
+/// lock retry delayed and an on-demand job (no fire time) keep their lifecycle. The lower bound
+/// keeps the index range short on a plan with a long history. The update is idempotent.
+pub async fn expire_superseded(
+    tx: &mut TenantTx<'_>,
+    plan_id: PlanId,
+    before: OffsetDateTime,
+    not_before: OffsetDateTime,
+    now: OffsetDateTime,
+) -> Result<u64, DbError> {
+    let result = sqlx::query(
+        "UPDATE jobs SET status = 'expired', finished_at = $4, updated_at = now() \
+         WHERE plan_id = $1 AND kind = 'backup' AND status = 'queued' \
+           AND fire_time > $3 AND fire_time < $2 AND attempt = 0 AND deliveries = 0",
+    )
+    .bind(plan_id)
+    .bind(before)
+    .bind(not_before)
+    .bind(now)
+    .execute(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(result.rows_affected())
+}
+
 /// Ends one overdue job. `false` when the job is not overdue in the sense of [`expire_overdue`].
 pub async fn mark_expired(
     tx: &mut TenantTx<'_>,

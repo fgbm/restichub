@@ -575,7 +575,7 @@ The sign-in screen asks for the username and the password only. The account is i
   1. Stop the agent service. Keep the agent offline for 3 plan intervals.
   2. Start the agent again.
   3. Open the "Jobs" screen.
-- **Expected result:** the missed-run policy of the plan applies. The policy `run_all` ("Run every missed run") creates 3 jobs. The policy `latest_only` ("Run the latest missed run") creates 1 job. The policy `skip` ("Skip the missed runs") creates 0 jobs. A fire time within the grace window of the pass is on time. That run always runs, and it is in addition to the count. A job that the host does not take before its expiry gets the status "Expired".
+- **Expected result:** the missed-run policy of the plan applies. The policy `run_all` ("Run every missed run") leaves 3 jobs in the queue. The policies `latest_only` ("Run the latest missed run") and `skip` ("Skip the missed runs") leave 1 job in the queue. Each new job replaces the older queued jobs, and the older jobs get the status "Expired". The host runs one backup when it returns. After a downtime of the control plane, the policy `latest_only` creates one job for the latest older missed fire time. The policy `skip` creates none for the older missed fire times. A fire time within the grace window of the pass is on time, and its job is always created. A job gets the status "Expired" when the host does not take it. Its expiry time is 24 hours after the fire time.
 - **Requirements:** FR-SC-07.
 - **Acceptance criteria:** AC-SC-07.
 - **Status:** Ready on the stage.

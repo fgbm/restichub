@@ -136,6 +136,7 @@ async fn process_plan(
         MAX_MISSED_RUNS,
         SCHEDULED_JOB_LIFETIME,
     )?;
+    let mut earliest_created: Option<OffsetDateTime> = None;
     for fire_time in select_fires(plan.missed_run_policy, &missed, now) {
         let job = jobs::NewJob {
             id: JobId::new(),
@@ -148,7 +149,18 @@ async fn process_plan(
             location_fingerprint: None,
             created_by: None,
         };
-        jobs::create_scheduled(tx, &job).await?;
+        if jobs::create_scheduled(tx, &job).await?.is_some() {
+            // `select_fires` lists the on-time fire time first, so the first one is not the oldest.
+            earliest_created = Some(earliest_created.map_or(fire_time, |e| e.min(fire_time)));
+        }
+    }
+    // The jobs that an offline host did not take yet are older than the new ones. The latest run
+    // replaces them, so the host does not run them back to back when it returns (FR-SC-07). A job
+    // older than its lifetime expires in the sweep, so the search stops there.
+    if plan.missed_run_policy != MissedRunPolicy::RunAll
+        && let Some(earliest) = earliest_created
+    {
+        jobs::expire_superseded(tx, plan.id, earliest, now - SCHEDULED_JOB_LIFETIME, now).await?;
     }
 
     let last_fire_time = missed.last().copied().unwrap_or(plan.next_run_at);
@@ -182,7 +194,7 @@ impl PlanError {
 ///
 /// A fire time within [`ON_TIME_GRACE`] of `now` is on time and always runs. The missed run policy
 /// applies only to the older fire times: `run_all` keeps them all, `latest_only` keeps the latest,
-/// and `skip` keeps none.
+/// and `skip` keeps none. The on-time fire times come first.
 fn select_fires(
     policy: MissedRunPolicy,
     missed: &[OffsetDateTime],
