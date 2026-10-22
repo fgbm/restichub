@@ -65,10 +65,11 @@ mod outcome;
 mod phases;
 mod runner;
 mod spooling;
+mod supervisor;
 mod watchdog;
 
 use log::JobLog;
-use outcome::{Progress, interrupted_error, job_error, job_outcome, task_failed_error};
+use outcome::{Progress, interrupted_error, job_error, job_outcome};
 use phases::{PhaseMode, Phased, ScriptFailure, Sink};
 use runner::{CancelHandle, StepError, StepOutcome};
 use spooling::LogMode;
@@ -156,9 +157,16 @@ pub struct Jobs {
     /// Wakes the drain task when a chunk waits in the spool.
     log_wake: Arc<tokio::sync::Notify>,
     log_drain: Arc<Mutex<Option<tokio::task::AbortHandle>>>,
-    /// Makes the job task panic right after restic starts, to cover the loss of a job task.
+    /// Makes the job task panic right after the child of a step starts, to cover the loss of a job
+    /// task.
     #[cfg(feature = "test-util")]
     panic_after_spawn: bool,
+    /// Makes the job task panic once, right after it stores the result.
+    #[cfg(feature = "test-util")]
+    panic_after_result: Arc<std::sync::atomic::AtomicBool>,
+    /// Cancels the job task right after it starts, the way the shutdown of the runtime does.
+    #[cfg(feature = "test-util")]
+    abort_job_task: bool,
 }
 
 impl Jobs {
@@ -208,14 +216,35 @@ impl Jobs {
             log_drain: Arc::new(Mutex::new(None)),
             #[cfg(feature = "test-util")]
             panic_after_spawn: false,
+            #[cfg(feature = "test-util")]
+            panic_after_result: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            #[cfg(feature = "test-util")]
+            abort_job_task: false,
         })
     }
 
-    /// Makes the job task panic while restic runs (FR-AG-09, FR-AG-10).
+    /// Makes the job task panic while the child of a step runs (FR-AG-09, FR-AG-10).
     #[cfg(feature = "test-util")]
     #[must_use]
     pub fn with_panic_after_spawn(mut self) -> Self {
         self.panic_after_spawn = true;
+        self
+    }
+
+    /// Cancels the job task right after it starts (FR-AG-09, ADR-0020).
+    #[cfg(feature = "test-util")]
+    #[must_use]
+    pub fn with_abort_job_task(mut self) -> Self {
+        self.abort_job_task = true;
+        self
+    }
+
+    /// Makes the job task panic once, after it stored the result (FR-AG-09, ADR-0020).
+    #[cfg(feature = "test-util")]
+    #[must_use]
+    pub fn with_panic_after_result(self) -> Self {
+        self.panic_after_result
+            .store(true, std::sync::atomic::Ordering::SeqCst);
         self
     }
 
@@ -987,41 +1016,6 @@ impl Jobs {
         self.finish(result).await;
     }
 
-    /// Runs the job in its own task and ends the job when that task dies without a result.
-    ///
-    /// A panic in a dependency unwinds the task of the job. Without this wait the job would stay in
-    /// `running` for good: it keeps a slot, and the agent lists it in each hello, so the control
-    /// plane never fails it (ADR-0039, ADR-0043).
-    async fn run_supervised(&self, validated: ValidatedJob, cancel: CancelHandle) {
-        let job_id = validated.job().job_id.clone();
-        let steps_total = u32::try_from(validated.job().steps.len()).unwrap_or(u32::MAX);
-        let jobs = self.clone();
-        let task_cancel = cancel.clone();
-        let task = tokio::spawn(async move { jobs.execute(validated, task_cancel).await });
-        let Err(error) = task.await else {
-            return;
-        };
-        let cause = match error.try_into_panic() {
-            Ok(payload) => panic_text(payload.as_ref()),
-            Err(error) => error.to_string(),
-        };
-        tracing::error!(%job_id, %cause, "the task of a job ended without a result");
-        // The restic child belongs to the dead task, and nothing else would stop it (FR-AG-10).
-        runner::kill_tree(&cancel.child);
-        *lock(&cancel.child) = None;
-        self.finish_log(&job_id);
-        if matches!(
-            lock(&self.journal).lookup(&job_id),
-            JournalState::Completed(_)
-        ) {
-            // The task died after it stored the result, so the stored result stands (ADR-0020).
-            self.release(&job_id);
-            return;
-        }
-        self.finish(failed_result(&job_id, steps_total, task_failed_error()))
-            .await;
-    }
-
     /// Stores the final result, frees the slot of the job and sends the result (ADR-0020).
     async fn finish(&self, result: JobResult) {
         let job_id = result.job_id.clone();
@@ -1041,6 +1035,13 @@ impl Jobs {
             journal.prune(now);
             journal.snapshot()
         };
+        #[cfg(feature = "test-util")]
+        assert!(
+            !self
+                .panic_after_result
+                .swap(false, std::sync::atomic::Ordering::SeqCst),
+            "the job task panics on purpose"
+        );
         if let Err(error) = self.write_journal(snapshot).await {
             tracing::warn!(%error, "cannot write the job journal");
         }
@@ -1082,9 +1083,21 @@ impl Jobs {
         started_at: Timestamp,
         finished_at: Timestamp,
     ) -> StepResult {
+        self.send_step_result_of(job_id, &step.step_id, outcome, started_at, finished_at)
+            .await
+    }
+
+    async fn send_step_result_of(
+        &self,
+        job_id: &str,
+        step_id: &str,
+        outcome: &StepOutcome,
+        started_at: Timestamp,
+        finished_at: Timestamp,
+    ) -> StepResult {
         let result = StepResult {
             job_id: job_id.to_owned(),
-            step_id: step.step_id.clone(),
+            step_id: step_id.to_owned(),
             status: outcome.status as i32,
             exit_code: outcome.exit_code,
             started_at: Some(started_at),
@@ -1159,15 +1172,6 @@ fn failed_result(job_id: &str, steps_total: u32, error: ErrorDetail) -> JobResul
         steps: Vec::new(),
         log_tail: Vec::new(),
     }
-}
-
-/// The text of a panic payload; a payload of another type has none.
-fn panic_text(payload: &(dyn std::any::Any + Send)) -> String {
-    payload
-        .downcast_ref::<&str>()
-        .map(|text| (*text).to_owned())
-        .or_else(|| payload.downcast_ref::<String>().cloned())
-        .unwrap_or_else(|| "a panic without a text".to_owned())
 }
 
 /// True for a job that only lists snapshots or the files of one (ADR-0035).

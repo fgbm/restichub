@@ -8,8 +8,8 @@ use std::time::Duration;
 
 use ed25519_dalek::SigningKey;
 use restichub_proto::agent::v1::{
-    AgentMessage, Job, JobResult, JobStatus, LocalCredentials, RepositoryAccess, Step,
-    TestAccessStep, agent_message, repository_access::BackendCredentials, step,
+    AgentMessage, Job, JobResult, JobStatus, LocalCredentials, RepositoryAccess, Step, StepResult,
+    StepStatus, TestAccessStep, agent_message, repository_access::BackendCredentials, step,
 };
 use restichub_proto::signing::{KeyRing, sign_job};
 use tokio::sync::mpsc;
@@ -62,15 +62,43 @@ fn test_access_job(job_id: &str, location: &std::path::Path) -> Job {
 }
 
 async fn wait_result(rx: &mut mpsc::Receiver<AgentMessage>) -> JobResult {
+    wait_result_with_steps(rx).await.1
+}
+
+/// The step results that came before the job result, and the job result.
+async fn wait_result_with_steps(
+    rx: &mut mpsc::Receiver<AgentMessage>,
+) -> (Vec<StepResult>, JobResult) {
+    let mut steps = Vec::new();
     loop {
         let message = tokio::time::timeout(Duration::from_secs(15), rx.recv())
             .await
             .expect("the agent must answer")
             .expect("the channel must stay open");
-        if let Some(agent_message::Payload::JobResult(result)) = message.payload {
-            return result;
+        match message.payload {
+            Some(agent_message::Payload::StepResult(step)) => steps.push(step),
+            Some(agent_message::Payload::JobResult(result)) => return (steps, result),
+            _ => {}
         }
     }
+}
+
+/// Reads /proc: a child that exited and that nobody waited for stays in the state `Z`.
+#[cfg(target_os = "linux")]
+fn zombie_children() -> Vec<u32> {
+    let me = std::process::id();
+    std::fs::read_dir("/proc")
+        .expect("cannot read /proc")
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            let pid: u32 = entry.file_name().to_str()?.parse().ok()?;
+            let stat = std::fs::read_to_string(entry.path().join("stat")).ok()?;
+            let mut fields = stat.rsplit_once(')')?.1.split_whitespace();
+            let state = fields.next()?;
+            let parent: u32 = fields.next()?.parse().ok()?;
+            (state == "Z" && parent == me).then_some(pid)
+        })
+        .collect()
 }
 
 /// FR-AG-09: a job whose task panics while restic runs ends as failed with a result for the control
@@ -98,7 +126,7 @@ async fn fr_ag_09_a_panic_in_the_job_task_fails_the_job_and_frees_the_slot() {
     )
     .await;
 
-    let result = wait_result(&mut rx).await;
+    let (steps, result) = wait_result_with_steps(&mut rx).await;
     assert_eq!(result.job_id, "job-panic");
     assert_eq!(result.outcome, JobStatus::Failed as i32);
     assert_eq!(
@@ -116,11 +144,101 @@ async fn fr_ag_09_a_panic_in_the_job_task_fails_the_job_and_frees_the_slot() {
         "the hello lists the stored result once, so the control plane stops the job"
     );
 
+    // FR-AG-10, AC-AG-07: the forced kill of restic may leave its lock, and the control plane
+    // learns it from the step result that comes before the job result.
+    assert_eq!(steps.len(), 1);
+    assert_eq!(steps[0].step_id, "test-access-repo-1");
+    assert!(
+        steps[0].possible_stale_lock,
+        "a restic killed by the agent may have left a lock"
+    );
+    assert_eq!(steps[0].status, StepStatus::Failed as i32);
+
     tokio::time::sleep(restic_runs_for + Duration::from_secs(1)).await;
     assert!(
         !std::path::Path::new(&format!("{}.restichub-finished", path.display())).exists(),
         "restic must not outlive the task of its job"
     );
+    #[cfg(target_os = "linux")]
+    assert!(
+        zombie_children().is_empty(),
+        "the killed restic must be reaped"
+    );
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&path);
+}
+
+/// FR-AG-09, ADR-0020: a task that dies after it stored the result still delivers the stored
+/// result, and the result is on the disk.
+#[tokio::test(flavor = "multi_thread")]
+async fn fr_ag_09_a_task_that_dies_after_it_stored_the_result_still_delivers_it() {
+    let dir = common::temp_config_dir("task-loss-stored");
+    std::fs::create_dir_all(&dir).expect("cannot create the configuration directory");
+    let path = common::temp_config_dir("task-loss-stored-repo");
+    std::fs::create_dir_all(&path).expect("cannot create the repository path");
+    common::script_exit_codes(&path, 0, 0);
+
+    let jobs = common::program_jobs(&dir).with_panic_after_result();
+    let (tx, mut rx) = mpsc::channel(32);
+    jobs.attach(&tx);
+    jobs.greeted(false);
+    let job = test_access_job("job-stored", &path);
+    jobs.handle(
+        sign_job(&job, KEY_ID, &signing_key()),
+        &ring(),
+        AGENT,
+        TENANT,
+    )
+    .await;
+
+    let result = wait_result(&mut rx).await;
+    assert_eq!(result.job_id, "job-stored");
+    assert_eq!(
+        result.outcome,
+        JobStatus::Succeeded as i32,
+        "the stored result stands, it is no internal error"
+    );
+    assert_eq!(jobs.stop_running(Duration::from_secs(1)).await, 0);
+    assert_eq!(
+        common::program_jobs(&dir).held_job_ids(),
+        vec!["job-stored".to_owned()],
+        "the result must be on the disk"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&path);
+}
+
+/// FR-AG-09, FR-AG-10: a panic in a script step fails the job and kills the script, and it marks
+/// no stale lock, because a script holds none.
+#[cfg(target_os = "linux")]
+#[tokio::test(flavor = "multi_thread")]
+async fn fr_ag_09_a_panic_in_a_script_step_fails_the_job_without_a_stale_lock() {
+    use common::scripts::{Host, simple};
+    use restichub_proto::agent::v1::HookPhase;
+
+    let host = Host::new("task-loss-script");
+    host.enable();
+    let started = host.marks().join("started");
+    let body = format!("touch '{}'\nsleep 300\n", started.display());
+    let job = host.job(
+        "job-script",
+        vec![simple("script-0", HookPhase::Before, &body, vec![])],
+    );
+    let jobs = host.jobs().with_panic_after_spawn();
+    let collected = common::run(&jobs, &job).await;
+
+    let result = collected.result();
+    assert_eq!(result.outcome, JobStatus::Failed as i32);
+    assert_eq!(
+        result.error.as_ref().map(|error| error.code.as_str()),
+        Some("agent_internal_error")
+    );
+    assert_eq!(collected.steps.len(), 1);
+    assert_eq!(collected.steps[0].step_id, "script-0");
+    assert!(!collected.steps[0].possible_stale_lock);
+    assert_eq!(jobs.stop_running(Duration::from_secs(1)).await, 0);
+    assert!(
+        zombie_children().is_empty(),
+        "the killed script must be reaped"
+    );
 }

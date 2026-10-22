@@ -6,10 +6,12 @@
 //! the step runs. A cancel, a stall or the maximum duration stops the step in two stages: the
 //! graceful signal, then the forced kill of the process tree after the grace period (ADR-0039).
 
+use std::process::{ChildStderr, ChildStdout};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use prost_types::Timestamp;
 use restichub_compiler::ValidatedJob;
 use restichub_compiler::arg::build_command;
 use restichub_proto::agent::v1::{
@@ -54,7 +56,7 @@ pub(super) const LINES_PER_TURN: usize = 256;
 /// The parameter of `step_not_started` that holds the scrubbed cause. The control plane stores a
 /// parameter value of up to this many characters.
 pub(super) const REASON_PARAM: &str = "reason";
-const MAX_REASON_CHARS: usize = 500;
+pub(super) const MAX_REASON_CHARS: usize = 500;
 
 /// Why a step is not a success. The stable code reaches the control plane (NFR-DOC-04).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -225,15 +227,77 @@ pub(super) enum LimitStop {
 #[derive(Clone)]
 pub(super) struct CancelHandle {
     pub(super) child: Arc<Mutex<Option<JobChild>>>,
+    step: Arc<Mutex<Option<ChildStep>>>,
     cancels: Arc<AtomicU32>,
+}
+
+/// The step that owns the child in the slot of a [`CancelHandle`].
+struct ChildStep {
+    step_id: String,
+    started_at: Timestamp,
+    restic: bool,
+}
+
+/// A child that the task of a job left running, after the agent stopped it.
+pub(super) struct Orphan {
+    pub(super) step_id: String,
+    pub(super) started_at: Timestamp,
+    /// Restic may have left its lock in the repository (FR-AG-10, AC-AG-07).
+    pub(super) possible_stale_lock: bool,
 }
 
 impl CancelHandle {
     pub(super) fn new() -> Self {
         Self {
             child: Arc::new(Mutex::new(None)),
+            step: Arc::new(Mutex::new(None)),
             cancels: Arc::new(AtomicU32::new(0)),
         }
+    }
+
+    /// Puts the child of a step in the slot. It runs right after the spawn, so a panic later in the
+    /// step still leaves a child that the supervisor of the job can stop.
+    pub(super) fn adopt(&self, child: JobChild, step_id: &str, restic: bool) {
+        *lock(&self.step) = Some(ChildStep {
+            step_id: step_id.to_owned(),
+            started_at: super::now_timestamp(),
+            restic,
+        });
+        *lock(&self.child) = Some(child);
+    }
+
+    /// Takes the output pipes of the child in the slot.
+    pub(super) fn take_output(&self) -> (Option<ChildStdout>, Option<ChildStderr>) {
+        lock(&self.child)
+            .as_mut()
+            .map_or((None, None), JobChild::take_output)
+    }
+
+    /// Stops the child that the dead task of a job left in the slot and waits until it exits, so
+    /// no zombie stays behind (FR-AG-10). `None` when the slot holds no child.
+    pub(super) async fn stop_orphan(&self) -> Option<Orphan> {
+        let mut child = lock(&self.child).take()?;
+        let step = lock(&self.step).take()?;
+        let left_lock = match child.try_wait() {
+            Ok(Some(status)) => lock_possibly_left(&status),
+            Ok(None) | Err(_) => {
+                if let Err(error) = child.kill_tree() {
+                    tracing::warn!(%error, "cannot kill the restic child");
+                }
+                let deadline = tokio::time::Instant::now() + DRAIN_TIMEOUT;
+                while !matches!(child.try_wait(), Ok(Some(_)) | Err(_))
+                    && tokio::time::Instant::now() < deadline
+                {
+                    tokio::time::sleep(POLL_INTERVAL).await;
+                }
+                true
+            }
+        };
+        Some(Orphan {
+            step_id: step.step_id,
+            started_at: step.started_at,
+            possible_stale_lock: step.restic && left_lock,
+        })
     }
 
     pub(super) fn cancel(&self) {
@@ -406,8 +470,8 @@ impl Jobs {
                 priority_of(step),
             )
         });
-        let mut child = match spawned {
-            Ok(child) => child,
+        match spawned {
+            Ok(child) => cancel.adopt(child, step_id, true),
             Err(error) => {
                 let detail = format!("{error:#}");
                 tracing::warn!(%detail, "cannot start restic");
@@ -419,12 +483,14 @@ impl Jobs {
                 self.send_log(log).await;
                 return StepOutcome::not_started_because(&scrubber.scrub(&detail));
             }
-        };
+        }
+        #[cfg(feature = "test-util")]
+        assert!(!self.panic_after_spawn, "the job task panics on purpose");
         // The secrets leave the memory of the agent with the command line (FR-AG-07).
         drop(line);
 
         let kind = step.kind.as_ref().map_or(OutputKind::Plain, OutputKind::of);
-        let (stdout, stderr) = child.take_output();
+        let (stdout, stderr) = cancel.take_output();
         let (tx, mut lines) = mpsc::channel::<Line>(kind.queue_depth());
         if let Some(stdout) = stdout {
             spawn_reader(stdout, Pipe::Stdout, kind.stdout_limit(), tx.clone());
@@ -459,9 +525,6 @@ impl Jobs {
             read_only: false,
         };
 
-        *lock(&cancel.child) = Some(child);
-        #[cfg(feature = "test-util")]
-        assert!(!self.panic_after_spawn, "the job task panics on purpose");
         let started = tokio::time::Instant::now();
         let step_deadline = limits.max.map(|max| started + max);
         let mut limit_stop: Option<LimitStop> = None;

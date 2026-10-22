@@ -123,8 +123,8 @@ pub(super) fn interrupted_error() -> ErrorDetail {
     }
 }
 
-/// The error of a job whose task ended without a result, for example after a panic. The agent
-/// stopped restic, so the job is over (FR-AG-09).
+/// The error of a job whose task panicked. The agent stopped the child of the task, so the job is
+/// over (FR-AG-09).
 pub(super) fn task_failed_error() -> ErrorDetail {
     ErrorDetail {
         code: "agent_internal_error".to_owned(),

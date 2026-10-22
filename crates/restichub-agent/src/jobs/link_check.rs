@@ -15,13 +15,13 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 
+use super::Jobs;
 use super::command_text::command_line_text;
 use super::log::JobLog;
 use super::runner::{
     CancelHandle, DRAIN_TIMEOUT, LINES_PER_TURN, LimitStop, POLL_INTERVAL, StepOutcome, interrupt,
     kill_tree, reap,
 };
-use super::{Jobs, lock};
 use crate::output::{Line, MAX_LINE, Pipe, spawn_reader};
 use crate::restore_links::{Selection, TargetCheck};
 use crate::scrub::Scrubber;
@@ -149,11 +149,11 @@ impl Jobs {
             )
         });
         drop(line);
-        let mut child = match spawned {
-            Ok(child) => child,
+        match spawned {
+            Ok(child) => cancel.adopt(child, step_id, true),
             Err(error) => return Some(cannot_check(&scrubber.scrub(&format!("{error:#}")))),
-        };
-        let (stdout, stderr) = child.take_output();
+        }
+        let (stdout, stderr) = cancel.take_output();
         let (tx, mut lines) = mpsc::channel::<Line>(64);
         if let Some(stdout) = stdout {
             spawn_reader(stdout, Pipe::Stdout, MAX_LINE, tx.clone());
@@ -162,7 +162,6 @@ impl Jobs {
             spawn_reader(stderr, Pipe::Stderr, MAX_LINE, tx.clone());
         }
         drop(tx);
-        *lock(&cancel.child) = Some(child);
 
         let mut nodes = Nodes {
             selection,
