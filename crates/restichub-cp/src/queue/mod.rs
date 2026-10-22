@@ -59,10 +59,11 @@ const BATCH_PER_AGENT: i64 = 100;
 /// `stream::BACKOFF_MAX`), so the wait holds twice that delay.
 pub const RECONNECT_GRACE: time::Duration = time::Duration::minutes(2);
 
-/// How long a tenant may stay in the reconnect grace without one pass that reads its agents before
-/// the control plane warns about it. A pass of one tenant that keeps failing keeps every absence
-/// test of that tenant off (see [`AgentView`]); the warning tells the operator why no absence
-/// arrives. It repeats at that interval while the failures continue.
+/// How long the run of failed passes of a tenant may last before the control plane warns about it.
+/// A pass of one tenant that keeps failing keeps every absence test of that tenant off (see
+/// [`AgentView`]), so the warning tells the operator why no absence arrives. The run ends only
+/// after passes that read the agents for the whole [`RECONNECT_GRACE`], and the warning repeats at
+/// this interval while the run continues.
 const LONG_GRACE_WARN: time::Duration = time::Duration::minutes(15);
 
 /// The result message of a job that never got an acknowledgement.
