@@ -9,11 +9,11 @@
 
 ADR-0039 gives each running step a stall watchdog and counts every line that restic prints as progress.
 
-A repository that refuses a connection is the largest case of a step without progress. restic retries the request and prints one line for each attempt on the standard error: `Stat(<config/>) returned error, retrying after 1.31s: …`, and then at 2.38, 4.17, 7.42, 13.56 and 37.94 seconds. Each line restarted the stall timeout, so a window of 5 minutes never closed. A backup against a repository that is down ran on until restic ended its retries. The profile setting "Stop after no progress" had no effect.
+A repository that refuses a connection is the largest case of a step without progress. restic retries the request and prints one line for each attempt on the standard error: `Stat(<config/>) returned error, retrying after 1.31s: …`. The pauses before the further attempts are 2.38, 4.17, 7.42, 13.56 and 37.94 seconds. Each line restarted the stall timeout, so a window of 5 minutes never closed. A backup against a repository that is down ran on until restic ended its retries. The profile setting "Stop after no progress" had no effect.
 
 A `backup` and a `restore` report their progress as status messages on the standard output. On the standard error they report a warning about one file or a retry of the backend.
 
-A `check` and a `prune` print their only output on the standard error, and they work for hours without a status message.
+A `check` and a `prune` work for hours without a status message. A `prune` prints its progress on the standard output, and a `check` prints a line only when it finds an error.
 
 ## Decision
 

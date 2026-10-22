@@ -47,7 +47,7 @@ ADR-0043 removes the grace rule for a job that started a short time ago. The age
 
 ## Note of 2026-10-22
 
-ADR-0051 refines the rule of progress. For a `backup` and a `restore` step, a line on the standard error is not progress. restic prints the retry of an unreachable backend there, and the stall timeout never expired. The verify phase of a `restore` prints nothing. It keeps the long window of `check` and `prune`, so a step that a hung target blocks still stops after that window.
+ADR-0051 refines the rule of progress. For a `backup` and a `restore` step, a line on the standard error is not progress. restic prints the retry of an unreachable backend there, and the stall timeout never expired. The verify phase of a `restore` prints nothing. It gets a window of 24 hours from the summary line. That window is longer than the one of `check` and `prune` (ADR-0051), so a step that a hung target blocks still stops.
 
 ## Consequences
 
