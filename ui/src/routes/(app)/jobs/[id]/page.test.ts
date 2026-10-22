@@ -8,6 +8,7 @@
 import { render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { testPage } from '#lib/test/route.svelte.ts';
 import JobDetailPage from './+page.svelte';
 
 const mocks = vi.hoisted(() => ({
@@ -25,8 +26,10 @@ vi.mock('$app/paths', () => ({
 	resolve: (path: string, params?: Record<string, string>) =>
 		params ? path.replace('[id]', params.id) : path
 }));
-vi.mock('$app/navigation', () => ({ goto: mocks.goto }));
-vi.mock('$app/state', () => ({ page: { params: { id: 'j_1' } } }));
+vi.mock('$app/navigation', () => ({ goto: mocks.goto, beforeNavigate: vi.fn() }));
+vi.mock('$app/state', async () => ({
+	page: (await import('#lib/test/route.svelte.ts')).testPage
+}));
 vi.mock('#lib/stores/session.svelte.ts', () => ({
 	getSession: () => ({ role: session.role })
 }));
@@ -130,6 +133,7 @@ describe('the job detail screen', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		session.role = 'operator';
+		testPage.params = { id: 'j_1' };
 		mocks.getJob.mockResolvedValue(job());
 		mocks.getJobLogs.mockResolvedValue(
 			logPage([line(1, 'snapshot a1b2c3d4 saved'), line(2, 'Warning: a file changed', 'warn')])
@@ -719,6 +723,30 @@ describe('the job detail screen', () => {
 
 		await waitFor(() => expect(mocks.runPlan).toHaveBeenCalledWith('pl_1'));
 		await waitFor(() => expect(mocks.goto).toHaveBeenCalledWith('/(app)/jobs/j_2'));
+	});
+
+	it('starts the new job with its own log when the address changes', async () => {
+		const user = userEvent.setup();
+		mocks.getJob.mockImplementation(async (id: string) =>
+			id === 'j_1' ? job() : job({ id: 'j_2', plan_id: 'pl_2' })
+		);
+		mocks.getJobLogs.mockImplementation(async (id: string) =>
+			logPage([line(1, id === 'j_1' ? 'the first run' : 'the second run')])
+		);
+		render(JobDetailPage);
+
+		await user.click(await screen.findByRole('button', { name: 'Show the log of Backup' }));
+		expect(within(await screen.findByRole('log')).getByText('the first run')).toBeInTheDocument();
+
+		testPage.params = { id: 'j_2' };
+
+		expect(await screen.findAllByText('j_2')).not.toHaveLength(0);
+		expect(screen.queryByText('j_1')).not.toBeInTheDocument();
+		expect(screen.queryByText('the first run')).not.toBeInTheDocument();
+
+		await user.click(await screen.findByRole('button', { name: 'Show the log of Backup' }));
+		expect(within(await screen.findByRole('log')).getByText('the second run')).toBeInTheDocument();
+		expect(mocks.getJobLogs).toHaveBeenCalledWith('j_2', { after_seq: 0, limit: 1000 });
 	});
 
 	it('disables Run again while the job runs and hides it without a plan or the right', async () => {

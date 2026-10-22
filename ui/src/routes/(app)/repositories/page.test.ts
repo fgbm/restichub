@@ -244,6 +244,12 @@ describe('the host of an init and an access test', () => {
 			{ id: 'a_1', hostname: 'nas-backup', ...HOST },
 			{ id: 'a_2', hostname: 'web-01', ...HOST }
 		]);
+		mocks.getJob.mockResolvedValue({
+			id: 'j_1',
+			status: 'queued',
+			result_code: null,
+			expires_at: null
+		});
 	});
 
 	async function openAction(label: string): Promise<HTMLElement> {
@@ -287,6 +293,25 @@ describe('the host of an init and an access test', () => {
 			await within(dialog).findByText(/Add its root to \/etc\/restichub-agent-repository-roots.txt/)
 		).toBeInTheDocument();
 		expect(within(dialog).queryByText('The job failed.')).not.toBeInTheDocument();
+	});
+
+	it('stops the poll of the job when the person leaves the page', async () => {
+		mocks.listRepositories.mockResolvedValue([repository({ initialized: false })]);
+		mocks.initRepository.mockResolvedValue({ id: 'j_1', status: 'queued' });
+		const user = userEvent.setup();
+		const view = render(Repositories);
+		await screen.findByText('repo-a');
+		await user.click(screen.getByRole('button', { name: 'More actions for repo-a' }));
+		await user.click(await screen.findByText('Initialize'));
+		const dialog = await screen.findByRole('dialog');
+		await userEvent.click(within(dialog).getByRole('button', { name: 'Start' }));
+		await waitFor(() => expect(mocks.getJob).toHaveBeenCalled());
+
+		view.unmount();
+
+		const calls = mocks.getJob.mock.calls.length;
+		await new Promise((resolve) => setTimeout(resolve, 1200));
+		expect(mocks.getJob).toHaveBeenCalledTimes(calls);
 	});
 
 	it('fr_rp_08 says why an init cannot start without a maintenance host', async () => {

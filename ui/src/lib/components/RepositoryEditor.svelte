@@ -1,8 +1,10 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
-	import { beforeNavigate, goto } from '$app/navigation';
+	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { ApiError, fieldError, service } from '#lib/api/index.ts';
+	import { latest } from '#lib/latest.ts';
+	import type { Latest } from '#lib/latest.ts';
 	import type {
 		Agent,
 		ApiProblem,
@@ -54,7 +56,6 @@
 	let existing = $state<Repository | null>(null);
 	let agents = $state<Agent[]>([]);
 	let saving = $state(false);
-	let saved = false;
 	let formError = $state<string | null>(null);
 	let formProblem = $state<ApiProblem | null>(null);
 	let baseline = $state('');
@@ -301,9 +302,9 @@
 		)
 	);
 
-	beforeNavigate(({ cancel }) => {
-		if (dirty && !saved && !window.confirm(t('rp.unsaved'))) cancel();
-	});
+	// A typed cron answers late, so each preview list follows the newest request of its schedule.
+	const retentionRequests = latest();
+	const checkRequests = latest();
 
 	// The page previews the next fire times of each schedule from the form, so the user sees them
 	// before the save (FR-SC-01). The list follows the edit of the cron or the time zone.
@@ -313,23 +314,32 @@
 		const retention = retentionCron;
 		const check = checkCron;
 		const handle = setTimeout(() => {
-			void loadRuns(retention, zone).then((runs) => (retentionRuns = runs));
-			void loadRuns(check, zone).then((runs) => (checkRuns = runs));
+			void loadRuns(retention, zone, retentionRequests, (runs) => (retentionRuns = runs));
+			void loadRuns(check, zone, checkRequests, (runs) => (checkRuns = runs));
 		}, 200);
 		return () => clearTimeout(handle);
 	});
 
-	async function loadRuns(cron: string, zone: string): Promise<string[] | null> {
-		if (!cron.trim() || !zone.trim()) return null;
+	async function loadRuns(
+		cron: string,
+		zone: string,
+		requests: Latest,
+		assign: (runs: string[] | null) => void
+	): Promise<void> {
+		const current = requests.start();
+		if (!cron.trim() || !zone.trim()) {
+			assign(null);
+			return;
+		}
 		try {
 			const response = await service.previewSchedule({
 				cron,
 				time_zone: zone,
 				count: PREVIEW_RUNS
 			});
-			return response.runs;
+			if (current()) assign(response.runs);
 		} catch {
-			return null;
+			if (current()) assign(null);
 		}
 	}
 
@@ -422,7 +432,7 @@
 					pushToast('danger', messageOf(problem));
 				}
 			}
-			saved = true;
+			baseline = stateKey;
 			await goto(resolve('/(app)/repositories'));
 		} catch (problem) {
 			formProblem = problem instanceof ApiError ? problem.problem : null;

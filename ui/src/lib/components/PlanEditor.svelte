@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { beforeNavigate, goto } from '$app/navigation';
+	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { ApiError, fieldError, service } from '#lib/api/index.ts';
+	import { latest } from '#lib/latest.ts';
 	import { defaultPlanName, nameError } from '#lib/names.ts';
 	import type {
 		Agent,
@@ -103,7 +104,6 @@
 	let valueText = $state('');
 	let valueSecretId = $state('');
 	let saving = $state(false);
-	let saved = false;
 	let deleteOpen = $state(false);
 	let deleting = $state(false);
 	let formError = $state<string | null>(null);
@@ -317,16 +317,22 @@
 		planValues = rest;
 	}
 
+	// A host that the person leaves behind answers late, so the table follows the newest request.
+	const hostParameterRequests = latest();
+
 	// The host values belong to the host of the plan, so they follow the host field.
 	async function loadHostParameters(): Promise<void> {
+		const current = hostParameterRequests.start();
 		if (!agentId) {
 			hostParameters = [];
 			return;
 		}
 		try {
 			const response = await service.getAgentParameters(agentId);
+			if (!current()) return;
 			hostParameters = response.parameters;
 		} catch {
+			if (!current()) return;
 			// The section shows the plan values and the defaults; a missing host value stays "not set".
 			hostParameters = [];
 		}
@@ -507,10 +513,6 @@
 		name = defaultPlanName(hostName, profileName, planNames);
 	});
 
-	beforeNavigate(({ cancel }) => {
-		if (dirty && !saved && !window.confirm(t('rp.unsaved'))) cancel();
-	});
-
 	// The page previews the next fire times from the cron and the time zone of the form, so the
 	// user sees them before the save (FR-SC-01). The run list follows the edit of either field.
 	$effect(() => {
@@ -521,7 +523,11 @@
 		return () => clearTimeout(handle);
 	});
 
+	// A typed cron answers late, so the list follows the newest request of the preview.
+	const runRequests = latest();
+
 	async function loadRuns(previewCron: string, previewTimeZone: string): Promise<void> {
+		const current = runRequests.start();
 		if (!previewCron.trim() || !previewTimeZone.trim()) {
 			runs = null;
 			return;
@@ -533,11 +539,13 @@
 				time_zone: previewTimeZone,
 				count: PREVIEW_RUNS
 			});
+			if (!current()) return;
 			runs = response.runs;
 		} catch {
+			if (!current()) return;
 			runs = null;
 		} finally {
-			runsLoading = false;
+			if (current()) runsLoading = false;
 		}
 	}
 
@@ -598,7 +606,7 @@
 				await service.createPlan({ name, ...body } satisfies CreatePlanRequest);
 			}
 			pushToast('success', t(existing ? 'plans.updated' : 'plans.created'));
-			saved = true;
+			baseline = stateKey;
 			await goto(resolve('/(app)/plans'));
 		} catch (problem) {
 			formProblem = problemOf(problem);
@@ -615,7 +623,7 @@
 			await service.deletePlan(existing.id);
 			pushToast('success', t('plans.deleted'));
 			deleteOpen = false;
-			saved = true;
+			baseline = stateKey;
 			await goto(resolve('/(app)/plans'));
 		} catch (problem) {
 			pushToast('danger', messageOf(problem));
