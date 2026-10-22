@@ -69,6 +69,32 @@ pub async fn try_lock_tenant(tx: &mut TenantTx<'_>) -> Result<bool, DbError> {
     Ok(locked)
 }
 
+/// The statement of [`dispatchable`], so a test can explain it.
+///
+/// The ranking is a subquery of the `FROM` clause rather than the right side of `IN`: a planner
+/// that underestimates the ranked set must not walk `jobs_tenant_created_idx`, the index over the
+/// whole history of the tenant, and run the ranking again for each row it reads.
+pub(crate) const DISPATCHABLE_SQL: &str = concat!(
+    "SELECT ",
+    job_columns!("j."),
+    " FROM ( \
+          SELECT id FROM ( \
+            SELECT id, row_number() OVER (PARTITION BY agent_id, repository_id ORDER BY created_at, id) AS rank \
+            FROM jobs \
+            WHERE status IN ('queued', 'sent') \
+              AND ((status = 'queued' AND (attempt = 0 OR run_at <= $1)) \
+                   OR (status = 'sent' AND lease_until IS NOT NULL AND lease_until <= $1)) \
+              AND NOT cancel_requested \
+              AND (expires_at IS NULL OR expires_at > $1) \
+              AND kind IN ('backup', 'forget', 'prune', 'check', 'unlock', 'unlock_all', 'restore', \
+                          'snapshots', 'ls') \
+              AND agent_id = ANY($2)) ranked \
+          WHERE rank <= $3) chosen \
+      JOIN jobs j ON j.id = chosen.id \
+      ORDER BY j.created_at, j.id \
+      FOR UPDATE OF j SKIP LOCKED"
+);
+
 /// Selects the jobs that the dispatcher may send now, oldest first, and locks them.
 ///
 /// Only the kinds that the queue builds qualify: an on-demand `init` or `test_access` job is never
@@ -88,31 +114,14 @@ pub async fn dispatchable(
 ) -> Result<Vec<Job>, DbError> {
     let agents: Vec<Uuid> = online.iter().map(|agent| agent.as_uuid()).collect();
     // The window function cannot share a query level with `FOR UPDATE`, so the ranking selects the
-    // identifiers and the outer query locks the rows.
-    let rows = sqlx::query_as::<_, JobRow>(concat!(
-        "SELECT ",
-        job_columns!(),
-        " FROM jobs WHERE id IN ( \
-              SELECT id FROM ( \
-                SELECT id, row_number() OVER (PARTITION BY agent_id, repository_id ORDER BY created_at, id) AS rank \
-                FROM jobs \
-                WHERE ((status = 'queued' AND (attempt = 0 OR run_at <= $1)) \
-                       OR (status = 'sent' AND lease_until IS NOT NULL AND lease_until <= $1)) \
-                  AND NOT cancel_requested \
-                  AND (expires_at IS NULL OR expires_at > $1) \
-                  AND kind IN ('backup', 'forget', 'prune', 'check', 'unlock', 'unlock_all', 'restore', \
-                              'snapshots', 'ls') \
-                  AND agent_id = ANY($2)) ranked \
-              WHERE rank <= $3) \
-          ORDER BY created_at, id \
-          FOR UPDATE SKIP LOCKED"
-    ))
-    .bind(now)
-    .bind(&agents)
-    .bind(per_agent)
-    .fetch_all(tx.as_conn())
-    .await
-    .map_err(DbError::Query)?;
+    // identifiers and the join locks the rows.
+    let rows = sqlx::query_as::<_, JobRow>(DISPATCHABLE_SQL)
+        .bind(now)
+        .bind(&agents)
+        .bind(per_agent)
+        .fetch_all(tx.as_conn())
+        .await
+        .map_err(DbError::Query)?;
     Ok(rows.into_iter().map(Job::from).collect())
 }
 

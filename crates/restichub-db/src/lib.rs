@@ -161,6 +161,12 @@ impl DbError {
         self.sqlstate().as_deref() == Some("23503")
     }
 
+    /// True for a cancelled statement (SQLSTATE 57014), for example one that passed its
+    /// `statement_timeout`.
+    pub fn is_statement_timeout(&self) -> bool {
+        self.sqlstate().as_deref() == Some("57014")
+    }
+
     pub(crate) fn sqlstate(&self) -> Option<String> {
         match self {
             Self::Query(error) => error
