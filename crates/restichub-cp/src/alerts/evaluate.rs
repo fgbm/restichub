@@ -19,6 +19,7 @@ use time::{Duration, OffsetDateTime};
 
 use super::message::{MAX_TEXT_CHARS, scrub};
 use super::rpo::{self, RpoState};
+use crate::queue::AgentView;
 use time::format_description::well_known::Rfc3339;
 
 /// A job failure older than this at the first look raises no alert.
@@ -77,11 +78,17 @@ struct Findings {
 
 /// Runs one evaluation of the tenant. A second instance that runs the same pass at the same time
 /// skips it.
+///
+/// The view says how long this instance read the agents without a break. A database outage hides
+/// the contact of every agent, so the pass judges no absence before the agent had the time to
+/// connect again (AC-ID-06, AC-PR-07).
 pub async fn evaluate_tenant(
     db: &Database,
     tenant: TenantId,
     now: OffsetDateTime,
+    view: &AgentView,
 ) -> Result<Report, DbError> {
+    let judges_absence = view.judges_absence(now);
     let mut tx = db.begin_tenant(tenant).await?;
     if !alerts::try_lock_tenant(&mut tx).await? {
         drop(tx);
@@ -102,7 +109,7 @@ pub async fn evaluate_tenant(
         let plans = dashboard::rpo_plans(&mut tx).await?;
         rpo_findings(&plans, now, &mut findings);
     }
-    if let Some(minutes) = threshold(&rules, AlertKind::AgentOffline) {
+    if judges_absence && let Some(minutes) = threshold(&rules, AlertKind::AgentOffline) {
         let agents = dashboard::agent_facts(&mut tx).await?;
         agent_findings(&agents, minutes, now, &mut findings);
     }
@@ -123,6 +130,10 @@ pub async fn evaluate_tenant(
         .collect();
     for alert in &open {
         if active_keys.contains(&(alert.kind, alert.dedupe_key.as_str())) {
+            continue;
+        }
+        // An open absence alert waits for the grace too: its agent may be on its way back.
+        if alert.kind == AlertKind::AgentOffline && !judges_absence {
             continue;
         }
         if alerts::resolve(&mut tx, alert.id, now).await? {

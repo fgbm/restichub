@@ -29,6 +29,7 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
 use crate::clock::Clock;
+use crate::queue::AgentView;
 use sender::Sender;
 
 /// How often the loop evaluates and sends. A violation therefore reaches a channel well inside
@@ -47,6 +48,27 @@ pub const TENANT_BUDGET: Duration = Duration::from_secs(330);
 /// so no tenant is always the last one.
 pub const PASS_BUDGET: Duration = Duration::from_secs(900);
 
+/// What one pass may do. A test sets its own values; the loop uses [`PassLimits::default`].
+#[derive(Debug, Clone, Copy)]
+pub struct PassLimits {
+    /// How many tenants the pass handles at the same time.
+    pub concurrency: usize,
+    /// The longest time of the evaluation and the delivery of one tenant together.
+    pub tenant_budget: Duration,
+    /// The position in the tenant list that the pass starts at.
+    pub offset: usize,
+}
+
+impl Default for PassLimits {
+    fn default() -> Self {
+        Self {
+            concurrency: CONCURRENCY,
+            tenant_budget: TENANT_BUDGET,
+            offset: 0,
+        }
+    }
+}
+
 /// Runs one evaluation and one send for every active tenant, up to [`CONCURRENCY`] tenants at the
 /// same time. Each tenant reads the clock when it starts, so a tenant that waits for a slot does
 /// not evaluate with a time from before the wait.
@@ -55,8 +77,9 @@ pub async fn run_once(
     sender: &Sender,
     provider: Arc<dyn KekProvider>,
     clock: Arc<dyn Clock>,
+    view: Arc<AgentView>,
 ) -> Result<(), DbError> {
-    run_once_with(db, sender, provider, clock, CONCURRENCY, TENANT_BUDGET, 0).await
+    run_once_with(db, sender, provider, clock, view, PassLimits::default()).await
 }
 
 /// Like [`run_once`], with the limits chosen by the caller. A rotation of the tenant list by
@@ -66,10 +89,14 @@ pub async fn run_once_with(
     sender: &Sender,
     provider: Arc<dyn KekProvider>,
     clock: Arc<dyn Clock>,
-    concurrency: usize,
-    tenant_budget: Duration,
-    offset: usize,
+    view: Arc<AgentView>,
+    limits: PassLimits,
 ) -> Result<(), DbError> {
+    let PassLimits {
+        concurrency,
+        tenant_budget,
+        offset,
+    } = limits;
     let mut tenant_list = {
         let mut tx = db.begin_platform().await?;
         let list = tenants::list(&mut tx).await?;
@@ -95,8 +122,13 @@ pub async fn run_once_with(
             tracing::warn!("the alert pass ran out of time, so the rest waits for the next pass");
             break;
         }
-        let (db, sender, provider, clock) =
-            (db.clone(), sender.clone(), provider.clone(), clock.clone());
+        let (db, sender, provider, clock, view) = (
+            db.clone(),
+            sender.clone(),
+            provider.clone(),
+            clock.clone(),
+            view.clone(),
+        );
         tasks.spawn(async move {
             let _permit = permit;
             let deadline = tokio::time::Instant::now() + tenant_budget;
@@ -105,6 +137,7 @@ pub async fn run_once_with(
                 &sender,
                 provider.as_ref(),
                 clock.as_ref(),
+                &view,
                 &tenant,
                 deadline,
             );
@@ -126,10 +159,11 @@ async fn handle_tenant(
     sender: &Sender,
     provider: &dyn KekProvider,
     clock: &dyn Clock,
+    view: &AgentView,
     tenant: &restichub_db::tenants::Tenant,
     deadline: tokio::time::Instant,
 ) {
-    match evaluate::evaluate_tenant(db, tenant.id, clock.now()).await {
+    match evaluate::evaluate_tenant(db, tenant.id, clock.now(), view).await {
         Ok(report) => {
             if let Some(events) = sender.events()
                 && (report.opened > 0 || report.resolved > 0)
@@ -162,6 +196,7 @@ pub fn spawn(
     sender: Sender,
     provider: Arc<dyn KekProvider>,
     clock: Arc<dyn Clock>,
+    view: Arc<AgentView>,
     interval: Duration,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
@@ -178,9 +213,11 @@ pub fn spawn(
                 &sender,
                 provider.clone(),
                 clock.clone(),
-                CONCURRENCY,
-                TENANT_BUDGET,
-                pass,
+                view.clone(),
+                PassLimits {
+                    offset: pass,
+                    ..PassLimits::default()
+                },
             )
             .await
             {

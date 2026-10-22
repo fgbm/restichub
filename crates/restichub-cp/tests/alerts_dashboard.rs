@@ -5,7 +5,7 @@
 mod alert_support;
 mod common;
 
-use alert_support::{finish_job, local_sender, scoped, set_last_seen};
+use alert_support::{finish_job, judged_view, local_sender, scoped, set_last_seen};
 use axum::http::StatusCode;
 use restichub_cp::config::TenancyConfig;
 use restichub_cp::server::{AppState, router};
@@ -143,7 +143,7 @@ async fn ac_mn_09_dashboard_overview() {
     // Open the alerts with a pass at the current time.
     let kek = test_kek();
     let clock = restichub_cp::clock::ManualClock::new(now).shared();
-    restichub_cp::alerts::run_once(db.database(), &sender, kek, clock)
+    restichub_cp::alerts::run_once(db.database(), &sender, kek, clock, judged_view(now))
         .await
         .expect("pass");
 

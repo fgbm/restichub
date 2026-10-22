@@ -12,8 +12,8 @@ mod common;
 use std::sync::Arc;
 
 use alert_support::{
-    HookRequest, SmtpSink, WebhookSink, backup_job, finish_job, local_sender, plan_created_at,
-    repository_job, scoped, set_last_seen,
+    HookRequest, SmtpSink, WebhookSink, backup_job, finish_job, judged_view, local_sender,
+    plan_created_at, repository_job, scoped, set_last_seen,
 };
 use axum::Router;
 use axum::http::StatusCode;
@@ -136,7 +136,7 @@ impl Fixture {
     async fn run_with(&self, sender: &Sender, now: OffsetDateTime) {
         let kek = test_kek();
         let clock = restichub_cp::clock::ManualClock::new(now).shared();
-        restichub_cp::alerts::run_once(self.db.database(), sender, kek, clock)
+        restichub_cp::alerts::run_once(self.db.database(), sender, kek, clock, judged_view(now))
             .await
             .expect("the alert pass works");
     }
