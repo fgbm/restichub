@@ -79,10 +79,10 @@ pub const STOP_GRACE: Duration = Duration::from_secs(30);
 
 /// How long a stopping service waits for its jobs before the process ends (FR-AG-10, AC-AG-06).
 ///
-/// The service control manager of Windows stops a service within 30 s by default, so the wait
-/// stays below that bound. A job that still runs then loses its tree to the job object, as a
-/// forced kill does (AC-AG-07).
-pub const STOP_DRAIN: Duration = Duration::from_secs(20);
+/// A job that the stop cancels needs its own forced kill inside this wait, so the wait exceeds
+/// [`STOP_GRACE`]. The Windows service reports it as the wait hint of the pending stop, so the
+/// service control manager waits for the drain.
+pub const STOP_DRAIN: Duration = Duration::from_secs(STOP_GRACE.as_secs() + 15);
 
 /// How long past the job deadline the cleanup scripts (`after`, `on_*` and `finally`) may run
 /// (FR-HK-05).
@@ -171,6 +171,9 @@ impl Jobs {
     ) -> Result<Self> {
         let mut journal = FileJournal::load(dir.join(JOURNAL_FILE))?;
         journal.prune(now_timestamp());
+        // No job of this process runs yet, so an entry without a result belongs to the process
+        // that ended before this start (FR-IN-08).
+        journal.mark_orphans();
         journal.persist()?;
         let restore = RestoreAccess::for_host(dir, &cache, &program);
         crate::service::warn_about_read_only_roots(restore.roots());
@@ -497,6 +500,9 @@ impl Jobs {
         let snapshot = match admit(job, &mut *journal, expires_at) {
             // The journal changes only for a new admission (ADR-0020).
             Admission::New => Some(journal.snapshot()),
+            // A job that the previous process left without a result and this process runs again
+            // is no orphan any more (FR-IN-08).
+            Admission::InProgress if journal.revive(&job.job_id) => Some(journal.snapshot()),
             Admission::InProgress | Admission::AlreadyCompleted(_) => None,
         };
         let cancel = CancelHandle::new();

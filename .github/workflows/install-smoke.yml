@@ -405,25 +405,52 @@ jobs:
           New-Item -ItemType Directory -Force $keep | Out-Null
           Copy-Item $restic (Join-Path $keep 'restic.exe') -Force
           Copy-Item $record (Join-Path $keep 'restic.json') -Force
-          $repository = Join-Path $env:SMOKE_DIR 'slow-repository'
-          $signal = "$repository.restichub-signal"
+          # The double exits eight seconds after Ctrl+Break, as restic does while it removes its
+          # repository lock over a slow link. Thus a stop of the service lasts longer than the
+          # two seconds that Stop-Service waits for a service that still reports Running.
+          $delay = 8000
+          $first = Join-Path $env:SMOKE_DIR 'slow-repository'
+          $second = Join-Path $env:SMOKE_DIR 'slow-restart-repository'
+
+          function Start-SlowJob($path) {
+            $id = (bash scripts/install-smoke.sh slow-job $path $delay | Select-Object -Last 1).Trim()
+            if (-not $id) { throw 'the smoke script printed no job id' }
+            # The job reaches restic after the control plane sent it, not before.
+            for ($i = 0; $i -lt 120; $i++) {
+              if ((Test-Path "$path.restichub-argv") -and (Get-Content "$path.restichub-argv")) { break }
+              Start-Sleep -Seconds 1
+            }
+            if (-not (Test-Path "$path.restichub-argv")) { throw "the job $id did not reach restic" }
+            $state = (bash scripts/install-smoke.sh job-state $id).Trim()
+            Write-Host "job $id at $path: $state"
+            if ($state -notmatch '^running') { throw "the job is not running: $state" }
+            return $id
+          }
+
+          function Wait-JobState($id, $expected) {
+            $state = ''
+            for ($i = 0; $i -lt 120; $i++) {
+              $state = (bash scripts/install-smoke.sh job-state $id).Trim()
+              if ($state -match $expected) { return $state }
+              Start-Sleep -Seconds 1
+            }
+            throw "job $id ended '$state', not '$expected'"
+          }
+
+          function Wait-ServiceState($expected) {
+            for ($i = 0; $i -lt 90; $i++) {
+              if ((Get-Service restichub-agent).Status -eq $expected) { return }
+              Start-Sleep -Seconds 1
+            }
+            throw "the service did not reach $expected, state: $((Get-Service restichub-agent).Status)"
+          }
+
           try {
             Copy-Item $fake $restic -Force
             $settings = Get-Content $record -Raw | ConvertFrom-Json
             $settings.sha256 = (Get-FileHash $restic -Algorithm SHA256).Hash.ToLower()
             $settings | ConvertTo-Json -Compress | Set-Content $record
-            $id = (bash scripts/install-smoke.sh slow-job $repository | Select-Object -Last 1).Trim()
-            if (-not $id) { throw 'the smoke script printed no job id' }
-            Write-Host "job $id runs at $repository"
-            # The job reaches restic after the control plane sent it, not before.
-            for ($i = 0; $i -lt 120; $i++) {
-              if ((Test-Path "$repository.restichub-argv") -and (Get-Content "$repository.restichub-argv")) { break }
-              Start-Sleep -Seconds 1
-            }
-            if (-not (Test-Path "$repository.restichub-argv")) { throw 'the job did not reach restic' }
-            $state = bash scripts/install-smoke.sh job-state $id
-            Write-Host "job state: $state"
-            if ($state -notmatch '^running') { throw "the job is not running: $state" }
+            $id = Start-SlowJob $first
             $output = (& $agent install-service 2>&1 | Out-String)
             $code = $LASTEXITCODE
             Write-Host $output
@@ -431,14 +458,14 @@ jobs:
             if ($output -notmatch 'cannot stop the service') { throw 'the refusal does not name the stop' }
             if ($output -notmatch 'then run the command again') { throw 'the refusal names no next step' }
             if ((Get-Service restichub-agent).Status -ne 'Running') { throw 'the refused command stopped the service' }
-            $state = bash scripts/install-smoke.sh job-state $id
+            $state = (bash scripts/install-smoke.sh job-state $id).Trim()
             if ($state -notmatch '^running') { throw "the refused command ended the job: $state" }
-            # The stop of the service must reach restic with the graceful signal, so that restic
-            # removes its repository lock.
-            . scripts/install-smoke-windows.ps1
-            Stop-AgentService
-            if (-not (Test-Path $signal)) { throw "restic recorded no stop signal in $signal" }
-            $recorded = (Get-Content $signal -Raw).Trim()
+            # The service reports a pending stop at once, so the stop waits for the drain and
+            # reports no failure; restic gets Ctrl+Break and removes its repository lock.
+            Stop-Service restichub-agent -ErrorAction Stop
+            Wait-ServiceState 'Stopped'
+            if (-not (Test-Path "$first.restichub-signal")) { throw "restic recorded no stop signal in $first.restichub-signal" }
+            $recorded = (Get-Content "$first.restichub-signal" -Raw).Trim()
             Write-Host "restic recorded: $recorded"
             if ($recorded -notmatch 'ctrl_break') { throw "restic got no Ctrl+Break, it recorded: $recorded" }
             $since = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
@@ -447,17 +474,21 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw 'not connected' }
             # The agent stores the result of the stopped job, so the control plane shows it after the
             # next connection instead of a lost job.
-            for ($i = 0; $i -lt 60; $i++) {
-              $state = bash scripts/install-smoke.sh job-state $id
-              if ($state -notmatch '^(running|sent|queued)') { break }
-              Start-Sleep -Seconds 1
-            }
+            $state = Wait-JobState $id '^failed cancelled$'
             Write-Host "job state after the stop: $state"
-            if ($state -ne 'failed cancelled') { throw "the stopped job ended '$state', not cancelled" }
+            # Restart-Service stops and starts only a service that it saw as stopped. Before the
+            # agent reported a pending stop, the restart failed and left the service stopped.
+            $id = Start-SlowJob $second
+            Restart-Service restichub-agent -ErrorAction Stop
+            Wait-ServiceState 'Running'
+            if ((Get-Content "$second.restichub-signal" -Raw).Trim() -notmatch 'ctrl_break') { throw 'restic got no Ctrl+Break on the restart' }
+            $state = Wait-JobState $id '^failed cancelled$'
+            Write-Host "job state after the restart: $state"
           } finally {
             Copy-Item (Join-Path $keep 'restic.exe') $restic -Force
             Copy-Item (Join-Path $keep 'restic.json') $record -Force
-            Remove-Item "$repository.restichub-sleep", "$repository.restichub-signal", "$repository.restichub-argv" -Force -ErrorAction SilentlyContinue
+            Remove-Item "$first.restichub-sleep", "$first.restichub-signal", "$first.restichub-argv" -Force -ErrorAction SilentlyContinue
+            Remove-Item "$second.restichub-sleep", "$second.restichub-signal", "$second.restichub-argv" -Force -ErrorAction SilentlyContinue
             if ((Get-Service restichub-agent -ErrorAction SilentlyContinue).Status -ne 'Running') { Start-Service restichub-agent -ErrorAction SilentlyContinue }
             $global:LASTEXITCODE = 0
           }

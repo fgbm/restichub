@@ -2,6 +2,8 @@
 
 use std::ffi::{OsStr, OsString};
 use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -10,7 +12,9 @@ use windows_service::service::{
     ServiceErrorControl, ServiceExitCode, ServiceFailureActions, ServiceFailureResetPeriod,
     ServiceInfo, ServiceStartType, ServiceState, ServiceStatus, ServiceType,
 };
-use windows_service::service_control_handler::{self, ServiceControlHandlerResult};
+use windows_service::service_control_handler::{
+    self, ServiceControlHandlerResult, ServiceStatusHandle,
+};
 use windows_service::service_manager::{ServiceManager, ServiceManagerAccess};
 use windows_service::{define_windows_service, service_dispatcher};
 
@@ -21,6 +25,16 @@ const ERROR_SERVICE_DOES_NOT_EXIST: i32 = 1060;
 
 /// A running job gets its stop grace first, so this bound is generous.
 const STOP_WAIT: Duration = Duration::from_secs(120);
+
+/// The wait hint of a pending stop: the drain of the jobs plus the rest of the exit (FR-AG-10).
+const STOP_WAIT_HINT: Duration = Duration::from_secs(crate::jobs::STOP_DRAIN.as_secs() + 15);
+
+/// How often a pending stop advances its checkpoint, which the system expects before the wait
+/// hint passes (FR-AG-10).
+const CHECKPOINT_TICK: Duration = Duration::from_secs(5);
+
+/// The largest checkpoint of a pending state; the system requires a non-zero value that changes.
+const MAX_CHECKPOINT: u32 = 0x7fff;
 
 define_windows_service!(ffi_service_main, service_main);
 
@@ -55,9 +69,14 @@ fn run_service() -> Result<()> {
         tracing::warn!(%error, "cannot allocate the console; a cancel falls back to the forced kill");
     }
     let (sender, receiver) = std::sync::mpsc::channel();
+    let (stop_sender, stop_receiver) = std::sync::mpsc::channel();
+    let wake = stop_sender.clone();
     let handler = move |event| match event {
-        ServiceControl::Stop => {
+        // A shutdown of the host is a stop: the process ends either way, and a job must still get
+        // its graceful signal (FR-AG-10).
+        ServiceControl::Stop | ServiceControl::Shutdown | ServiceControl::Preshutdown => {
             let _ = sender.send(());
+            let _ = stop_sender.send(());
             ServiceControlHandlerResult::NoError
         }
         ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,
@@ -66,9 +85,13 @@ fn run_service() -> Result<()> {
     let status_handle = service_control_handler::register(SERVICE_NAME, handler)?;
     status_handle.set_service_status(status(
         ServiceState::Running,
-        ServiceControlAccept::STOP,
+        ServiceControlAccept::STOP
+            | ServiceControlAccept::SHUTDOWN
+            | ServiceControlAccept::PRESHUTDOWN,
         ServiceExitCode::NO_ERROR,
     ))?;
+    let finished = Arc::new(AtomicBool::new(false));
+    let ticker = spawn_pending(status_handle, stop_receiver, Arc::clone(&finished));
     let exit_code = match crate::commands::run(&crate::paths::config_dir(), Some(receiver)) {
         Ok(()) => ServiceExitCode::NO_ERROR,
         // `run` has logged the refusal with its fix.
@@ -77,12 +100,55 @@ fn run_service() -> Result<()> {
         }
         Err(error) => return Err(error),
     };
+    // The stopped state goes after the ticker, so a pending report cannot follow it.
+    finished.store(true, Ordering::SeqCst);
+    let _ = wake.send(());
+    let _ = ticker.join();
     status_handle.set_service_status(status(
         ServiceState::Stopped,
         ServiceControlAccept::empty(),
         exit_code,
     ))?;
     Ok(())
+}
+
+/// Reports the pending stop as soon as the manager sends a stop control and advances its checkpoint
+/// while the service drains its jobs, so the manager waits for the process instead of counting a
+/// failed stop (FR-AG-10).
+fn spawn_pending(
+    status: ServiceStatusHandle,
+    stop: std::sync::mpsc::Receiver<()>,
+    finished: Arc<AtomicBool>,
+) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        if stop.recv().is_err() {
+            return;
+        }
+        let mut checkpoint = 0_u32;
+        while !finished.load(Ordering::SeqCst) {
+            checkpoint = checkpoint % MAX_CHECKPOINT + 1;
+            if status
+                .set_service_status(pending_status(checkpoint))
+                .is_err()
+            {
+                return;
+            }
+            // A further stop control ends the wait early; a timeout only advances the checkpoint.
+            let _ = stop.recv_timeout(CHECKPOINT_TICK);
+        }
+    })
+}
+
+fn pending_status(checkpoint: u32) -> ServiceStatus {
+    ServiceStatus {
+        service_type: ServiceType::OWN_PROCESS,
+        current_state: ServiceState::StopPending,
+        controls_accepted: ServiceControlAccept::empty(),
+        exit_code: ServiceExitCode::NO_ERROR,
+        checkpoint,
+        wait_hint: STOP_WAIT_HINT,
+        process_id: None,
+    }
 }
 
 fn status(
@@ -434,6 +500,16 @@ mod tests {
         let advice = late_stop().to_string();
         assert!(advice.contains("run the command again"), "{advice}");
         assert!(!advice.contains("start it"), "{advice}");
+    }
+
+    #[test]
+    fn fr_ag_10_the_pending_stop_covers_the_drain_of_the_jobs() {
+        let pending = pending_status(1);
+        assert_eq!(pending.current_state, ServiceState::StopPending);
+        assert_eq!(pending.checkpoint, 1);
+        assert!(pending.controls_accepted.is_empty());
+        assert!(pending.wait_hint > crate::jobs::STOP_DRAIN);
+        assert!(crate::jobs::STOP_DRAIN > crate::jobs::STOP_GRACE);
     }
 
     #[test]

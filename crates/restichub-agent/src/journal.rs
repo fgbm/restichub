@@ -51,6 +51,10 @@ struct Entry {
     /// Bytes of log in the stored result, so the journal can cap the total without decoding.
     #[serde(default)]
     tail_bytes: u64,
+    /// Set for an entry without a result that the service found at its start: the process that
+    /// accepted the job ended before it did, so no job runs (FR-IN-08).
+    #[serde(default)]
+    orphaned: bool,
 }
 
 /// The serialized journal, in the order of acceptance.
@@ -198,15 +202,42 @@ impl FileJournal {
         }
     }
 
-    /// Tells whether a job that has not expired has no result yet. The entry of a job that a crash
-    /// stopped counts too, until it expires.
+    /// Tells whether a job of the live service has no result yet. An entry that the previous
+    /// process left without a result is no such job, so it does not refuse a command (FR-IN-08).
     #[must_use]
     pub fn has_unfinished_job(&self, now: Timestamp) -> bool {
         let now = i128::from(now.seconds) + i128::from(now.nanos) / 1_000_000_000;
         let retain = i128::from(CLOCK_SKEW.as_secs());
-        self.entries
-            .iter()
-            .any(|entry| entry.result.is_none() && i128::from(entry.expires_at) + retain > now)
+        self.entries.iter().any(|entry| {
+            !entry.orphaned && entry.result.is_none() && i128::from(entry.expires_at) + retain > now
+        })
+    }
+
+    /// Marks every entry without a result as an orphan and reports how many entries it marked
+    /// (FR-IN-08).
+    ///
+    /// The service calls it at its start, when no job of this process runs yet.
+    pub fn mark_orphans(&mut self) -> usize {
+        let mut marked = 0;
+        for entry in &mut self.entries {
+            if entry.result.is_none() && !entry.orphaned {
+                entry.orphaned = true;
+                marked += 1;
+            }
+        }
+        marked
+    }
+
+    /// Clears the orphan mark of a job that this process runs again and reports whether the
+    /// journal changed (FR-IN-08).
+    pub fn revive(&mut self, job_id: &str) -> bool {
+        match self.entries.iter_mut().find(|entry| entry.job_id == job_id) {
+            Some(entry) if entry.orphaned => {
+                entry.orphaned = false;
+                true
+            }
+            _ => false,
+        }
     }
 
     /// Removes the entry of `job_id` (ADR-0020).
@@ -259,6 +290,7 @@ impl JobJournal for FileJournal {
             expires_at: expires_at.seconds,
             result: None,
             tail_bytes: 0,
+            orphaned: false,
         });
     }
 
@@ -395,6 +427,21 @@ mod tests {
             "an expired entry makes room"
         );
         assert!(journal.entries.len() < super::MAX_ENTRIES);
+    }
+
+    #[test]
+    fn fr_in_08_an_entry_of_the_previous_process_is_no_unfinished_job() {
+        let mut journal = FileJournal::load(temp_path("orphan")).expect("cannot load");
+        journal.record_accepted("job-1", at(2_000));
+        assert!(journal.has_unfinished_job(at(1_000)));
+        assert_eq!(journal.mark_orphans(), 1);
+        assert!(!journal.has_unfinished_job(at(1_000)));
+
+        assert_eq!(journal.mark_orphans(), 0);
+        assert!(journal.revive("job-1"));
+        assert!(journal.has_unfinished_job(at(1_000)));
+        // A redelivered job still reads as running (ADR-0020).
+        assert_eq!(journal.lookup("job-1"), JournalState::InProgress);
     }
 
     #[test]

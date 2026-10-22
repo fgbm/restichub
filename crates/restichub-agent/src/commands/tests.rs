@@ -140,6 +140,18 @@ mod trust_mode {
         journal.persist().expect("persist");
     }
 
+    /// Starts the service on the journal: it marks every unfinished entry as an orphan of the
+    /// process that ended.
+    fn service_started(dir: &Path) {
+        crate::jobs::Jobs::open(
+            PathBuf::from("restic"),
+            String::new(),
+            dir.join("cache"),
+            dir,
+        )
+        .expect("the service opens the journal");
+    }
+
     #[test]
     fn fr_hk_08_trust_enable_restarts_an_idle_service_and_waits_for_the_connection() {
         let dir = config_dir("restart");
@@ -203,6 +215,34 @@ mod trust_mode {
             format!("{error:#}").contains("the job journal cannot be read"),
             "{error:#}"
         );
+        cleanup(&dir);
+    }
+
+    /// FR-IN-08: an entry that the previous process left without a result runs no job, so it does
+    /// not refuse the command; a job of the live service does.
+    #[test]
+    fn fr_in_08_an_entry_of_the_previous_process_does_not_refuse_a_command() {
+        let dir = config_dir("stale-job");
+        let fake = Fake::new(&dir, RUNNING);
+        accept_job(&dir, false);
+        service_started(&dir);
+        refuse_running_job(&fake, &dir).expect("no job of the live service runs");
+
+        let mut journal = FileJournal::load(dir.join(JOURNAL_FILE)).expect("journal");
+        let expires = Timestamp {
+            seconds: OffsetDateTime::now_utc().unix_timestamp() + 3600,
+            nanos: 0,
+        };
+        journal.record_accepted("job-2", expires);
+        journal.persist().expect("persist");
+        let error = refuse_running_job(&fake, &dir).expect_err("a job of the live service refuses");
+        let text = format!("{error:#}");
+        assert!(
+            text.contains("the job journal shows a job in progress"),
+            "{text}"
+        );
+        assert!(text.contains("wait for the job to end"), "{text}");
+        assert!(!text.contains("by hand"), "{text}");
         cleanup(&dir);
     }
 

@@ -722,8 +722,8 @@ fn busy_reason(dir: &Path) -> Option<String> {
 /// Refuses a command that would stop the service while it runs a job, because a stop cuts the job
 /// short and restic can lose its repository lock (FR-AG-10, FR-IN-08).
 ///
-/// A stopped service is no refusal: it runs no job, and a journal entry that a crash left behind
-/// must not block the command.
+/// A stopped service is no refusal: it runs no job, and the service marks the entries of the
+/// process that ended at its start, so they do not block the command.
 fn refuse_running_job(manager: &dyn ServiceManager, dir: &Path) -> Result<()> {
     if !manager.state()?.running {
         return Ok(());
@@ -731,9 +731,7 @@ fn refuse_running_job(manager: &dyn ServiceManager, dir: &Path) -> Result<()> {
     let Some(reason) = busy_reason(dir) else {
         return Ok(());
     };
-    bail!(
-        "cannot stop the service: {reason}; wait for the job to end, or stop the service by hand, then run the command again"
-    )
+    bail!("cannot stop the service: {reason}; wait for the job to end, then run the command again")
 }
 
 fn now_timestamp() -> prost_types::Timestamp {
