@@ -59,7 +59,7 @@ async fn fixture(
     }
 }
 
-/// Runs one scheduler pass at `start + offset`.
+/// One scheduler pass, five seconds after the fire time at `start + offset`.
 async fn pass(database: &Database, start: OffsetDateTime, offset: Duration) {
     let clock = ManualClock::new(start);
     clock.advance(offset.whole_seconds() + 5);
@@ -193,7 +193,7 @@ async fn ac_sc_07_a_replacement_keeps_manual_sent_and_run_all_jobs() {
         .expect("the first scheduled job");
     assert_eq!(first.status, JobStatus::Expired);
 
-    // The policy run_all keeps every queued job.
+    // Under this policy every queued job stays.
     let kept = statuses(database, run_all.tenant, run_all.plan).await;
     assert_eq!(kept.len(), 3);
     assert!(kept.iter().all(|(_, status)| *status == JobStatus::Queued));

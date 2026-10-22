@@ -50,7 +50,7 @@ A fire time is missed when the control plane does not run a job for it, for exam
 
 The policy also applies when the host is offline. The control plane keeps the queued jobs of an offline host, so the host does not run them one after the other when it returns:
 
-- With the policy "Run the latest missed run", a new scheduled job replaces the older scheduled jobs of the plan that the host did not take. The replaced jobs get the `expired` status. The host runs the newest job only. A job that the queue already sent, and a job that you started with Run now, stay as they are.
+- With the policy "Run the latest missed run", a new scheduled job replaces the older scheduled jobs of the plan. The host did not take these jobs. The replaced jobs get the `expired` status. The host runs the newest job only. A job that the queue already sent does not change. A job that you started with Run now does not change.
 - With the policy "Skip the missed runs", the control plane creates no job while the host is offline.
 - With the policy "Run every missed run", the host runs each queued job.
 
