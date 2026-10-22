@@ -28,7 +28,7 @@ fn date(year: i32, month: u8, day: u8) -> OffsetDateTime {
     }
 }
 
-fn target() -> TargetFacts {
+pub(super) fn target() -> TargetFacts {
     let mut labels = BTreeMap::new();
     labels.insert("env".to_owned(), "prod".to_owned());
     TargetFacts {
@@ -45,7 +45,7 @@ fn target() -> TargetFacts {
     }
 }
 
-fn profile() -> Profile {
+pub(super) fn profile() -> Profile {
     Profile {
         paths: ProfilePaths {
             all: vec!["/srv".to_owned()],
@@ -66,7 +66,7 @@ fn repository() -> RepositoryAccess {
     }
 }
 
-fn plan(profile: &Profile, target: &TargetFacts) -> Plan {
+pub(super) fn plan(profile: &Profile, target: &TargetFacts) -> Plan {
     match compile(profile, Some(REPOSITORY_ID), target) {
         Ok(value) => value,
         Err(error) => panic!("{error:?}"),

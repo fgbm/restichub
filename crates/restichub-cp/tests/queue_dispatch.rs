@@ -170,6 +170,37 @@ async fn ac_ag_12_the_job_carries_the_limits_of_its_profile() {
     env.db.cleanup().await;
 }
 
+/// AC-AG-14, FR-AG-15: the steps of a job carry the low priority that the profile asks for.
+#[tokio::test]
+async fn ac_ag_14_the_job_carries_the_priority_of_its_profile() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let mut agent = env.connect_agent("priority-host").await;
+    let repository = env.create_repository(agent.id, "pw").await;
+    let profile = env
+        .create_profile(json!({"options": {"priority": "low"}}))
+        .await;
+    let plan = env.create_plan(profile, agent.id, repository).await;
+    env.run_plan(plan).await;
+    env.pass().await;
+
+    let signed = agent.job().await;
+    let job = env.verify(&signed, &agent).await;
+    let low = restichub_proto::agent::v1::ProcessPriority::Low as i32;
+    let backup = job
+        .steps
+        .iter()
+        .find_map(|step| match &step.kind {
+            Some(step::Kind::Backup(backup)) => Some(backup),
+            _ => None,
+        })
+        .expect("the job holds a backup step");
+    assert_eq!(backup.priority, low);
+    env.db.cleanup().await;
+}
+
 #[tokio::test]
 async fn ac_rp_03_the_delivery_record_commits_before_the_job_is_sent() {
     let Some(db) = common::test_db().await else {
