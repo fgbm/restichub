@@ -170,7 +170,9 @@ pub enum Disconnect {
 /// Runs the connect loop with the operating system shutdown signal (FR-AG-01, FR-ID-08).
 ///
 /// The systemd unit sends SIGTERM and the Windows service sends a stop control; both reach the
-/// blocking `shutdown` channel, so the loop stops gracefully.
+/// blocking `shutdown` channel, so the loop stops gracefully. A stop also cancels the running jobs
+/// the way a cancel does, so restic removes its repository lock before the process ends (FR-AG-10,
+/// AC-AG-06).
 ///
 /// # Errors
 ///
@@ -185,7 +187,7 @@ pub async fn serve(
 ) -> Result<()> {
     let (stop_tx, mut stop_rx) = watch::channel(false);
     spawn_shutdown(shutdown, stop_tx)?;
-    run(
+    let result = run(
         identity,
         dir,
         keys,
@@ -194,7 +196,11 @@ pub async fn serve(
         StreamOptions::default(),
         &mut stop_rx,
     )
-    .await
+    .await;
+    if *stop_rx.borrow() {
+        jobs.stop_running(crate::jobs::STOP_DRAIN).await;
+    }
+    result
 }
 
 /// Bridges the blocking shutdown channel to the async stop signal.

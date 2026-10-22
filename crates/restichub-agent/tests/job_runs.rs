@@ -525,7 +525,6 @@ async fn collect_job(rx: &mut mpsc::Receiver<AgentMessage>) -> (Vec<StepResult>,
 }
 
 /// Waits until the fake restic of `path` has started a run.
-#[cfg(windows)]
 async fn wait_for_start(path: &Path) {
     for _ in 0..400 {
         if runs(path) > 0 {
@@ -730,11 +729,66 @@ async fn cancel_with_ctrl_break(name: &str) {
     let _ = std::fs::remove_dir_all(&path);
 }
 
-/// AC-AG-06: a `CTRL_BREAK` cancels the step of the agent.
+/// AC-AG-06, FR-AG-10: a `CTRL_BREAK` cancels the step of the agent.
 #[cfg(windows)]
 #[tokio::test(flavor = "multi_thread")]
 async fn ac_ag_06_ctrl_break_cancels_a_step() {
     cancel_with_ctrl_break("job-runs-ctrl-break").await;
+}
+
+/// AC-AG-06, FR-AG-10: a stop of the service cancels the running job with the graceful signal, so
+/// restic removes its repository lock and the job ends `cancelled` before the process exits.
+#[tokio::test(flavor = "multi_thread")]
+async fn ac_ag_06_a_stop_of_the_service_stops_the_running_job_gracefully() {
+    let dir = config_dir("job-runs-service-stop");
+    let path = repository("job-runs-service-stop-repo");
+    common::script_exit_codes(&path, 0, 0);
+    common::script_sleep(&path, 20_000);
+
+    #[cfg(windows)]
+    restichub_agent::exec::allocate_hidden_console().expect("cannot allocate the console");
+    // The grace period is longer than the wait of the stop, so only the graceful signal can end the
+    // step in time.
+    let jobs = common::program_jobs_with_grace(&dir, Duration::from_secs(15));
+    assert_eq!(
+        jobs.stop_running(Duration::from_secs(10)).await,
+        0,
+        "a stop without a job returns at once"
+    );
+
+    let (tx, mut rx) = mpsc::channel(32);
+    jobs.attach(&tx);
+    jobs.greeted(false);
+    let job = job(
+        "job-service-stop",
+        vec![access("repo-1", &path)],
+        vec![test_access_step("repo-1")],
+    );
+    jobs.handle(signed(&job), &ring(), AGENT, TENANT).await;
+    wait_for_start(&path).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let stopped_at = std::time::Instant::now();
+    assert_eq!(
+        jobs.stop_running(Duration::from_secs(10)).await,
+        1,
+        "the running job stops"
+    );
+    assert!(
+        stopped_at.elapsed() < Duration::from_secs(10),
+        "the graceful signal must end the step before the grace period"
+    );
+
+    let (steps, result) = collect_job(&mut rx).await;
+    assert_eq!(result.outcome, JobStatus::Cancelled as i32);
+    assert_eq!(steps.len(), 1);
+    assert_eq!(steps[0].status, StepStatus::Cancelled as i32);
+    assert!(
+        !steps[0].possible_stale_lock,
+        "a graceful stop leaves no stale lock"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&path);
 }
 
 /// The body of the test below. It runs in a process that has no console, as a service does.

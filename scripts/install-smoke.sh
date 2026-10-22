@@ -14,6 +14,10 @@
 #                                 back up SOURCE into a local repository below ROOT
 #   install-smoke.sh local-repository ROOT SOURCE OUTSIDE
 #                                 back up into a local repository below ROOT; refuse OUTSIDE
+#   install-smoke.sh slow-job PATH
+#                                 start a test-access job at PATH that waits in restic and records
+#                                 the graceful stop signal; print its id
+#   install-smoke.sh job-state ID print the status and the result code of a job
 #   install-smoke.sh cp-logs      print the log of the control plane
 #
 # The state lives in $SMOKE_DIR. The values are for a throw-away control plane on the loopback
@@ -200,8 +204,7 @@ canary_jobs() {
 }
 
 # One repository with a random password, so a job proves that the service runs restic.
-one_job() {
-	local root="${1:?the repository directory}" agent repository
+one_job() {	local root="${1:?the repository directory}" agent repository
 	agent="$(agent_json | jq -r '.items[0].id')"
 	repository="$(head -c 24 /dev/urandom | base64 |
 		jq -Rc --arg path "$root/repo" --arg agent "$agent" \
@@ -211,6 +214,25 @@ one_job() {
 	run_job "$repository" init
 	run_job "$repository" test-access
 	echo "the job succeeded"
+}
+
+# Starts the test-access job of a new local repository at $1, with a restic that waits ten minutes
+# and records the graceful stop signal beside the repository (FR-AG-10, AC-AG-06). Prints the job
+# id, so the caller can read its state while the job runs.
+slow_job() {
+	local path="${1:?the repository path}" agent repository id
+	agent="$(agent_json | jq -r '.items[0].id')"
+	repository="$(create_local_repository slow "$path" "$agent")"
+	printf '600000\n' >"$path.restichub-sleep"
+	: >"$path.restichub-signal"
+	id="$(start_job "$repository" test-access)"
+	printf '%s\n' "$id"
+}
+
+# Prints the status and the result code of job $1, for example "failed cancelled".
+job_state() {
+	curl -fsS -b "$jar" "$web/api/v1/jobs/$1" |
+		jq -r '"\(.status) \(.result_code // "-")"'
 }
 
 # Prints the id of a new local repository $1 at the path $2 with the maintenance agent $3.
@@ -281,6 +303,8 @@ canary-jobs) shift; canary_jobs "$@" ;;
 one-job) shift; one_job "$@" ;;
 backup) shift; backup "$@" ;;
 local-repository) shift; local_repository "$@" ;;
+slow-job) shift; slow_job "$@" ;;
+job-state) shift; job_state "$@" ;;
 cp-logs) cat "$smoke_dir/cp.log" ;;
 *) echo "unknown command: ${1:-}" >&2; exit 2 ;;
 esac

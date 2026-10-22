@@ -172,6 +172,40 @@ mod trust_mode {
         cleanup(&dir);
     }
 
+    /// FR-AG-10, FR-IN-08: a command that would stop the service refuses while a job runs, because
+    /// the stop cuts restic short and it can keep its repository lock.
+    #[test]
+    fn fr_ag_10_a_command_that_stops_the_service_is_refused_while_a_job_runs() {
+        let dir = config_dir("busy-stop");
+        let fake = Fake::new(&dir, RUNNING);
+        refuse_running_job(&fake, &dir).expect("an idle service is no refusal");
+
+        accept_job(&dir, false);
+        let error = refuse_running_job(&fake, &dir).expect_err("a running job must refuse");
+        let text = format!("{error:#}");
+        assert!(text.starts_with("cannot stop the service: "), "{text}");
+        assert!(
+            text.contains("the job journal shows a job in progress"),
+            "{text}"
+        );
+        assert!(text.contains("then run the command again"), "{text}");
+        assert!(fake.events().is_empty(), "a refusal touches no service");
+
+        let stopped = Fake::new(&dir, STOPPED);
+        refuse_running_job(&stopped, &dir).expect("a stopped service runs no job");
+
+        accept_job(&dir, true);
+        refuse_running_job(&fake, &dir).expect("a finished job is no refusal");
+
+        std::fs::write(dir.join(JOURNAL_FILE), b"not json").expect("write");
+        let error = refuse_running_job(&fake, &dir).expect_err("a bad journal must refuse");
+        assert!(
+            format!("{error:#}").contains("the job journal cannot be read"),
+            "{error:#}"
+        );
+        cleanup(&dir);
+    }
+
     #[test]
     fn fr_hk_08_trust_enable_fails_when_the_agent_does_not_reconnect() {
         let dir = config_dir("no-reconnect");

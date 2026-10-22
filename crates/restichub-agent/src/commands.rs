@@ -196,6 +196,7 @@ fn unsafe_identity(dir: &Path, error: &anyhow::Error) -> UnsafeIdentity {
 pub fn register(options: &RegisterOptions, dir: &Path) -> Result<()> {
     crate::preflight::ensure_elevated()?;
     check_register_input(options, dir)?;
+    refuse_running_job(&HostService, dir)?;
     // Every check and repair that can refuse runs before `--force` removes an identity that another
     // account could change, so a refusal leaves the old files in place (T20, FR-IN-07).
     let program = crate::program_repair::prepare(dir, &HostService)?;
@@ -414,11 +415,13 @@ fn finish_setup(report: Option<&SetupReport>, hostname: Option<&str>) -> Result<
 ///
 /// # Errors
 ///
-/// Returns an error when the process is not elevated, the identity is absent, the service cannot be
-/// installed, or the agent does not connect.
+/// Returns an error when the process is not elevated, a job runs in the service, the identity is
+/// absent, the service cannot be installed, or the agent does not connect.
 pub fn install_service(options: &InstallOptions) -> Result<()> {
     crate::preflight::ensure_elevated()?;
     let dir = crate::paths::config_dir();
+    // Before the repair, which stops the service too (FR-AG-10, FR-IN-08).
+    refuse_running_job(&HostService, &dir)?;
     let program = crate::program_repair::prepare(&dir, &HostService)?;
     prepare_install(
         &dir,
@@ -520,6 +523,10 @@ pub fn ensure_restic(options: &ResticFileOptions) -> Result<ResticBinary> {
 pub fn restic_update(options: &UpdateOptions) -> Result<()> {
     crate::preflight::ensure_elevated()?;
     crate::paths::ensure_config_dir(&crate::paths::config_dir())?;
+    if !options.no_restart {
+        // The restart at the end would stop a job and its restic (FR-AG-10).
+        refuse_running_job(&HostService, &crate::paths::config_dir())?;
+    }
     let installer = Installer::host()?;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -712,6 +719,23 @@ fn busy_reason(dir: &Path) -> Option<String> {
     }
 }
 
+/// Refuses a command that would stop the service while it runs a job, because a stop cuts the job
+/// short and restic can lose its repository lock (FR-AG-10, FR-IN-08).
+///
+/// A stopped service is no refusal: it runs no job, and a journal entry that a crash left behind
+/// must not block the command.
+fn refuse_running_job(manager: &dyn ServiceManager, dir: &Path) -> Result<()> {
+    if !manager.state()?.running {
+        return Ok(());
+    }
+    let Some(reason) = busy_reason(dir) else {
+        return Ok(());
+    };
+    bail!(
+        "cannot stop the service: {reason}; wait for the job to end, or stop the service by hand, then run the command again"
+    )
+}
+
 fn now_timestamp() -> prost_types::Timestamp {
     let now = OffsetDateTime::now_utc();
     prost_types::Timestamp {
@@ -739,6 +763,17 @@ fn check_register_input(options: &RegisterOptions, dir: &Path) -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// Stops and removes the operating system service (FR-IN-08).
+///
+/// # Errors
+///
+/// Returns an error when a job runs in the service, or the service cannot be removed.
+pub fn uninstall_service() -> Result<()> {
+    crate::preflight::ensure_elevated()?;
+    refuse_running_job(&HostService, &crate::paths::config_dir())?;
+    crate::service::uninstall()
 }
 
 /// Prints the identity, restic, the service and the connection without secrets (FR-AG-04).

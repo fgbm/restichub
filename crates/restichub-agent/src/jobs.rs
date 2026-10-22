@@ -77,6 +77,13 @@ use watchdog::StepLimits;
 /// (FR-AG-10, AC-AG-06).
 pub const STOP_GRACE: Duration = Duration::from_secs(30);
 
+/// How long a stopping service waits for its jobs before the process ends (FR-AG-10, AC-AG-06).
+///
+/// The service control manager of Windows stops a service within 30 s by default, so the wait
+/// stays below that bound. A job that still runs then loses its tree to the job object, as a
+/// forced kill does (AC-AG-07).
+pub const STOP_DRAIN: Duration = Duration::from_secs(20);
+
 /// How long past the job deadline the cleanup scripts (`after`, `on_*` and `finally`) may run
 /// (FR-HK-05).
 pub const CLEANUP_GRACE: Duration = Duration::from_secs(10 * 60);
@@ -534,6 +541,39 @@ impl Jobs {
         if let Some(handle) = lock(&self.running).get(job_id) {
             handle.cancel();
         }
+    }
+
+    /// Stops every running job the way a cancel does, so that restic removes its repository lock
+    /// before the service ends, and waits at most `wait` for their results (FR-AG-10, AC-AG-06).
+    ///
+    /// Zero when no job runs.
+    pub async fn stop_running(&self, wait: Duration) -> usize {
+        let running: Vec<String> = lock(&self.running).keys().cloned().collect();
+        if running.is_empty() {
+            return 0;
+        }
+        for job_id in &running {
+            self.cancel(job_id);
+        }
+        tracing::info!(
+            jobs = running.len(),
+            "the agent stops the running jobs before it stops"
+        );
+        let deadline = tokio::time::Instant::now() + wait;
+        while running
+            .iter()
+            .any(|job_id| lock(&self.running).contains_key(job_id))
+        {
+            if tokio::time::Instant::now() >= deadline {
+                tracing::warn!(
+                    jobs = running.len(),
+                    "a job did not stop in time; its restic may keep the repository lock"
+                );
+                break;
+            }
+            tokio::time::sleep(runner::POLL_INTERVAL).await;
+        }
+        running.len()
     }
 
     /// Re-sends the results that the control plane may have missed (ADR-0020).

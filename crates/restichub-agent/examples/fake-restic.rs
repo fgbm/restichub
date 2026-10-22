@@ -15,6 +15,10 @@
 //!   Windows, so a test covers the forced kill of the process tree (FR-AG-10, AC-AG-07). Without
 //!   it the double exits with code 130 on `CTRL_BREAK`.
 //!
+//! - `<location>.restichub-signal` receives one line with the graceful stop signal that the double
+//!   got, so a test proves that the agent stopped restic instead of killing it (FR-AG-10,
+//!   AC-AG-06).
+//!
 //! - `<location>.restichub-kill` makes the double end itself with `SIGKILL` after the sleep, as an
 //!   outside kill does (AC-SC-06, Linux only).
 //!
@@ -47,7 +51,10 @@ fn main() {
     record(&format!("{repository}.restichub-argv"), &args);
     record_credential_names(&format!("{repository}.restichub-env"));
     record_priority(&format!("{repository}.restichub-state"));
-    ignore_interrupt(&format!("{repository}.restichub-ignore"));
+    ignore_interrupt(
+        &format!("{repository}.restichub-ignore"),
+        &format!("{repository}.restichub-signal"),
+    );
     if command == "ls" {
         emit_listing(&format!("{repository}.restichub-ls-count"), &args);
     }
@@ -185,13 +192,32 @@ fn record_priority(path: &str) {
     let _ = path;
 }
 
+/// The file that receives the graceful stop signal. A handler on another thread writes it, so the
+/// path is a process-wide value.
+static SIGNAL_FILE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// Appends the name of the graceful stop signal that this process got.
+fn record_signal(name: &str) {
+    let Some(path) = SIGNAL_FILE.get() else {
+        return;
+    };
+    let opened = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path);
+    if let Ok(mut file) = opened {
+        let _ = writeln!(file, "{name}");
+    }
+}
+
 /// Ignores the interrupt when the marker file asks for it, so only the forced kill stops the double.
 ///
 /// On Windows the double handles `CTRL_BREAK`: it exits with code 130 as restic does, or ignores the
-/// event when the marker asks for it.
+/// event when the marker asks for it. The same handler records the signal in `signal`.
 #[allow(unsafe_code)]
-fn ignore_interrupt(path: &str) {
+fn ignore_interrupt(path: &str, signal: &str) {
     let ignore = std::fs::read_to_string(path).is_ok_and(|value| !value.trim().is_empty());
+    let _ = SIGNAL_FILE.set(signal.to_owned());
     #[cfg(windows)]
     {
         use std::sync::atomic::{AtomicBool, Ordering};
@@ -206,6 +232,7 @@ fn ignore_interrupt(path: &str) {
             if IGNORE.load(Ordering::SeqCst) {
                 return 1;
             }
+            record_signal("ctrl_break");
             std::process::exit(130)
         }
 
@@ -218,8 +245,25 @@ fn ignore_interrupt(path: &str) {
         // SAFETY: `signal` installs the standard ignore handler for SIGINT.
         unsafe { libc::signal(libc::SIGINT, libc::SIG_IGN) };
     }
+    #[cfg(target_os = "linux")]
+    if !ignore {
+        // SAFETY: `signal` installs a plain function that lives for the whole process.
+        unsafe {
+            libc::signal(
+                libc::SIGINT,
+                record_sigint as *const () as libc::sighandler_t,
+            )
+        };
+    }
     #[cfg(not(any(windows, target_os = "linux")))]
     let _ = ignore;
+}
+
+/// Records the graceful stop and exits as restic does after `SIGINT`.
+#[cfg(target_os = "linux")]
+extern "C" fn record_sigint(_signal: libc::c_int) {
+    record_signal("sigint");
+    std::process::exit(130);
 }
 
 /// Waits the duration in the control file, for a test that needs the step to run.

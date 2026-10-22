@@ -238,6 +238,9 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v2
       - name: Build the control plane and the agent
         run: cargo build -p restichub-cp -p restichub-agent -p restichub-canary-scan
+      # The job of the stop below runs a restic that waits, so this job builds the scripted double.
+      - name: Build the fake restic
+        run: cargo build -p restichub-agent --example fake-restic
       # The runner holds PostgreSQL but no container engine. A fresh cluster in a temporary
       # directory does not depend on the version or the credentials of the installed one.
       - name: Start PostgreSQL
@@ -382,6 +385,82 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "install-service exit code $LASTEXITCODE" }
           if ((Get-Service restichub-agent).Status -ne 'Running') { throw 'not running' }
           bash scripts/install-smoke.sh connected $since 60
+      # A stop of the service cuts a job short, and a restic that it kills can keep its repository
+      # lock. Thus install-service refuses while a job runs, and a stop by hand reaches restic as
+      # Ctrl+Break, so restic removes its lock and the job ends cancelled (FR-AG-10, AC-AG-06).
+      - name: install-service refuses while a job runs, and a stop ends the job gracefully (FR-AG-10)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $dir = Join-Path $env:ProgramFiles 'ResticHub\Agent'
+          $agent = Join-Path $dir 'restichub-agent.exe'
+          $restic = Join-Path $dir 'restic.exe'
+          $record = Join-Path $env:ProgramData 'ResticHub\Agent\restic.json'
+          $fake = Join-Path $env:GITHUB_WORKSPACE 'target\debug\examples\fake-restic.exe'
+          if (-not (Test-Path $fake)) { throw "the fake restic is not built: $fake" }
+          # The service checks restic against this record at each start of a step, so the workflow
+          # swaps both files and puts them back at the end.
+          $keep = Join-Path $env:RUNNER_TEMP 'restic-real'
+          New-Item -ItemType Directory -Force $keep | Out-Null
+          Copy-Item $restic (Join-Path $keep 'restic.exe') -Force
+          Copy-Item $record (Join-Path $keep 'restic.json') -Force
+          $repository = Join-Path $env:SMOKE_DIR 'slow-repository'
+          $signal = "$repository.restichub-signal"
+          try {
+            Copy-Item $fake $restic -Force
+            $settings = Get-Content $record -Raw | ConvertFrom-Json
+            $settings.sha256 = (Get-FileHash $restic -Algorithm SHA256).Hash.ToLower()
+            $settings | ConvertTo-Json -Compress | Set-Content $record
+            $id = (bash scripts/install-smoke.sh slow-job $repository | Select-Object -Last 1).Trim()
+            if (-not $id) { throw 'the smoke script printed no job id' }
+            Write-Host "job $id runs at $repository"
+            # The job reaches restic after the control plane sent it, not before.
+            for ($i = 0; $i -lt 120; $i++) {
+              if ((Test-Path "$repository.restichub-argv") -and (Get-Content "$repository.restichub-argv")) { break }
+              Start-Sleep -Seconds 1
+            }
+            if (-not (Test-Path "$repository.restichub-argv")) { throw 'the job did not reach restic' }
+            $state = bash scripts/install-smoke.sh job-state $id
+            Write-Host "job state: $state"
+            if ($state -notmatch '^running') { throw "the job is not running: $state" }
+            $output = (& $agent install-service 2>&1 | Out-String)
+            $code = $LASTEXITCODE
+            Write-Host $output
+            if ($code -eq 0) { throw 'install-service must refuse while a job runs' }
+            if ($output -notmatch 'cannot stop the service') { throw 'the refusal does not name the stop' }
+            if ($output -notmatch 'then run the command again') { throw 'the refusal names no next step' }
+            if ((Get-Service restichub-agent).Status -ne 'Running') { throw 'the refused command stopped the service' }
+            $state = bash scripts/install-smoke.sh job-state $id
+            if ($state -notmatch '^running') { throw "the refused command ended the job: $state" }
+            # The stop of the service must reach restic with the graceful signal, so that restic
+            # removes its repository lock.
+            . scripts/install-smoke-windows.ps1
+            Stop-AgentService
+            if (-not (Test-Path $signal)) { throw "restic recorded no stop signal in $signal" }
+            $recorded = (Get-Content $signal -Raw).Trim()
+            Write-Host "restic recorded: $recorded"
+            if ($recorded -notmatch 'ctrl_break') { throw "restic got no Ctrl+Break, it recorded: $recorded" }
+            $since = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+            Start-Service restichub-agent
+            bash scripts/install-smoke.sh connected $since 60
+            if ($LASTEXITCODE -ne 0) { throw 'not connected' }
+            # The agent stores the result of the stopped job, so the control plane shows it after the
+            # next connection instead of a lost job.
+            for ($i = 0; $i -lt 60; $i++) {
+              $state = bash scripts/install-smoke.sh job-state $id
+              if ($state -notmatch '^(running|sent|queued)') { break }
+              Start-Sleep -Seconds 1
+            }
+            Write-Host "job state after the stop: $state"
+            if ($state -ne 'failed cancelled') { throw "the stopped job ended '$state', not cancelled" }
+          } finally {
+            Copy-Item (Join-Path $keep 'restic.exe') $restic -Force
+            Copy-Item (Join-Path $keep 'restic.json') $record -Force
+            Remove-Item "$repository.restichub-sleep", "$repository.restichub-signal", "$repository.restichub-argv" -Force -ErrorAction SilentlyContinue
+            if ((Get-Service restichub-agent -ErrorAction SilentlyContinue).Status -ne 'Running') { Start-Service restichub-agent -ErrorAction SilentlyContinue }
+            $global:LASTEXITCODE = 0
+          }
       # File Explorer adds an entry for a non-elevated administrator who opens an agent folder.
       # The service removes it at its start and continues (ADR-0048, ADR-0049, AC-AG-15).
       - name: The Explorer access of an administrator does not stop the service (ADR-0048)
