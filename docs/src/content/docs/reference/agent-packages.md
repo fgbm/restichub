@@ -3,7 +3,7 @@ title: Agent packages
 description: The content of the agent package and the verification chain of the restic that the agent downloads.
 ---
 
-The agent package does not hold restic. The package and restic are two separate downloads. The agent downloads and verifies restic itself. Unpack the package in any folder and run `restichub-agent register`. The agent copies itself into its program directory (`/opt/restichub-agent` on Linux, `%ProgramFiles%\ResticHub\Agent` on Windows) and installs the service from there. See [Register an agent](/restichub/getting-started/add-a-host/) for the commands and the layout.
+The agent package does not hold restic. The package and restic are two separate downloads. The agent downloads and verifies restic itself. Unpack the package in any folder and run `register` from that folder. The agent copies itself into its program directory (`/opt/restichub-agent` on Linux, `%ProgramFiles%\ResticHub\Agent` on Windows) and installs the service from there. See [Register an agent](/restichub/getting-started/add-a-host/) for the commands and the layout.
 
 ## Package content
 
@@ -57,14 +57,18 @@ The agent stores the binary in a protected directory:
 - Linux: `/opt/restichub-agent/bin/restic`.
 - Windows: `%ProgramFiles%\ResticHub\Agent\restic.exe`, next to the agent executable. Users can read and run the files. Only SYSTEM and Administrators can write there.
 
-The protected configuration directory holds the file `restic.json` with the version and the SHA-256 of the installed binary. At each start, and before each restic process, the agent checks the binary against this record and refuses a different binary. The control plane cannot set the restic path. If restic is absent or does not match, the service stops with a message that names the next step: run `restichub-agent restic update`.
+The protected configuration directory holds the file `restic.json` with the version and the SHA-256 of the installed binary. At each start, and before each restic process, the agent checks the binary against this record and refuses a different binary. The control plane cannot set the restic path. If restic is absent or does not match, the service stops with a message that names the next step: run `restic update`.
 
 ### Update restic
 
-Run the command as `root` or in an elevated PowerShell:
+Run the command as `root` on Linux or in an elevated PowerShell on Windows. The installer adds no link on `PATH`, so use the full path of the agent:
 
 ```sh
-restichub-agent restic update
+sudo /opt/restichub-agent/bin/restichub-agent restic update
+```
+
+```powershell
+& "$env:ProgramFiles\ResticHub\Agent\restichub-agent.exe" restic update
 ```
 
 The command downloads the latest release and verifies it. It runs the new binary with `version`. Only then does it replace the old binary with one rename. The old binary stays in the same directory as `restic-previous`. If a step fails, the old binary and the old record stay as they were. The service reads the record before each restic process, so the next job uses the new binary. If a service is installed, the command restarts it. Use `--no-restart` to restart it yourself later. On Windows the replacement fails while the service runs the binary. Then stop the service, run the command again and start the service.
@@ -84,7 +88,7 @@ A host without access to GitHub uses files that you copied from another computer
 Do not rename the archive, because its name gives the version. Then run any of the commands `register`, `install-service` or `restic update` with the options:
 
 ```sh
-restichub-agent restic update \
+./restichub-agent restic update \
   --restic-archive ./restic_0.19.1_linux_amd64.bz2 \
   --restic-sums ./SHA256SUMS \
   --restic-sums-sig ./SHA256SUMS.asc
@@ -96,6 +100,6 @@ The agent verifies these files in the same way as a download.
 
 The download honours `HTTPS_PROXY` and `NO_PROXY` of the process that runs the command. The proxy must be an `http://` URL, for example `http://proxy.example:3128`. The agent opens a `CONNECT` tunnel through it, and the TLS session and all checks stay between the agent and GitHub. A proxy with a user name and a password uses `http://user:password@proxy.example:3128`. Write a special character of the user name or the password as a percent escape, for example `%40` for `@`. An IPv6 proxy address uses brackets, for example `http://[2001:db8::1]:3128`.
 
-`sudo` removes these variables. Keep them with `sudo --preserve-env=HTTPS_PROXY,NO_PROXY restichub-agent restic update`.
+`sudo` removes these variables. Keep them with `sudo --preserve-env=HTTPS_PROXY,NO_PROXY ./restichub-agent restic update`.
 
 GitHub limits the number of requests without a token. If GitHub answers with a rate limit, the agent says so. Try again later or use the offline files.
