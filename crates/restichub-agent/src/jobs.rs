@@ -41,8 +41,9 @@ use anyhow::{Context as _, Result};
 use prost_types::Timestamp;
 use restichub_compiler::ValidatedJob;
 use restichub_proto::agent::v1::{
-    AgentMessage, JobAck, JobRejected, JobResult, JobStatus, RejectReason, ScriptInterpreter,
-    ServerScriptsState, SignedJob, Step, StepResult, StepStatus, agent_message, step, step_result,
+    AgentMessage, ErrorDetail, JobAck, JobRejected, JobResult, JobStatus, RejectReason,
+    ScriptInterpreter, ServerScriptsState, SignedJob, Step, StepResult, StepStatus, agent_message,
+    step, step_result,
 };
 use restichub_proto::signing::{
     Admission, Expected, JobJournal as _, JournalState, KeyRing, Rejection, admit, verify_job,
@@ -64,6 +65,7 @@ mod outcome;
 mod phases;
 mod runner;
 mod spooling;
+mod supervisor;
 mod watchdog;
 
 use log::JobLog;
@@ -155,6 +157,16 @@ pub struct Jobs {
     /// Wakes the drain task when a chunk waits in the spool.
     log_wake: Arc<tokio::sync::Notify>,
     log_drain: Arc<Mutex<Option<tokio::task::AbortHandle>>>,
+    /// Makes the job task panic right after the child of a step starts, to cover the loss of a job
+    /// task.
+    #[cfg(feature = "test-util")]
+    panic_after_spawn: bool,
+    /// Makes the job task panic once, right after it stores the result.
+    #[cfg(feature = "test-util")]
+    panic_after_result: Arc<std::sync::atomic::AtomicBool>,
+    /// Cancels the job task right after it starts, the way the shutdown of the runtime does.
+    #[cfg(feature = "test-util")]
+    abort_job_task: bool,
 }
 
 impl Jobs {
@@ -202,7 +214,47 @@ impl Jobs {
             log_mode: Arc::new(AtomicU8::new(LogMode::Direct as u8)),
             log_wake: Arc::new(tokio::sync::Notify::new()),
             log_drain: Arc::new(Mutex::new(None)),
+            #[cfg(feature = "test-util")]
+            panic_after_spawn: false,
+            #[cfg(feature = "test-util")]
+            panic_after_result: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            #[cfg(feature = "test-util")]
+            abort_job_task: false,
         })
+    }
+
+    /// Makes the job task panic while the child of a step runs (FR-AG-09, FR-AG-10).
+    #[cfg(feature = "test-util")]
+    #[must_use]
+    pub fn with_panic_after_spawn(mut self) -> Self {
+        self.panic_after_spawn = true;
+        self
+    }
+
+    /// Cancels the job task right after it starts (FR-AG-09, ADR-0020).
+    #[cfg(feature = "test-util")]
+    #[must_use]
+    pub fn with_abort_job_task(mut self) -> Self {
+        self.abort_job_task = true;
+        self
+    }
+
+    /// Makes the job task panic once, after it stored the result (FR-AG-09, ADR-0020).
+    #[cfg(feature = "test-util")]
+    #[must_use]
+    pub fn with_panic_after_result(self) -> Self {
+        self.panic_after_result
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        self
+    }
+
+    /// Panics when a test asked for it, after the child had time to start.
+    #[cfg(feature = "test-util")]
+    async fn panic_if_asked(&self) {
+        if self.panic_after_spawn {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            panic!("the job task panics on purpose");
+        }
     }
 
     /// Replaces the log spool, for a test that needs a small cap (FR-LG-07).
@@ -404,7 +456,7 @@ impl Jobs {
                 if self.send(ack(job_id.clone())).await {
                     let jobs = self.clone();
                     tokio::spawn(async move {
-                        jobs.execute(validated, cancel).await;
+                        jobs.run_supervised(validated, cancel).await;
                     });
                 } else {
                     // The stream dropped after the admission; the control plane delivers the job
@@ -431,7 +483,8 @@ impl Jobs {
                 JournalState::Completed(result) => return Some(Known::Stored(result)),
                 _ if running.contains_key(&job.job_id) => return Some(Known::Running),
                 JournalState::InProgress if runs_programs(job) => {
-                    let result = interrupted_result(job);
+                    let steps_total = u32::try_from(job.steps.len()).unwrap_or(u32::MAX);
+                    let result = failed_result(&job.job_id, steps_total, interrupted_error());
                     journal.record_completed(&job.job_id, result.clone());
                     (result, journal.snapshot())
                 }
@@ -969,6 +1022,12 @@ impl Jobs {
             steps: step_results.iter().map(compact).collect(),
             log_tail: log.tail(),
         };
+        self.finish(result).await;
+    }
+
+    /// Stores the final result, frees the slot of the job and sends the result (ADR-0020).
+    async fn finish(&self, result: JobResult) {
+        let job_id = result.job_id.clone();
         // The result is durable before the job leaves `running`, so a redelivery in between gets the
         // acknowledgement and a later one gets the stored result, never a second run (ADR-0020).
         let snapshot = {
@@ -985,6 +1044,13 @@ impl Jobs {
             journal.prune(now);
             journal.snapshot()
         };
+        #[cfg(feature = "test-util")]
+        assert!(
+            !self
+                .panic_after_result
+                .swap(false, std::sync::atomic::Ordering::SeqCst),
+            "the job task panics on purpose"
+        );
         if let Err(error) = self.write_journal(snapshot).await {
             tracing::warn!(%error, "cannot write the job journal");
         }
@@ -1026,9 +1092,21 @@ impl Jobs {
         started_at: Timestamp,
         finished_at: Timestamp,
     ) -> StepResult {
+        self.send_step_result_of(job_id, &step.step_id, outcome, started_at, finished_at)
+            .await
+    }
+
+    async fn send_step_result_of(
+        &self,
+        job_id: &str,
+        step_id: &str,
+        outcome: &StepOutcome,
+        started_at: Timestamp,
+        finished_at: Timestamp,
+    ) -> StepResult {
         let result = StepResult {
             job_id: job_id.to_owned(),
-            step_id: step.step_id.clone(),
+            step_id: step_id.to_owned(),
             status: outcome.status as i32,
             exit_code: outcome.exit_code,
             started_at: Some(started_at),
@@ -1090,16 +1168,16 @@ fn runs_programs(job: &restichub_proto::agent::v1::Job) -> bool {
         .any(|step| matches!(step.kind, Some(step::Kind::Script(_))))
 }
 
-/// A restart cut the job short, so no step result exists for it (ADR-0037).
-fn interrupted_result(job: &restichub_proto::agent::v1::Job) -> JobResult {
+/// The final result of a job that failed without a step result.
+fn failed_result(job_id: &str, steps_total: u32, error: ErrorDetail) -> JobResult {
     JobResult {
-        job_id: job.job_id.clone(),
+        job_id: job_id.to_owned(),
         status: StepStatus::Failed as i32,
-        steps_total: u32::try_from(job.steps.len()).unwrap_or(u32::MAX),
+        steps_total,
         steps_succeeded: 0,
         steps_failed: 0,
         outcome: JobStatus::Failed as i32,
-        error: Some(interrupted_error()),
+        error: Some(error),
         steps: Vec::new(),
         log_tail: Vec::new(),
     }

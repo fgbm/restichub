@@ -803,6 +803,7 @@ export const ru: Record<MessageKey, string> = {
 	'jobs.reason.cancelled': 'Задание отменено.',
 	'jobs.reason.succeeded_with_warnings': 'Завершено с предупреждениями.',
 	'jobs.errorCode.interrupted': 'прервано перезапуском агента',
+	'jobs.errorCode.agent_internal_error': 'внутренняя ошибка агента',
 	'jobs.errorCode.step_failed': 'ошибка restic',
 	'jobs.errorCode.step_not_started': 'Шаг не начался',
 	'jobs.errorCode.wrong_password': 'неверный пароль или ключи',
@@ -851,6 +852,8 @@ export const ru: Record<MessageKey, string> = {
 		'Параметру {option} нужен restic {required}. На агенте restic {installed}.',
 	'jobs.incompatible.version':
 		'На агенте restic {installed}. ResticHub нужен restic {required} или новее.',
+	'jobs.reason.agent_internal_error':
+		'Агент остановил задание из-за внутренней ошибки. Прочитайте журнал агента.',
 	'jobs.reason.interrupted': 'Прервано: агент перезапустился во время скриптов',
 	'jobs.reason.timed_out': 'Задание выполнялось дольше предельной длительности.',
 	'jobs.reason.stalled':

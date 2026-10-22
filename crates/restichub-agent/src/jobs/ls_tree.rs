@@ -11,13 +11,13 @@ use restichub_proto::agent::v1::{LogStream, Step};
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
+use super::Jobs;
 use super::command_text::command_line_text;
 use super::log::JobLog;
 use super::runner::{
     CancelHandle, DRAIN_TIMEOUT, POLL_INTERVAL, interrupt, kill_tree, priority_of, reap,
 };
 use super::watchdog::{StepLimits, Watchdog};
-use super::{Jobs, lock};
 use crate::output::{DOCUMENT_QUEUE, Line, MAX_DOCUMENT, MAX_LINE, Pipe, spawn_reader};
 use crate::scrub::Scrubber;
 
@@ -63,8 +63,8 @@ impl Jobs {
             )
         });
         drop(line);
-        let mut child = match spawned {
-            Ok(child) => child,
+        match spawned {
+            Ok(child) => cancel.adopt(child, step_id, true),
             Err(error) => {
                 let detail = format!("{error:#}");
                 tracing::warn!(%detail, "cannot start restic for the link targets");
@@ -75,8 +75,8 @@ impl Jobs {
                 );
                 return None;
             }
-        };
-        let (stdout, stderr) = child.take_output();
+        }
+        let (stdout, stderr) = cancel.take_output();
         let (tx, mut lines) = mpsc::channel::<Line>(DOCUMENT_QUEUE);
         if let Some(stdout) = stdout {
             spawn_reader(stdout, Pipe::Stdout, MAX_DOCUMENT, tx.clone());
@@ -85,7 +85,6 @@ impl Jobs {
             spawn_reader(stderr, Pipe::Stderr, MAX_LINE, tx.clone());
         }
         drop(tx);
-        *lock(&cancel.child) = Some(child);
 
         let started = Instant::now();
         let mut watchdog = Watchdog::new(limits.stall, started);

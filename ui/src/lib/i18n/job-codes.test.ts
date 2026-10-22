@@ -48,6 +48,7 @@ const STEP_STATUS: Record<Schemas['StepStatus'], true> = {
 // The codes that the agent and the control plane write into `result_message`.
 const RESULT_MESSAGES = [
 	'interrupted',
+	'agent_internal_error',
 	'step_failed',
 	'step_not_started',
 	'wrong_password',

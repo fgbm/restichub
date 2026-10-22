@@ -546,3 +546,14 @@ fn fr_rp_08_the_agent_rejects_a_forget_without_a_tag_filter() {
         ));
     }
 }
+
+#[test]
+fn fr_ag_09_the_panic_text_of_a_job_has_its_secrets_masked() {
+    let validated = ValidatedJob::new(job("agent-1", "tenant-1", 900, 2_000, vec![test_access()]))
+        .expect("a valid job");
+    let payload: Box<dyn std::any::Any + Send> =
+        Box::new(format!("cannot parse the line of {}", "topsecret"));
+    let text = super::supervisor::scrubbed_panic(&validated, payload.as_ref());
+    assert!(!text.contains("topsecret"), "{text}");
+    assert!(text.contains("cannot parse the line"), "{text}");
+}
