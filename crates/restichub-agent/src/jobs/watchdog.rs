@@ -25,6 +25,20 @@ const STALL_VARIABLE: &str = "RESTICHUB_JOB_STALL_TIMEOUT_SECS";
 /// `check` and `prune` print nothing for long periods while they work.
 const LONG_STALL: Duration = Duration::from_secs(6 * 60 * 60);
 
+/// The largest pack file that restic writes. `--pack-size` refuses more than 128 MiB, and the
+/// command of a job sets no pack size, so a pack can reach this size.
+const MAX_PACK_BYTES: u64 = 128 * 1024 * 1024;
+
+/// How many packs the raised window covers. A backup reads the files into packs and restic reports
+/// `bytes_done` again only when an upload ends, so the window must hold a whole pack at the limit;
+/// two packs leave room for one upload that shares the limit with the others in flight.
+const UPLOAD_PACKS: u64 = 2;
+
+/// The verify phase of a restore prints nothing on either stream, and a healthy verification of a
+/// large target reads for hours. The agent cannot tell a slow disk from a hung one there, so the
+/// phase gets a window of its own, longer than the 6 hours of `check` and `prune` (ADR-0051).
+const VERIFY_STALL: Duration = Duration::from_secs(24 * 60 * 60);
+
 /// The limits of one step: the optional maximum duration and the stall timeout (ADR-0039).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct StepLimits {
@@ -46,8 +60,27 @@ impl StepLimits {
         } else {
             default_stall(step, std::env::var(STALL_VARIABLE).ok().as_deref())
         };
-        Self { max, stall }
+        Self {
+            max,
+            stall: stall.max(upload_stall(step)),
+        }
     }
+}
+
+/// The window that the upload limit of a `backup` step needs, or zero without a limit.
+///
+/// The limit is a rate at which restic cannot report progress while a pack uploads, so a window
+/// that is shorter than one pack at that rate stops a healthy backup as stalled (FR-AG-05,
+/// FR-AG-15).
+fn upload_stall(step: &Step) -> Duration {
+    let Some(step::Kind::Backup(backup)) = &step.kind else {
+        return Duration::ZERO;
+    };
+    let bytes_per_second = backup.limit_upload_kib.saturating_mul(1024);
+    if bytes_per_second == 0 {
+        return Duration::ZERO;
+    }
+    Duration::from_secs(MAX_PACK_BYTES.saturating_mul(UPLOAD_PACKS) / bytes_per_second)
 }
 
 /// The default of a job that carries no stall timeout: the environment variable, else the kind default.
@@ -133,10 +166,10 @@ impl Watchdog {
     /// The verify phase of a restore starts: it prints nothing until it ends.
     ///
     /// restic prints the last status and the summary before it verifies the files and prints
-    /// nothing while it verifies (`cmd/restore.go`). The step keeps the long window of `check` and
-    /// `prune`, so a verify over a target that hangs still stops the step (ADR-0051).
+    /// nothing while it verifies (`cmd/restore.go`). The step keeps the longer of its own window
+    /// and 24 hours, so a verification stops the step only after that time (ADR-0051).
     pub(super) fn verify(&mut self, now: Instant) {
-        self.stall = self.stall.max(LONG_STALL);
+        self.stall = self.stall.max(VERIFY_STALL);
         self.last_progress = now;
     }
 
@@ -147,7 +180,7 @@ impl Watchdog {
 
 #[cfg(test)]
 mod tests {
-    use restichub_proto::agent::v1::StepProgress;
+    use restichub_proto::agent::v1::{BackupStep, StepProgress};
 
     use super::*;
 
@@ -286,28 +319,94 @@ mod tests {
         }
     }
 
-    /// The verify phase of a restore prints nothing until it ends, so the step waits the long
-    /// window of `check` and `prune` there (ADR-0051).
+    /// The verify phase of a restore prints nothing until it ends, so the step waits 24 hours
+    /// there (ADR-0051).
     #[test]
-    fn ac_ag_12_the_verify_phase_of_a_restore_has_the_long_window() {
+    fn ac_ag_12_the_verify_phase_of_a_restore_has_a_window_of_24_hours() {
         let start = Instant::now();
         let mut watchdog = Watchdog::new(Duration::from_secs(60), start);
         watchdog.status(&status(1000, "file"), start);
         watchdog.verify(start);
-        let almost = start + LONG_STALL - Duration::from_secs(1);
+        let almost = start + VERIFY_STALL - Duration::from_secs(1);
         assert!(!watchdog.is_stalled(almost), "the verify phase still runs");
-        assert!(watchdog.is_stalled(start + LONG_STALL));
+        assert!(watchdog.is_stalled(start + VERIFY_STALL));
+        assert_eq!(VERIFY_STALL, Duration::from_secs(24 * 60 * 60));
     }
 
     /// A step that already has a longer window keeps it: the verify phase only raises the window.
     #[test]
     fn ac_ag_12_the_verify_phase_keeps_a_longer_stall_timeout() {
         let start = Instant::now();
-        let longer = LONG_STALL + Duration::from_secs(3600);
+        let longer = VERIFY_STALL + Duration::from_secs(3600);
         let mut watchdog = Watchdog::new(longer, start);
         watchdog.verify(start);
-        assert!(!watchdog.is_stalled(start + LONG_STALL));
+        assert!(!watchdog.is_stalled(start + VERIFY_STALL));
         assert!(watchdog.is_stalled(start + longer));
+    }
+
+    /// A backup at a narrow link reports no new `bytes_done` while it uploads a pack. The window
+    /// must hold a whole pack at the limit, or the backup stops as stalled (FR-AG-15).
+    #[test]
+    fn ac_ag_12_an_upload_limit_widens_the_stall_window_of_a_backup() {
+        let limited = |limit_upload_kib| Step {
+            kind: Some(step::Kind::Backup(BackupStep {
+                limit_upload_kib,
+                ..Default::default()
+            })),
+            ..Step::default()
+        };
+        assert_eq!(upload_stall(&limited(0)), Duration::ZERO);
+        // 50 KiB/s: 87 minutes, longer than the 5-minute window of the profile and than the
+        // 26 minutes that one pack of the default size of 16 MiB takes.
+        assert_eq!(
+            upload_stall(&limited(50)),
+            Duration::from_secs(2 * 128 * 1024 * 1024 / (50 * 1024))
+        );
+        assert!(upload_stall(&limited(50)) > Duration::from_secs(44 * 60));
+        // 500 KiB/s: 8 minutes, longer than the 171 s that restic held at that limit.
+        assert!(upload_stall(&limited(500)) > Duration::from_secs(171));
+        // A rate that uploads the packs faster than the window does not change the window.
+        assert_eq!(
+            StepLimits::for_step(&limited(1_000_000), None, 3600).stall,
+            Duration::from_secs(3600)
+        );
+        // The raised window wins over a short window of the job.
+        assert_eq!(
+            StepLimits::for_step(&limited(50), None, 300).stall,
+            upload_stall(&limited(50))
+        );
+        // The agent takes the maximum, so a longer window of the job stays.
+        assert_eq!(
+            StepLimits::for_step(&limited(50), None, 7200).stall,
+            Duration::from_secs(7200)
+        );
+        // A step without an upload limit keeps the window of its job.
+        let restore = Step {
+            kind: Some(step::Kind::Restore(Default::default())),
+            ..Step::default()
+        };
+        assert_eq!(upload_stall(&restore), Duration::ZERO);
+    }
+
+    /// A watchdog with the raised window of a backup at 50 KiB/s does not stop at the 302 s that
+    /// the lab measured with a 5-minute window while restic uploaded its packs.
+    #[test]
+    fn ac_ag_12_a_backup_at_50_kibs_is_not_stalled_during_a_pack_upload() {
+        let start = Instant::now();
+        let step = Step {
+            kind: Some(step::Kind::Backup(BackupStep {
+                limit_upload_kib: 50,
+                ..Default::default()
+            })),
+            ..Step::default()
+        };
+        let limits = StepLimits::for_step(&step, None, 300);
+        let mut watchdog = Watchdog::new(limits.stall, start);
+        watchdog.status(&status(59_000, "file"), start);
+        let lab = start + Duration::from_secs(302);
+        watchdog.status(&status(59_000, "file"), lab);
+        assert!(!watchdog.is_stalled(lab), "the upload still runs");
+        assert!(watchdog.is_stalled(start + limits.stall));
     }
 
     #[test]

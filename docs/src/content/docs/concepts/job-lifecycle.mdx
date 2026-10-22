@@ -34,7 +34,7 @@ The dispatcher builds each job when it sends the job for the first time. It comp
 
 A job carries the secrets of its own repository only. The control plane reads each secret when it sends the job and writes a `secret_delivered` audit record. The record holds no secret value.
 
-The control plane sends `--retry-lock` with a `backup`, `forget`, `prune` and `check` step. The value is 4 minutes. A `restore`, `snapshots`, `ls` and `unlock` step goes without it. Four minutes is shorter than the shortest stall timeout of a profile. restic then ends a held lock with exit code 11 before the agent stops the step as stalled, and the control plane retries the job.
+The control plane sends `--retry-lock` with a `backup`, `forget`, `prune` and `check` step. The value is 4 minutes. The other steps go without the flag: `init`, `snapshots`, `ls`, `restore`, `unlock`, `unlock_all`, `stats`, `test_access` and `script`. Four minutes is shorter than the shortest stall timeout of a profile. restic then ends a held lock with exit code 11 before the agent stops the step as stalled, and the control plane retries the job.
 
 The control plane signs each job. The agent checks the signature before it runs the job. The control plane keeps the signed job, encrypted with the key of the tenant, until the job reaches a final state.
 
@@ -82,7 +82,9 @@ A job in the queue has an acceptance window. A manual job has a window of one ho
 
 The agent watches the progress of each step. restic makes progress when the number of bytes or files changes. It also makes progress when the total number of bytes or files changes. A changed list of current files and a new line of text are progress too. A repeated status line is not progress. At a `restore` step, the number of skipped files or bytes is progress too. restic reads and hashes the files that the target already holds, and it counts them there. At a `backup` or a `restore` step, a line on the standard error is not progress. restic reports a warning about one file or a retry of a repository that it cannot reach there. Such a line says nothing about the work. The other steps print their only output on the standard error, so a line there is progress.
 
-A `restore` step that verifies its files prints its last status line and its summary before the verification. It prints no line while it verifies. The agent gives this phase the stall timeout of `check` and `prune`: 6 hours from the summary line. A verification that reads no file for 6 hours stops the step as stalled. A cancel also stops it.
+A `restore` step that verifies its files prints its last status line and its summary before the verification. It prints no line while it verifies, so the agent does not see the files that restic reads. The agent gives this phase 24 hours from the summary line, or the longer stall timeout of the step. It stops any verification that runs longer as stalled, also one over a healthy target. A cancel also stops it. A verification that needs more than 24 hours needs a larger value of `RESTICHUB_JOB_STALL_TIMEOUT_SECS` on the agent, up to 7 days. A verification that runs for a week or longer is a planning problem: split the restore, or drop the verification.
+
+When its uploads are full, restic stops reading the files. A `backup` step with an upload limit therefore reports no new number of bytes while it uploads a pack. The agent raises the stall timeout of such a step to at least twice the time to upload one pack at that limit. A pack holds 128 MiB at most, the largest size that restic writes. At 50 KiB/s the raised value is 87 minutes, and at 500 KiB/s it is 9 minutes. The agent keeps a longer stall timeout of the job. The job detail shows the stall timeout of the profile, which is shorter than the raised value.
 
 The agent stops a step that makes no progress for the stall timeout. It stops the step in two stages: first the graceful signal, then the forced stop of the process tree after the grace period. The job fails with the reason `stalled`.
 
@@ -90,11 +92,12 @@ The agent stops a step that makes no progress for the stall timeout. It stops th
 |---|---|
 | `backup`, `restore` and the short steps | 60 minutes |
 | `check`, `prune` | 6 hours, also inside a backup job |
-| The verify phase of a `restore` | 6 hours from the summary line |
+| The verify phase of a `restore` | 24 hours from the summary line |
+| A `backup` with an upload limit | At least twice the time to upload a pack of 128 MiB at the limit |
 
-A profile sets the stall timeout for its jobs. The setting is "Stop after no progress (minutes)" in the section "Run limits" of the profile. The value is from 5 to 10080 minutes. A `check` or `prune` step in the job waits for the longer of this value and 6 hours. A status line that repeats the same content is not progress.
+A profile sets the stall timeout for its jobs. The setting is "Stop after no progress (minutes)" in the section "Run limits" of the profile. The value is from 5 to 10080 minutes. A `check` or `prune` step in the job waits for the longer of this value and 6 hours. A backup with an upload limit waits for the longer of this value and the raised value above. A status line that repeats the same content is not progress.
 
-A `restore` job has no profile, so it carries no stall timeout and no maximum duration. The agent takes the stall timeout from its variable `RESTICHUB_JOB_STALL_TIMEOUT_SECS`, or the default of a restore. The card of the job says that the value is the default of the agent, without a number.
+A `restore` job has no profile, so it carries no stall timeout and no maximum duration. The agent takes the stall timeout from its variable `RESTICHUB_JOB_STALL_TIMEOUT_SECS`, or the default of a restore. The card of the job says that the value is the default of the agent, without a number. A value above 24 hours also gives the verify phase a longer window.
 
 ### Maximum duration
 
@@ -108,7 +111,7 @@ An operator can change the defaults. The values are in seconds. The page [Enviro
 |---|---|---|
 | `RESTICHUB_JOB_STALL_TIMEOUT_SECS` | control plane | The stall timeout of a new profile. From 300 to 604800. |
 | `RESTICHUB_JOB_MAX_DURATION_SECS` | control plane | The maximum duration of a new profile. From 0 to 2592000. Zero means no limit. |
-| `RESTICHUB_JOB_STALL_TIMEOUT_SECS` | agent | The stall timeout of a job that carries none, for all step kinds. From 300 to 604800. |
+| `RESTICHUB_JOB_STALL_TIMEOUT_SECS` | agent | The stall timeout of a job that carries none, for all step kinds. From 300 to 604800. The verify phase of a `restore` waits for the longer of this value and 24 hours. |
 | `RESTICHUB_JOB_HARD_CEILING_SECS` | control plane | The time after which the control plane fails a running job whatever its limits. The default is 31 days (2678400). A smaller value than 3600 becomes 3600. |
 
 For the stall timeout and the maximum duration, a value that is not a number, or is out of range, is ignored. The control plane rounds the value up to whole minutes. A profile that exists keeps its own values.
