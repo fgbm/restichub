@@ -1548,7 +1548,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Readiness probe. The function checks the database. */
+        /** Readiness probe. The function checks the database and the background tasks. */
         get: operations["readyz"];
         put?: never;
         post?: never;
