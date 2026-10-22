@@ -196,9 +196,9 @@ A host that you registered first with 0.1.0-rc.2 or a later release on a clean c
 
 `install-service` writes the systemd unit again and removes a change that you made by hand. The new unit has a system call filter (`SystemCallFilter=@system-service`) and hides the other processes (`ProtectProc=invisible`). A system call outside the filter fails with the error `EPERM`. Thus a server script cannot use a debug tool such as `strace` or `perf`. See [Server scripts](/restichub/guides/scripts/).
 
-The new unit also does not set `RestrictSUIDSGID`. A restore of a file with a setuid or setgid mode failed on a host with the older unit. Such a restore wrote the file without the setuid or setgid bit. Do the restore again after you run `install-service`. Then the restore keeps the mode.
+The new unit also does not set `RestrictSUIDSGID`. A restore of a file with a setuid or setgid mode failed on a host with the older unit. Such a restore wrote the file without the setuid or setgid bit. Do the restore again after you run `install-service`. In "Existing files", select "Replace every file" or "Replace a file that differs", or restore into an empty directory. With "Keep every existing file" or "Replace a file that is older than the snapshot", restic skips the file that the failed restore left. The job then ends with the status `succeeded`, but the file has no setuid or setgid bit.
 
-The new unit also keeps the `CAP_SETFCAP` capability. A restore of a file with a file capability, for example `ping`, failed on a host with the older unit. The job ended with the status failed. Run `install-service` from the new package. Then do the restore again.
+The new unit also keeps the `CAP_SETFCAP` capability. A restore of a file with a file capability, for example `ping`, failed on a host with the older unit. The job ended with the status `failed`. Run `install-service` from the new package. Then do the restore again. In "Existing files", select "Replace every file" or "Replace a file that differs", or restore into an empty directory. With "Keep every existing file" or "Replace a file that is older than the snapshot", restic skips the file that the failed restore left. The job then ends with the status `succeeded`, but the file has no file capability.
 
 ### Local repositories on Linux
 
