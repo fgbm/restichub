@@ -17,7 +17,8 @@ if (!('ResizeObserver' in globalThis)) {
 // bits-ui takes the scroll lock of a closed layer off the body in a 24 ms timer. A test that starts
 // in that window clicks on a body with `pointer-events: none`, so each test waits for the unlock.
 async function bodyUnlocked(): Promise<void> {
-	await waitFor(() => expect(document.body.style.pointerEvents).toBe(''));
+	if (document.body.style.pointerEvents === '') return;
+	await waitFor(() => expect(document.body.style.pointerEvents).toBe(''), { interval: 5 });
 }
 
 afterEach(async () => {
