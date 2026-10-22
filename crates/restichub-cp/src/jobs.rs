@@ -702,7 +702,8 @@ pub async fn handle_job_result(
             return WriteOutcome::Transient;
         }
     };
-    // `handle_job_result_data` runs first for the same message and has audited the refusal.
+    // `handle_job_result_data` runs first for the same message: it audits the job of another
+    // agent, and a repeat of a refused job never reaches this call.
     if job.agent_id != agent {
         return WriteOutcome::Ignored;
     }

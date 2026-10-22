@@ -1180,6 +1180,9 @@ async fn handle_message(
                 .await;
         }
         Some(agent_message::Payload::JobResult(result)) => {
+            if refused_before(state, identity.agent, &result.job_id) {
+                return false;
+            }
             // A result that the database did not take closes the stream, so the agent sends its
             // stored results again after the reconnect (ADR-0020, FR-PR-07).
             let stored = crate::job_data::handle_job_result_data(
@@ -1197,6 +1200,9 @@ async fn handle_message(
                 == WriteOutcome::Transient;
         }
         Some(agent_message::Payload::StepResult(result)) => {
+            if refused_before(state, identity.agent, &result.job_id) {
+                return false;
+            }
             let stored = crate::job_data::handle_step_result(
                 state,
                 identity.tenant,
@@ -1231,6 +1237,15 @@ async fn handle_message(
         None => {}
     }
     false
+}
+
+/// Whether the control plane refused a message for this job and still remembers the refusal.
+///
+/// The handlers write nothing for a refused job, so a repeat of a result stays away from the
+/// database (AC-PR-05).
+fn refused_before(state: &AppState, agent: AgentId, job_id: &str) -> bool {
+    crate::jobs::parse_job_id_value(job_id)
+        .is_some_and(|job_id| crate::job_data::refused_before(state, agent, job_id))
 }
 
 fn reject_certificate(tx: &mpsc::Sender<ControlMessage>, reason: CertificateRejectReason) {
