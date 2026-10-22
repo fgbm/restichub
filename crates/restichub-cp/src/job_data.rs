@@ -105,7 +105,7 @@ pub struct ProgressUpdate {
 
 /// Whether the control plane refused a message for this job and still remembers the refusal, so
 /// the repeat must not reach the database (AC-PR-05).
-fn refused_before(state: &AppState, agent: AgentId, job: JobId) -> bool {
+pub(crate) fn refused_before(state: &AppState, agent: AgentId, job: JobId) -> bool {
     state
         .progress_throttle()
         .refused((agent, job), Instant::now())

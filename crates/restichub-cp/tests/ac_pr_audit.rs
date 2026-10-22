@@ -178,6 +178,20 @@ async fn ac_pr_05_a_message_for_the_job_of_another_agent_is_audited() {
     env.db.cleanup().await;
 }
 
+/// The rolled-back transactions of the database of the test. A message that reaches no handler
+/// opens no transaction, so it changes no counter.
+async fn rollbacks(env: &Env) -> i64 {
+    let mut tx = env.scoped().await;
+    let count = sqlx::query_scalar::<_, i64>(
+        "SELECT xact_rollback FROM pg_stat_database WHERE datname = current_database()",
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .expect("cannot read the transaction counter");
+    tx.commit().await.expect("cannot end the read");
+    count
+}
+
 fn rejection(job_id: String) -> restichub_proto::agent::v1::AgentMessage {
     restichub_proto::agent::v1::AgentMessage {
         payload: Some(agent_message::Payload::JobRejected(JobRejected {
@@ -317,6 +331,66 @@ async fn ac_pr_05_a_message_for_a_job_that_is_not_sent_is_audited() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].object_id, Some(queued));
     assert_eq!(rows[0].diff["new"]["reason"], "job_not_sent");
+    assert_eq!(rows[0].diff["new"]["message"], "step_progress");
+    env.db.cleanup().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn ac_pr_05_a_repeated_result_for_a_refused_job_reads_the_job_once() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let agent = env.connect_agent("repeat-result-host").await;
+    let unknown = Uuid::new_v4().to_string();
+    // The first message for the job is refused, and the control plane remembers the refusal.
+    agent
+        .tx
+        .send(AgentMessage {
+            payload: Some(agent_message::Payload::StepProgress(StepProgress {
+                job_id: unknown.clone(),
+                step_id: "backup".to_owned(),
+                files_done: 1,
+                ..StepProgress::default()
+            })),
+        })
+        .await
+        .expect("cannot send the progress");
+    assert_eq!(wait_for_rows(&env, "agent_message_refused").await.len(), 1);
+
+    let before = rollbacks(&env).await;
+    for _ in 0..10 {
+        agent
+            .result(
+                &unknown,
+                restichub_proto::agent::v1::JobStatus::Failed,
+                restichub_proto::agent::v1::StepStatus::Failed,
+            )
+            .await;
+        agent.stale_lock_step(&unknown).await;
+        agent.lock_held(&unknown).await;
+    }
+    // The stream handles the messages in order, so the audit of this rejection shows that the
+    // repeats are behind it.
+    agent
+        .tx
+        .send(rejection(Uuid::new_v4().to_string()))
+        .await
+        .expect("cannot send the rejection");
+    assert_eq!(wait_for_rows(&env, "job_rejected").await.len(), 1);
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let transactions = rollbacks(&env).await - before;
+    assert!(
+        transactions <= 2,
+        "the repeated results of a refused job opened {transactions} transactions"
+    );
+    let rows = audit_rows(&env, "agent_message_refused").await;
+    assert_eq!(
+        rows.len(),
+        1,
+        "one record for the job of the refused messages"
+    );
     assert_eq!(rows[0].diff["new"]["message"], "step_progress");
     env.db.cleanup().await;
 }
