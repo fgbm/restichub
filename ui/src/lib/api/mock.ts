@@ -777,7 +777,7 @@ function makeJobs(): MockJob[] {
 		job('j_s2', 'queued', null, null, 3, null, null),
 		job('j_s3', 'succeeded', 'succeeded', null, 60 * 24 + 40, 60 * 24 + 38, 60 * 24 + 20),
 		job('j_s6', 'succeeded', 'succeeded_with_warnings', null, 60 * 30, 60 * 30 - 2, 60 * 30 - 20),
-		job('j_s8', 'failed', 'cancelled', 'interrupted', 60 * 8 + 5, 60 * 8 + 4, 60 * 8),
+		job('j_s8', 'failed', 'failed', 'interrupted', 60 * 8 + 5, 60 * 8 + 4, 60 * 8),
 		job('j_s4', 'failed', 'config_error', 'compile_failed', 60 * 48 + 5, null, 60 * 48 + 5),
 		job(
 			'j_s5',
