@@ -18,15 +18,19 @@ The profile editor is one page. Select "Add profile" on the "Profiles" screen, o
 | Tags | The tags of the snapshots of this profile. The retention rules and the searches use them. Type a tag and press Enter, or separate tags with a comma or a space. Each tag becomes a chip. Select the cross on a chip to remove the tag. |
 | Backup options | VSS (Windows only), which passes `--use-fs-snapshot`. "Stay on one file system" (`--one-file-system`). "Exclude cache directories" that hold a `CACHEDIR.TAG` file (`--exclude-caches`). "Upload limit (KiB/s)" and "Download limit (KiB/s)" (`--limit-upload`, `--limit-download`). |
 | Retention | The rules that decide which snapshots stay. See the section below. |
-| Repository check | A check after the backup. Without a "Read-data subset", the check reads the repository structure only. This is fast. A share such as `5%` or `1/10` reads that part of the data. A larger share takes more time and traffic. |
+| Repository check | The options of the `check` step. The check is a maintenance step: the maintenance host runs it in its own job, on the check schedule of the repository. It does not run in a backup job. Without a "Read-data subset", the check reads the repository structure only. This is fast. A share such as `5%` or `1/10` reads that part of the data. A larger share takes more time and traffic. See [Repositories](/restichub/concepts/repositories/#maintenance). |
 | Scripts on the host | Scripts before and after the backup. See [Server scripts](/restichub/guides/scripts/). |
 | Run limits | The stall limit and the maximum duration of a job. See the section below. |
 
 A profile has no hooks. Use [server scripts](/restichub/guides/scripts/) to run a command on the host before or after a backup.
 
+:::note
+restic can leave a file out of a VSS snapshot when another program holds the file open with an exclusive lock. The snapshot then lacks the file, and the backup job ends with warnings (`succeeded_with_warnings`). The log of the step names the file. Stop the program before the backup to get a complete copy.
+:::
+
 The paths, the exclusions, the exclude files and the tags hold variables such as `{{hostname}}` and `{{param.<name>}}`. The profile editor lists them when you type `{{`. See [Template variables](/restichub/reference/variables/).
 
-Only the [maintenance host](/restichub/concepts/repositories/) of a repository runs the `forget` and `prune` steps of that repository.
+Only the [maintenance host](/restichub/concepts/repositories/) of a repository runs the `forget`, `prune` and `check` steps of that repository.
 
 ## Retention rules
 

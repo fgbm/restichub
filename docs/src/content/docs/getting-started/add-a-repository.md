@@ -62,7 +62,7 @@ Do these steps on the repository host before you initialize the repository:
 
 1. Write the parent directory of the repository on one line of the file `/etc/restichub-agent-repository-roots.txt`, for example `/srv/restichub` or `/var/spool/restichub`. Each line holds one absolute path. A line that starts with `#` is a comment. On Linux the agent ignores a line with a quotation mark, a backslash, `%`, a space or a control character. The agent logs a warning for these lines and for a line that is not an absolute path. The command `install-service` refuses such a line and names its number.
 2. Make sure that root owns the file and that no other account can write it: `sudo chown root:root /etc/restichub-agent-repository-roots.txt` and `sudo chmod 0644 /etc/restichub-agent-repository-roots.txt`.
-3. Run `sudo restichub-agent install-service`. The command adds each root to `ReadWritePaths` of the systemd unit and restarts the service. It creates a missing root with access for root only, and each missing parent with mode `0755`.
+3. Run `sudo /opt/restichub-agent/bin/restichub-agent install-service`. The command adds each root to `ReadWritePaths` of the systemd unit and restarts the service. It creates a missing root with access for root only, and each missing parent with mode `0755`.
 
 Run `install-service` again after each change of the file. The agent writes a warning to the log at each start for a root that the installed unit cannot write.
 
@@ -100,7 +100,7 @@ The repository status changes to "Ready".
 | "The repository is not at this location on this host. Check the path, the mount and the host." | The host cannot reach the location. | Check the "Endpoint", the bucket and the network path from the host. |
 | "The job expired before the host answered. Start it again." | The host did not answer in time. | Make sure that the host is online, then start the job again. |
 | "The host refused the local repository path. ..." | The path is outside the repository roots of a Linux host (`repository_path_denied`). | Add the root to `/etc/restichub-agent-repository-roots.txt` and run `install-service`. See [A local repository on Linux](#a-local-repository-on-linux). |
-| "The agent cannot write to the local repository path. ..." | Restic reported `read-only file system` on the repository path (`repository_read_only`). The root is in the file, but the installed unit does not list it. | Run `sudo restichub-agent install-service`, then start the job again. |
+| "The agent cannot write to the local repository path. ..." | Restic reported `read-only file system` on the repository path (`repository_read_only`). The root is in the file, but the installed unit does not list it. | Run `sudo /opt/restichub-agent/bin/restichub-agent install-service`, then start the job again. |
 
 ## How the initialization works
 

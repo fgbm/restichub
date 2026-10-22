@@ -10,11 +10,13 @@ import Screen from '../../../../components/Screen.astro';
 
 ## Команда регистрации
 
-Веб-интерфейс показывает полную команду в диалоге «Добавить хост». Чтобы открыть его, нажмите «Добавить хост» на экране «Хосты». Команда использует адрес сервера управления и токен:
+Веб-интерфейс показывает команду в диалоге «Добавить хост». Чтобы открыть его, нажмите «Добавить хост» на экране «Хосты». Команда использует адрес сервера управления и токен. Диалог пишет команду без пути. Выполните её в папке пакета, где лежит распакованный агент:
 
 ```sh
-restichub-agent register --url https://<control-plane> --token <token>
+sudo ./restichub-agent register --url https://<control-plane> --token <token>
 ```
+
+Команда установки не создаёт ссылку в `PATH`. Поэтому следующая команда требует полный путь установленного агента, например `/opt/restichub-agent/bin/restichub-agent status`. В Windows откройте PowerShell с повышенными правами в папке пакета и выполните `.\restichub-agent.exe register --url https://<control-plane> --token <token>`.
 
 <Screen name="hosts-add-command" alt="Диалог «Добавить хост» с токеном регистрации и командой register" />
 
@@ -100,7 +102,7 @@ the control plane refused the agent identity; check that the agent is enrolled a
 
 После этого агент ждёт 60 секунд и пробует снова. После отзыва зарегистрируйте хост заново (см. [Повторная регистрация хоста](/restichub/ru/guides/agent-certificates/)).
 
-Чтобы прочитать состояние агента на хосте, выполните команду `restichub-agent status` (см. [Команды и файлы агента](/restichub/ru/reference/agent-commands/)).
+Чтобы прочитать состояние агента на хосте, выполните команду `status` (см. [Команды и файлы агента](/restichub/ru/reference/agent-commands/)).
 
 ## Следующий шаг
 
