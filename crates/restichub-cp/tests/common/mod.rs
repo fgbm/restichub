@@ -583,6 +583,7 @@ pub async fn seed_profile(db: &Database, tenant: TenantId, name: &str) -> restic
             exclude_caches: false,
             limit_upload_kib: 0,
             limit_download_kib: 0,
+            priority: restichub_db::profiles::ProfilePriority::Normal,
             stall_timeout_minutes: 60,
             max_duration_minutes: 2880,
             retention: None,

@@ -59,6 +59,20 @@ pub struct BackupOptions {
     pub limit_upload_kib: u64,
     /// Download limit in kibibytes each second. Zero means no limit (FR-AG-15).
     pub limit_download_kib: u64,
+    /// Low asks the agent to lower the process and I/O priority of the compiled steps (FR-AG-15).
+    /// The maintenance job of a repository builds its own `prune` and `check` steps, which do not
+    /// carry it.
+    pub priority: Priority,
+}
+
+/// The process and I/O priority that a profile asks for (FR-AG-15).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Priority {
+    /// The agent keeps the priority of the operating system default.
+    #[default]
+    Normal,
+    /// Lower process and I/O priority (AC-AG-14).
+    Low,
 }
 
 /// The time limits of a job (ADR-0039). Zero means the default of the stall timeout and no

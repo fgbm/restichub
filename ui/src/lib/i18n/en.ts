@@ -696,6 +696,7 @@ export const en = {
 	'profiles.options.excludeCaches': 'Exclude cache directories',
 	'profiles.options.limitUpload': 'Upload limit (KiB/s)',
 	'profiles.options.limitDownload': 'Download limit (KiB/s)',
+	'profiles.options.lowPriority': 'Low priority',
 	'profiles.options.limitNone': 'No limit',
 	'profiles.retention': 'Retention',
 	'profiles.retention.groupBy.host': 'Host',
@@ -1930,6 +1931,8 @@ export const en = {
 	'pe.options.vssHelp': 'Windows only: a copy of a consistent volume snapshot.',
 	'pe.options.oneFsHelp': 'Mounted volumes inside the paths are skipped.',
 	'pe.options.cachesHelp': 'Directories with a CACHEDIR.TAG file are skipped.',
+	'pe.options.lowPriorityHelp':
+		'The backup and the deletion of expired snapshots of this profile run with a lower CPU priority, and on Linux also with a lower disk priority. The steps can take more time.',
 	'pe.check.lead':
 		'A check of the repository after the backup. Without a read-data share, the check reads the structure only, which is fast.',
 	'pe.check.help':
@@ -2057,6 +2060,7 @@ export const en = {
 	'pe.sum.caches': 'no cache directories',
 	'pe.sum.upload': 'upload up to {count} KiB/s',
 	'pe.sum.download': 'download up to {count} KiB/s',
+	'pe.sum.lowPriority': 'low priority',
 	'pe.sum.retentionOff': 'Off: no snapshot is deleted',
 	'pe.sum.retentionNone': 'No rules: nothing is deleted',
 	'pe.sum.last': 'last {count}',

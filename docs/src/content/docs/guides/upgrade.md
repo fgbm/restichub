@@ -141,7 +141,7 @@ Upgrade the agents only after the new control plane works.
 ### Control plane
 
 - Make the backup of the database as the PostgreSQL superuser of the stack, as [Back up the control plane](/restichub/operations/back-up-the-control-plane/#back-up-the-database) shows. The command of the 0.1.0-rc.4 documentation, `pg_dump -U restichub_owner`, does not work. The tables have row-level security, so the dump stops with `query would be affected by row-level security policy`.
-- Nine database migrations (0049 to 0057) run at the first start. The migrations 0049 to 0055 add the indexes and the fields of the lists, and the password reset of a platform account. They also add the user name of a rest-server and the stream state of a host. A blank email of an account becomes no email. The migration 0055 replaces the unique keys of the names. The migrations 0056 and 0057 move the repository to the plan and add the profile parameters. See the sections below.
+- Ten database migrations (0049 to 0058) run at the first start. The migrations 0049 to 0055 add the indexes and the fields of the lists, and the password reset of a platform account. They also add the user name of a rest-server and the stream state of a host. A blank email of an account becomes no email. The migration 0055 replaces the unique keys of the names. The migrations 0056 and 0057 move the repository to the plan and add the profile parameters. The migration 0058 adds the priority of a profile. See the sections below.
 - Names may now contain any text. The name of a profile, a plan or an alert channel is 1 to 100 characters, with any letters, spaces and emoji. It is unique in the tenant, and the letter case does not matter. The names that you made before stay valid.
 - The comparison of names uses the function `lower()` of PostgreSQL, so it follows the `LC_CTYPE` of the database. The reference stack uses `en_US.utf8`. With the locale `C`, only the ASCII letters fold. Then the names "Ночной" and "НОЧНОЙ" can both exist.
 - One location holds one repository. The control plane refuses a new or changed repository with the location of another repository of the tenant. It does not delete a duplicate that exists. It logs a warning, and the list of repositories shows the mark "Shared location". Delete the duplicate records in ResticHub. A delete never deletes restic data. See [Add a repository](/restichub/getting-started/add-a-repository/).
@@ -164,6 +164,12 @@ Upgrade the agents only after the new control plane works.
 - A script variable has a new kind, "Profile parameter". The value of a text parameter reaches the agent as a masked value. An agent of an older package receives it as a secret value and masks it in the same way. See [Agent and control plane versions](/restichub/reference/agent-version-compatibility/#masked-script-values).
 - Only an Admin sets, changes or removes a secret parameter value. An Operator sets the text values. Only an Admin deletes a plan that holds a secret value.
 - A save that leaves a plan without a required parameter gives `400` with `parameter_missing` or `parameter_missing_in_plans`. See [Status and reason codes](/restichub/reference/status-codes/#refused-parameter-values).
+
+### Profile priority
+
+- A profile has the option `options.priority` with the values `normal` and `low`. The migration 0058 gives each existing profile the value `normal`, so the priority of a running job does not change.
+- The value `low` applies to the `backup` step and to the `forget` step of the profile. The `prune` and `check` steps keep the normal priority.
+- `PATCH /api/v1/profiles/{id}` replaces the options as a whole. A request without `options.priority` sets the value `normal`. An API client that sends the options of a profile sends the priority too.
 
 ### All agents
 
@@ -195,6 +201,8 @@ A host that you registered first with 0.1.0-rc.2 or a later release on a clean c
 ### Linux agents
 
 `install-service` writes the systemd unit again and removes a change that you made by hand. The new unit has a system call filter (`SystemCallFilter=@system-service`) and hides the other processes (`ProtectProc=invisible`). A system call outside the filter fails with the error `EPERM`. Thus a server script cannot use a debug tool such as `strace` or `perf`. See [Server scripts](/restichub/guides/scripts/).
+
+The new unit also does not set `RestrictSUIDSGID`. A restore of a file with a setuid or setgid mode failed on a host with the older unit. Such a restore wrote the file without the setuid or setgid bit. Do the restore again after you run `install-service`. Then the restore keeps the mode.
 
 ### Local repositories on Linux
 
