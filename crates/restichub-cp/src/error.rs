@@ -124,7 +124,7 @@ pub struct ApiError {
     reason: Option<Reason>,
     /// The name of the repository that holds the location. Only `repository_location_taken` sets it.
     existing_name: Option<String>,
-    /// The `Retry-After` header value in seconds. Only `rate_limited` and `busy` set it.
+    /// The `Retry-After` header value in seconds. Set by `rate_limited`, `busy` and a timeout.
     retry_after: Option<u64>,
     // Boxed so that `Result<_, ApiError>` stays below the `result_large_err` limit.
     records: Option<Box<Records>>,
@@ -158,6 +158,14 @@ impl ApiError {
             ErrorCode::ServiceUnavailable,
             "Service Unavailable",
         )
+    }
+
+    /// A `503 service_unavailable` error that tells the client to try again after the given
+    /// seconds.
+    pub fn unavailable_retry(retry_after: u64) -> Self {
+        let mut error = Self::service_unavailable();
+        error.retry_after = Some(retry_after.clamp(1, MAX_RETRY_AFTER));
+        error
     }
 
     /// Creates a `500 internal_error` error with a cause.
@@ -518,8 +526,15 @@ fn cause_chain(error: &dyn StdError) -> String {
     message
 }
 
+/// In seconds.
+const STATEMENT_TIMEOUT_RETRY_AFTER: u64 = 5;
+
 impl From<DbError> for ApiError {
     fn from(error: DbError) -> Self {
+        if error.is_statement_timeout() {
+            tracing::warn!(cause = %cause_chain(&error), "a request query passed its statement timeout");
+            return Self::unavailable_retry(STATEMENT_TIMEOUT_RETRY_AFTER);
+        }
         Self::internal(cause_chain(&error))
     }
 }

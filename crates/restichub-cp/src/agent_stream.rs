@@ -646,24 +646,53 @@ async fn report_superseded_use(
 
 /// Writes the first `last_seen_at` under the registry guard.
 ///
-/// The single statement re-checks the status, the serial and the expiry. `false` refuses the stream.
+/// The single statement re-checks the status, the serial and the expiry. Only a row that the guard
+/// refuses answers `permission_denied`, which the agent takes as a revoked identity (FR-ID-04). A
+/// database error answers `unavailable`, which the agent retries with backoff.
 async fn touch_connected(
     db: &Database,
     identity: &PeerIdentity,
     now: time::OffsetDateTime,
-) -> bool {
-    let Ok(mut tx) = db.begin_tenant(identity.tenant).await else {
-        return false;
-    };
-    match agent_repo::touch_last_seen_guarded(&mut tx, identity.agent, &identity.serial_hex(), now)
-        .await
-    {
-        Ok(true) => {
-            let _ = tx.commit().await;
-            true
+) -> Result<(), Status> {
+    let touched = touch_last_seen(
+        db,
+        identity.tenant,
+        identity.agent,
+        &identity.serial_hex(),
+        now,
+    )
+    .await;
+    touch_status(identity.tenant, identity.agent, touched)
+}
+
+fn touch_status(
+    tenant: TenantId,
+    agent: AgentId,
+    touched: Result<bool, restichub_db::DbError>,
+) -> Result<(), Status> {
+    match touched {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(Status::permission_denied("the agent is revoked or expired")),
+        Err(error) => {
+            tracing::warn!(%tenant, %agent, cause = ?error, "the agent registry is not available");
+            Err(Status::unavailable("the agent registry is not available"))
         }
-        Ok(false) | Err(_) => false,
     }
+}
+
+async fn touch_last_seen(
+    db: &Database,
+    tenant: TenantId,
+    agent: AgentId,
+    serial_hex: &str,
+    now: time::OffsetDateTime,
+) -> Result<bool, restichub_db::DbError> {
+    let mut tx = db.begin_tenant(tenant).await?;
+    let touched = agent_repo::touch_last_seen_guarded(&mut tx, agent, serial_hex, now).await?;
+    if touched {
+        tx.commit().await?;
+    }
+    Ok(touched)
 }
 
 /// Removes the leading zero bytes of a DER integer, so the stored serial and the certificate serial
@@ -753,9 +782,7 @@ impl AgentService for AgentStreamService {
 
         // The guarded write re-checks the status, the serial and the expiry in one statement. A
         // revoke or an expiry in the window refuses the open, so no stream is registered (FR-ID-04).
-        if !touch_connected(self.state.db(), &identity, now).await {
-            return Err(Status::permission_denied("the agent is revoked or expired"));
-        }
+        touch_connected(self.state.db(), &identity, now).await?;
 
         let (close_tx, close_rx) = watch::channel(false);
         let generation = self.state.agent_registry().open(
@@ -1390,7 +1417,7 @@ pub async fn flush_last_seen(db: &Database, registry: &StreamRegistry, now: time
     for (tenant, entries) in registry.take_last_seen() {
         let ids: Vec<Uuid> = entries.iter().map(|(agent, _)| agent.as_uuid()).collect();
         let serials: Vec<String> = entries.iter().map(|(_, serial)| serial.clone()).collect();
-        let Ok(mut tx) = db.begin_tenant(tenant).await else {
+        let Some(mut tx) = db.begin_tenant_or_log(tenant, "last seen flush").await else {
             continue;
         };
         match agent_repo::touch_last_seen_batch(&mut tx, &ids, &serials, now).await {
@@ -1448,9 +1475,33 @@ pub fn agent_service(state: AppState) -> AgentServiceServer<AgentStreamService> 
 
 #[cfg(test)]
 mod tests {
-    use super::{StreamRegistry, hex, normalise_serial, parse_identity_uri};
-    use restichub_db::{AgentId, JobId, TenantId};
+    use super::{
+        StreamRegistry, hex, normalise_serial, parse_identity_uri, touch_last_seen, touch_status,
+    };
+    use restichub_db::{AgentId, Database, DatabaseConfig, JobId, TenantId};
     use uuid::Uuid;
+
+    #[tokio::test]
+    async fn fr_id_04_a_database_failure_is_not_a_revoke_answer() {
+        let config = DatabaseConfig {
+            url: "postgres://restichub@127.0.0.1:1/restichub".to_owned(),
+            max_connections: 1,
+            acquire_timeout: std::time::Duration::from_millis(100),
+            statement_timeout: None,
+        };
+        let db = Database::connect_lazy(&config, None).expect("the lazy pool");
+
+        let (tenant, agent) = (TenantId::new(), AgentId::new());
+        let now = time::OffsetDateTime::now_utc();
+
+        let touched = touch_last_seen(&db, tenant, agent, "01", now).await;
+        let status = touch_status(tenant, agent, touched).expect_err("the database is down");
+        assert_eq!(status.code(), tonic::Code::Unavailable);
+
+        let status = touch_status(tenant, agent, Ok(false)).expect_err("the guard refused");
+        assert_eq!(status.code(), tonic::Code::PermissionDenied);
+        assert!(touch_status(tenant, agent, Ok(true)).is_ok());
+    }
 
     #[test]
     fn the_identity_uri_binds_the_tenant_and_the_agent() {

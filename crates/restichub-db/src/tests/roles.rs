@@ -79,6 +79,7 @@ async fn db_the_runtime_role_is_safe_and_the_owner_is_refused() -> TestResult {
         url: std::env::var("RESTICHUB_TEST_DATABASE_URL")?,
         max_connections: 1,
         acquire_timeout: std::time::Duration::from_secs(5),
+        statement_timeout: None,
     };
     let admin = Database::connect(&config, None).await?;
     assert!(admin.verify_runtime_role().await.is_err());

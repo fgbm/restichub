@@ -107,8 +107,11 @@ pub async fn flush_summaries(state: &AppState, tenant: TenantId, agent: AgentId)
     if pending.is_empty() {
         return;
     }
-    let Ok(mut tx) = state.db().begin_tenant(tenant).await else {
-        tracing::warn!(%agent, "the audit summary could not open a transaction");
+    let Some(mut tx) = state
+        .db()
+        .begin_tenant_or_log(tenant, "audit summary")
+        .await
+    else {
         return;
     };
     for (subject, suppressed) in pending {
