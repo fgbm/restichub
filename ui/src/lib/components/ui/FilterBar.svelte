@@ -22,7 +22,6 @@
 	import RecordLine from './RecordLine.svelte';
 	import { matchesRecord } from './record';
 	import TextField from './TextField.svelte';
-	import Tooltip from './Tooltip.svelte';
 	import type {
 		FilterFacet,
 		FilterOption,
@@ -42,7 +41,6 @@
 		total,
 		totalNote,
 		sort,
-		hint,
 		end,
 		onchange,
 		onreset
@@ -63,8 +61,6 @@
 		totalNote?: string;
 		/** The Sort menu. It writes the `sort` and `order` keys; empty means the default. */
 		sort?: FilterSort;
-		/** A short help text behind an info icon. */
-		hint?: string;
 		/** Content at the right end of the row, for example the age of the list and a refresh button. */
 		end?: Snippet;
 		onchange: (patch: FilterState) => void;
@@ -451,14 +447,6 @@
 	{/if}
 {/snippet}
 
-{#snippet hintIcon()}
-	{#if hint}
-		<Tooltip content={hint} ariaLabel={hint}>
-			<span class="hint"><Icon name="info" size="md" /></span>
-		</Tooltip>
-	{/if}
-{/snippet}
-
 {#snippet chipList()}
 	{#if chips.length > 0}
 		<ul class="chips" aria-label={t('filter.applied')}>
@@ -554,7 +542,6 @@
 						<DropdownMenu items={sortItems} align="end" icon="sort" label={t('filter.sort')} />
 					</div>
 				{/if}
-				{@render hintIcon()}
 				{#if end}
 					<div class="filter-bar__end">{@render end()}</div>
 				{/if}
@@ -574,7 +561,6 @@
 		<div class="filter-bar__row">
 			{@render searchField()}
 			{@render facetPopovers()}
-			{@render hintIcon()}
 
 			{#if active}
 				<Button variant="ghost" size="sm" onclick={reset}>{t('filter.reset')}</Button>
@@ -675,11 +661,6 @@
 		align-items: center;
 		gap: var(--rh-space-2);
 		margin-left: auto;
-	}
-
-	.hint {
-		display: inline-flex;
-		color: var(--rh-color-text-muted);
 	}
 
 	.options {

@@ -329,7 +329,6 @@
 				total={loading ? undefined : totalCapped ? `${formatCount(total)}+` : formatCount(total)}
 				{facets}
 				period
-				hint={t('audit.filters.timeHint')}
 				onchange={filters.update}
 				onreset={filters.reset}
 			/>
