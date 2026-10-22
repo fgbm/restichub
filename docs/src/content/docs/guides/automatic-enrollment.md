@@ -3,7 +3,7 @@ title: Automatic enrollment of hosts
 description: Enroll many hosts from a script, Ansible or cloud-init with the API and one enrollment token for each host.
 ---
 
-A script can enroll hosts without the web UI. A control machine gets an enrollment token from the API. The host receives the token and runs `restichub-agent register`. The command installs the agent, enrolls the host and starts the service. This page shows the procedure and examples for a shell script, Ansible, cloud-init and PowerShell.
+A script can enroll hosts without the web UI. A control machine gets an enrollment token from the API. The host receives the token and runs `register` from the folder of the package. The command installs the agent, enrolls the host and starts the service. This page shows the procedure and examples for a shell script, Ansible, cloud-init and PowerShell.
 
 The examples use `https://backup.example.com` as the control plane URL. Replace it with your URL.
 
@@ -44,7 +44,7 @@ A token enrolls one host one time. Get a new token for each host. Give the token
 1. Download the agent package to the host.
 2. Compare the SHA-256 of the package with the verified `SHA256SUMS` of the release.
 3. Unpack the package in any folder.
-4. Run `restichub-agent register --url https://backup.example.com --token-stdin` as `root` or Administrator.
+4. Run `register --url https://backup.example.com --token-stdin` from the folder of the package, as `root` or Administrator.
 5. Give the token on the standard input of the command.
 
 Use `--token-stdin` or `--token-file PATH` in a script. Do not use `--token`, because other accounts can read the process arguments.
@@ -212,7 +212,7 @@ A host keeps its identifier, plans and labels when it enrolls again (see [Enroll
 
 1. Send `POST /api/v1/agents/<id>/reenroll` with the body `{}` or `{"ttl_seconds": 600}`.
 2. Read the token value from the field `token` of the response.
-3. On the host, run `restichub-agent register --force --url https://backup.example.com --token-stdin`.
+3. On the host, run `register --force --url https://backup.example.com --token-stdin` from the folder of the package.
 
 ```sh
 printf 'Authorization: Bearer %s\n' "$RESTICHUB_API_TOKEN" |

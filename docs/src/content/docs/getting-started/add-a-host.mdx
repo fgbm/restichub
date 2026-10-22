@@ -10,11 +10,13 @@ An agent registers by hand with a one-time enrollment token. A person on the hos
 
 ## The registration command
 
-The Web UI shows the full command in the dialog "Add a host". Select "Add host" on the "Hosts" screen to open it. The command uses the control plane URL and the token:
+The Web UI shows the command in the dialog "Add a host". Select "Add host" on the "Hosts" screen to open it. The command uses the control plane URL and the token. The dialog shows no path. Run the command in the folder of the package, where the unpacked agent is:
 
 ```sh
-restichub-agent register --url https://<control-plane> --token <token>
+sudo ./restichub-agent register --url https://<control-plane> --token <token>
 ```
+
+The installer adds no link on `PATH`. A later command therefore needs the full path of the installed agent, for example `/opt/restichub-agent/bin/restichub-agent status`. On Windows, start an elevated PowerShell in the folder of the package and run `.\restichub-agent.exe register --url https://<control-plane> --token <token>`.
 
 <Screen name="hosts-add-command" alt="The dialog Add a host with the enrollment token and the register command" />
 

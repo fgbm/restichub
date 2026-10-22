@@ -3,7 +3,7 @@ title: Автоматическая регистрация хостов
 description: Как зарегистрировать много хостов из скрипта, Ansible или cloud-init через API, с отдельным токеном регистрации для каждого хоста.
 ---
 
-Скрипт может регистрировать хосты без веб-интерфейса. Управляющая машина получает токен регистрации через API. Хост получает токен и выполняет `restichub-agent register`. Команда устанавливает агент, регистрирует хост и запускает службу. Эта страница описывает процедуру и даёт примеры для скрипта оболочки, Ansible, cloud-init и PowerShell.
+Скрипт может регистрировать хосты без веб-интерфейса. Управляющая машина получает токен регистрации через API. Хост получает токен и выполняет `register` из папки пакета. Команда устанавливает агент, регистрирует хост и запускает службу. Эта страница описывает процедуру и даёт примеры для скрипта оболочки, Ansible, cloud-init и PowerShell.
 
 В примерах адрес сервера управления — `https://backup.example.com`. Замените его своим адресом.
 
@@ -44,7 +44,7 @@ printf 'Authorization: Bearer %s\n' "$RESTICHUB_API_TOKEN" |
 1. Загрузите пакет агента на хост.
 2. Сравните SHA-256 пакета с проверенным файлом `SHA256SUMS` выпуска.
 3. Распакуйте пакет в любую папку.
-4. Выполните `restichub-agent register --url https://backup.example.com --token-stdin` от имени `root` или администратора.
+4. Выполните `register --url https://backup.example.com --token-stdin` из папки пакета от имени `root` или администратора.
 5. Передайте токен на стандартный ввод команды.
 
 В скрипте используйте `--token-stdin` или `--token-file PATH`. Не используйте `--token`: другие учётные записи могут прочитать аргументы процесса.
@@ -212,7 +212,7 @@ printf 'Authorization: Bearer %s\n' "$RESTICHUB_API_TOKEN" |
 
 1. Отправьте `POST /api/v1/agents/<id>/reenroll` с телом `{}` или `{"ttl_seconds": 600}`.
 2. Прочитайте значение токена из поля `token` ответа.
-3. На хосте выполните `restichub-agent register --force --url https://backup.example.com --token-stdin`.
+3. На хосте выполните `register --force --url https://backup.example.com --token-stdin` из папки пакета.
 
 ```sh
 printf 'Authorization: Bearer %s\n' "$RESTICHUB_API_TOKEN" |

@@ -9,7 +9,7 @@ Each agent has a client certificate for the mTLS stream to the control plane. Th
 
 An agent that enrolled but did not open a stream has the status "Waiting for connection". The host is not online and not offline. The Overview counts it apart as "Hosts waiting for connection". The status changes to "Online" when the agent connects for the first time.
 
-A host stays in this status when the service does not start or cannot reach the control plane. Run `restichub-agent status` on the host to read the last error (see [Register an agent](/restichub/reference/agent-commands/#troubleshooting)).
+A host stays in this status when the service does not start or cannot reach the control plane. Run `status` on the host to read the last error (see [Register an agent](/restichub/reference/agent-commands/#troubleshooting)).
 
 ## Lifetime and rotation window
 
@@ -62,7 +62,7 @@ Use this procedure when the agent lost its identity, or when you must move the a
 1. Open the Hosts screen as an Admin.
 2. Open the menu "…" of the host row and select "Re-register". The host page has the same button in the section "Dangerous actions".
 3. Select "Create token". The screen shows the token one time.
-4. Run the shown command as `root` or Administrator on the computer of the host: `restichub-agent register --force --url <url> --token <token>`. You can run it from any folder.
+4. Run the shown command as `root` or Administrator on the computer of the host. Use the full path of the agent, because the installer adds no link on `PATH`: `/opt/restichub-agent/bin/restichub-agent register --force --url <url> --token <token>` on Linux, or `& "$env:ProgramFiles\ResticHub\Agent\restichub-agent.exe" register --force --url <url> --token <token>` in an elevated PowerShell on Windows. You can run it from any folder.
 
 The token is bound to the host. The command prints that it replaced the host record. The control plane then refuses the old certificate at once, and it closes the open stream of the old agent. The audit log gets the action `agent_reenroll`.
 
