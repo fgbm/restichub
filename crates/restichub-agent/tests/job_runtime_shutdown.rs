@@ -1,7 +1,6 @@
 //! The shutdown of the runtime during a job raises no failure (FR-AG-09, ADR-0020, FR-IN-08).
 //!
-//! The test runs in its own process: the restic children that the shutdown leaves behind are
-//! zombies of the process, and they would disturb the zombie checks of the other job tests.
+//! A cancelled task leaves its restic child running, so the tests live in their own file.
 
 #![allow(clippy::expect_used)]
 

@@ -289,7 +289,7 @@ impl Jobs {
             }
         }
         #[cfg(feature = "test-util")]
-        assert!(!self.panic_after_spawn, "the job task panics on purpose");
+        self.panic_if_asked().await;
         // The secret values leave the memory of the agent with the invocation (FR-HK-09).
         drop(invocation);
 

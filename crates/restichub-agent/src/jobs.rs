@@ -248,6 +248,15 @@ impl Jobs {
         self
     }
 
+    /// Panics when a test asked for it, after the child had time to start.
+    #[cfg(feature = "test-util")]
+    async fn panic_if_asked(&self) {
+        if self.panic_after_spawn {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            panic!("the job task panics on purpose");
+        }
+    }
+
     /// Replaces the log spool, for a test that needs a small cap (FR-LG-07).
     #[cfg(feature = "test-util")]
     #[must_use]

@@ -83,22 +83,17 @@ async fn wait_result_with_steps(
     }
 }
 
-/// Reads /proc: a child that exited and that nobody waited for stays in the state `Z`.
+/// True when `/proc` still lists the process: a child that exited and that nobody waited for stays
+/// there as a zombie. The wait covers a grandchild that init reaps.
 #[cfg(target_os = "linux")]
-fn zombie_children() -> Vec<u32> {
-    let me = std::process::id();
-    std::fs::read_dir("/proc")
-        .expect("cannot read /proc")
-        .filter_map(|entry| {
-            let entry = entry.ok()?;
-            let pid: u32 = entry.file_name().to_str()?.parse().ok()?;
-            let stat = std::fs::read_to_string(entry.path().join("stat")).ok()?;
-            let mut fields = stat.rsplit_once(')')?.1.split_whitespace();
-            let state = fields.next()?;
-            let parent: u32 = fields.next()?.parse().ok()?;
-            (state == "Z" && parent == me).then_some(pid)
-        })
-        .collect()
+async fn is_reaped(pid: &str) -> bool {
+    for _ in 0..40 {
+        if !std::path::Path::new(&format!("/proc/{pid}")).exists() {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    false
 }
 
 /// FR-AG-09: a job whose task panics while restic runs ends as failed with a result for the control
@@ -160,10 +155,11 @@ async fn fr_ag_09_a_panic_in_the_job_task_fails_the_job_and_frees_the_slot() {
         "restic must not outlive the task of its job"
     );
     #[cfg(target_os = "linux")]
-    assert!(
-        zombie_children().is_empty(),
-        "the killed restic must be reaped"
-    );
+    {
+        let pid = std::fs::read_to_string(format!("{}.restichub-pid", path.display()))
+            .expect("the fake restic must write its pid");
+        assert!(is_reaped(&pid).await, "the killed restic must be reaped");
+    }
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&path);
 }
@@ -218,8 +214,8 @@ async fn fr_ag_09_a_panic_in_a_script_step_fails_the_job_without_a_stale_lock() 
 
     let host = Host::new("task-loss-script");
     host.enable();
-    let started = host.marks().join("started");
-    let body = format!("touch '{}'\nsleep 300\n", started.display());
+    let pid_file = host.marks().join("started");
+    let body = format!("echo $$ > '{}'\nsleep 300\n", pid_file.display());
     let job = host.job(
         "job-script",
         vec![simple("script-0", HookPhase::Before, &body, vec![])],
@@ -237,8 +233,9 @@ async fn fr_ag_09_a_panic_in_a_script_step_fails_the_job_without_a_stale_lock() 
     assert_eq!(collected.steps[0].step_id, "script-0");
     assert!(!collected.steps[0].possible_stale_lock);
     assert_eq!(jobs.stop_running(Duration::from_secs(1)).await, 0);
+    let pid = std::fs::read_to_string(&pid_file).expect("the script must write its pid");
     assert!(
-        zombie_children().is_empty(),
+        is_reaped(pid.trim()).await,
         "the killed script must be reaped"
     );
 }

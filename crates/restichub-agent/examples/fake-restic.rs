@@ -42,6 +42,8 @@
 //!   million entries without a file of that size (AC-RS-02).
 //! - `<location>.restichub-finished` appears when the double reaches its normal exit, so a test
 //!   proves that the agent killed it before (FR-AG-10).
+//! - `<location>.restichub-pid` holds the process id of the double, so a test proves that the agent
+//!   reaped it (FR-AG-10).
 //! - `<location>.restichub-state` receives the nice value and the I/O priority of the process, so
 //!   a test proves the priority of a step (FR-AG-15, Linux only).
 //!
@@ -55,6 +57,10 @@ fn main() {
     let repository = std::env::var("RESTIC_REPOSITORY").unwrap_or_default();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let command = args.first().cloned().unwrap_or_default();
+    let _ = std::fs::write(
+        format!("{repository}.restichub-pid"),
+        std::process::id().to_string(),
+    );
     record(&format!("{repository}.restichub-argv"), &args);
     record_credential_names(&format!("{repository}.restichub-env"));
     record_priority(&format!("{repository}.restichub-state"));
