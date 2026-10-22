@@ -818,14 +818,25 @@ mod tests {
 
     #[test]
     fn ac_pr_07_a_tenant_that_fails_once_each_90_seconds_warns_after_the_long_grace() {
+        // The first pass fails, and the passes in between read the agents. Each read is shorter
+        // than the grace, so the run of failures does not end and the warning still arrives.
         let mut grace = TenantGrace::default();
         let start = at_start();
-        let warnings = passes(
-            &mut grace,
-            start,
-            start + time::Duration::minutes(16),
-            time::Duration::seconds(90),
-        );
+        let step = time::Duration::seconds(2);
+        let mut since_failure = time::Duration::seconds(90);
+        let mut warnings = 0;
+        let mut now = start;
+        while now < start + time::Duration::minutes(16) {
+            grace.passed(now);
+            if since_failure >= time::Duration::seconds(90) {
+                since_failure = time::Duration::ZERO;
+                if grace.failed(now).is_some() {
+                    warnings += 1;
+                }
+            }
+            since_failure += step;
+            now += step;
+        }
         assert_eq!(warnings, 1, "the grace of the tenant never ends");
     }
 
