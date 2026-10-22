@@ -3,6 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { ApiError, fieldError, service } from '#lib/api/index.ts';
+	import { latest } from '#lib/latest.ts';
 	import { nameError } from '#lib/names.ts';
 	import type {
 		Agent,
@@ -411,7 +412,7 @@
 	let previewLoading = $state(false);
 	let previewResult = $state<PreviewResponse | null>(null);
 	let previewProblem = $state<ApiProblem | null>(null);
-	let previewSequence = 0;
+	const previewRequests = latest();
 	// AC-UI-11 keeps the host of the commands panel for the browser.
 	let commandHostId = $state(
 		loadPreference(
@@ -454,7 +455,7 @@
 		// The panel and the debounce both ask for the commands, so one key is sent one time.
 		if (previewKey === lastPreviewKey) return;
 		lastPreviewKey = previewKey;
-		const sequence = ++previewSequence;
+		const current = previewRequests.start();
 		const request: PreviewRequest = {
 			agent_id: commandHostId,
 			profile_id: existing?.id,
@@ -465,13 +466,14 @@
 		previewProblem = null;
 		try {
 			const result = await service.previewProfile(request);
-			if (sequence === previewSequence) previewResult = result;
+			if (!current()) return;
+			previewResult = result;
 		} catch (problem) {
-			if (sequence !== previewSequence) return;
+			if (!current()) return;
 			previewResult = null;
 			previewProblem = problemOf(problem);
 		} finally {
-			if (sequence === previewSequence) previewLoading = false;
+			if (current()) previewLoading = false;
 		}
 	}
 

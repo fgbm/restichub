@@ -34,10 +34,13 @@ The top bar (`AppShell`) shows the section levels from the navigation, then the 
 | `side`     | A snippet for the side panel. Put one or more `SummaryPanel` components in it. |
 | `banners`  | A snippet for the notices about the full record, above the sections.           |
 | `save`     | `SaveBar`: the save bar of an editor. See below.                               |
+| `unsaved`  | Changes that are not saved outside the save bar. See below.                    |
 | `onsubmit` | When it is set, the sections and the save bar are one form.                    |
 | `crumbs`   | By default, the title is the only level.                                       |
 
 The other properties are the same as in `Page`.
+
+`RecordPage` keeps the changes that are not saved. When the person leaves the page with a change of `save.dirty` or with `unsaved`, the page asks a question. A full page leave shows the dialog of the browser. A save in progress does not ask. Do not add a guard to an editor. `unsaved` holds a change of a section that saves on its own, for example the parameter values of a host.
 
 The save bar is a strip below the sections column. It is at the bottom edge of the window while the sections scroll under it, and then it has a light shadow at the top. At the end of the page, the bar is below the last section and does not cover it. The side panel stays fully visible above the level of the bar. Below 1024 px, the bar uses the full width. `SaveBar` (`$lib/components/layout`) has these properties:
 

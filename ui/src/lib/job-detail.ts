@@ -168,6 +168,13 @@ export interface Stat {
 	params?: Record<string, string>;
 }
 
+/** The value of a statistic, with the parameters that it counts, such as "52 GiB of 128 402 files". */
+export function statText(stat: Stat): string {
+	return stat.params
+		? t('jobDetail.stat.processedValue', { ...stat.params, size: stat.value })
+		: stat.value;
+}
+
 /** The statistics that a summary shows, in display order. */
 export function statsOf(output: StepOutput | null | undefined): Stat[] {
 	if (!output) return [];

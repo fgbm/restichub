@@ -1,14 +1,34 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { createRawSnippet, type Snippet } from 'svelte';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getPageMeta } from '#lib/stores/page-meta.svelte.ts';
+import type { SaveBar } from './types';
 import Page from './Page.svelte';
 import RecordPage from './RecordPage.svelte';
 import SummaryPanel from './SummaryPanel.svelte';
 
+// SvelteKit keeps the `beforeNavigate` callbacks; the test runs them as a navigation does.
+const navigation = vi.hoisted(() => ({
+	guards: [] as ((navigation: { type: string; cancel: () => void }) => void)[]
+}));
+
+vi.mock('$app/navigation', () => ({
+	beforeNavigate: (guard: (navigation: { type: string; cancel: () => void }) => void) => {
+		navigation.guards.push(guard);
+	}
+}));
+
 function html(markup: string): Snippet {
 	return createRawSnippet(() => ({ render: () => markup }));
 }
+
+beforeEach(() => {
+	navigation.guards = [];
+});
+
+afterEach(() => {
+	vi.restoreAllMocks();
+});
 
 describe('Page', () => {
 	it('declares its breadcrumb levels while it is shown', () => {
@@ -121,6 +141,83 @@ describe('RecordPage', () => {
 		});
 		expect(screen.getByText('Your role cannot change a profile.')).toBeInTheDocument();
 		expect(screen.queryByRole('button', { name: 'Save' })).toBeNull();
+	});
+});
+
+describe('RecordPage unsaved changes', () => {
+	function navigationEvent(type = 'link') {
+		const cancel = vi.fn();
+		for (const guard of navigation.guards) guard({ type, cancel });
+		return cancel;
+	}
+
+	function record(save: SaveBar | undefined, unsaved = false) {
+		return render(RecordPage, {
+			props: {
+				title: 'db-profile',
+				save,
+				unsaved,
+				children: html('<section>Basics</section>')
+			}
+		});
+	}
+
+	it('asks before it lets the changes of the save bar go', () => {
+		const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+		record({ dirty: true, oncancel: vi.fn() });
+
+		navigationEvent();
+
+		expect(confirm).toHaveBeenCalledWith('The changes are not saved. Leave the page?');
+	});
+
+	it('stops the navigation when the person keeps the page', () => {
+		vi.spyOn(window, 'confirm').mockReturnValue(false);
+		record({ dirty: true, oncancel: vi.fn() });
+
+		expect(navigationEvent()).toHaveBeenCalledOnce();
+	});
+
+	it('lets the navigation pass without changes and while a save runs', () => {
+		const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+		const clean = record({ dirty: false, oncancel: vi.fn() });
+		navigationEvent();
+		clean.unmount();
+
+		navigation.guards = [];
+		record({ dirty: true, saving: true, oncancel: vi.fn() });
+		navigationEvent();
+
+		expect(confirm).not.toHaveBeenCalled();
+	});
+
+	it('guards the changes of a section that saves on its own', () => {
+		const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+		record(undefined, true);
+
+		navigationEvent();
+
+		expect(confirm).toHaveBeenCalledOnce();
+	});
+
+	it('leaves without a question when the save bar drops the changes', async () => {
+		const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+		const oncancel = vi.fn();
+		record({ dirty: true, oncancel });
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+		navigationEvent();
+
+		expect(oncancel).toHaveBeenCalledOnce();
+		expect(confirm).not.toHaveBeenCalled();
+	});
+
+	it('gives the question of a page leave to the browser', () => {
+		const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+		record({ dirty: true, oncancel: vi.fn() });
+
+		expect(navigationEvent('leave')).toHaveBeenCalledOnce();
+		expect(confirm).not.toHaveBeenCalled();
 	});
 });
 

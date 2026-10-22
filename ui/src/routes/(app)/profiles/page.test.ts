@@ -3,7 +3,7 @@
  */
 import { render, screen, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Profiles from './+page.svelte';
 
 const mocks = vi.hoisted(() => ({
@@ -38,12 +38,6 @@ vi.mock('#lib/api/index.ts', async (importOriginal) => {
 			deleteProfile: mocks.deleteProfile
 		}
 	};
-});
-
-// A dialog that a test leaves open keeps `pointer-events: none` on the body, which stops the
-// next test from a click.
-afterEach(() => {
-	document.body.style.pointerEvents = '';
 });
 
 beforeEach(() => {

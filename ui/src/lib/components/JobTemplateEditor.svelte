@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { beforeNavigate, goto } from '$app/navigation';
+	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { ApiError, fieldError, service } from '#lib/api/index.ts';
 	import type {
@@ -40,7 +40,6 @@
 	let scriptTemplates = $state<ScriptTemplate[]>([]);
 	let secrets = $state<Secret[]>([]);
 	let saving = $state(false);
-	let saved = false;
 	let formError = $state<string | null>(null);
 	let formProblem = $state<ApiProblem | null>(null);
 	let baseline = $state('');
@@ -118,10 +117,6 @@
 
 	onMount(load);
 
-	beforeNavigate(({ cancel }) => {
-		if (dirty && !saved && !window.confirm(t('rp.unsaved'))) cancel();
-	});
-
 	function toList(): void {
 		void goto(resolve('/(app)/settings/scripts/jobs'));
 	}
@@ -148,7 +143,7 @@
 			if (existing) await service.updateJobTemplate(existing.id, shared);
 			else await service.createJobTemplate(shared);
 			pushToast('success', t(existing ? 'jobTemplates.updated' : 'jobTemplates.created'));
-			saved = true;
+			baseline = snapshot();
 			toList();
 		} catch (problem) {
 			formProblem = problemOf(problem);
@@ -165,7 +160,7 @@
 			await service.deleteJobTemplate(existing.id);
 			pushToast('success', t('jobTemplates.deleted'));
 			deleteOpen = false;
-			saved = true;
+			baseline = snapshot();
 			toList();
 		} catch (problem) {
 			pushToast('danger', messageOf(problem));
