@@ -74,7 +74,7 @@ const NOT_ACKNOWLEDGED: &str = "not_acknowledged";
 /// tenant does not stop every dispatch (AC-NFR-01).
 const PASS_STATEMENT_TIMEOUT: time::Duration = time::Duration::seconds(10);
 
-/// How often the warning about a pass that passed [`PASS_STATEMENT_TIMEOUT`] repeats for a tenant.
+/// How often the warning about a pass that passed the statement timeout repeats for a tenant.
 const TIMEOUT_WARN: time::Duration = time::Duration::minutes(15);
 
 /// The result message of a job that the control plane could not sign.
@@ -186,8 +186,8 @@ impl TenantGrace {
         }
     }
 
-    /// Records a pass that a statement timeout ended. The pass counts as failed, and the line
-    /// repeats at [`TIMEOUT_WARN`] so a tenant that stays slow does not fill the log.
+    /// Warns about a pass that a statement timeout ended, at most once per `TIMEOUT_WARN`, so a
+    /// tenant that stays slow does not fill the log.
     fn timed_out(&mut self, tenant: TenantId, now: OffsetDateTime) {
         let warn = self
             .timeout_warned_at
@@ -230,7 +230,7 @@ impl AgentView {
         }
     }
 
-    /// Records a pass that a statement timeout ended, and warns at most once per [`TIMEOUT_WARN`]
+    /// Records a pass that a statement timeout ended, and warns at most once per `TIMEOUT_WARN`
     /// for the tenant.
     pub fn timed_out(&self, tenant: TenantId, now: OffsetDateTime) {
         self.lock()
