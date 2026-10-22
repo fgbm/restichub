@@ -16,7 +16,8 @@ Each queued job carried `timeout_seconds` of 12 hours. The agent enforced it as 
 - A step has no wall-clock limit by default.
 - The agent holds a stall watchdog for each running step. A step makes progress when a status line of restic changes `bytes_done`, `files_done` or the current files. It also makes progress when restic prints any other line. A repeated status line with the same numbers is not progress.
 - The watchdog stops the step in two stages (FR-AG-10) when it saw no progress for the stall timeout. The result carries the stable code `step_stalled`, and the job result carries the code `stalled`.
-- The job field `stall_timeout_seconds` sets the stall timeout. Zero means the default of the step: 60 minutes for `backup`, `restore` and the short steps, and 6 hours for `check` and `prune`, which print nothing for long periods.
+- The job field `stall_timeout_seconds` sets the stall timeout. Zero means the default of the step: 60 minutes for `backup`, `restore` and the short steps, and 6 hours for `check` and `prune`, which print nothing for long periods. The verify phase of a `restore` keeps 24 hours from the summary line (ADR-0051).
+- A `backup` step with an upload limit raises its stall timeout to at least twice the time to upload one pack at the limited rate. A pack holds 128 MiB at most, the largest size that restic writes. restic stops reading the files while its upload slots are full, and it reports `bytes_done` again only when an upload ends. A shorter window therefore stops a healthy backup on a narrow link. At 50 KiB/s the raised value is 87 minutes, and at 500 KiB/s it is 9 minutes. The agent keeps a longer stall timeout of the job.
 - The watchdog is not a schedule. It runs only inside a running step and starts no job (ADR-0002).
 
 ### A maximum duration of 48 hours by default

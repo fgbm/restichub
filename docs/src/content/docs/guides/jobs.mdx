@@ -22,7 +22,7 @@ Select the name of a job in the list "Jobs". The page of the job opens at `/jobs
 | Queued | The time when the job entered the queue. |
 | Started, Finished | The start and end times. |
 | Accept until | The end of the acceptance window. The field shows while the job is waiting or sent. |
-| Limit | Shows for a running job only. The line "Maximum: ..." or "No maximum" shows the maximum duration. The line "No progress: ..." shows the stall timeout. Without both limits the field says "Stops when restic makes no progress". |
+| Limit | Shows for a running job only. The line "Maximum: ..." or "No maximum" shows the maximum duration. The line "No progress: ..." shows the stall timeout. Without both limits the field says "Stops when restic makes no progress". A backup with an upload limit is stopped later than the stall timeout of the profile, because the agent raises the value: see [Job lifecycle](/restichub/concepts/job-lifecycle/#stall-timeout). |
 | Attempt | The attempt number. The field shows after a lock retry. |
 | Signing key | The first 8 characters of the identifier of the key that signed the job. The button next to it copies the whole identifier. Use it to find the jobs of a key after a [key compromise](/restichub/operations/job-signing-key-compromise/). |
 | Duration | The run time. |

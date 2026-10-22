@@ -296,6 +296,39 @@ async fn ac_ag_12_a_restore_with_verify_is_not_stalled_while_it_verifies() {
     );
 }
 
+/// AC-AG-12, FR-AG-15: a backup with an upload limit reports no new `bytes_done` while restic
+/// uploads a pack. The agent raises the window of such a step, so the upload does not stop it as
+/// stalled.
+#[tokio::test(flavor = "multi_thread")]
+async fn ac_ag_12_an_upload_limit_widens_the_stall_window_of_a_backup() {
+    let path = directory("limits-upload");
+    // The step reports one status line, waits three seconds and reports the next one. Without the
+    // upload limit the 2-second window of the job ends the step in the pause.
+    common::script_stdout(
+        &path,
+        "backup",
+        concat!(
+            r#"{"message_type":"status","percent_done":0.6,"total_files":10,"files_done":6,"total_bytes":100000,"bytes_done":60000,"current_files":["/data/file"]}"#,
+            "\n#sleep 3000\n",
+            r#"{"message_type":"status","percent_done":0.8,"total_files":10,"files_done":8,"total_bytes":100000,"bytes_done":80000,"current_files":["/data/file2"]}"#,
+            "\n#sleep 100\n",
+        ),
+    );
+    // 64 MiB/s raises the window to 4 seconds: two packs of 128 MiB at that limit.
+    let mut job = backup_job("job-upload", &path, 2, 0);
+    if let Some(step::Kind::Backup(backup)) = &mut job.steps[0].kind {
+        backup.limit_upload_kib = 65_536;
+    }
+
+    let (result, elapsed) = run(&job, &path, "limits-upload-dir").await;
+    assert_eq!(result.outcome, JobStatus::Succeeded as i32);
+    assert_eq!(error_code(&result), None);
+    assert!(
+        elapsed > Duration::from_secs(3),
+        "the run must outlast the stall timeout, took {elapsed:?}"
+    );
+}
+
 /// FR-SC-05, ADR-0039: restic waits for a lock of another host without a status line. The agent
 /// asks restic to end the wait before the stall timeout, so the step ends with the lock code and
 /// the control plane can retry the job.
