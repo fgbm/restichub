@@ -22,7 +22,7 @@ The diagram does not show the redelivery. A job stays in `sent` while the contro
 | <Ui k="jobs.status.succeeded" />, in green | `succeeded` | Every step succeeded. |
 | <Ui k="jobs.status.succeeded_with_warnings" />, in yellow | `succeeded` | Every step finished, and restic reported warnings. The list shows a pill with this label. The tooltip shows "<Ui k="jobs.statusFull.succeeded_with_warnings" />". The result code is `succeeded_with_warnings`. |
 | <Ui k="jobs.status.failed" /> | `failed` | A step failed, or the control plane refused the job. The result code and the reason give the detail. |
-| <Ui k="jobs.status.cancelled" /> | `failed` | An Operator cancelled the job. The result code is `cancelled`. |
+| <Ui k="jobs.status.cancelled" /> | `failed` | An Operator cancelled the job, or a stop of the agent service, a restart of the agent or a reboot of the host interrupted it. The result code is `cancelled`. |
 | <Ui k="jobs.status.expired" /> | `expired` | The job waited in the queue longer than its acceptance window. A running job never expires. |
 | <Ui k="jobs.status.dead_letter" /> | `dead_letter` | The repository stayed locked after the last retry. |
 
@@ -116,9 +116,19 @@ An operator can change the defaults. The values are in seconds. The page [Enviro
 
 For the stall timeout and the maximum duration, a value that is not a number, or is out of range, is ignored. The control plane rounds the value up to whole minutes. A profile that exists keeps its own values.
 
+### Interrupted jobs
+
+A stop of the agent service, a restart of the agent and a reboot of the host interrupt a running job. The job ends as <Ui k="jobs.status.cancelled" />, and it raises no `job_failed` alert. The job did not fail. The RPO alert of the plan opens when no backup succeeds in time.
+
+- When the service stops, the agent stops the running job as it does for a cancel. Restic removes its lock. The agent sends the cancelled result when it connects again.
+- When the agent restarts, it does not run again a job with a script. It sends the reason `interrupted`.
+- When the agent does not list the job after a restart, or the host stays offline for 30 minutes, the reason is `agent_lost`. The control plane marks the repository lock as possibly stale.
+
+A restic error, a script error, a stall and a fault of the agent end the job as `failed`, and they raise the alert.
+
 ### Lost jobs
 
-The control plane does not fail a running job because of the time that it ran. It fails the job with the reason `agent_lost` in two cases:
+The control plane does not fail a running job because of the time that it ran. It ends the job as cancelled with the reason `agent_lost` in two cases:
 
 - The agent is offline and the control plane did not hear from it for 30 minutes.
 - The agent connects again and does not list the job in its hello message. The agent restarted and lost the job.
@@ -141,7 +151,7 @@ The control plane ends the job that reported the lock and queues a new job with 
 
 ## Stale locks
 
-A hard stop of restic can leave a lock in the repository. The control plane marks the lock in two cases. The agent reports a possible stale lock, or the agent is lost while a job runs. A job on a lost agent fails with the reason `agent_lost`. The control plane counts an agent as lost only after it read the online agents for two minutes without a break. After the start of the control plane and after a database outage, an agent has that time to connect again. A running job fails with the reason `timed_out` when it stays past its maximum duration and a grace period of 10 minutes. The control plane marks its lock too. The agent stops a stalled step itself. It also stops a step past its maximum duration. It reports `possible_stale_lock` after a forced stop. A sent job that the agent did not confirm before it expired fails with the reason `unacknowledged_expired`, and its lock is marked too. A revoke of a host fails its running job with the reason `agent_revoked` and marks the lock too. When the maintenance host of the repository is revoked, the control plane runs the `unlock` on another active host. A local repository has no other host: its mark stays and the dashboard shows it.
+A hard stop of restic can leave a lock in the repository. The control plane marks the lock in two cases. The agent reports a possible stale lock, or the agent is lost while a job runs. A job on a lost agent ends as cancelled with the reason `agent_lost`. The control plane counts an agent as lost only after it read the online agents for two minutes without a break. After the start of the control plane and after a database outage, an agent has that time to connect again. A running job fails with the reason `timed_out` when it stays past its maximum duration and a grace period of 10 minutes. The control plane marks its lock too. The agent stops a stalled step itself. It also stops a step past its maximum duration. It reports `possible_stale_lock` after a forced stop. A sent job that the agent did not confirm before it expired fails with the reason `unacknowledged_expired`, and its lock is marked too. A revoke of a host fails its running job with the reason `agent_revoked` and marks the lock too. When the maintenance host of the repository is revoked, the control plane runs the `unlock` on another active host. A local repository has no other host: its mark stays and the dashboard shows it.
 
 When the mark is 30 minutes old and no job waits or runs on the repository, the control plane queues an `unlock` job. The job never removes the locks of a running operation. If a job that takes the exclusive lock of restic, or that removes the locks, succeeded after the mark, the control plane queues no unlock. A backup runs next to the lock, so its success does not show that the lock is gone.
 

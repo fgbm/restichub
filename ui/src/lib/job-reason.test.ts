@@ -42,7 +42,7 @@ describe('jobReason', () => {
 	});
 
 	it('translates a typed result message and keeps a code without a translation', () => {
-		expect(jobReason({ result_code: 'failed', result_message: 'interrupted' })).toBe(
+		expect(jobReason({ result_code: 'cancelled', result_message: 'interrupted' })).toBe(
 			'Interrupted: the agent restarted while scripts ran'
 		);
 		expect(jobReason({ result_code: 'failed', result_message: 'lock_retries_exhausted' })).toBe(

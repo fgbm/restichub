@@ -149,6 +149,7 @@ async fn ac_sc_06_a_running_job_past_its_queue_lifetime_stays_in_flight() {
     let body = env.job(job).await;
     assert_eq!(body["status"], "failed");
     assert_eq!(body["result_message"], "agent_lost");
+    assert_eq!(body["result_code"], "cancelled");
     env.db.cleanup().await;
 }
 
