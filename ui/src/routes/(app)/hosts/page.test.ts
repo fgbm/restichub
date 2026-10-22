@@ -477,7 +477,7 @@ describe('the Hosts screen', () => {
 	});
 
 	it('offers the replacement only on the newer record (FR-ID-11, AC-ID-09)', async () => {
-		const user = userEvent.setup({ pointerEventsCheck: 0 });
+		const user = userEvent.setup();
 		mocks.hostRows.mockResolvedValue([
 			agent({
 				id: 'a_01',

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { beforeNavigate, goto } from '$app/navigation';
+	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { ApiError, fieldError, service } from '#lib/api/index.ts';
 	import type {
@@ -56,7 +56,6 @@
 	let loadError = $state<string | null>(null);
 	let existing = $state<ScriptTemplate | null>(null);
 	let saving = $state(false);
-	let saved = false;
 	let formError = $state<string | null>(null);
 	let formProblem = $state<ApiProblem | null>(null);
 	let baseline = $state('');
@@ -204,10 +203,6 @@
 
 	onMount(load);
 
-	beforeNavigate(({ cancel }) => {
-		if (dirty && !saved && !window.confirm(t('rp.unsaved'))) cancel();
-	});
-
 	function toList(): void {
 		void goto(resolve('/(app)/settings/scripts/templates'));
 	}
@@ -240,7 +235,7 @@
 			if (existing) await service.updateScriptTemplate(existing.id, shared);
 			else await service.createScriptTemplate(shared);
 			pushToast('success', t(existing ? 'scriptTemplates.updated' : 'scriptTemplates.created'));
-			saved = true;
+			baseline = snapshot();
 			toList();
 		} catch (problem) {
 			formProblem = problemOf(problem);
@@ -257,7 +252,7 @@
 			await service.deleteScriptTemplate(existing.id);
 			pushToast('success', t('scriptTemplates.deleted'));
 			deleteOpen = false;
-			saved = true;
+			baseline = snapshot();
 			toList();
 		} catch (problem) {
 			pushToast('danger', messageOf(problem));

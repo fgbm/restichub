@@ -36,6 +36,9 @@
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
 	import { fromRefusal, fromUsage, type BlockedView } from '#lib/delete-check.ts';
 
+	// A job answer is slower than the pause between two requests during an init or an access test.
+	const JOB_POLL_MS = 500;
+
 	let repositories = $state<Repository[]>([]);
 	let agents = $state<Agent[]>([]);
 	let loading = $state(true);
@@ -73,7 +76,8 @@
 			? `${resolve('/(app)/repositories/[id]', { id: jobRepository.id })}#repo-agent`
 			: ''
 	);
-	let jobTimer: ReturnType<typeof setInterval> | null = null;
+	// The dialog holds the poll of one job. A newer run of the poll makes the older loop stop.
+	let jobPoll = 0;
 
 	const jobStatusLabels: Record<JobStatus, MessageKey> = {
 		queued: 'repositories.job.queued',
@@ -321,6 +325,7 @@
 	}
 
 	onMount(load);
+	onMount(() => stopJobTimer);
 
 	async function runTask(repository: Repository, task: MaintenanceTask): Promise<void> {
 		try {
@@ -428,7 +433,7 @@
 				jobKind === 'init'
 					? await service.initRepository(jobRepository.id, request)
 					: await service.testAccessRepository(jobRepository.id, request);
-			pollJob();
+			void pollJob();
 		} catch (problem) {
 			jobError = jobMessage(problem);
 		} finally {
@@ -436,30 +441,32 @@
 		}
 	}
 
-	function pollJob(): void {
+	// One request follows the answer of the previous one, so the replies cannot overlap and arrive
+	// in the sequence of the requests.
+	async function pollJob(): Promise<void> {
 		stopJobTimer();
-		jobTimer = setInterval(async () => {
-			if (!job) return;
+		const mine = jobPoll;
+		while (mine === jobPoll && job) {
 			try {
 				job = await service.getJob(job.id);
-				if (jobDone) {
-					stopJobTimer();
-					await load();
-				} else if (jobExpired) {
-					stopJobTimer();
-				}
 			} catch (problem) {
-				stopJobTimer();
+				if (mine !== jobPoll) return;
 				jobError = jobMessage(problem);
+				return;
 			}
-		}, 500);
+			if (mine !== jobPoll) return;
+			if (jobDone) {
+				await load();
+				return;
+			}
+			if (jobExpired) return;
+			await new Promise((resolve) => setTimeout(resolve, JOB_POLL_MS));
+		}
 	}
 
+	/** Stops the poll of the dialog: the dialog closes, another job starts, or the page goes away. */
 	function stopJobTimer(): void {
-		if (jobTimer) {
-			clearInterval(jobTimer);
-			jobTimer = null;
-		}
+		jobPoll++;
 	}
 
 	function closeJob(): void {

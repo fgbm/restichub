@@ -25,13 +25,23 @@ const mocks = vi.hoisted(() => ({
 	goto: vi.fn()
 }));
 
+// SvelteKit keeps the `beforeNavigate` callbacks; the test runs them as a navigation does.
+const navigation = vi.hoisted(() => ({
+	guards: [] as ((navigation: { type: string; cancel: () => void }) => void)[]
+}));
+
 const session = vi.hoisted(() => ({ role: 'admin' as string }));
 
 vi.mock('$app/paths', () => ({
 	resolve: (path: string, params?: Record<string, string>) =>
 		params ? path.replace('[id]', params.id) : path
 }));
-vi.mock('$app/navigation', () => ({ goto: mocks.goto }));
+vi.mock('$app/navigation', () => ({
+	goto: mocks.goto,
+	beforeNavigate: (guard: (navigation: { type: string; cancel: () => void }) => void) => {
+		navigation.guards.push(guard);
+	}
+}));
 vi.mock('#lib/stores/session.svelte.ts', () => ({
 	getSession: () => ({
 		user: { id: 'u_01', username: 'admin', display_name: 'Anna', role: session.role },
@@ -127,6 +137,7 @@ function agent(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
 	for (const mock of Object.values(mocks)) mock.mockReset();
+	navigation.guards = [];
 	session.role = 'admin';
 	mocks.listProfiles.mockResolvedValue([profile()]);
 	mocks.getJobLimitDefaults.mockResolvedValue({
@@ -167,12 +178,6 @@ beforeEach(() => {
 			}
 		]
 	});
-});
-
-// A side panel that a test leaves open keeps `pointer-events: none` on the body, which stops the
-// next test from a click.
-afterEach(() => {
-	document.body.style.pointerEvents = '';
 });
 
 function user() {
@@ -922,5 +927,40 @@ describe('Profile editor parameters (FR-PF-09, FR-PF-11, ADR-0047)', () => {
 		);
 		expect(screen.getByText('and 1 more')).toBeInTheDocument();
 		expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
+	});
+});
+
+describe('Profile editor unsaved changes', () => {
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	function navigate() {
+		const cancel = vi.fn();
+		for (const guard of navigation.guards) guard({ type: 'link', cancel });
+		return cancel;
+	}
+
+	it('asks before it lets the changes of the profile go', async () => {
+		const u = user();
+		const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+		render(ProfileEditor, { profileId: 'p_1' });
+		await screen.findByLabelText(/^Profile/);
+		const name = document.querySelector<HTMLInputElement>('#profile-name') as HTMLInputElement;
+		await u.clear(name);
+		await u.type(name, 'db-nightly-2');
+		expect(await screen.findByText('The changes are not saved')).toBeInTheDocument();
+
+		expect(navigate()).toHaveBeenCalledOnce();
+		expect(confirm).toHaveBeenCalledWith('The changes are not saved. Leave the page?');
+	});
+
+	it('lets the navigation pass when the profile has no changes', async () => {
+		const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+		render(ProfileEditor, { profileId: 'p_1' });
+		expect(await screen.findByText('No changes')).toBeInTheDocument();
+
+		expect(navigate()).not.toHaveBeenCalled();
+		expect(confirm).not.toHaveBeenCalled();
 	});
 });

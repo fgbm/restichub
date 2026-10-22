@@ -3,8 +3,9 @@
  */
 import { render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { agent, listing, node, repository, snapshot, treePage } from '../../restore-fixtures';
+import { testPage } from '#lib/test/route.svelte.ts';
 import Snapshot from './+page.svelte';
 
 const mocks = vi.hoisted(() => ({
@@ -21,13 +22,11 @@ const mocks = vi.hoisted(() => ({
 }));
 
 const session = vi.hoisted(() => ({ role: 'operator' as string }));
-const route = vi.hoisted(() => ({
-	url: new URL('http://localhost/restore'),
-	params: {} as Record<string, string>
-}));
 
 vi.mock('$app/navigation', () => ({ goto: mocks.goto }));
-vi.mock('$app/state', () => ({ page: route }));
+vi.mock('$app/state', async () => ({
+	page: (await import('#lib/test/route.svelte.ts')).testPage
+}));
 vi.mock('$app/paths', () => ({
 	resolve: (path: string, params: Record<string, string> = {}) =>
 		path.replace(/\[(\w+)\]/g, (_, key: string) => params[key] ?? '')
@@ -65,8 +64,8 @@ const peer = { ...agent, id: 'a_2', hostname: 'ws-anna' };
 beforeEach(() => {
 	session.role = 'operator';
 	vi.clearAllMocks();
-	route.url = new URL('http://localhost/restore/r_1/x?tag=daily&host=nas-backup');
-	route.params = { repository: 'r_1', snapshot: ID };
+	testPage.url = new URL('http://localhost/restore/r_1/x?tag=daily&host=nas-backup');
+	testPage.params = { repository: 'r_1', snapshot: ID };
 	mocks.listRepositories.mockResolvedValue([repository]);
 	mocks.listAgents.mockResolvedValue([agent, peer]);
 	mocks.listProfiles.mockResolvedValue([]);
@@ -83,11 +82,6 @@ beforeEach(() => {
 	);
 });
 
-// A dialog that stays open at the end of a test leaves the page locked for the next one.
-afterEach(() => {
-	document.body.style.pointerEvents = '';
-});
-
 async function openDialog(user: ReturnType<typeof userEvent.setup>) {
 	await user.click(await screen.findByRole('button', { name: 'Restore…' }));
 	return screen.findByRole('dialog');
@@ -102,8 +96,19 @@ describe('Snapshot page', () => {
 		expect(screen.queryByRole('link', { name: /Back to the snapshots/ })).toBeNull();
 	});
 
+	it('shows the new snapshot when the address changes', async () => {
+		render(Snapshot);
+		expect(await screen.findByRole('heading', { name: 'Snapshot a1b2c3d4' })).toBeVisible();
+
+		testPage.params = { repository: 'r_1', snapshot: 'b2c3d4e5'.padEnd(64, '0') };
+
+		expect(await screen.findByRole('heading', { name: 'Snapshot b2c3d4e5' })).toBeVisible();
+		expect(screen.queryByRole('heading', { name: 'Snapshot a1b2c3d4' })).not.toBeInTheDocument();
+		expect(screen.queryByText(ID)).not.toBeInTheDocument();
+	});
+
 	it('fr_rs_02_says_so_when_the_snapshot_is_not_in_the_stored_list', async () => {
-		route.params = { repository: 'r_1', snapshot: 'ff'.repeat(32) };
+		testPage.params = { repository: 'r_1', snapshot: 'ff'.repeat(32) };
 		render(Snapshot);
 		expect(await screen.findByText('The snapshot is not in the stored list')).toBeVisible();
 	});
@@ -167,7 +172,7 @@ describe('Snapshot page', () => {
 
 	it('fr_rs_04_the_target_parameter_preselects_the_target_host', async () => {
 		const user = userEvent.setup();
-		route.url = new URL('http://localhost/restore/r_1/x?target=a_2');
+		testPage.url = new URL('http://localhost/restore/r_1/x?target=a_2');
 		render(Snapshot);
 		expect(await screen.findByRole('heading', { name: 'Snapshot a1b2c3d4' })).toBeVisible();
 		const dialog = await openDialog(user);
@@ -178,7 +183,7 @@ describe('Snapshot page', () => {
 
 	it('fr_rs_04_the_target_parameter_of_an_unknown_host_falls_back_to_the_snapshot_host', async () => {
 		const user = userEvent.setup();
-		route.url = new URL('http://localhost/restore/r_1/x?target=a_99');
+		testPage.url = new URL('http://localhost/restore/r_1/x?target=a_99');
 		render(Snapshot);
 		const dialog = await openDialog(user);
 		expect(within(dialog).getByRole('combobox', { name: /^Target host/ })).toHaveTextContent(
