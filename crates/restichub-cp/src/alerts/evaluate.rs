@@ -92,6 +92,7 @@ pub async fn evaluate_tenant(
 ) -> Result<Report, DbError> {
     let judges_absence = view.judges_absence(tenant, now);
     let mut tx = db.begin_tenant(tenant).await?;
+    tx.force_custom_plan().await?;
     if !alerts::try_lock_tenant(&mut tx).await? {
         drop(tx);
         return Ok(Report {
