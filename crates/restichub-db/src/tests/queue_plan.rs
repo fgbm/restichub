@@ -18,11 +18,10 @@ use crate::test_util::test_database;
 /// The number of finished jobs in the history of the test tenant.
 const HISTORY: i64 = 50_000;
 
-/// The number of due jobs that the dispatcher looks for.
 const DUE: i64 = 20;
 
-/// The indexes that hold the queued and active rows of a tenant, so a scan of one of them costs
-/// what the queue holds and never what the history holds.
+/// A scan of one of these costs what the queue holds and never what the history holds, because each
+/// index holds only the queued and active rows of a tenant.
 const WAITING_INDEXES: [&str; 4] = [
     "jobs_waiting_idx",
     "jobs_tenant_kind_status_idx",

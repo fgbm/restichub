@@ -95,8 +95,8 @@ impl<'a> TenantTx<'a> {
         Ok(())
     }
 
-    /// Sets the statement timeout of the rest of the transaction. A statement that passes it is
-    /// cancelled with SQLSTATE 57014, and the transaction no longer commits.
+    /// A statement of the rest of the transaction that runs longer is cancelled with SQLSTATE
+    /// 57014, and the transaction no longer commits.
     pub async fn statement_timeout(&mut self, timeout: time::Duration) -> Result<(), DbError> {
         let value = format!("{}ms", timeout.whole_milliseconds().max(1));
         set_config(&mut self.tx, "statement_timeout", &value).await
