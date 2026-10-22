@@ -5,6 +5,7 @@ use std::time::Duration;
 use anyhow::Context;
 use restichub_cp::config::{Cli, Command, Config, MigrationConfig};
 use restichub_cp::server::{self, AppState};
+use restichub_cp::supervisor::Supervisor;
 use restichub_cp::telemetry;
 use restichub_secrets::{KekConfig, KekProvider, SystemEnv, load_kek_provider};
 
@@ -122,8 +123,11 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
         });
     }
 
+    let supervisor = Supervisor::default();
+
     // The periodic maintenance removes the expired sessions and setup tokens.
     restichub_cp::maintenance::spawn(
+        &supervisor,
         database.clone(),
         restichub_cp::maintenance::CLEANUP_INTERVAL,
     );
@@ -131,6 +135,7 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
     // The periodic retirement bounds the job signing key rotation overlap without a manual call
     // (ADR-0026). It is a control plane task, not job scheduling (ADR-0002).
     restichub_cp::maintenance::spawn_signing_key_retirement(
+        &supervisor,
         database.clone(),
         job_signing.clone(),
         Arc::new(restichub_cp::clock::SystemClock),
@@ -140,6 +145,7 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
     // The periodic sweep moves an overdue job to `expired`, so a poll sees a terminal status
     // It is a maintenance task of the control plane, not job scheduling (ADR-0002).
     restichub_cp::maintenance::spawn_job_expiry(
+        &supervisor,
         database.clone(),
         Arc::new(restichub_cp::clock::SystemClock),
         restichub_cp::maintenance::JOB_EXPIRY_INTERVAL,
@@ -148,6 +154,7 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
     // The scheduler turns a due plan into one job for each fire time (FR-SC-01, FR-SC-02, ADR-0010).
     // It runs in the control plane; the agent holds no schedule (ADR-0002).
     restichub_cp::scheduler::spawn(
+        &supervisor,
         database.clone(),
         Arc::new(restichub_cp::clock::SystemClock),
         restichub_cp::scheduler::SCHEDULER_INTERVAL,
@@ -155,6 +162,7 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
 
     // The retention sweep deletes the old log text and keeps the job rows (FR-LG-02, AC-LG-01).
     restichub_cp::log_store::spawn_retention(
+        &supervisor,
         database.clone(),
         Arc::new(restichub_cp::clock::SystemClock),
         config.log_retention_days,
@@ -163,6 +171,7 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
 
     let auth = restichub_cp::server::AuthState::new(config.auth.clone());
     restichub_cp::maintenance::spawn_limiter_sweep(
+        &supervisor,
         auth.user_limiter.clone(),
         auth.ip_limiter.clone(),
         auth.create_user_limiter.clone(),
@@ -172,6 +181,7 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
     let alert_sender = restichub_cp::alerts::sender::Sender::new(config.alerts.clone())
         .context("cannot prepare the alert sender")?;
     let state = AppState::with_auth(database, auth)
+        .with_supervisor(supervisor.clone())
         .with_trusted_proxies(config.trusted_proxies.clone())
         .with_kek(kek.clone())
         .with_sender(alert_sender.clone())
@@ -195,6 +205,7 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
     // The alert loop evaluates the rules and sends the messages (FR-MN-03, FR-MN-04, ADR-0036). It
     // is a control plane task, not job scheduling (ADR-0002).
     restichub_cp::alerts::spawn(
+        &supervisor,
         state.db().clone(),
         alert_sender.with_events(state.events_shared()),
         kek,
@@ -209,6 +220,7 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
 
     // The batch flush writes the `last_seen_at` buffer of the agent streams.
     restichub_cp::agent_stream::spawn_last_seen_flush(
+        &supervisor,
         state.db().clone(),
         state.agent_registry_shared(),
         state.auth().clock.clone(),
@@ -250,15 +262,23 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
             ..Default::default()
         };
         let agent_state = state.clone();
-        let mut agent_shutdown = shutdown_rx.clone();
-        tokio::spawn(async move {
-            let stop = async move {
-                let _ = agent_shutdown.changed().await;
-            };
-            if let Err(error) =
-                restichub_cp::agent_listener::serve(agent_state, addr, tls, limits, stop).await
-            {
-                tracing::error!(%error, "the agent listener stopped");
+        let agent_shutdown = shutdown_rx.clone();
+        supervisor.spawn_service("agent_listener", move || {
+            let (state, tls) = (agent_state.clone(), tls.clone());
+            let mut stop = agent_shutdown.clone();
+            let probe = agent_shutdown.clone();
+            async move {
+                restichub_cp::agent_listener::serve(state, addr, tls, limits, async move {
+                    let _ = stop.changed().await;
+                })
+                .await?;
+                // The listener returns `Ok` when the stream of accepted connections ends, which
+                // is a failure unless the shutdown signal came first.
+                if probe.has_changed().unwrap_or(true) {
+                    Ok(())
+                } else {
+                    Err(restichub_cp::agent_listener::ListenerError::Stopped)
+                }
             }
         });
         tracing::info!(%addr, "the agent listener is ready");

@@ -128,6 +128,8 @@ pub enum ListenerError {
     Bind(#[source] std::io::Error),
     #[error("the agent listener stopped with an error")]
     Serve(#[from] tonic::transport::Error),
+    #[error("the agent listener ended without a shutdown signal")]
+    Stopped,
     #[error("cannot build the TLS configuration of the agent listener")]
     Tls(#[from] rustls::Error),
     #[error("the client certificate verifier of the agent listener is not valid")]
@@ -564,6 +566,16 @@ fn set_keepalive(stream: &TcpStream) {
     let _ = socket.set_tcp_keepalive(&keepalive);
 }
 
+/// Aborts the task when dropped, on a panic or a cancellation of the server future too. The accept
+/// loop owns the socket, so a restart of the listener can bind the address again only after it ends.
+struct AbortOnDrop(tokio::task::JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 /// Serves the agent listener on a bound listener until the shutdown future resolves (ADR-0026).
 ///
 /// The control plane terminates TLS on its own, so the gRPC server receives the already-decrypted
@@ -580,15 +592,15 @@ pub async fn serve_listener(
     let handshakes = Arc::new(Semaphore::new(HANDSHAKE_CONCURRENCY));
     let load = Arc::new(Load::new(&limits));
     let stats = Arc::clone(state.listener_stats());
-    let report = tokio::spawn({
+    let _report = AbortOnDrop(tokio::spawn({
         let load = Arc::clone(&load);
         Arc::clone(&stats).report(
             move || load.connections.load(Ordering::Acquire),
             limits.max_connections,
         )
-    });
+    }));
     let (tx, rx) = tokio::sync::mpsc::channel::<io::Result<AgentConnection>>(64);
-    tokio::spawn(async move {
+    let _accept = AbortOnDrop(tokio::spawn(async move {
         loop {
             let (stream, peer) = match listener.accept().await {
                 Ok(accepted) => accepted,
@@ -662,7 +674,7 @@ pub async fn serve_listener(
                 let _ = tx.send(Ok(connection)).await;
             });
         }
-    });
+    }));
 
     let mut builder = tonic::transport::Server::builder();
     builder = builder
@@ -675,11 +687,9 @@ pub async fn serve_listener(
         .concurrency_limit_per_connection(8)
         .load_shed(true);
     let router = builder.add_routes(agent_routes(state));
-    let served = router
+    router
         .serve_with_incoming_shutdown(tokio_stream::wrappers::ReceiverStream::new(rx), shutdown)
-        .await;
-    report.abort();
-    served?;
+        .await?;
     Ok(())
 }
 

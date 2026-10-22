@@ -68,6 +68,7 @@ pub mod server;
 pub mod setup;
 pub mod signing_keys;
 pub mod startup;
+pub mod supervisor;
 pub mod telemetry;
 pub mod tenants;
 pub mod token;

@@ -30,6 +30,7 @@ use tokio::task::JoinSet;
 
 use crate::clock::Clock;
 use crate::queue::AgentView;
+use crate::supervisor::Supervisor;
 use sender::Sender;
 
 /// How often the loop evaluates and sends. A violation therefore reaches a channel well inside
@@ -202,6 +203,7 @@ async fn handle_tenant(
 
 /// Starts the periodic loop.
 pub fn spawn(
+    supervisor: &Supervisor,
     db: Database,
     sender: Sender,
     provider: Arc<dyn KekProvider>,
@@ -209,31 +211,34 @@ pub fn spawn(
     view: Arc<AgentView>,
     interval: Duration,
 ) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        let mut ticker = tokio::time::interval(interval);
-        // A pass that takes longer than the interval must not queue the missed ticks.
-        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        // The first tick of `interval` fires immediately. Skip it.
-        ticker.tick().await;
-        let mut pass = 0_usize;
-        loop {
-            ticker.tick().await;
-            if let Err(error) = run_once_with(
-                &db,
-                &sender,
-                provider.clone(),
-                clock.clone(),
-                view.clone(),
-                PassLimits {
-                    offset: pass,
-                    ..PassLimits::default()
-                },
-            )
-            .await
-            {
-                tracing::warn!(%error, "the alert pass failed");
+    supervisor.spawn_loop("alerts", move |start| {
+        let (db, sender) = (db.clone(), sender.clone());
+        let (provider, clock, view) = (provider.clone(), clock.clone(), view.clone());
+        async move {
+            let mut ticker = tokio::time::interval(interval);
+            // A pass that takes longer than the interval must not queue the missed ticks.
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            start.skip_first_tick(&mut ticker).await;
+            let mut pass = 0_usize;
+            loop {
+                ticker.tick().await;
+                if let Err(error) = run_once_with(
+                    &db,
+                    &sender,
+                    provider.clone(),
+                    clock.clone(),
+                    view.clone(),
+                    PassLimits {
+                        offset: pass,
+                        ..PassLimits::default()
+                    },
+                )
+                .await
+                {
+                    tracing::warn!(%error, "the alert pass failed");
+                }
+                pass = pass.wrapping_add(1);
             }
-            pass = pass.wrapping_add(1);
         }
     })
 }

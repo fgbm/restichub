@@ -44,8 +44,8 @@ PgBouncer in transaction mode does not accept the startup parameter `options`. T
 
 | Variable | Default | Unit | Meaning |
 |---|---|---|---|
-| `RESTICHUB_AUTH_SESSION_IDLE_SECS` | `1800` (30 minutes) | seconds | A session ends after this time without a request. |
-| `RESTICHUB_AUTH_SESSION_ABSOLUTE_SECS` | `43200` (12 hours) | seconds | A session ends after this time, whatever its use. |
+| `RESTICHUB_AUTH_SESSION_IDLE_SECS` | `1800` (30 minutes) | seconds | A session ends after this time without a request. The largest value is 31536000 (one year). |
+| `RESTICHUB_AUTH_SESSION_ABSOLUTE_SECS` | `43200` (12 hours) | seconds | A session ends after this time, whatever its use. The largest value is 31536000 (one year). |
 | `RESTICHUB_AUTH_SIGN_IN_USER_RATE` | `10` | attempts per minute | The largest number of sign-in attempts for one user name. |
 | `RESTICHUB_AUTH_SIGN_IN_IP_RATE` | `30` | attempts per minute | The largest number of sign-in attempts from one IP address. |
 | `RESTICHUB_AUTH_MAX_CONCURRENT_HASHES` | the number of CPUs | count | The largest number of password hashes that run at the same time. Each hash uses about 19 MiB of memory. |
@@ -72,7 +72,7 @@ PgBouncer in transaction mode does not accept the startup parameter `options`. T
 | `RESTICHUB_QUEUE_AGENT_LIMIT` | `2` | count | The largest number of jobs that run on one agent. |
 | `RESTICHUB_QUEUE_REPOSITORY_LIMIT` | `4` | count | The largest number of backups that run on one repository. |
 | `RESTICHUB_QUEUE_GLOBAL_LIMIT` | `100` | count | The largest number of jobs that run in one organization. |
-| `RESTICHUB_QUEUE_LEASE_SECS` | `60` | seconds | The time that the control plane waits for the acknowledgement of a job before it sends the job again. The smallest value is 15. |
+| `RESTICHUB_QUEUE_LEASE_SECS` | `60` | seconds | The time that the control plane waits for the acknowledgement of a job before it sends the job again. The smallest value is 15. The largest value is 86400 (one day). |
 | `RESTICHUB_QUEUE_LOCK_RETRY_LIMIT` | `5` | count | The number of lock results after which a job gets the state "<Ui k="jobs.status.dead_letter" />". |
 | `RESTICHUB_QUEUE_LOCK_RETRY_BASE_SECS` | `30` | seconds | The delay before the first lock retry. The delay doubles for each retry. |
 
