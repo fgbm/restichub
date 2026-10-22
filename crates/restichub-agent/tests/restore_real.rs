@@ -664,3 +664,69 @@ async fn fr_rs_02_a_symlink_page_gives_the_target_of_the_link() {
     );
     assert_eq!(link.link_target, "docs");
 }
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn fr_rs_03_a_restore_keeps_the_setuid_and_setgid_mode_of_a_file() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let Some((source, snapshot)) = backed_up(
+        "fr-rs-03-setuid",
+        &[("bin/suid", b"suid"), ("bin/sgid", b"sgid")],
+    )
+    .await
+    else {
+        return;
+    };
+    // The backup already ran, so set the modes and take a second snapshot of the same tree.
+    let modes = [("bin/suid", 0o4755), ("bin/sgid", 0o2755)];
+    for (relative, mode) in modes {
+        std::fs::set_permissions(
+            source.data.join(relative),
+            std::fs::Permissions::from_mode(mode),
+        )
+        .expect("cannot set the mode");
+    }
+    let data = source.data.to_string_lossy().into_owned();
+    let jobs = real_jobs(&source.agent_a, &source.restic);
+    let backup = job(
+        "job-backup-modes",
+        vec![access("repo-1", &source.repository, PASSWORD)],
+        vec![backup_step("repo-1", &[&data]), snapshots_step("repo-1")],
+    );
+    let result = run(&jobs, &backup).await;
+    assert_eq!(
+        result.result().outcome,
+        JobStatus::Succeeded as i32,
+        "{}",
+        result.log_text()
+    );
+    let Some(Output::SnapshotList(list)) = result.step("snapshots").output.clone() else {
+        panic!("the snapshots step must give a list");
+    };
+    let latest = list.snapshots.last().expect("a snapshot").id.clone();
+    assert_ne!(latest, snapshot, "the second backup makes a new snapshot");
+
+    let target = directory("fr-rs-03-setuid-target");
+    let (result, _) = restore_on_agent_b(
+        &source,
+        &latest,
+        restore_args("repo-1", &latest, &target),
+        "job-restore-modes",
+    )
+    .await;
+    assert_eq!(
+        result.result().outcome,
+        JobStatus::Succeeded as i32,
+        "{}",
+        result.log_text()
+    );
+    let root = tree_root(&target, &source.data);
+    for (relative, mode) in modes {
+        let restored = std::fs::metadata(root.join(relative))
+            .expect("the restored file")
+            .permissions()
+            .mode();
+        assert_eq!(restored & 0o7777, mode, "the mode of {relative}");
+    }
+}

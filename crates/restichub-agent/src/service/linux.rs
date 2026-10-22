@@ -29,6 +29,9 @@ fn unit_path() -> PathBuf {
 /// the identity directory, the cache directory and `writable_roots`: the restore roots (FR-RS-03)
 /// and the repository roots (ADR-0045). `ProtectSystem=strict` alone leaves `/home`, `/root` and
 /// `/run/user` writable. A read of a backup source stays possible.
+///
+/// The unit has no `RestrictSUIDSGID`: it makes `chmod` refuse a setuid or setgid mode with `EPERM`,
+/// so a restore of such a file fails (FR-RS-03).
 #[must_use]
 pub fn unit_contents(exe: &Path, config_dir: &Path, writable_roots: &[PathBuf]) -> String {
     let writable_paths: String = writable_roots
@@ -62,7 +65,6 @@ pub fn unit_contents(exe: &Path, config_dir: &Path, writable_roots: &[PathBuf]) 
          ProtectHostname=true\n\
          RestrictNamespaces=true\n\
          RestrictRealtime=true\n\
-         RestrictSUIDSGID=true\n\
          LockPersonality=true\n\
          MemoryDenyWriteExecute=true\n\
          SystemCallArchitectures=native\n\
@@ -377,6 +379,21 @@ mod tests {
         assert!(unit.contains("ProtectSystem=strict"));
         assert!(unit.contains("PrivateTmp=true"));
         assert!(unit.contains("WantedBy=multi-user.target"));
+    }
+
+    #[test]
+    fn fr_rs_03_the_unit_lets_restic_restore_a_setuid_or_setgid_mode() {
+        let unit = unit_contents(
+            Path::new("/opt/restichub-agent/restichub-agent"),
+            Path::new("/etc/restichub-agent"),
+            &[PathBuf::from("/var/lib/restichub-restore")],
+        );
+        assert!(
+            !unit.contains("RestrictSUIDSGID"),
+            "systemd makes chmod fail with EPERM on a setuid or setgid mode"
+        );
+        assert!(unit.contains("NoNewPrivileges=true\n"));
+        assert!(unit.contains("CapabilityBoundingSet=CAP_DAC_READ_SEARCH"));
     }
 
     #[test]

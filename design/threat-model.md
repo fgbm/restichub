@@ -66,6 +66,8 @@ Status: draft. Date: 2026-10-12. The maintainers review this document before eac
 
 | T35 | An Operator points a script at another server through a `text` parameter. The script sends the secret value that an Admin chose for the host. | Only an Admin sets, changes or removes a value of the kind `secret` on a host or in a plan (ADR-0047). The audit log records each change, with the name of the parameter and the identifier of the secret. The agent masks the value in the log. The control plane masks it in the preview, the job detail and the audit diff (FR-PF-12). | **Accepted.** An Operator still changes a `text` value and so points a script at another server. The script then sends the secret value of the host to that server. The Admin-only secret value and the audit log limit the damage, and they do not stop it. |
 
+The Linux unit does not set `RestrictSUIDSGID`: restic runs as `root` and must restore a setuid or setgid mode (FR-RS-03). `NoNewPrivileges=true` and the capability bounding set limit a restored program.
+
 ## 3.1 Tests for the threats
 
 NFR-SEC-02 asks for a review of the threat rows before each release. This table names the automated tests of each threat, so the review can run them. A threat marked "Manual" has no automated test in the repository: its control is a build or an operator procedure.

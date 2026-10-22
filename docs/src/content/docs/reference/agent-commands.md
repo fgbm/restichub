@@ -170,6 +170,8 @@ The unit keeps five capabilities: `CAP_DAC_READ_SEARCH`, `CAP_DAC_OVERRIDE`, `CA
 
 `ProtectSystem=strict` and `ProtectHome=read-only` make the whole file system read-only, except the identity directory through `ReadWritePaths` and the cache directory. A read of a backup source stays possible. Restic writes to a local repository. The unit lists each repository root of `/etc/restichub-agent-repository-roots.txt` in `ReadWritePaths` (see [A local repository on Linux](/restichub/getting-started/add-a-repository/#a-local-repository-on-linux)). Do not edit the unit: `install-service` writes it again. The unit also lists the restore directories there (`/var/lib/restichub-restore` and each directory from `/etc/restichub-agent-restore-roots.txt`). `install-service` creates the default directory. Run it again after you add a directory, because systemd reads the list at the start of the unit. A backup source below `/home` stays readable. `ProtectSystem=strict` alone does not cover `/home`, `/root` and `/run/user`, so the unit sets `ProtectHome=read-only` too.
 
+The unit does not set `RestrictSUIDSGID`. With that option systemd makes `chmod` refuse a setuid or setgid mode, so a restore of such a file, for example `/usr/bin/sudo`, fails. `NoNewPrivileges=true` and the capability bounding set stay.
+
 The unit sets `CacheDirectory=restichub-agent` and `RESTIC_CACHE_DIR=/var/cache/restichub-agent`, so the restic cache stays in a directory that the unit can write.
 
 ## Proxy settings

@@ -170,6 +170,8 @@ last connected:      2026-10-15 09:30:12.0 +00:00:00
 
 `ProtectSystem=strict` и `ProtectHome=read-only` делают всю файловую систему доступной только для чтения. Исключения — каталог учётных данных (через `ReadWritePaths`) и каталог кэша. Читать источник резервного копирования по-прежнему можно. Restic пишет в локальный репозиторий. Юнит перечисляет в `ReadWritePaths` каждый корень репозиториев из `/etc/restichub-agent-repository-roots.txt` (см. [Локальный репозиторий в Linux](/restichub/ru/getting-started/add-a-repository/#локальный-репозиторий-в-linux)). Не изменяйте юнит вручную: `install-service` записывает его заново. Там же юнит перечисляет каталоги восстановления (`/var/lib/restichub-restore` и каждый каталог из `/etc/restichub-agent-restore-roots.txt`). Команда `install-service` создаёт каталог по умолчанию. Выполните её снова после добавления каталога: systemd читает список при запуске юнита. Источник резервного копирования ниже `/home` остаётся доступным для чтения. `ProtectSystem=strict` без других параметров не защищает `/home`, `/root` и `/run/user`, поэтому юнит также задаёт `ProtectHome=read-only`.
 
+Юнит не задаёт `RestrictSUIDSGID`. С этой опцией systemd запрещает `chmod` выставлять бит setuid или setgid, и восстановление такого файла, например `/usr/bin/sudo`, завершается ошибкой. `NoNewPrivileges=true` и ограниченный набор привилегий остаются.
+
 Юнит задаёт `CacheDirectory=restichub-agent` и `RESTIC_CACHE_DIR=/var/cache/restichub-agent`. Так кэш restic остаётся в каталоге, в который юнит может писать.
 
 ## Настройки прокси
