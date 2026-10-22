@@ -130,9 +130,9 @@ impl QueueConfig {
 /// after a pass that could not read them.
 ///
 /// The wait is kept for each tenant. A pass that fails in the tenant of one organization must not
-/// hide a host of another organization for as long as it fails. The dispatcher and the alert
-/// evaluation both read the wait of the tenant, so the process holds one wait and not a second
-/// timer.
+/// hide a host of another organization for as long as it fails. The dispatcher, the stale lock
+/// recovery and the alert evaluation read the wait of the tenant; the alert evaluation holds no
+/// timer of its own.
 #[derive(Debug, Default)]
 pub struct AgentView {
     tenants: std::sync::Mutex<HashMap<TenantId, TenantGrace>>,
@@ -143,37 +143,44 @@ pub struct AgentView {
 struct TenantGrace {
     /// The first pass that read the agents again, while the wait runs.
     reading_since: Option<OffsetDateTime>,
-    /// The first pass that failed in the current run of failures.
+    /// The first failed pass of the run that the current wait belongs to.
     failing_since: Option<OffsetDateTime>,
-    /// When the warning about a run of failures that does not end last went out.
+    /// When the warning about the current run of failures last went out.
     warned_at: Option<OffsetDateTime>,
 }
 
 impl TenantGrace {
     fn passed(&mut self, now: OffsetDateTime) {
-        if self.reading_since.is_none() {
-            self.reading_since = Some(now);
+        let since = *self.reading_since.get_or_insert(now);
+        if now < since + RECONNECT_GRACE {
+            return;
         }
+        // The agents were readable for the whole wait, so the run of failures has ended.
         self.failing_since = None;
         self.warned_at = None;
     }
 
-    fn failed(&mut self, tenant: TenantId, now: OffsetDateTime) {
+    fn failed(&mut self, now: OffsetDateTime) -> Option<OffsetDateTime> {
         self.reading_since = None;
         let failing_since = *self.failing_since.get_or_insert(now);
         let warn = now >= failing_since + LONG_GRACE_WARN
             && self
                 .warned_at
                 .is_none_or(|warned| now >= warned + LONG_GRACE_WARN);
-        if warn {
-            tracing::warn!(
-                tenant = %tenant,
-                minutes = (now - failing_since).whole_minutes(),
-                "the pass of a tenant keeps failing, so the control plane judges no absent agent there"
-            );
-            self.warned_at = Some(now);
+        if !warn {
+            return None;
         }
+        self.warned_at = Some(now);
+        Some(failing_since)
     }
+}
+
+fn warn_long_grace(tenant: TenantId, failing_since: OffsetDateTime, now: OffsetDateTime) {
+    tracing::warn!(
+        tenant = %tenant,
+        minutes = (now - failing_since).whole_minutes(),
+        "the pass of a tenant keeps failing, so the control plane judges no absent agent there"
+    );
 }
 
 impl AgentView {
@@ -183,23 +190,27 @@ impl AgentView {
             .unwrap_or_else(|error| error.into_inner())
     }
 
-    /// Records a pass that read the agents of the tenant. Only the first pass after a failure
-    /// starts the wait.
+    /// Records a pass that read the agents of the tenant. The run of failed passes of the tenant
+    /// ends only after a pass that found the agents readable for the whole wait.
     pub fn passed(&self, tenant: TenantId, now: OffsetDateTime) {
         self.lock().entry(tenant).or_default().passed(now);
     }
 
     /// Records that a pass of the tenant could not read or write. The wait of that tenant starts
-    /// again with its next pass.
+    /// again with its next pass, and a warning goes out when the tenant stays in it.
     pub fn failed(&self, tenant: TenantId, now: OffsetDateTime) {
-        self.lock().entry(tenant).or_default().failed(tenant, now);
+        if let Some(since) = self.lock().entry(tenant).or_default().failed(now) {
+            warn_long_grace(tenant, since, now);
+        }
     }
 
     /// Records that a pass could not read the list of the tenants. The wait of every tenant starts
     /// again with its next pass.
     pub fn all_failed(&self, now: OffsetDateTime) {
         for (tenant, grace) in self.lock().iter_mut() {
-            grace.failed(*tenant, now);
+            if let Some(since) = grace.failed(now) {
+                warn_long_grace(*tenant, since, now);
+            }
         }
     }
 
@@ -757,7 +768,6 @@ mod tests {
             "the failure of one tenant does not hide the agents of another"
         );
 
-        // A tenant whose pass keeps failing stays in the grace, and the control plane warns about it.
         let later = back + time::Duration::hours(3);
         view.failed(second, later);
         assert!(!view.judges_absence(second, later));
@@ -767,6 +777,78 @@ mod tests {
             "the next pass that reads the agents starts the grace again"
         );
         assert!(view.judges_absence(second, later + RECONNECT_GRACE));
+    }
+
+    /// Runs the dispatcher passes of one tenant in their production order, and returns the number
+    /// of warnings that the control plane wrote.
+    fn passes(
+        grace: &mut TenantGrace,
+        from: OffsetDateTime,
+        to: OffsetDateTime,
+        step: time::Duration,
+    ) -> u32 {
+        let mut warnings = 0;
+        let mut now = from;
+        while now < to {
+            grace.passed(now);
+            if grace.failed(now).is_some() {
+                warnings += 1;
+            }
+            now += step;
+        }
+        warnings
+    }
+
+    #[test]
+    fn ac_pr_07_a_tenant_in_the_grace_warns_once_after_the_long_grace() {
+        let mut grace = TenantGrace::default();
+        let start = at_start();
+        let warnings = passes(
+            &mut grace,
+            start,
+            start + time::Duration::minutes(16),
+            time::Duration::seconds(2),
+        );
+        assert_eq!(
+            warnings, 1,
+            "the pass of the tenant failed at every turn for 16 minutes"
+        );
+    }
+
+    #[test]
+    fn ac_pr_07_a_tenant_that_fails_once_each_90_seconds_warns_after_the_long_grace() {
+        let mut grace = TenantGrace::default();
+        let start = at_start();
+        let warnings = passes(
+            &mut grace,
+            start,
+            start + time::Duration::minutes(16),
+            time::Duration::seconds(90),
+        );
+        assert_eq!(warnings, 1, "the grace of the tenant never ends");
+    }
+
+    #[test]
+    fn ac_pr_07_a_clean_grace_ends_the_run_of_failures_of_the_tenant() {
+        let mut grace = TenantGrace::default();
+        let start = at_start();
+        let step = time::Duration::seconds(2);
+        grace.passed(start);
+        assert!(
+            grace.failed(start).is_none(),
+            "a first failure is too young to warn"
+        );
+
+        let later = start + LONG_GRACE_WARN;
+        let mut now = start + step;
+        while now < later {
+            grace.passed(now);
+            now += step;
+        }
+        assert!(
+            grace.failed(later).is_none(),
+            "no absence test of the tenant stayed off for 15 minutes, so there is nothing to warn about"
+        );
     }
 
     #[test]

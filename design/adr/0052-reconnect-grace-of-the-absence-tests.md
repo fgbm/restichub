@@ -16,11 +16,11 @@ The registry of the online agents of an instance starts empty and needs the same
 ## Decision
 
 - The control plane judges the absence of an agent only after the reconnect grace of 2 minutes. The grace is `RECONNECT_GRACE`, the wait that the stale lock recovery of AC-PR-07 already uses. It starts with the first pass that read the agents after the start of the process or after a pass that could not read them.
-- A process holds one grace and no second timer. The dispatcher, the stale lock recovery and the alert evaluation read the same grace of the tenant.
+- The dispatcher, the stale lock recovery and the alert evaluation read the same grace of the organization. The alert evaluation has no timer of its own.
 - In the grace the alert "Host offline" neither opens nor closes. An alert that is open when the grace starts stays open, and it sends one recovery message after the grace, when its host is back.
 - Each instance keeps the grace in its own memory. Two instances can therefore alert a host up to 2 minutes apart. The grace is not in the database, so a restart of an instance starts it again, as FR-ID-08 requires.
-- The grace is kept for each organization. A failed read of the list of the organizations restarts the grace of every organization. A failed pass of one organization, which can fail on its own rows only, restarts the grace of that organization only. No organization waits for the failure of another.
-- An organization whose pass keeps failing stays in the grace, so its absence tests stay off. The control plane logs a warning about such an organization every 15 minutes.
+- The grace is kept for each organization. A failed read of the list of the organizations restarts the grace of every organization. A failed pass of one organization restarts the grace of that organization only. No organization waits for the failure of another.
+- An organization whose pass keeps failing stays in the grace, so its absence tests stay off. The grace of an organization ends only after a pass that read its agents for the whole 2 minutes. The control plane logs a warning when the pass of an organization keeps failing for 15 minutes, and it repeats the warning at that interval.
 - The threshold of the alert "Host offline" keeps its meaning from ADR-0036 and ADR-0044. The reconnect grace comes on top of it: the alert opens when the threshold and the grace have both passed.
 
 ## Consequences
