@@ -6,13 +6,18 @@
 
 use std::time::Duration;
 
-use restichub_proto::agent::v1::{Step, StepProgress, step};
+use restichub_proto::agent::v1::{Step, step};
 use tokio::time::Instant;
+
+use crate::output::Progress;
 
 /// The stall timeout of a step kind when the job gives none (ADR-0039).
 const DEFAULT_STALL: Duration = Duration::from_secs(60 * 60);
 
-const MIN_STALL_VARIABLE_SECS: u64 = 60;
+/// The smallest stall timeout that the variable may set. restic waits 4 minutes for a held lock
+/// and the shortest window of a profile is 5 minutes, so a shorter window would stop the step as
+/// stalled while restic still waits (FR-SC-05, ADR-0039).
+const MIN_STALL_VARIABLE_SECS: u64 = 5 * 60;
 const MAX_STALL_VARIABLE_SECS: u64 = 7 * 24 * 60 * 60;
 
 const STALL_VARIABLE: &str = "RESTICHUB_JOB_STALL_TIMEOUT_SECS";
@@ -64,6 +69,10 @@ fn default_stall(step: &Step, variable: Option<&str>) -> Duration {
 struct Seen {
     bytes_done: u64,
     files_done: u64,
+    bytes_skipped: u64,
+    files_skipped: u64,
+    total_bytes: u64,
+    total_files: u64,
     current_files: Vec<String>,
 }
 
@@ -94,13 +103,18 @@ impl Watchdog {
         self.last_progress = now;
     }
 
-    /// A status line is progress only when its counters or its current files changed. restic
-    /// repeats the same status while it waits on a backend.
-    pub(super) fn status(&mut self, progress: &StepProgress, now: Instant) {
+    /// A status line is progress only when one of its counters or its current files changed. A
+    /// restore grows `files_skipped` and `bytes_skipped` while it reads the files that the target
+    /// already holds, and `total_files` and `total_bytes` while it scans the tree (ADR-0039).
+    pub(super) fn status(&mut self, progress: &Progress, now: Instant) {
         let seen = Seen {
-            bytes_done: progress.bytes_done,
-            files_done: progress.files_done,
-            current_files: progress.current_files.clone(),
+            bytes_done: progress.message.bytes_done,
+            files_done: progress.message.files_done,
+            bytes_skipped: progress.bytes_skipped,
+            files_skipped: progress.files_skipped,
+            total_bytes: progress.message.total_bytes,
+            total_files: progress.message.total_files,
+            current_files: progress.message.current_files.clone(),
         };
         if self.seen.as_ref() != Some(&seen) {
             self.seen = Some(seen);
@@ -116,6 +130,16 @@ impl Watchdog {
         }
     }
 
+    /// The verify phase of a restore starts: it prints nothing until it ends.
+    ///
+    /// restic prints the last status and the summary before it verifies the files and prints
+    /// nothing while it verifies (`cmd/restore.go`). The step keeps the long window of `check` and
+    /// `prune`, so a verify over a target that hangs still stops the step (ADR-0051).
+    pub(super) fn verify(&mut self, now: Instant) {
+        self.stall = self.stall.max(LONG_STALL);
+        self.last_progress = now;
+    }
+
     pub(super) fn is_stalled(&self, now: Instant) -> bool {
         now.saturating_duration_since(self.last_progress) >= self.stall
     }
@@ -123,14 +147,20 @@ impl Watchdog {
 
 #[cfg(test)]
 mod tests {
+    use restichub_proto::agent::v1::StepProgress;
+
     use super::*;
 
-    fn status(bytes_done: u64, file: &str) -> StepProgress {
-        StepProgress {
-            bytes_done,
-            files_done: bytes_done / 10,
-            current_files: vec![file.to_owned()],
-            ..StepProgress::default()
+    fn status(bytes_done: u64, file: &str) -> Progress {
+        Progress {
+            message: StepProgress {
+                bytes_done,
+                files_done: bytes_done / 10,
+                current_files: vec![file.to_owned()],
+                ..StepProgress::default()
+            },
+            files_skipped: 0,
+            bytes_skipped: 0,
         }
     }
 
@@ -146,6 +176,12 @@ mod tests {
         assert_eq!(
             default_stall(&backup, Some("1")),
             Duration::from_secs(MIN_STALL_VARIABLE_SECS)
+        );
+        // A window shorter than the lock wait of restic would stop the step as stalled while
+        // restic still waits for the lock (FR-SC-05).
+        assert_eq!(
+            default_stall(&backup, Some("240")),
+            Duration::from_secs(300)
         );
     }
 
@@ -201,6 +237,77 @@ mod tests {
         assert!(watchdog.is_stalled(later));
         watchdog.status_line("{\"message_type\":\"status\",\"percent_done\":0.5}", later);
         assert!(!watchdog.is_stalled(later));
+    }
+
+    /// A restore over a target that holds the same data skips every file, so only the skipped
+    /// counters grow (ADR-0039).
+    #[test]
+    fn ac_ag_12_a_restore_that_skips_files_makes_progress() {
+        let start = Instant::now();
+        let mut watchdog = Watchdog::new(Duration::from_secs(60), start);
+        for second in 0..600 {
+            let at = start + Duration::from_secs(second);
+            watchdog.status(
+                &Progress {
+                    message: StepProgress {
+                        total_files: 1_000,
+                        total_bytes: 10_000_000,
+                        ..StepProgress::default()
+                    },
+                    files_skipped: second * 2,
+                    bytes_skipped: second * 15_000,
+                },
+                at,
+            );
+            assert!(!watchdog.is_stalled(at), "a skipped file is progress");
+        }
+    }
+
+    /// The scan of the tree grows the totals before restic restores the first file.
+    #[test]
+    fn ac_ag_12_a_tree_scan_makes_progress() {
+        let start = Instant::now();
+        let mut watchdog = Watchdog::new(Duration::from_secs(60), start);
+        for step in 0..600 {
+            let at = start + Duration::from_secs(step);
+            watchdog.status(
+                &Progress {
+                    message: StepProgress {
+                        total_files: step * 100,
+                        total_bytes: step * 1_000_000,
+                        ..StepProgress::default()
+                    },
+                    files_skipped: 0,
+                    bytes_skipped: 0,
+                },
+                at,
+            );
+            assert!(!watchdog.is_stalled(at), "a growing total is progress");
+        }
+    }
+
+    /// The verify phase of a restore prints nothing until it ends, so the step waits the long
+    /// window of `check` and `prune` there (ADR-0051).
+    #[test]
+    fn ac_ag_12_the_verify_phase_of_a_restore_has_the_long_window() {
+        let start = Instant::now();
+        let mut watchdog = Watchdog::new(Duration::from_secs(60), start);
+        watchdog.status(&status(1000, "file"), start);
+        watchdog.verify(start);
+        let almost = start + LONG_STALL - Duration::from_secs(1);
+        assert!(!watchdog.is_stalled(almost), "the verify phase still runs");
+        assert!(watchdog.is_stalled(start + LONG_STALL));
+    }
+
+    /// A step that already has a longer window keeps it: the verify phase only raises the window.
+    #[test]
+    fn ac_ag_12_the_verify_phase_keeps_a_longer_stall_timeout() {
+        let start = Instant::now();
+        let longer = LONG_STALL + Duration::from_secs(3600);
+        let mut watchdog = Watchdog::new(longer, start);
+        watchdog.verify(start);
+        assert!(!watchdog.is_stalled(start + LONG_STALL));
+        assert!(watchdog.is_stalled(start + longer));
     }
 
     #[test]

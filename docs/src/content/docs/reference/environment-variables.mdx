@@ -80,7 +80,7 @@ See [Jobs](/restichub/concepts/job-lifecycle/) for the rules of the queue.
 |---|---|---|---|---|
 | `RESTICHUB_JOB_STALL_TIMEOUT_SECS` | control plane | `3600` (60 minutes) | seconds | The "No progress" limit of a new profile. The control plane rounds the value up to whole minutes. Allowed: 300 to 604800. Other values are ignored. |
 | `RESTICHUB_JOB_MAX_DURATION_SECS` | control plane | `172800` (48 hours) | seconds | The maximum duration of a new profile. Allowed: 0 to 2592000. 0 means no limit. Other values are ignored. |
-| `RESTICHUB_JOB_STALL_TIMEOUT_SECS` | agent | 60 minutes. 6 hours for `check` and `prune`. | seconds | The stall timeout of a job that carries none. A value outside 60 to 604800 is set to the nearest limit. |
+| `RESTICHUB_JOB_STALL_TIMEOUT_SECS` | agent | 60 minutes. 6 hours for `check` and `prune`. | seconds | The stall timeout of a job that carries none. A value outside 300 to 604800 is set to the nearest limit. The smallest value is 5 minutes, because restic waits 4 minutes for a held lock. |
 | `RESTICHUB_JOB_HARD_CEILING_SECS` | control plane | `2678400` (31 days) | seconds | The time after which the control plane fails a running job, whatever its limits. A value below 3600 becomes 3600. |
 
 An existing profile keeps its own values. See [Profiles](/restichub/concepts/profiles/#job-limits) and [Jobs](/restichub/concepts/job-lifecycle/#time-limits).

@@ -27,9 +27,20 @@ A `check` and a `prune` print their only output on the standard error, and they 
 - An error about one file no longer holds the watchdog open. A `backup` prints a status message while it works, so a backup that reads files and reports errors keeps the watchdog open.
 - The agent keeps the rule of ADR-0039 for `check` and `prune`, because they print no status message.
 
+## Note of 2026-10-22: the counters of a restore, its verify phase and the lock wait
+
+A `restore` over a target that already holds the snapshot reads and hashes the files that did not change. restic counts those files as skipped. It then grows `files_skipped` and `bytes_skipped` only, and `files_restored` and `bytes_restored` stay at 0 for the whole run. The watchdog read the two restored counters only, so a healthy restore stopped as `stalled` after the stall timeout. The scan of the tree also grows `total_files` and `total_bytes` before restic restores the first file.
+
+- A status message of a step is progress when one of these values changes: `bytes_done`, `files_done`, `bytes_skipped`, `files_skipped`, `total_bytes`, `total_files`, or the current files. The skipped counters restart the watchdog only; the protocol message keeps the restored counters.
+- A `restore` with `--verify` prints its last status message and its summary before it verifies the files. The verification prints nothing, on either stream (restic `cmd/restore.go`, `internal/ui/restore/json.go`). Its progress bar is for a terminal only. The agent cannot tell a slow disk from a hung one there, and a wrong guess stops a restore that wrote every file. It therefore gives the verify phase the long window of `check` and `prune`, 6 hours, counted from the summary message. A verify that reads no file for 6 hours stops the step as `stalled`. A cancel also stops it. A `restore` job carries no maximum duration, so nothing else does.
+- `--retry-lock` waits 4 minutes. The shortest stall timeout of a profile is 5 minutes. restic therefore ends a held lock with exit code 11 before the watchdog stops the step. The step then ends with the code `repository_locked`, and the control plane retries the job. Before this change the two values were equal, and the watchdog fired about one second before restic gave up. The agent accepts `RESTICHUB_JOB_STALL_TIMEOUT_SECS` from 300 seconds for the same reason: a shorter window would stop a step that waits for a lock.
+- A `restore` job carries no stall timeout from a profile. The control plane cannot see the value that the agent uses. The card of the job names the default of the agent without a number.
+
 ## Alternatives
 
 | Alternative | Why we did not select it |
 |---|---|
 | Count a retry line as progress by its text (`returned error, retrying after`) | The text belongs to restic, not to the product. A newer restic can change it, and the watchdog counts the retry as progress again. |
 | Ignore the standard error for every step | `check` and `prune` print their only output there. A long `prune` would stop after 6 hours although it advances. |
+| Judge the verify phase of a restore by its restored counters | restic prints no counter while it verifies, so the step stops although the disk is only slow. |
+| Give the lock wait a grace period before the first status line | The grace is a second time value next to the stall timeout, and the operator cannot see it. A shorter `--retry-lock` keeps one value. |

@@ -172,11 +172,25 @@ impl OutputKind {
 #[derive(Debug, PartialEq)]
 pub(crate) enum Accepted {
     Log(String),
-    Progress(StepProgress),
+    Progress(Progress),
     /// The collector keeps the line for the typed output.
     Consumed,
     /// A status line without log text. restic repeats it while it waits on a backend.
     Status(String),
+    /// The summary of a restore that then verifies the files it wrote. restic prints no status
+    /// line while it verifies.
+    Verifying,
+}
+
+/// The progress of a step and the counters of a restore that the protocol does not carry.
+#[derive(Debug, PartialEq)]
+pub(crate) struct Progress {
+    /// The message that the agent sends to the control plane (FR-AG-08).
+    pub(crate) message: StepProgress,
+    /// A restore over a target that already holds the snapshot skips these files, so only these
+    /// two counters move while it works (ADR-0039).
+    pub(crate) files_skipped: u64,
+    pub(crate) bytes_skipped: u64,
 }
 
 /// Turns the standard output of one step into the typed output (FR-AG-08).
@@ -193,6 +207,7 @@ pub(crate) struct Collector {
     nodes_bytes: usize,
     more_nodes: bool,
     dry_run: bool,
+    verify: bool,
 }
 
 /// Nodes of the `ls` stream that a step returns: from `skip`, at most `limit` of them (AC-RS-02).
@@ -218,6 +233,7 @@ impl Collector {
             nodes_bytes: 0,
             more_nodes: false,
             dry_run: false,
+            verify: false,
         }
     }
 
@@ -238,6 +254,13 @@ impl Collector {
     #[must_use]
     pub(crate) fn with_dry_run(mut self, dry_run: bool) -> Self {
         self.dry_run = dry_run;
+        self
+    }
+
+    /// Marks the restore as one that verifies the files after it restores them (FR-RS-04).
+    #[must_use]
+    pub(crate) fn with_verify(mut self, verify: bool) -> Self {
+        self.verify = verify;
         self
     }
 
@@ -278,9 +301,11 @@ impl Collector {
         };
         let message_type = message.get("message_type").and_then(Value::as_str);
         match (self.kind, message_type) {
-            (OutputKind::Backup, Some("status")) => {
-                Accepted::Progress(progress(&message, &self.job_id, &self.step_id))
-            }
+            (OutputKind::Backup, Some("status")) => Accepted::Progress(Progress {
+                message: progress(&message, &self.job_id, &self.step_id),
+                files_skipped: 0,
+                bytes_skipped: 0,
+            }),
             (OutputKind::Backup, Some("summary")) => {
                 self.output = Some(step_result::Output::BackupSummary(backup_summary(&message)));
                 Accepted::Consumed
@@ -309,7 +334,11 @@ impl Collector {
                     &message,
                     self.dry_run,
                 )));
-                Accepted::Consumed
+                if self.verify {
+                    Accepted::Verifying
+                } else {
+                    Accepted::Consumed
+                }
             }
             (OutputKind::Backup | OutputKind::Restore, Some("error")) => {
                 Accepted::Log(backup_error(&message))
@@ -423,18 +452,22 @@ fn progress(message: &Value, job_id: &str, step_id: &str) -> StepProgress {
 }
 
 /// The progress of a restore: the `status` message names its fields in the restore way.
-fn restore_progress(message: &Value, job_id: &str, step_id: &str) -> StepProgress {
-    StepProgress {
-        job_id: job_id.to_owned(),
-        step_id: step_id.to_owned(),
-        bytes_done: uint(message, "bytes_restored"),
-        total_bytes: uint(message, "total_bytes"),
-        files_done: uint(message, "files_restored"),
-        total_files: uint(message, "total_files"),
-        percent_done: float(message, "percent_done"),
-        seconds_elapsed: float(message, "seconds_elapsed"),
-        seconds_remaining: 0,
-        current_files: Vec::new(),
+fn restore_progress(message: &Value, job_id: &str, step_id: &str) -> Progress {
+    Progress {
+        message: StepProgress {
+            job_id: job_id.to_owned(),
+            step_id: step_id.to_owned(),
+            bytes_done: uint(message, "bytes_restored"),
+            total_bytes: uint(message, "total_bytes"),
+            files_done: uint(message, "files_restored"),
+            total_files: uint(message, "total_files"),
+            percent_done: float(message, "percent_done"),
+            seconds_elapsed: float(message, "seconds_elapsed"),
+            seconds_remaining: 0,
+            current_files: Vec::new(),
+        },
+        files_skipped: uint(message, "files_skipped"),
+        bytes_skipped: uint(message, "bytes_skipped"),
     }
 }
 

@@ -26,12 +26,12 @@ fn fr_ag_08_a_backup_gives_progress_and_a_typed_summary() {
     let (accepted, output) = feed(OutputKind::Backup, BACKUP_1);
     match &accepted[0] {
         Accepted::Progress(progress) => {
-            assert_eq!(progress.job_id, "job-1");
-            assert_eq!(progress.step_id, "step-1");
-            assert_eq!(progress.total_files, 2);
-            assert_eq!(progress.files_done, 2);
-            assert_eq!(progress.total_bytes, 300_006);
-            assert!((progress.percent_done - 1.0).abs() < f64::EPSILON);
+            assert_eq!(progress.message.job_id, "job-1");
+            assert_eq!(progress.message.step_id, "step-1");
+            assert_eq!(progress.message.total_files, 2);
+            assert_eq!(progress.message.files_done, 2);
+            assert_eq!(progress.message.total_bytes, 300_006);
+            assert!((progress.message.percent_done - 1.0).abs() < f64::EPSILON);
         }
         other => panic!("the status line must give progress: {other:?}"),
     }
@@ -97,6 +97,38 @@ fn fr_ag_08_a_line_that_is_not_json_is_a_log_line() {
     let cut = r#"{"message_type":"summary","files_new":1"#;
     assert_eq!(collector.accept(cut, true), Accepted::Log(cut.to_owned()));
     assert!(collector.finish().is_none());
+}
+
+/// A restore over a target that holds the same data prints the skipped counters only, and they
+/// leave the protocol message as it is (ADR-0039).
+#[test]
+fn fr_ag_08_a_restore_status_gives_the_skipped_counters() {
+    let line = r#"{"message_type":"status","seconds_elapsed":6,"percent_done":0,"total_files":1000,"files_restored":0,"files_skipped":400,"total_bytes":10000000,"bytes_restored":0,"bytes_skipped":6000000}"#;
+    let mut collector = Collector::new(OutputKind::Restore, "job-1", "step-1");
+    let Accepted::Progress(progress) = collector.accept(line, false) else {
+        panic!("a restore status line must give progress");
+    };
+    assert_eq!(progress.message.files_done, 0);
+    assert_eq!(progress.message.bytes_done, 0);
+    assert_eq!(progress.message.total_files, 1_000);
+    assert_eq!(progress.message.total_bytes, 10_000_000);
+    assert_eq!(progress.files_skipped, 400);
+    assert_eq!(progress.bytes_skipped, 6_000_000);
+}
+
+/// The summary of a restore that then verifies its files says so, and a restore without the flag
+/// keeps the line as typed output only (FR-RS-04).
+#[test]
+fn fr_ag_08_a_restore_with_verify_marks_the_start_of_the_verification() {
+    let summary = r#"{"message_type":"summary","total_files":10,"files_restored":10,"total_bytes":2000,"bytes_restored":2000}"#;
+    let mut verifying = Collector::new(OutputKind::Restore, "job-1", "step-1").with_verify(true);
+    assert_eq!(verifying.accept(summary, false), Accepted::Verifying);
+    assert!(matches!(
+        verifying.finish(),
+        Some(Output::RestoreSummary(_))
+    ));
+    let mut plain = Collector::new(OutputKind::Restore, "job-1", "step-1");
+    assert_eq!(plain.accept(summary, false), Accepted::Consumed);
 }
 
 #[test]
