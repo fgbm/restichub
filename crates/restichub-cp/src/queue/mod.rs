@@ -69,6 +69,15 @@ const LONG_GRACE_WARN: time::Duration = time::Duration::minutes(15);
 /// The result message of a job that never got an acknowledgement.
 const NOT_ACKNOWLEDGED: &str = "not_acknowledged";
 
+/// The longest time that one statement of a tenant pass may run.
+///
+/// A pass that passes it fails and the dispatcher continues with the next tenant, so one slow
+/// tenant does not stop every dispatch (AC-NFR-01).
+const PASS_STATEMENT_TIMEOUT: time::Duration = time::Duration::seconds(10);
+
+/// How often the warning about a pass that passed the statement timeout repeats for a tenant.
+const TIMEOUT_WARN: time::Duration = time::Duration::minutes(15);
+
 /// The result message of a job that the control plane could not sign.
 const SIGNING_FAILED: &str = "signing_failed";
 
@@ -148,6 +157,8 @@ struct TenantGrace {
     failing_since: Option<OffsetDateTime>,
     /// When the warning about the current run of failures last went out.
     warned_at: Option<OffsetDateTime>,
+    /// When the warning about a statement timeout last went out.
+    timeout_warned_at: Option<OffsetDateTime>,
 }
 
 impl TenantGrace {
@@ -173,6 +184,23 @@ impl TenantGrace {
         }
         self.warned_at = Some(now);
         Some(failing_since)
+    }
+
+    /// Warns about a pass that a statement timeout ended, at most once per `TIMEOUT_WARN`, so a
+    /// tenant that stays slow does not fill the log.
+    fn timed_out(&mut self, tenant: TenantId, now: OffsetDateTime) {
+        let warn = self
+            .timeout_warned_at
+            .is_none_or(|warned| now >= warned + TIMEOUT_WARN);
+        if warn {
+            tracing::warn!(
+                tenant = %tenant,
+                seconds = PASS_STATEMENT_TIMEOUT.whole_seconds(),
+                "the pass of a tenant passed the statement timeout, so its agent_lost, timed_out \
+                 and Host offline checks stay off until a pass succeeds"
+            );
+            self.timeout_warned_at = Some(now);
+        }
     }
 }
 
@@ -213,6 +241,15 @@ impl AgentView {
                 warn_long_grace(*tenant, since, now);
             }
         }
+    }
+
+    /// Records a pass that a statement timeout ended, and warns at most once per `TIMEOUT_WARN`
+    /// for the tenant.
+    pub fn timed_out(&self, tenant: TenantId, now: OffsetDateTime) {
+        self.lock()
+            .entry(tenant)
+            .or_default()
+            .timed_out(tenant, now);
     }
 
     /// True when the control plane read the agents of the tenant for at least [`RECONNECT_GRACE`].
@@ -264,11 +301,19 @@ pub async fn run_with_online(
         state.agent_view().passed(tenant.id, now);
         let recovered = stale::recover_tenant(state, tenant.id, now, online).await;
         if let Err(error) = &recovered {
-            tracing::warn!(tenant = %tenant.id, %error, "the stale lock pass of a tenant failed");
+            if error.is_statement_timeout() {
+                state.agent_view().timed_out(tenant.id, now);
+            } else {
+                tracing::warn!(tenant = %tenant.id, %error, "the stale lock pass of a tenant failed");
+            }
         }
         let dispatched = dispatch_tenant(state, tenant.id, now, online).await;
         if let Err(error) = &dispatched {
-            tracing::warn!(tenant = %tenant.id, %error, "the dispatch pass of a tenant failed");
+            if error.is_statement_timeout() {
+                state.agent_view().timed_out(tenant.id, now);
+            } else {
+                tracing::warn!(tenant = %tenant.id, %error, "the dispatch pass of a tenant failed");
+            }
         }
         if recovered.is_err() || dispatched.is_err() {
             state.agent_view().failed(tenant.id, now);
@@ -301,6 +346,8 @@ async fn dispatch_tenant(
         load_signer(state).await
     };
     let mut tx = state.db().begin_tenant(tenant).await?;
+    tx.statement_timeout(PASS_STATEMENT_TIMEOUT).await?;
+    tx.force_custom_plan().await?;
     queue_repo::fail_for_revoked_agents(&mut tx, now).await?;
     if !queue_repo::try_lock_tenant(&mut tx).await? {
         return tx.commit().await;

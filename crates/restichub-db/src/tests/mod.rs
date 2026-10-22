@@ -15,6 +15,7 @@ mod migrations;
 mod parameters;
 mod plans;
 mod profiles;
+mod queue_plan;
 mod repositories;
 mod restore;
 mod rls;

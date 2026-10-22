@@ -545,8 +545,15 @@ async fn check_registry(
     identity: &PeerIdentity,
     now: time::OffsetDateTime,
 ) -> Result<(), Status> {
-    let unavailable =
-        |_: restichub_db::DbError| Status::internal("the agent registry is not available");
+    let unavailable = |error: restichub_db::DbError| {
+        tracing::warn!(
+            tenant = %identity.tenant,
+            agent = %identity.agent,
+            cause = ?error,
+            "the agent registry is not available"
+        );
+        Status::internal("the agent registry is not available")
+    };
     let mut tx = db
         .begin_tenant(identity.tenant)
         .await
