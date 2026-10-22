@@ -1191,12 +1191,16 @@ mod tests {
 
     #[test]
     fn fr_ag_09_a_job_with_warnings_is_not_a_plain_success() {
-        let outcome = outcome_of(&result(ProtoJobStatus::SucceededWithWarnings), JobKind::Backup)
-            .expect("the outcome must map");
+        let outcome = outcome_of(
+            &result(ProtoJobStatus::SucceededWithWarnings),
+            JobKind::Backup,
+        )
+        .expect("the outcome must map");
         assert_eq!(outcome.status, JobStatus::Succeeded);
         assert_eq!(outcome.result_code, JobResultCode::SucceededWithWarnings);
         assert_eq!(outcome.result_message, None);
-        let plain = outcome_of(&result(ProtoJobStatus::Succeeded), JobKind::Backup).expect("the outcome must map");
+        let plain = outcome_of(&result(ProtoJobStatus::Succeeded), JobKind::Backup)
+            .expect("the outcome must map");
         assert_eq!(plain.result_code, JobResultCode::Succeeded);
         assert_eq!(plain.result_message, None);
     }
@@ -1213,8 +1217,8 @@ mod tests {
 
     #[test]
     fn ac_mn_10_an_interrupted_backup_is_cancelled_and_keeps_its_reason() {
-        let outcome = outcome_of(&failed_with("interrupted"), JobKind::Backup)
-            .expect("the outcome must map");
+        let outcome =
+            outcome_of(&failed_with("interrupted"), JobKind::Backup).expect("the outcome must map");
         assert_eq!(outcome.status, JobStatus::Failed);
         assert_eq!(outcome.result_code, JobResultCode::Cancelled);
         assert_eq!(outcome.result_message.as_deref(), Some("interrupted"));
@@ -1255,9 +1259,8 @@ mod tests {
 
     #[test]
     fn fr_sc_05_a_locked_repository_is_a_typed_failure() {
-        let outcome =
-            outcome_of(&result(ProtoJobStatus::RepositoryLocked), JobKind::Backup)
-                .expect("the outcome must map");
+        let outcome = outcome_of(&result(ProtoJobStatus::RepositoryLocked), JobKind::Backup)
+            .expect("the outcome must map");
         assert_eq!(outcome.status, JobStatus::Failed);
         assert_eq!(outcome.result_code, JobResultCode::RepositoryLocked);
         assert_eq!(outcome.result_message, None);

@@ -152,7 +152,10 @@ async fn ac_mn_10_an_interrupted_backup_is_cancelled_and_only_the_rpo_alert_fire
 
     let created = plan_created_at(&w.cp.db, w.cp.tenant, PlanId::from_uuid(w.plan)).await;
     let later = created + Duration::days(400);
-    assert_eq!(open_alerts(&w.cp, later).await, ["rpo_violated"]);
+    // The agent is silent for 400 days, so its own alert is open too.
+    let alerts = open_alerts(&w.cp, later).await;
+    assert!(alerts.contains(&"rpo_violated".to_owned()), "{alerts:?}");
+    assert!(!alerts.contains(&"job_failed".to_owned()), "{alerts:?}");
     w.cp.db.cleanup().await;
 }
 

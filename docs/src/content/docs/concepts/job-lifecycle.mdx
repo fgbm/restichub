@@ -129,7 +129,7 @@ A job also fails with the reason `timed_out` when it runs 10 minutes longer than
 
 When the service of the agent stops, the agent stops the running job and reports it as cancelled. A restart can cut short a job that holds a script. The agent does not run such a job again, because a script must not run twice. The agent answers with the reason `interrupted`.
 
-The control plane ends an interrupted backup as cancelled and keeps the reason `interrupted`. The job raises no job alert, because the RPO alert catches the missed backup. Any other interrupted job (check, forget, prune, init, test access and restore) ends as failed and raises the job alert, because no other alert covers it. The job page shows the reason of a cancelled job when the job has one.
+The control plane ends an interrupted backup as cancelled and keeps the reason `interrupted`. The job raises no job alert, because the RPO alert catches the missed backup. Any other interrupted job ends as failed and raises the job alert. These jobs are check, forget, prune, init, test access and restore. No other alert covers them. The job page shows the reason of a cancelled job when the job has one.
 
 An agent that is older than this version does not know the stall timeout and does not stop a step that makes no progress. The control plane sends such an agent the maximum duration of the profile, or a fixed limit of 12 hours when the profile has none. The job detail shows only the maximum duration for such an agent.
 
