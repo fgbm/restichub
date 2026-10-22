@@ -797,6 +797,7 @@ export const en = {
 	'jobs.reason.cancelled': 'The job was cancelled.',
 	'jobs.reason.succeeded_with_warnings': 'Finished with warnings.',
 	'jobs.errorCode.interrupted': 'interrupted by an agent restart',
+	'jobs.errorCode.agent_internal_error': 'internal agent error',
 	'jobs.errorCode.step_failed': 'restic error',
 	'jobs.errorCode.step_not_started': 'The step did not start',
 	'jobs.errorCode.wrong_password': 'wrong password or keys',
@@ -845,6 +846,8 @@ export const en = {
 		'The option {option} needs restic {required}. The agent has restic {installed}.',
 	'jobs.incompatible.version':
 		'The agent has restic {installed}. ResticHub needs restic {required} or later.',
+	'jobs.reason.agent_internal_error':
+		'The agent stopped the job after an internal error. Read the agent log.',
 	'jobs.reason.interrupted': 'Interrupted: the agent restarted while scripts ran',
 	'jobs.reason.timed_out': 'The job ran longer than its maximum duration.',
 	'jobs.reason.stalled':

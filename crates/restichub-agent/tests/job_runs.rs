@@ -233,7 +233,9 @@ async fn fr_ag_05_a_step_without_a_timeout_honours_the_job_timeout() {
     let dir = config_dir("job-runs-timeout");
     let path = repository("job-runs-timeout-repo");
     common::script_exit_codes(&path, 10, 0);
-    common::script_sleep(&path, 5_000);
+    // The stop signal ends the double at once; the long sleep only keeps a slow runner from
+    // finishing the step before the timeout.
+    common::script_sleep(&path, 30_000);
 
     let jobs = common::program_jobs(&dir);
     let (tx, mut rx) = mpsc::channel(32);
@@ -247,12 +249,17 @@ async fn fr_ag_05_a_step_without_a_timeout_honours_the_job_timeout() {
     job.timeout_seconds = 1;
     job.steps[0].timeout_seconds = 0;
 
-    let started = std::time::Instant::now();
     jobs.handle(signed(&job), &ring(), AGENT, TENANT).await;
     let result = wait_result(&mut rx).await;
     assert_eq!(result.outcome, JobStatus::Failed as i32);
+    assert_eq!(
+        result.error.as_ref().map(|error| error.code.as_str()),
+        Some("max_duration_exceeded")
+    );
+    let signal = std::fs::read_to_string(format!("{}.restichub-signal", path.display()))
+        .expect("the agent must send the stop signal");
     assert!(
-        started.elapsed() < Duration::from_secs(4),
+        !signal.trim().is_empty(),
         "the job timeout must stop the step"
     );
     let _ = std::fs::remove_dir_all(&dir);

@@ -279,19 +279,21 @@ impl Jobs {
             limit = limit.min(deadline.saturating_duration_since(tokio::time::Instant::now()));
         }
         let scrubber = Scrubber::for_secrets(&invocation.secrets);
-        let mut child = match crate::exec::spawn_job_script(&invocation) {
-            Ok(child) => child,
+        match crate::exec::spawn_job_script(&invocation) {
+            Ok(child) => cancel.adopt(child, step_id, false),
             Err(error) => {
                 tracing::warn!(step = %label, error = %format!("{error:#}"), "cannot start a script");
                 log.push(step_id, LogStream::Agent, &format!("{label} did not start"));
                 self.send_log(log).await;
                 return StepOutcome::not_started();
             }
-        };
+        }
+        #[cfg(feature = "test-util")]
+        self.panic_if_asked().await;
         // The secret values leave the memory of the agent with the invocation (FR-HK-09).
         drop(invocation);
 
-        let (stdout, stderr) = child.take_output();
+        let (stdout, stderr) = cancel.take_output();
         let (tx, mut lines) = mpsc::channel::<Line>(256);
         if let Some(stdout) = stdout {
             spawn_reader(stdout, Pipe::Stdout, MAX_LINE, tx.clone());
@@ -300,7 +302,6 @@ impl Jobs {
             spawn_reader(stderr, Pipe::Stderr, MAX_LINE, tx.clone());
         }
         drop(tx);
-        *lock(&cancel.child) = Some(child);
 
         let mut output = ScriptOutput {
             step_id,

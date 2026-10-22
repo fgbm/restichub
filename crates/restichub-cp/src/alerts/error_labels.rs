@@ -10,6 +10,11 @@ pub(super) const LABELS: &[(&str, &str, &str)] = &[
         "interrupted by an agent restart",
         "прервано перезапуском агента",
     ),
+    (
+        "agent_internal_error",
+        "internal agent error",
+        "внутренняя ошибка агента",
+    ),
     ("step_failed", "restic error", "ошибка restic"),
     (
         "step_not_started",
