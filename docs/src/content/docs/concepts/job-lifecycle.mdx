@@ -22,7 +22,7 @@ The diagram does not show the redelivery. A job stays in `sent` while the contro
 | <Ui k="jobs.status.succeeded" />, in green | `succeeded` | Every step succeeded. |
 | <Ui k="jobs.status.succeeded_with_warnings" />, in yellow | `succeeded` | Every step finished, and restic reported warnings. The list shows a pill with this label. The tooltip shows "<Ui k="jobs.statusFull.succeeded_with_warnings" />". The result code is `succeeded_with_warnings`. |
 | <Ui k="jobs.status.failed" /> | `failed` | A step failed, or the control plane refused the job. The result code and the reason give the detail. |
-| <Ui k="jobs.status.cancelled" /> | `failed` | An Operator cancelled the job. The result code is `cancelled`. |
+| <Ui k="jobs.status.cancelled" /> | `failed` | An Operator cancelled the job, or the service of the agent stopped. Also, a backup with a script that the control plane delivered again after a restart ends here. The result code is `cancelled`. |
 | <Ui k="jobs.status.expired" /> | `expired` | The job waited in the queue longer than its acceptance window. A running job never expires. |
 | <Ui k="jobs.status.dead_letter" /> | `dead_letter` | The repository stayed locked after the last retry. |
 
@@ -118,7 +118,7 @@ For the stall timeout and the maximum duration, a value that is not a number, or
 
 ### Lost jobs
 
-The control plane does not fail a running job because of the time that it ran. It fails the job with the reason `agent_lost` in two cases:
+The control plane does not fail a running job because of the time that it ran. It fails the job with the reason `agent_lost` in two cases. In both cases the job raises the job alert, because the control plane cannot tell a crash of the agent from a lost host:
 
 - The agent is offline and the control plane did not hear from it for 30 minutes.
 - The agent connects again and does not list the job in its hello message. The agent restarted and lost the job.
@@ -126,6 +126,14 @@ The control plane does not fail a running job because of the time that it ran. I
 A job also fails with the reason `timed_out` when it runs 10 minutes longer than its maximum duration and the agent did not report an end. A job with no maximum duration fails with the same reason at the hard ceiling. Maintenance jobs (forget, prune, check) have a maximum duration of 48 hours. The control plane marks the repository lock as possibly stale in each of these cases.
 
 An agent that is older than this version does not know the stall timeout and does not stop a step that makes no progress. The control plane sends such an agent the maximum duration of the profile, or a fixed limit of 12 hours when the profile has none. The job detail shows only the maximum duration for such an agent.
+
+### Interrupted jobs
+
+When the service of the agent stops, the agent stops the running job of any kind and reports it as cancelled. This includes a clean reboot of the host, `systemctl restart` and an upgrade of the package. The control plane ends the job as cancelled and raises no job alert, as it did before. The RPO alert catches a missed backup. No alert covers a check, forget or prune job that a service stop cancels. This is a known limit (see [issue #404](https://github.com/fgbm/restichub/issues/404)).
+
+The agent reports the reason `interrupted` in one case only. The control plane delivers a job with a script again, because it did not get the acknowledgement. The agent does not run such a job again, because a script must not run twice. Only a backup has a script. The control plane ends this backup as cancelled and keeps the reason `interrupted`. The job raises no job alert, and the RPO alert catches the missed backup. The job page shows the reason of a cancelled job when the job has one. If an agent reports `interrupted` for a job of another kind, the control plane ends the job as failed and raises the job alert.
+
+The agent can restart without a clean stop, for example after a crash or a power loss, when the control plane already recorded the acknowledgement. Then the job has no result. The control plane ends it as failed with the reason `agent_lost` and raises the job alert (see [Lost jobs](#lost-jobs)).
 
 ## Lock retries
 

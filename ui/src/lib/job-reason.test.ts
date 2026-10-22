@@ -42,7 +42,7 @@ describe('jobReason', () => {
 	});
 
 	it('translates a typed result message and keeps a code without a translation', () => {
-		expect(jobReason({ result_code: 'failed', result_message: 'interrupted' })).toBe(
+		expect(jobReason({ result_code: 'cancelled', result_message: 'interrupted' })).toBe(
 			'Interrupted: the agent restarted while scripts ran'
 		);
 		expect(jobReason({ result_code: 'failed', result_message: 'lock_retries_exhausted' })).toBe(
@@ -59,6 +59,26 @@ describe('jobReason', () => {
 		);
 		expect(jobReason({ result_code: 'failed', result_message: 'repository_missing' })).toBe(
 			'No repository at this location.'
+		);
+	});
+});
+
+describe('the reason of a job page', () => {
+	const steps: [] = [];
+
+	it('ac_mn_10_keeps_the_cause_of_an_interruption_and_hides_a_plain_cancel', () => {
+		const cancelled = { result_code: 'cancelled' as const, result_params: null, steps };
+		expect(jobDetailReason({ ...cancelled, result_message: 'interrupted' })).toBe(
+			'Interrupted: the agent restarted while scripts ran'
+		);
+		expect(jobDetailReason({ ...cancelled, result_message: null })).toBeNull();
+		expect(jobDetailReason({ ...cancelled, result_message: 'cancelled' })).toBeNull();
+	});
+
+	it('ac_mn_10_shows_the_reason_of_a_failed_job', () => {
+		const failed = { result_code: 'failed' as const, result_params: null, steps };
+		expect(jobDetailReason({ ...failed, result_message: 'interrupted' })).toBe(
+			'Interrupted: the agent restarted while scripts ran'
 		);
 	});
 });

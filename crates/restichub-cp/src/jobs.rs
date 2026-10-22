@@ -88,6 +88,11 @@ const ACCESS_ERROR_CODE: &str = "repository_missing_here";
 /// The stable warning code of a `forget` step that selected no snapshot (FR-RP-08).
 const FORGET_SELECTED_NOTHING: &str = "forget_selected_nothing";
 
+/// The error code of a job with a script that the control plane delivered again after a restart
+/// of the agent. The agent sends it with the outcome `failed` (ADR-0037); the control plane stores
+/// an interrupted backup as cancelled (FR-MN-03).
+const INTERRUPTED_CODE: &str = "interrupted";
+
 /// The request body of an init or a test-access action.
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
@@ -718,7 +723,7 @@ pub async fn handle_job_result(
     if job.status.is_terminal() {
         return WriteOutcome::Ignored;
     }
-    let Some(outcome) = outcome_of(result) else {
+    let Some(outcome) = outcome_of(result, job.kind) else {
         tracing::warn!(job = %job_id, "the job result holds an unknown outcome");
         return WriteOutcome::Ignored;
     };
@@ -1070,7 +1075,7 @@ fn repository_steps(kind: JobKind, repository_id: &str) -> Vec<Step> {
 ///
 /// The error code from the agent is bounded and sanitized, so a malicious agent cannot store a huge
 /// value or a control character (FR-PR-08).
-fn outcome_of(result: &JobResult) -> Option<JobOutcome> {
+fn outcome_of(result: &JobResult, kind: JobKind) -> Option<JobOutcome> {
     let outcome = ProtoJobStatus::try_from(result.outcome).ok()?;
     let result_code = match outcome {
         ProtoJobStatus::Succeeded => JobResultCode::Succeeded,
@@ -1081,6 +1086,20 @@ fn outcome_of(result: &JobResult) -> Option<JobOutcome> {
         ProtoJobStatus::SucceededWithWarnings => JobResultCode::SucceededWithWarnings,
         ProtoJobStatus::RepositoryLocked => JobResultCode::RepositoryLocked,
         ProtoJobStatus::Unspecified => return None,
+    };
+    // An honest agent sends `interrupted` only for a job with a script, and only a backup has one.
+    // The lost acknowledgement is no fault of the backup, and the RPO alert catches the missed
+    // backup. No alert covers another kind, so it stays failed (FR-MN-03).
+    let interrupted = kind == JobKind::Backup
+        && result_code == JobResultCode::Failed
+        && result
+            .error
+            .as_ref()
+            .is_some_and(|error| error.code == INTERRUPTED_CODE);
+    let result_code = if interrupted {
+        JobResultCode::Cancelled
+    } else {
+        result_code
     };
     let status = match result_code {
         JobResultCode::Succeeded | JobResultCode::SucceededWithWarnings => JobStatus::Succeeded,
@@ -1158,8 +1177,8 @@ pub(crate) fn format_time(value: OffsetDateTime) -> String {
 mod tests {
     #![allow(clippy::expect_used)]
 
-    use restichub_db::{JobResultCode, JobStatus};
-    use restichub_proto::agent::v1::{JobResult, JobStatus as ProtoJobStatus};
+    use restichub_db::{JobKind, JobResultCode, JobStatus};
+    use restichub_proto::agent::v1::{ErrorDetail, JobResult, JobStatus as ProtoJobStatus};
 
     use super::outcome_of;
 
@@ -1173,20 +1192,76 @@ mod tests {
 
     #[test]
     fn fr_ag_09_a_job_with_warnings_is_not_a_plain_success() {
-        let outcome = outcome_of(&result(ProtoJobStatus::SucceededWithWarnings))
-            .expect("the outcome must map");
+        let outcome = outcome_of(
+            &result(ProtoJobStatus::SucceededWithWarnings),
+            JobKind::Backup,
+        )
+        .expect("the outcome must map");
         assert_eq!(outcome.status, JobStatus::Succeeded);
         assert_eq!(outcome.result_code, JobResultCode::SucceededWithWarnings);
         assert_eq!(outcome.result_message, None);
-        let plain = outcome_of(&result(ProtoJobStatus::Succeeded)).expect("the outcome must map");
+        let plain = outcome_of(&result(ProtoJobStatus::Succeeded), JobKind::Backup)
+            .expect("the outcome must map");
         assert_eq!(plain.result_code, JobResultCode::Succeeded);
         assert_eq!(plain.result_message, None);
     }
 
+    fn failed_with(code: &str) -> JobResult {
+        JobResult {
+            error: Some(ErrorDetail {
+                code: code.to_owned(),
+                params: Vec::new(),
+            }),
+            ..result(ProtoJobStatus::Failed)
+        }
+    }
+
+    #[test]
+    fn ac_mn_10_an_interrupted_backup_is_cancelled_and_keeps_its_reason() {
+        let outcome =
+            outcome_of(&failed_with("interrupted"), JobKind::Backup).expect("the outcome must map");
+        assert_eq!(outcome.status, JobStatus::Failed);
+        assert_eq!(outcome.result_code, JobResultCode::Cancelled);
+        assert_eq!(outcome.result_message.as_deref(), Some("interrupted"));
+    }
+
+    #[test]
+    fn ac_mn_10_another_kind_interrupted_stays_failed() {
+        for kind in [
+            JobKind::Check,
+            JobKind::Forget,
+            JobKind::Prune,
+            JobKind::Init,
+            JobKind::TestAccess,
+            JobKind::Restore,
+        ] {
+            let outcome =
+                outcome_of(&failed_with("interrupted"), kind).expect("the outcome must map");
+            assert_eq!(outcome.result_code, JobResultCode::Failed, "{kind:?}");
+            assert_eq!(outcome.result_message.as_deref(), Some("interrupted"));
+        }
+    }
+
+    #[test]
+    fn ac_mn_10_a_failure_is_not_an_interruption() {
+        for code in ["step_failed", "hook_failed", "agent_internal_error"] {
+            let outcome =
+                outcome_of(&failed_with(code), JobKind::Backup).expect("the outcome must map");
+            assert_eq!(outcome.status, JobStatus::Failed);
+            assert_eq!(outcome.result_code, JobResultCode::Failed, "{code}");
+        }
+        let succeeded = JobResult {
+            error: failed_with("interrupted").error,
+            ..result(ProtoJobStatus::Succeeded)
+        };
+        let outcome = outcome_of(&succeeded, JobKind::Backup).expect("the outcome must map");
+        assert_eq!(outcome.result_code, JobResultCode::Succeeded);
+    }
+
     #[test]
     fn fr_sc_05_a_locked_repository_is_a_typed_failure() {
-        let outcome =
-            outcome_of(&result(ProtoJobStatus::RepositoryLocked)).expect("the outcome must map");
+        let outcome = outcome_of(&result(ProtoJobStatus::RepositoryLocked), JobKind::Backup)
+            .expect("the outcome must map");
         assert_eq!(outcome.status, JobStatus::Failed);
         assert_eq!(outcome.result_code, JobResultCode::RepositoryLocked);
         assert_eq!(outcome.result_message, None);

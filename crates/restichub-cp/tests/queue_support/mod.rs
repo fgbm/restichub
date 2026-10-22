@@ -21,9 +21,9 @@ use restichub_db::test_util::TestDatabase;
 use restichub_db::{AgentId, PLATFORM_TENANT_ID, SigningKeyRole, TenantId, signing};
 use restichub_emulator::enroll::{EnrollFacts, EnrollTls, EnrolledIdentity, enroll_tls};
 use restichub_proto::agent::v1::{
-    AgentHello, AgentMessage, ControlMessage, ForgetGroup, ForgetResult, ForgetSnapshot, Job,
-    JobAck, JobResult, JobStatus, SignedJob, StepResult, StepStatus, agent_message,
-    agent_service_client::AgentServiceClient, control_message, step_result,
+    AgentHello, AgentMessage, ControlMessage, ErrorDetail, ForgetGroup, ForgetResult,
+    ForgetSnapshot, Job, JobAck, JobResult, JobStatus, SignedJob, StepResult, StepStatus,
+    agent_message, agent_service_client::AgentServiceClient, control_message, step_result,
 };
 use restichub_proto::signing::{Expected, KeyRing, verify_job};
 use serde_json::{Value, json};
@@ -1034,6 +1034,17 @@ impl FakeAgent {
     }
 
     pub async fn result(&self, job_id: &str, outcome: JobStatus, status: StepStatus) {
+        self.result_with_error(job_id, outcome, status, None).await;
+    }
+
+    /// Sends a job result that carries the stable error code of the agent.
+    pub async fn result_with_error(
+        &self,
+        job_id: &str,
+        outcome: JobStatus,
+        status: StepStatus,
+        code: Option<&str>,
+    ) {
         self.tx
             .send(AgentMessage {
                 payload: Some(agent_message::Payload::JobResult(JobResult {
@@ -1043,7 +1054,10 @@ impl FakeAgent {
                     steps_succeeded: u32::from(outcome == JobStatus::Succeeded),
                     steps_failed: u32::from(outcome != JobStatus::Succeeded),
                     outcome: outcome as i32,
-                    error: None,
+                    error: code.map(|code| ErrorDetail {
+                        code: code.to_owned(),
+                        params: Vec::new(),
+                    }),
                     ..JobResult::default()
                 })),
             })
