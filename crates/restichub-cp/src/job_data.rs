@@ -366,7 +366,11 @@ async fn ownership(
     kind: &'static str,
 ) -> Ownership {
     let cutoff = write_cutoff(state);
-    let Ok(mut tx) = state.db().begin_tenant(tenant).await else {
+    let Some(mut tx) = state
+        .db()
+        .begin_tenant_or_log(tenant, "job ownership")
+        .await
+    else {
         return Ownership::Retry;
     };
     let found = match job_repo::get(&mut tx, job).await {

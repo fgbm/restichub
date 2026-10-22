@@ -6,7 +6,8 @@
 use std::time::Duration;
 
 use super::TestResult;
-use crate::{Database, DatabaseConfig};
+use crate::Database;
+use crate::test_util::test_database;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_millis(300);
 
@@ -18,22 +19,14 @@ async fn timeout_setting(database: &Database) -> Result<String, Box<dyn std::err
     Ok(value)
 }
 
-async fn connect_with_timeout() -> Result<Database, Box<dyn std::error::Error>> {
-    let config = DatabaseConfig {
-        url: std::env::var("RESTICHUB_TEST_DATABASE_URL")?,
-        max_connections: 1,
-        acquire_timeout: Duration::from_secs(5),
-        statement_timeout: Some(DEFAULT_TIMEOUT),
-    };
-    Ok(Database::connect(&config, None).await?)
-}
-
 #[tokio::test]
 async fn db_a_statement_that_passes_the_default_timeout_is_cancelled() -> TestResult {
-    if std::env::var("RESTICHUB_TEST_DATABASE_URL").is_err() {
+    let Some(db) = test_database().await else {
         return Ok(());
-    }
-    let database = connect_with_timeout().await?;
+    };
+    let database = db
+        .database_with_statement_timeout(1, DEFAULT_TIMEOUT)
+        .await?;
 
     let mut tx = database.begin_platform().await?;
     let error = match sqlx::query("SELECT pg_sleep(5)")
@@ -50,15 +43,18 @@ async fn db_a_statement_that_passes_the_default_timeout_is_cancelled() -> TestRe
     drop(tx);
 
     database.close().await;
+    db.cleanup().await;
     Ok(())
 }
 
 #[tokio::test]
 async fn db_a_pass_can_raise_the_default_and_the_default_returns_after_it() -> TestResult {
-    if std::env::var("RESTICHUB_TEST_DATABASE_URL").is_err() {
+    let Some(db) = test_database().await else {
         return Ok(());
-    }
-    let database = connect_with_timeout().await?;
+    };
+    let database = db
+        .database_with_statement_timeout(1, DEFAULT_TIMEOUT)
+        .await?;
     assert_eq!(timeout_setting(&database).await?, "300ms");
 
     let mut tx = database.begin_platform().await?;
@@ -74,15 +70,41 @@ async fn db_a_pass_can_raise_the_default_and_the_default_returns_after_it() -> T
     assert_eq!(timeout_setting(&database).await?, "300ms");
 
     database.close().await;
+    db.cleanup().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn db_a_tenant_transaction_raises_the_default_with_its_own_timeout() -> TestResult {
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let database = db
+        .database_with_statement_timeout(1, DEFAULT_TIMEOUT)
+        .await?;
+
+    let mut tx = database.begin_tenant(crate::PLATFORM_TENANT_ID).await?;
+    tx.statement_timeout(time::Duration::seconds(10)).await?;
+    sqlx::query("SELECT pg_sleep(0.6)")
+        .execute(tx.as_conn())
+        .await?;
+    tx.commit().await?;
+
+    assert_eq!(timeout_setting(&database).await?, "300ms");
+
+    database.close().await;
+    db.cleanup().await;
     Ok(())
 }
 
 #[tokio::test]
 async fn db_a_session_level_timeout_does_not_survive_on_a_pooled_connection() -> TestResult {
-    if std::env::var("RESTICHUB_TEST_DATABASE_URL").is_err() {
+    let Some(db) = test_database().await else {
         return Ok(());
-    }
-    let database = connect_with_timeout().await?;
+    };
+    let database = db
+        .database_with_statement_timeout(1, DEFAULT_TIMEOUT)
+        .await?;
 
     {
         let mut tx = database.begin_platform().await?;
@@ -95,5 +117,6 @@ async fn db_a_session_level_timeout_does_not_survive_on_a_pooled_connection() ->
     assert_eq!(timeout_setting(&database).await?, "300ms");
 
     database.close().await;
+    db.cleanup().await;
     Ok(())
 }

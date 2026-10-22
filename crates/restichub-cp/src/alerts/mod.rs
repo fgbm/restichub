@@ -171,6 +171,16 @@ async fn handle_tenant(
                 events.alert_changed(tenant.id);
             }
         }
+        Err(error) if error.is_statement_timeout() => {
+            // Every pass fails the same way until the history shrinks, and no alert of the tenant
+            // opens or closes in the meantime (AC-MN-01).
+            tracing::error!(
+                tenant = %tenant.id,
+                seconds = evaluate::EVALUATION_STATEMENT_TIMEOUT.whole_seconds(),
+                %error,
+                "the alert evaluation of a tenant passed its statement timeout"
+            );
+        }
         Err(error) => {
             tracing::warn!(tenant = %tenant.id, %error, "the alert evaluation of a tenant failed");
         }

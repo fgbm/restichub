@@ -160,14 +160,6 @@ impl ApiError {
         )
     }
 
-    /// A `503 service_unavailable` error that tells the client to try again after the given
-    /// seconds.
-    pub fn unavailable_retry(retry_after: u64) -> Self {
-        let mut error = Self::service_unavailable();
-        error.retry_after = Some(retry_after.clamp(1, MAX_RETRY_AFTER));
-        error
-    }
-
     /// Creates a `500 internal_error` error with a cause.
     ///
     /// The response mapper logs the cause with the request ID. The body holds no internal detail.
@@ -298,7 +290,8 @@ impl ApiError {
         error
     }
 
-    /// The control plane returns this error when the password hash semaphore is saturated.
+    /// The control plane returns this error when the password hash semaphore is saturated or a
+    /// database statement passes its timeout.
     pub fn busy(retry_after: u64) -> Self {
         let mut error = Self::new(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -533,7 +526,7 @@ impl From<DbError> for ApiError {
     fn from(error: DbError) -> Self {
         if error.is_statement_timeout() {
             tracing::warn!(cause = %cause_chain(&error), "a request query passed its statement timeout");
-            return Self::unavailable_retry(STATEMENT_TIMEOUT_RETRY_AFTER);
+            return Self::busy(STATEMENT_TIMEOUT_RETRY_AFTER);
         }
         Self::internal(cause_chain(&error))
     }
@@ -549,6 +542,7 @@ impl From<crate::job_signing::JobSigningError> for ApiError {
     fn from(error: crate::job_signing::JobSigningError) -> Self {
         match error {
             crate::job_signing::JobSigningError::StaleCurrentKey => Self::conflict(),
+            crate::job_signing::JobSigningError::Database(error) => Self::from(error),
             other => Self::internal(cause_chain(&other)),
         }
     }
@@ -560,6 +554,7 @@ impl From<crate::delivery::DeliveryError> for ApiError {
             crate::delivery::DeliveryError::NotFound => {
                 Self::internal("the repository binds a secret that does not exist")
             }
+            crate::delivery::DeliveryError::Database(error) => Self::from(error),
             other => Self::internal(cause_chain(&other)),
         }
     }

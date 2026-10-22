@@ -35,6 +35,10 @@ pub const SNAPSHOTS_RETENTION: time::Duration = time::Duration::hours(1);
 /// How long the control plane keeps a finished browse job.
 pub const BROWSE_JOB_RETENTION: time::Duration = time::Duration::days(7);
 
+/// The most browse jobs that one transaction of the cleanup deletes. Each job takes its steps,
+/// logs and listings with it.
+const BROWSE_JOB_BATCH: i64 = 1000;
+
 /// Removes the expired sessions and the expired and used setup tokens.
 ///
 /// The runtime role cannot cross the tenant boundary, so the function lists the tenants and cleans
@@ -67,9 +71,25 @@ async fn cleanup_tenant(
     sessions::delete_expired(&mut tx, now).await?;
     restore::delete_expired_listings(&mut tx, now - PAGE_RETENTION, now - SNAPSHOTS_RETENTION)
         .await?;
-    restore::delete_old_browse_jobs(&mut tx, now - BROWSE_JOB_RETENTION).await?;
     tx.commit().await?;
-    Ok(())
+    // The browse jobs go last and in batches, so a long backlog never rolls back the deletion of
+    // the listings (FR-RS-01).
+    delete_old_browse_jobs(db, tenant, now - BROWSE_JOB_RETENTION).await
+}
+
+async fn delete_old_browse_jobs(
+    db: &Database,
+    tenant: restichub_db::TenantId,
+    before: OffsetDateTime,
+) -> Result<(), DbError> {
+    loop {
+        let mut tx = db.begin_tenant(tenant).await?;
+        let deleted = restore::delete_old_browse_jobs(&mut tx, before, BROWSE_JOB_BATCH).await?;
+        tx.commit().await?;
+        if deleted < BROWSE_JOB_BATCH.unsigned_abs() {
+            return Ok(());
+        }
+    }
 }
 
 async fn cleanup_setup(db: &Database, now: OffsetDateTime) -> Result<(), DbError> {

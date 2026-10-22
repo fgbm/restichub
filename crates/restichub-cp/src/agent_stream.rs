@@ -552,7 +552,7 @@ async fn check_registry(
             cause = ?error,
             "the agent registry is not available"
         );
-        Status::internal("the agent registry is not available")
+        Status::unavailable("the agent registry is not available")
     };
     let mut tx = db
         .begin_tenant(identity.tenant)
@@ -1501,6 +1501,24 @@ mod tests {
         let status = touch_status(tenant, agent, Ok(false)).expect_err("the guard refused");
         assert_eq!(status.code(), tonic::Code::PermissionDenied);
         assert!(touch_status(tenant, agent, Ok(true)).is_ok());
+
+        let now = time::OffsetDateTime::now_utc();
+        let identity = super::PeerIdentity {
+            tenant,
+            agent,
+            serial: vec![1],
+            presented: crate::rotation::PresentedCertificate {
+                serial: vec![1],
+                public_key: Vec::new(),
+                not_before: now,
+                not_after: now,
+            },
+            issued: None,
+        };
+        let status = super::check_registry(&db, &identity, now)
+            .await
+            .expect_err("the database is down");
+        assert_eq!(status.code(), tonic::Code::Unavailable);
     }
 
     #[test]

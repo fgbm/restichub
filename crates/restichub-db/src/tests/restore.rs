@@ -135,7 +135,7 @@ async fn fr_rs_01_db_the_newest_snapshot_list_wins_and_the_sweep_removes_old_row
     assert!(restore::get_listing(&mut tx, old).await?.is_none());
     assert!(restore::get_listing(&mut tx, new).await?.is_some());
 
-    let deleted = restore::delete_old_browse_jobs(&mut tx, now - Duration::days(7)).await?;
+    let deleted = restore::delete_old_browse_jobs(&mut tx, now - Duration::days(7), 100).await?;
     assert_eq!(deleted, 1, "the old browse job goes with its request");
     assert!(restore::get_request(&mut tx, old).await?.is_none());
     assert!(restore::get_request(&mut tx, new).await?.is_some());
@@ -210,6 +210,64 @@ async fn ac_tn_01_db_a_listing_of_another_tenant_is_invisible() -> TestResult {
         restore::latest_snapshots(&mut tx, repository)
             .await?
             .is_none()
+    );
+    tx.commit().await?;
+
+    db.cleanup().await;
+    Ok(())
+}
+
+/// FR-RS-01: the sweep of the old browse jobs takes one batch at a time and only the jobs of its
+/// tenant, so the caller bounds the length of each transaction.
+#[tokio::test]
+async fn fr_rs_01_db_the_browse_job_sweep_deletes_one_batch_at_a_time() -> TestResult {
+    let Some(db) = test_database().await else {
+        return Ok(());
+    };
+    let (tenant_a, tenant_b) = two_tenants(db.database()).await?;
+    seed_tenant(db.database(), tenant_a).await?;
+    seed_tenant(db.database(), tenant_b).await?;
+    let now = OffsetDateTime::now_utc();
+    let old = now - Duration::days(8);
+
+    let mut tx = db.database().begin_tenant(tenant_b).await?;
+    let other = finished_job(&mut tx, tenant_b, "ls", old).await?;
+    tx.commit().await?;
+
+    let mut tx = db.database().begin_tenant(tenant_a).await?;
+    for _ in 0..3 {
+        finished_job(&mut tx, tenant_a, "ls", old).await?;
+    }
+    let fresh = finished_job(&mut tx, tenant_a, "ls", now).await?;
+    let before = now - Duration::days(7);
+
+    assert_eq!(
+        restore::delete_old_browse_jobs(&mut tx, before, 2).await?,
+        2
+    );
+    assert_eq!(
+        restore::delete_old_browse_jobs(&mut tx, before, 2).await?,
+        1
+    );
+    assert_eq!(
+        restore::delete_old_browse_jobs(&mut tx, before, 2).await?,
+        0
+    );
+    let left: i64 = sqlx::query_scalar("SELECT count(*) FROM jobs WHERE id = $1")
+        .bind(fresh)
+        .fetch_one(tx.as_conn())
+        .await?;
+    assert_eq!(left, 1, "a fresh job stays");
+    tx.commit().await?;
+
+    let mut tx = db.database().begin_tenant(tenant_b).await?;
+    let left: i64 = sqlx::query_scalar("SELECT count(*) FROM jobs WHERE id = $1")
+        .bind(other)
+        .fetch_one(tx.as_conn())
+        .await?;
+    assert_eq!(
+        left, 1,
+        "the sweep of one tenant leaves the jobs of another"
     );
     tx.commit().await?;
 

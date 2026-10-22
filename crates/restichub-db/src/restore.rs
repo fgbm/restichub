@@ -295,18 +295,26 @@ pub async fn delete_expired_listings(
     Ok(result.rows_affected())
 }
 
-/// Deletes the finished browse jobs that ended before `before`, with their steps, logs and
-/// listings. The Restore screen creates one job for each page of a tree, so the rows do not stay
-/// for good like the other jobs (FR-LG-03 keeps the history of backups and restores).
+/// Deletes at most `batch` finished browse jobs that ended before `before`, with their steps, logs
+/// and listings. The Restore screen creates one job for each page of a tree, so the rows do not
+/// stay for good like the other jobs (FR-LG-03 keeps the history of backups and restores).
+///
+/// The cascade of one job is costly, so the caller repeats the call in short transactions until it
+/// returns fewer rows than `batch`.
 pub async fn delete_old_browse_jobs(
     tx: &mut TenantTx<'_>,
     before: OffsetDateTime,
+    batch: i64,
 ) -> Result<u64, DbError> {
     let result = sqlx::query(
-        "DELETE FROM jobs WHERE kind IN ('snapshots', 'ls') AND finished_at IS NOT NULL \
-                            AND finished_at < $1",
+        "DELETE FROM jobs WHERE id IN ( \
+             SELECT id FROM jobs WHERE tenant_id = $1 AND kind IN ('snapshots', 'ls') \
+                                   AND finished_at IS NOT NULL AND finished_at < $2 \
+             LIMIT $3)",
     )
+    .bind(tx.tenant())
     .bind(before)
+    .bind(batch)
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;

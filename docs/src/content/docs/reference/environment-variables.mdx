@@ -36,6 +36,10 @@ Set the variables in the environment of the control plane process. For the Docke
 | `RESTICHUB_KEK` | none | The key encryption key. It opens the repository passwords and the installation CA. Not recommended: `docker inspect` and the process environment show the value. Use `RESTICHUB_KEK_FILE`. |
 | `RESTICHUB_KEK_FILE` | none | The path of a file that holds the key encryption key. The reference stack mounts a Docker secret there. The file must have no group or other bits, for example `0400` or `0600`. Set `RESTICHUB_KEK` or `RESTICHUB_KEK_FILE`, not both. |
 
+The control plane sets `statement_timeout` to 20 seconds on each connection of the runtime login. It sends the value as the startup parameter `options` of the connection. This value has priority over `ALTER ROLE`, `ALTER DATABASE`, `PGOPTIONS` and an `options` value in `RESTICHUB_DATABASE_URL`. You cannot change it. A request that passes the limit gets the HTTP status 503, the code `busy` and the header `Retry-After`. The dispatcher and the alert evaluation set their own limits (10 and 120 seconds). The migration connection keeps the setting of the server.
+
+PgBouncer in transaction mode does not accept the startup parameter `options`. The control plane cannot connect through it. Connect the control plane to PostgreSQL directly. Do not add `options` to `ignore_startup_parameters` of PgBouncer. PgBouncer then drops the value, and the control plane runs without the limit.
+
 ## Control plane: sign-in
 
 | Variable | Default | Unit | Meaning |
