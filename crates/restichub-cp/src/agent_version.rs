@@ -191,7 +191,19 @@ mod tests {
     }
 
     #[test]
-    fn fr_pr_09_a_release_candidate_agent_is_current_against_an_older_release_candidate() {
+    fn fr_pr_09_a_numeric_identifier_is_lower_than_an_alphanumeric_one() {
+        assert_eq!(
+            status_against("0.1.0-rc.beta", "0.1.0-rc.1", CURRENT),
+            AgentVersionStatus::UpdateAvailable
+        );
+        assert_eq!(
+            status_against("0.1.0-rc.1", "0.1.0-rc.beta", CURRENT),
+            AgentVersionStatus::Current
+        );
+    }
+
+    #[test]
+    fn fr_pr_09_a_release_candidate_control_plane_compares_by_precedence() {
         assert_eq!(
             status_against("0.1.0-rc.6", "0.1.0", CURRENT),
             AgentVersionStatus::Current
@@ -241,6 +253,17 @@ mod tests {
             status_against("1.4.0", "1.4.0", Some((PROTOCOL_VERSION_MAJOR + 1, 0))),
             AgentVersionStatus::Unsupported
         );
+    }
+
+    #[test]
+    fn fr_pr_09_an_invalid_pre_release_is_unknown() {
+        for version in ["0.1.0-", "0.1.0-rc..1", "0.1.0-rc.1_2", "0.1.0-rc.1 2"] {
+            assert_eq!(
+                status_against("1.4.0", version, CURRENT),
+                AgentVersionStatus::Unknown,
+                "{version}"
+            );
+        }
     }
 
     #[test]
