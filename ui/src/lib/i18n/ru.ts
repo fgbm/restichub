@@ -1149,7 +1149,6 @@ export const ru: Record<MessageKey, string> = {
 	// Audit log
 	'audit.title': 'Журнал аудита',
 	'audit.description': 'Каждая записанная операция с действующим лицом и изменением.',
-	'audit.filters.timeHint': 'ГГГГ-ММ-ДД ЧЧ:ММ',
 	'audit.filters.action': 'Действие',
 	'audit.filters.actorType': 'Тип лица',
 	'audit.filters.actorId': 'Идентификатор лица',

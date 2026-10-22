@@ -1143,7 +1143,6 @@ export const en = {
 	// Audit log
 	'audit.title': 'Audit log',
 	'audit.description': 'Every recorded operation, with the actor and the change.',
-	'audit.filters.timeHint': 'YYYY-MM-DD HH:MM',
 	'audit.filters.action': 'Action',
 	'audit.filters.actorType': 'Actor type',
 	'audit.filters.actorId': 'Actor ID',
