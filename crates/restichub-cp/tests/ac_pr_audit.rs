@@ -178,20 +178,6 @@ async fn ac_pr_05_a_message_for_the_job_of_another_agent_is_audited() {
     env.db.cleanup().await;
 }
 
-/// The rolled-back transactions of the database of the test. A message that reaches no handler
-/// opens no transaction, so it changes no counter.
-async fn rollbacks(env: &Env) -> i64 {
-    let mut tx = env.scoped().await;
-    let count = sqlx::query_scalar::<_, i64>(
-        "SELECT xact_rollback FROM pg_stat_database WHERE datname = current_database()",
-    )
-    .fetch_one(&mut *tx)
-    .await
-    .expect("cannot read the transaction counter");
-    tx.commit().await.expect("cannot end the read");
-    count
-}
-
 fn rejection(job_id: String) -> restichub_proto::agent::v1::AgentMessage {
     restichub_proto::agent::v1::AgentMessage {
         payload: Some(agent_message::Payload::JobRejected(JobRejected {
@@ -341,57 +327,88 @@ async fn ac_pr_05_a_repeated_result_for_a_refused_job_reads_the_job_once() {
         return;
     };
     let env = Env::start(db, test_queue()).await;
-    let agent = env.connect_agent("repeat-result-host").await;
-    let unknown = Uuid::new_v4().to_string();
-    // The first message for the job is refused, and the control plane remembers the refusal.
-    agent
+    let attacker = env.connect_agent("repeat-result-host").await;
+    let mut victim = env.connect_agent("victim-result-host").await;
+    let repository = env.create_repository(victim.id, "pw").await;
+    let backup = env.run_fresh_plan(repository, victim.id).await;
+    env.pass().await;
+    let job = decode_job_id(&victim.job().await);
+    victim.start(&env, &job).await;
+
+    // The first result of the attacker for the job of the victim is refused and audited.
+    attacker
+        .result(
+            &job,
+            restichub_proto::agent::v1::JobStatus::Failed,
+            restichub_proto::agent::v1::StepStatus::Failed,
+        )
+        .await;
+    let first = wait_for_rows(&env, "agent_message_refused").await;
+    assert_eq!(first.len(), 1);
+    assert_eq!(first[0].diff["new"]["reason"], "foreign_job");
+
+    // While the test holds the row, a message that reads the job waits on it.
+    let mut row = env.scoped().await;
+    sqlx::query("SELECT 1 FROM jobs WHERE id = $1 FOR UPDATE")
+        .bind(backup)
+        .fetch_optional(&mut *row)
+        .await
+        .expect("cannot lock the job row");
+
+    for _ in 0..5 {
+        attacker
+            .result(
+                &job,
+                restichub_proto::agent::v1::JobStatus::Failed,
+                restichub_proto::agent::v1::StepStatus::Failed,
+            )
+            .await;
+        attacker.stale_lock_step(&job).await;
+        attacker.lock_held(&job).await;
+    }
+    // The stream handles the messages one by one, so the audit of this later message shows that
+    // the repeats are behind it.
+    let later = Uuid::new_v4();
+    attacker
         .tx
         .send(AgentMessage {
             payload: Some(agent_message::Payload::StepProgress(StepProgress {
-                job_id: unknown.clone(),
+                job_id: later.to_string(),
                 step_id: "backup".to_owned(),
-                files_done: 1,
                 ..StepProgress::default()
             })),
         })
         .await
         .expect("cannot send the progress");
-    assert_eq!(wait_for_rows(&env, "agent_message_refused").await.len(), 1);
-
-    let before = rollbacks(&env).await;
-    for _ in 0..10 {
-        agent
-            .result(
-                &unknown,
-                restichub_proto::agent::v1::JobStatus::Failed,
-                restichub_proto::agent::v1::StepStatus::Failed,
-            )
-            .await;
-        agent.stale_lock_step(&unknown).await;
-        agent.lock_held(&unknown).await;
+    let mut reached = Vec::new();
+    for _ in 0..50 {
+        reached = audit_rows(&env, "agent_message_refused")
+            .await
+            .into_iter()
+            .filter(|row| row.diff["new"]["job_id"] == later.to_string())
+            .collect();
+        if !reached.is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    // The stream handles the messages in order, so the audit of this rejection shows that the
-    // repeats are behind it.
-    agent
-        .tx
-        .send(rejection(Uuid::new_v4().to_string()))
-        .await
-        .expect("cannot send the rejection");
-    assert_eq!(wait_for_rows(&env, "job_rejected").await.len(), 1);
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    row.commit().await.expect("cannot release the job row");
 
-    let transactions = rollbacks(&env).await - before;
-    assert!(
-        transactions <= 2,
-        "the repeated results of a refused job opened {transactions} transactions"
-    );
-    let rows = audit_rows(&env, "agent_message_refused").await;
     assert_eq!(
-        rows.len(),
+        reached.len(),
+        1,
+        "the repeats of a refused result wait on the job row, so they reach the database"
+    );
+    let refused = audit_rows(&env, "agent_message_refused").await;
+    assert_eq!(
+        refused
+            .iter()
+            .filter(|row| row.object_id == Some(backup))
+            .count(),
         1,
         "one record for the job of the refused messages"
     );
-    assert_eq!(rows[0].diff["new"]["message"], "step_progress");
+    assert_eq!(env.job_status(backup).await, "running");
     env.db.cleanup().await;
 }
 
