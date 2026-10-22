@@ -79,6 +79,10 @@ pub struct DatabaseConfig {
     pub url: String,
     pub max_connections: u32,
     pub acquire_timeout: Duration,
+    /// The default `statement_timeout` of each connection. `None` keeps the server setting.
+    ///
+    /// A transaction raises or lowers it with [`TenantTx::statement_timeout`].
+    pub statement_timeout: Option<Duration>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -235,6 +239,22 @@ impl Database {
     /// the rows of this tenant.
     pub async fn begin_tenant(&self, tenant: TenantId) -> Result<TenantTx<'_>, DbError> {
         TenantTx::begin(&self.pool, tenant).await
+    }
+
+    /// Opens the transaction of [`Database::begin_tenant`] for a caller that has no error to
+    /// return, and logs the cause when the open fails.
+    pub async fn begin_tenant_or_log(
+        &self,
+        tenant: TenantId,
+        purpose: &str,
+    ) -> Option<TenantTx<'_>> {
+        match self.begin_tenant(tenant).await {
+            Ok(tx) => Some(tx),
+            Err(error) => {
+                tracing::warn!(%tenant, purpose, cause = ?error, "cannot open a tenant transaction");
+                None
+            }
+        }
     }
 
     /// The transaction sets the runtime role and the platform scope.
@@ -444,9 +464,22 @@ fn connect_options(
         .url
         .parse::<PgConnectOptions>()
         .map_err(DbError::InvalidUrl)?;
+    let options = with_statement_timeout(options, config.statement_timeout);
     match password {
         Some(password) => Ok(options.password(password)),
         None => Ok(options),
+    }
+}
+
+/// Sets the timeout as a startup parameter, so it is the session default that `RESET ALL` returns
+/// to when a connection goes back to the pool.
+fn with_statement_timeout(
+    options: PgConnectOptions,
+    timeout: Option<Duration>,
+) -> PgConnectOptions {
+    match timeout {
+        Some(timeout) => options.options([("statement_timeout", timeout.as_millis().to_string())]),
+        None => options,
     }
 }
 

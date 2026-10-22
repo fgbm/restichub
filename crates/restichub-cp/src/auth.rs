@@ -282,7 +282,11 @@ pub async fn list_tenants(
 }
 
 async fn tenant_name(state: &AppState, tenant_id: TenantId) -> String {
-    let Ok(mut tx) = state.db().begin_tenant(tenant_id).await else {
+    let Some(mut tx) = state
+        .db()
+        .begin_tenant_or_log(tenant_id, "tenant name")
+        .await
+    else {
         return String::new();
     };
     let name = tenants::get(&mut tx, tenant_id)

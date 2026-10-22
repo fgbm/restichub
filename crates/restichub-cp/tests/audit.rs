@@ -43,6 +43,7 @@ fn lazy_app() -> Result<Router, Box<dyn std::error::Error>> {
         url: "postgres://restichub@127.0.0.1:1/restichub".to_owned(),
         max_connections: 1,
         acquire_timeout: Duration::from_millis(100),
+        statement_timeout: None,
     };
     let database = Database::connect_lazy(&config, None)?;
     // The platform audit path is under test, so the router runs in multi mode.

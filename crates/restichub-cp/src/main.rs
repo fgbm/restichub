@@ -11,6 +11,10 @@ use restichub_secrets::{KekConfig, KekProvider, SystemEnv, load_kek_provider};
 
 const MIGRATION_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Below the 30 s request deadline, so a runaway query is cancelled in the database and does not
+/// keep a pool connection after the request ends. A pass that needs more sets its own value.
+const DATABASE_STATEMENT_TIMEOUT: Duration = Duration::from_secs(20);
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     match restichub_cp::config::parse_args(std::env::args().skip(1))? {
@@ -332,6 +336,7 @@ async fn migrate(cli: Cli) -> anyhow::Result<()> {
         url: migration.url.clone(),
         max_connections: 1,
         acquire_timeout: MIGRATION_ACQUIRE_TIMEOUT,
+        statement_timeout: None,
     };
     let password = migration
         .password
@@ -410,6 +415,7 @@ async fn connect_database(config: &Config) -> anyhow::Result<restichub_db::Datab
         url: config.database_url.clone(),
         max_connections: config.database_max_connections,
         acquire_timeout: config.database_acquire_timeout,
+        statement_timeout: Some(DATABASE_STATEMENT_TIMEOUT),
     };
     let password = config
         .database_password

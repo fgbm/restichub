@@ -409,8 +409,11 @@ pub async fn handle_job_ack(state: &AppState, tenant: TenantId, agent: AgentId, 
         return;
     };
     let now = state.auth().clock.now();
-    let Ok(mut tx) = state.db().begin_tenant(tenant).await else {
-        tracing::warn!(job = %ack.job_id, "the job acknowledgement could not open a transaction");
+    let Some(mut tx) = state
+        .db()
+        .begin_tenant_or_log(tenant, "job acknowledgement")
+        .await
+    else {
         return;
     };
     let job = match job_repo::get_for_update(&mut tx, job_id).await {
@@ -497,8 +500,11 @@ pub async fn handle_job_rejected(
         return;
     };
     let now = state.auth().clock.now();
-    let Ok(mut tx) = state.db().begin_tenant(tenant).await else {
-        tracing::warn!(job = %rejected.job_id, "the job rejection could not open a transaction");
+    let Some(mut tx) = state
+        .db()
+        .begin_tenant_or_log(tenant, "job rejection")
+        .await
+    else {
         return;
     };
     let job = match job_repo::get_for_update(&mut tx, job_id).await {
@@ -584,8 +590,11 @@ async fn audit_foreign_job(
 
 /// Audits a rejection that names no job of the agent (AC-PR-01).
 async fn audit_rejection(state: &AppState, tenant: TenantId, agent: AgentId, reason: &'static str) {
-    let Ok(mut tx) = state.db().begin_tenant(tenant).await else {
-        tracing::warn!(%agent, "the rejection audit could not open a transaction");
+    let Some(mut tx) = state
+        .db()
+        .begin_tenant_or_log(tenant, "rejection audit")
+        .await
+    else {
         return;
     };
     let audited = refusal_audit::rejection(state, &mut tx, agent, None, reason).await;
@@ -690,8 +699,7 @@ pub async fn handle_job_result(
         return WriteOutcome::Ignored;
     };
     let now = state.auth().clock.now();
-    let Ok(mut tx) = state.db().begin_tenant(tenant).await else {
-        tracing::warn!(job = %result.job_id, "the job result could not open a transaction");
+    let Some(mut tx) = state.db().begin_tenant_or_log(tenant, "job result").await else {
         return WriteOutcome::Transient;
     };
     let job = match job_repo::get_for_update(&mut tx, job_id).await {
