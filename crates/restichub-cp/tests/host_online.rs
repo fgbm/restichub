@@ -141,8 +141,18 @@ async fn ac_id_06_the_offline_alert_still_waits_for_its_threshold() {
     stop(agent);
     wait_online(&env, id, false).await;
 
-    let evaluate =
-        |at| restichub_cp::alerts::evaluate::evaluate_tenant(env.db.database(), env.tenant, at);
+    // This test covers the threshold only, so the grace has already run out.
+    env.state
+        .agent_view()
+        .passed(env.tenant, env.now() - restichub_cp::queue::RECONNECT_GRACE);
+    let evaluate = |at| {
+        restichub_cp::alerts::evaluate::evaluate_tenant(
+            env.db.database(),
+            env.tenant,
+            at,
+            env.state.agent_view(),
+        )
+    };
     let report = evaluate(env.now()).await.expect("the evaluation");
     assert_eq!(report.opened, 0, "the display is offline, the alert waits");
     let report = evaluate(env.now() + time::Duration::minutes(31))

@@ -195,6 +195,7 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
         alert_sender.with_events(state.events_shared()),
         kek,
         state.auth().clock.clone(),
+        state.agent_view_shared(),
         restichub_cp::alerts::INTERVAL,
     );
     let app = server::router(state.clone());

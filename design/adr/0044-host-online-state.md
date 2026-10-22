@@ -1,6 +1,6 @@
 # ADR-0044: The host online state is an open stream recorded in the database
 
-- Status: accepted
+- Status: accepted. See [ADR-0052](0052-reconnect-grace-of-the-absence-tests.md) for the reconnect grace that delays the alert "Host offline".
 - Date: 2026-10-17
 - Requirements: FR-ID-07, FR-ID-08, AC-MN-09, AC-ID-06
 - Related: ADR-0018, ADR-0036

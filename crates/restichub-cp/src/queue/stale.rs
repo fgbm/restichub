@@ -68,7 +68,7 @@ pub async fn recover_tenant(
     // The registry is empty after the start and after a database outage that hid the agents. A job
     // of an agent that reconnects then is not lost, so neither sweep runs before the agent had the
     // time to connect again (AC-PR-07).
-    if state.agent_view().judges_absence(now) {
+    if state.agent_view().judges_absence(tenant, now) {
         // The agent enforces the maximum duration of a job that carries one. A running job far past
         // it is gone, also when the agent is online again: it restarted and lost the job. Its lock
         // becomes a suspect. A job without a maximum duration has no wall-clock limit (ADR-0039).

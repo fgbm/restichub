@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use alert_support::{FixedResolver, WebhookSink, local_sender, scoped, set_last_seen};
+use alert_support::{FixedResolver, WebhookSink, judged_view, local_sender, scoped, set_last_seen};
 use axum::Router;
 use axum::http::StatusCode;
 use restichub_cp::alerts::deliver::{self, Report};
@@ -319,7 +319,8 @@ async fn fr_mn_01_one_unreadable_alert_row_does_not_stop_the_evaluation() {
     let agent = seed_agent(db.database(), tenant, "silent-host").await;
     set_last_seen(&db, tenant, agent, Some(now - time::Duration::days(2))).await;
 
-    evaluate::evaluate_tenant(db.database(), tenant, now)
+    let view = judged_view(&db, now).await;
+    evaluate::evaluate_tenant(db.database(), tenant, now, &view)
         .await
         .expect("evaluation");
 

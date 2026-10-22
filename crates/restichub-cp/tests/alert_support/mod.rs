@@ -12,6 +12,7 @@ use base64::Engine as _;
 use restichub_cp::alerts::sender::Sender;
 use restichub_cp::alerts::settings::{AlertsSettings, SmtpSecurity, SmtpSettings, WebhookSettings};
 use restichub_cp::alerts::transport::{BoxIo, ResolveFuture, Resolver, tls_config_with_roots};
+use restichub_cp::queue::{AgentView, RECONNECT_GRACE};
 use restichub_db::test_util::TestDatabase;
 use restichub_db::{AgentId, JobId, JobKind, PlanId, RepositoryId, TenantId};
 use time::OffsetDateTime;
@@ -494,6 +495,21 @@ pub async fn repository_job(
     .expect("cannot create the job");
     tx.commit().await.expect("cannot commit the job");
     id
+}
+
+/// The view of an instance that has read the agents without a break for longer than the reconnect
+/// grace, so an evaluation judges an absence in every tenant.
+pub async fn judged_view(db: &TestDatabase, now: OffsetDateTime) -> Arc<AgentView> {
+    let view = AgentView::default();
+    let mut tx = db.database().begin_platform().await.expect("begin");
+    let list = restichub_db::tenants::list(&mut tx)
+        .await
+        .expect("the tenant list");
+    tx.commit().await.expect("commit");
+    for tenant in list {
+        view.passed(tenant.id, now - RECONNECT_GRACE);
+    }
+    Arc::new(view)
 }
 
 pub async fn set_last_seen(

@@ -500,6 +500,11 @@ impl AppState {
     pub fn agent_view(&self) -> &crate::queue::AgentView {
         &self.agent_view
     }
+
+    /// The shared view, for the alert loop of AC-ID-06.
+    pub fn agent_view_shared(&self) -> Arc<crate::queue::AgentView> {
+        Arc::clone(&self.agent_view)
+    }
 }
 
 /// The router registers one route for each entry of [`ROUTES`], so the routes table, the router and

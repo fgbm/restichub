@@ -8,7 +8,7 @@ mod common;
 
 use std::time::{Duration, Instant};
 
-use alert_support::{WebhookSink, local_sender, scoped};
+use alert_support::{WebhookSink, judged_view, local_sender, scoped};
 use axum::Router;
 use axum::http::StatusCode;
 use restichub_cp::clock::ManualClock;
@@ -95,7 +95,9 @@ async fn ac_mn_07_a_slow_target_does_not_delay_another_tenant() {
             .position(|tenant| tenant.id == slow)
             .expect("the slow tenant")
     };
-    let clock = ManualClock::new(OffsetDateTime::now_utc() + time::Duration::hours(3)).shared();
+    let now = OffsetDateTime::now_utc() + time::Duration::hours(3);
+    let clock = ManualClock::new(now).shared();
+    let view = judged_view(&db, now).await;
     let (database, sender, kek) = (db.database().clone(), local_sender(None), test_kek());
     let pass = tokio::spawn(async move {
         restichub_cp::alerts::run_once_with(
@@ -103,9 +105,11 @@ async fn ac_mn_07_a_slow_target_does_not_delay_another_tenant() {
             &sender,
             kek,
             clock,
-            restichub_cp::alerts::CONCURRENCY,
-            restichub_cp::alerts::TENANT_BUDGET,
-            offset,
+            view,
+            restichub_cp::alerts::PassLimits {
+                offset,
+                ..restichub_cp::alerts::PassLimits::default()
+            },
         )
         .await
     });
@@ -161,12 +165,13 @@ async fn ac_mn_07_the_evaluation_reads_more_than_two_thousand_agents() {
     let tenant = create_tenant_with_key(db.database(), "many-agents").await;
     bulk_agents(&db, tenant, 2000).await;
     let now = OffsetDateTime::now_utc() + time::Duration::hours(3);
-    let first = restichub_cp::alerts::evaluate::evaluate_tenant(db.database(), tenant, now)
+    let view = judged_view(&db, now).await;
+    let first = restichub_cp::alerts::evaluate::evaluate_tenant(db.database(), tenant, now, &view)
         .await
         .expect("evaluation");
     assert_eq!(first.opened, 2001);
     assert_eq!(open_alerts(&db, tenant).await, 2001);
-    let again = restichub_cp::alerts::evaluate::evaluate_tenant(db.database(), tenant, now)
+    let again = restichub_cp::alerts::evaluate::evaluate_tenant(db.database(), tenant, now, &view)
         .await
         .expect("evaluation");
     assert_eq!((again.opened, again.resolved), (0, 0));
