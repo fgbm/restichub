@@ -61,6 +61,7 @@ pub async fn recover_tenant(
 ) -> Result<(), DbError> {
     let mut tx = state.db().begin_tenant(tenant).await?;
     tx.statement_timeout(super::PASS_STATEMENT_TIMEOUT).await?;
+    tx.force_custom_plan().await?;
     if !queue_repo::try_lock_tenant(&mut tx).await? {
         return Ok(());
     }
