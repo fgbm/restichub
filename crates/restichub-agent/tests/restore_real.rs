@@ -15,8 +15,10 @@ use std::time::{Duration, SystemTime};
 
 use common::*;
 use restichub_agent::jobs::Jobs;
+#[cfg(unix)]
+use restichub_proto::agent::v1::NodeType;
 use restichub_proto::agent::v1::{
-    JobStatus, NodeType, OverwriteMode, RestoreStep, StepStatus, step, step_result::Output,
+    JobStatus, OverwriteMode, RestoreStep, StepStatus, step, step_result::Output,
 };
 
 const PASSWORD: &str = "CANARY-restore-real-password";
