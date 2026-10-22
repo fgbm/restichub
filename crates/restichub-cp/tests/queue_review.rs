@@ -133,7 +133,6 @@ async fn ac_sc_10_a_running_job_of_a_connected_agent_is_not_failed_by_the_clock(
     let body = env.job(job).await;
     assert_eq!(body["status"], "failed");
     assert_eq!(body["result_message"], "agent_lost");
-    assert_eq!(body["result_code"], "cancelled");
     env.db.cleanup().await;
 }
 
@@ -160,7 +159,6 @@ async fn ac_sc_10_a_hello_that_does_not_list_a_running_job_fails_it() {
     let _restarted = env.reconnect_agent_holding(&listed, Vec::new()).await;
     eventually(|| async { env.job_status(job).await == "failed" }).await;
     assert_eq!(env.job(job).await["result_message"], "agent_lost");
-    assert_eq!(env.job(job).await["result_code"], "cancelled");
     assert!(stale_marked(env, job).await, "the lock may be stale");
     env.db.cleanup().await;
 }

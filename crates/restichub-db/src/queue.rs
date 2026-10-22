@@ -616,8 +616,7 @@ pub async fn running_unlisted(
     Ok(rows.into_iter().map(JobId::from_uuid).collect())
 }
 
-/// Ends a running job because its agent is lost with the `cancelled` result, and marks the
-/// repository lock as possibly stale.
+/// Fails a running job because its agent is lost, and marks the repository lock as possibly stale.
 pub async fn mark_agent_lost(
     tx: &mut TenantTx<'_>,
     id: JobId,
@@ -625,7 +624,7 @@ pub async fn mark_agent_lost(
     now: OffsetDateTime,
 ) -> Result<bool, DbError> {
     let result = sqlx::query(
-        "UPDATE jobs SET status = 'failed', result_code = 'cancelled', result_message = 'agent_lost', \
+        "UPDATE jobs SET status = 'failed', result_code = 'failed', result_message = 'agent_lost', \
                 stale_lock_since = $2, finished_at = $3, lease_until = NULL, updated_at = now() \
          WHERE id = $1 AND status = 'running'",
     )

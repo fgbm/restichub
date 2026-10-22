@@ -132,11 +132,6 @@
 		return t('table.error');
 	}
 
-	function reasonOf(current: JobDetail): string | null {
-		if (cancelled) return null;
-		return jobDetailReason(current);
-	}
-
 	async function copyKeyId(keyId: string): Promise<void> {
 		keyCopied = await copyText(keyId);
 		if (keyCopied) setTimeout(() => (keyCopied = false), 1500);
@@ -331,8 +326,8 @@
 	{/snippet}
 	{#snippet banners()}
 		{#if job}
-			{#if reasonOf(job)}
-				<p class="head__reason">{reasonOf(job)}</p>
+			{#if jobDetailReason(job)}
+				<p class="head__reason">{jobDetailReason(job)}</p>
 			{/if}
 			{#if stats.length > 0}
 				<Panel title={t('jobDetail.summary')} subtitle={t('jobDetail.summaryHint')}>

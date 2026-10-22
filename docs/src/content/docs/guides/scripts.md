@@ -143,7 +143,7 @@ The scripts of the phases After, On success, On error and Finally have a time li
 
 A process that leaves the process group, for example with `setsid` or `nohup`, is outside the tree that the agent kills. On Linux, the service setting `KillMode=control-group` of the agent kills such a process when the service stops. Do not start a long-lived process from a script.
 
-If the agent restarts while a job with a script runs, the agent does not run the job again. It answers with the final result `interrupted`, because a script may not run twice. The control plane ends such a job as cancelled. A job that already finished returns its stored result, also after you turned the mode off.
+If the agent restarts while a job with a script runs, the agent does not run the job again. It answers with the final result `interrupted`, because a script may not run twice. The control plane ends an interrupted backup as cancelled and raises no job alert, because the RPO alert catches the missed backup. Any other interrupted job ends as failed and raises the alert. A job that already finished returns its stored result, also after you turned the mode off.
 
 On Linux, the service of the agent runs with `ProtectSystem=strict`. A script can write only to the cache directory, the configuration directory and the restore directories. To allow another path, add a drop-in file:
 

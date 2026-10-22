@@ -198,7 +198,7 @@ A user can be a member of more than one tenant. In the MVP a role applies to the
 |---|---|---|
 | FR-MN-01 | Dashboard. For each agent and plan: time of the last successful backup, recovery point objective (RPO) status, lock status, errors, online status. | M |
 | FR-MN-02 | Job history with logs and with statistics from the restic `summary`: files, size, added data, duration. | M |
-| FR-MN-03 | Alerts: job failed, RPO violated, agent offline longer than N, repository not checked for N days, lock held longer than N, capacity. A stop of the agent service, a restart of the agent or a reboot of the host can interrupt a job. The job ends as cancelled and raises no job alert. The RPO alert catches the missed backup. | M (first three), 1.0 (others) |
+| FR-MN-03 | Alerts: job failed, RPO violated, agent offline longer than N, repository not checked for N days, lock held longer than N, capacity. A stop of the agent service, a restart of the agent or a reboot of the host can interrupt a backup. The job ends as cancelled and raises no job alert. The RPO alert catches the missed backup. Another interrupted job, and a job that the CP lost, end as failed and raise the alert. | M (first three), 1.0 (others) |
 | FR-MN-04 | Notification channels: email, webhook, Telegram. | M (email, webhook), 1.0 (Telegram) |
 | FR-MN-05 | Prometheus `/metrics` endpoint. | M |
 | FR-MN-06 | Zabbix template: discovery of agents and plans, triggers. | 1.0 |

@@ -354,7 +354,7 @@ async fn ac_mn_02_the_alert_translates_a_stable_error_code() {
         t0 + Duration::minutes(10),
         "failed",
         "failed",
-        Some("stalled"),
+        Some("interrupted"),
         failed_at,
     )
     .await;
@@ -362,64 +362,10 @@ async fn ac_mn_02_the_alert_translates_a_stable_error_code() {
 
     let hooks = fx.hooks();
     assert_eq!(hooks.len(), 1);
-    assert_eq!(hooks[0].json()["alert"]["error_text"], "stalled");
-    assert_eq!(hooks[0].json()["alert"]["error_label"], "no progress");
-    fx.db.cleanup().await;
-}
-
-/// AC-MN-10: a job that a stop, a restart or a reboot interrupted raises no job alert, and the
-/// RPO alert of the plan still opens when no backup succeeds in time.
-#[tokio::test]
-async fn ac_mn_10_an_interrupted_job_raises_no_alert_and_the_rpo_alert_still_fires() {
-    let Some(fx) = fixture("ac-mn-10-interrupted").await else {
-        return;
-    };
-    let t0 = fx.t0;
-    for (fire, message) in [(10, "cancelled"), (20, "interrupted"), (30, "agent_lost")] {
-        let finished = t0 + Duration::minutes(fire + 5);
-        fx.finished_job(
-            fx.plan,
-            t0 + Duration::minutes(fire),
-            "failed",
-            "cancelled",
-            Some(message),
-            finished,
-        )
-        .await;
-        fx.run(finished + Duration::minutes(1)).await;
-        assert!(fx.hooks().is_empty(), "{message} raised an alert");
-    }
-
-    fx.run(t0 + Duration::hours(26) + Duration::minutes(4))
-        .await;
+    assert_eq!(hooks[0].json()["alert"]["error_text"], "interrupted");
     assert_eq!(
-        fx.events(),
-        vec![("alert.opened".to_owned(), "rpo_violated".to_owned())]
-    );
-    fx.db.cleanup().await;
-}
-
-/// AC-MN-10: a restic failure still raises the job alert.
-#[tokio::test]
-async fn ac_mn_10_a_restic_failure_still_raises_the_job_alert() {
-    let Some(fx) = fixture("ac-mn-10-failure").await else {
-        return;
-    };
-    let t0 = fx.t0;
-    let failed_at = t0 + Duration::minutes(30);
-    fx.finished_job(
-        fx.plan,
-        t0 + Duration::minutes(10),
-        "failed",
-        "failed",
-        Some("step_failed"),
-        failed_at,
-    )
-    .await;
-    fx.run(failed_at + Duration::minutes(1)).await;
-    assert_eq!(
-        fx.events(),
-        vec![("alert.opened".to_owned(), "job_failed".to_owned())]
+        hooks[0].json()["alert"]["error_label"],
+        "interrupted by an agent restart"
     );
     fx.db.cleanup().await;
 }

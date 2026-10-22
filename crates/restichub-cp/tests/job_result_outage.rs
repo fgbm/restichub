@@ -217,6 +217,5 @@ async fn ac_pr_07_a_lost_agent_fails_the_job_after_the_grace() {
     let body = env.job(job).await;
     assert_eq!(body["status"], "failed");
     assert_eq!(body["result_message"], "agent_lost");
-    assert_eq!(body["result_code"], "cancelled");
     env.db.cleanup().await;
 }

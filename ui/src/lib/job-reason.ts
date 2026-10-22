@@ -38,8 +38,18 @@ export function notStartedReason(step: StepSource | null | undefined): string | 
 	return step.error_params?.reason?.trim() || null;
 }
 
-/* The reason line of a job page, which knows the steps: a step that did not start names its cause. */
+/*
+ * The reason line of a job page, which knows the steps: a step that did not start names its cause.
+ * A cancel names no cause: the status says it. A job that an interruption cancelled keeps its
+ * reason, so the operator sees what ended it.
+ */
 export function jobDetailReason(job: ReasonSource & { steps: StepSource[] }): string | null {
+	if (
+		job.result_code === 'cancelled' &&
+		(!job.result_message || job.result_message === 'cancelled')
+	) {
+		return null;
+	}
 	if (job.result_message === 'step_not_started') {
 		const reason = job.steps.map(notStartedReason).find((cause) => cause !== null);
 		if (reason) return t('jobs.notStartedBecause', { reason });

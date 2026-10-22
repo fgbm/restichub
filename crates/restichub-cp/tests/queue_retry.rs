@@ -393,7 +393,6 @@ async fn ac_sc_06_a_lost_agent_leaves_an_unlock_after_thirty_minutes() {
     let body = env.job(job).await;
     assert_eq!(body["status"], "failed");
     assert_eq!(body["result_message"], "agent_lost");
-    assert_eq!(body["result_code"], "cancelled");
     let jobs = repository_jobs(&env, repository).await;
     assert!(
         jobs.iter()
