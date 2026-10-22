@@ -195,7 +195,8 @@ impl TenantGrace {
             tracing::warn!(
                 tenant = %tenant,
                 seconds = PASS_STATEMENT_TIMEOUT.whole_seconds(),
-                "the pass of a tenant passed the statement timeout, so its dispatch waits for a later pass"
+                "the pass of a tenant passed the statement timeout, so its agent_lost, timed_out \
+                 and Host offline checks stay off until a pass succeeds"
             );
             self.timeout_warned_at = Some(now);
         }
