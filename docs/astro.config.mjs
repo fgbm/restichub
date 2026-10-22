@@ -120,6 +120,7 @@ export default defineConfig({
 					'operations/security-for-operators',
 					'operations/verify-a-release',
 					'operations/back-up-the-control-plane',
+					'operations/monitor-the-control-plane',
 					'operations/root-ca-rotation',
 					'operations/job-signing-key-compromise',
 					'operations/job-signing-key-recovery',

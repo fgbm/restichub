@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -10,6 +11,7 @@ use http_body_util::BodyExt;
 use restichub_db::Database;
 use restichub_secrets::KekProvider;
 use tokio::sync::{Notify, Semaphore};
+use tower_http::catch_panic::CatchPanicLayer;
 use tower_http::request_id::{
     MakeRequestId, PropagateRequestIdLayer, RequestId, SetRequestIdLayer,
 };
@@ -236,6 +238,7 @@ pub struct AppState {
     progress_throttle:
         Arc<crate::progress_throttle::ProgressThrottle<crate::job_data::ProgressUpdate>>,
     agent_view: Arc<crate::queue::AgentView>,
+    supervisor: crate::supervisor::Supervisor,
 }
 
 impl AppState {
@@ -270,6 +273,7 @@ impl AppState {
             sender: None,
             progress_throttle: Arc::default(),
             agent_view: Arc::default(),
+            supervisor: crate::supervisor::Supervisor::default(),
         }
     }
 
@@ -298,6 +302,7 @@ impl AppState {
             sender: None,
             progress_throttle: Arc::default(),
             agent_view: Arc::default(),
+            supervisor: crate::supervisor::Supervisor::default(),
         }
     }
 
@@ -350,6 +355,17 @@ impl AppState {
     /// short certificate lifetime shortens it (FR-ID-03).
     pub fn rotation_cooldown(&self) -> time::Duration {
         std::cmp::min(self.agent_cert_lifetime / 4, ROTATION_COOLDOWN)
+    }
+
+    /// The server passes the supervisor that started its background tasks, so `/readyz` reports a
+    /// failing task (NFR-OPS-02).
+    pub fn with_supervisor(mut self, supervisor: crate::supervisor::Supervisor) -> Self {
+        self.supervisor = supervisor;
+        self
+    }
+
+    pub fn supervisor(&self) -> &crate::supervisor::Supervisor {
+        &self.supervisor
     }
 
     /// The server passes the settings of the job queue here (FR-SC-08).
@@ -516,6 +532,7 @@ pub fn router(state: AppState) -> Router {
         .method_not_allowed_fallback(method_not_allowed)
         .with_state(state.clone())
         .layer(middleware::from_fn_with_state(state, hide_platform_routes))
+        .layer(catch_panic())
         .layer(TimeoutLayer::with_status_code(
             StatusCode::REQUEST_TIMEOUT,
             REQUEST_TIMEOUT,
@@ -576,6 +593,22 @@ fn base_openapi() -> OpenApiDocument {
         .build();
     SecurityAddon.modify(&mut document);
     document
+}
+
+type PanicHandler = fn(Box<dyn Any + Send>) -> Response;
+
+fn catch_panic() -> CatchPanicLayer<PanicHandler> {
+    CatchPanicLayer::custom(panic_response as PanicHandler)
+}
+
+/// Answers a request whose handler panicked with the `500` problem, so the client gets a response
+/// with the request ID instead of a closed connection.
+fn panic_response(payload: Box<dyn Any + Send>) -> Response {
+    ApiError::internal(format!(
+        "a handler panicked: {}",
+        crate::supervisor::panic_message(payload.as_ref())
+    ))
+    .into_response()
 }
 
 /// Adds the request ID to every problem response and logs the internal cause once.
@@ -645,17 +678,17 @@ pub(crate) async fn healthz() -> &'static str {
     "ok"
 }
 
-/// Readiness probe. The function checks the database.
+/// Readiness probe. The function checks the database and the background tasks.
 #[utoipa::path(
     get,
     path = "/readyz",
     responses(
-        (status = 200, description = "The database is ready."),
-        (status = 503, description = "The database is not ready.")
+        (status = 200, description = "The database is ready and no background task is failing."),
+        (status = 503, description = "The database is not ready, or a background task stopped and has not run for a stable period since its restart.")
     )
 )]
 pub(crate) async fn readyz(State(state): State<AppState>) -> Response {
-    if state.db.is_ready().await {
+    if state.db.is_ready().await && state.supervisor.failing().is_empty() {
         StatusCode::OK.into_response()
     } else {
         ApiError::service_unavailable().into_response()
@@ -767,7 +800,58 @@ fn request_id_header() -> HeaderName {
 
 #[cfg(test)]
 mod tests {
-    use super::is_api_path;
+    use axum::body::Body;
+    use axum::routing::get;
+    use tower::ServiceExt;
+
+    use super::*;
+
+    async fn breaks() -> &'static str {
+        panic!("a handler breaks")
+    }
+
+    #[tokio::test]
+    async fn ac_nfr_11_a_panicking_handler_gets_a_problem_with_the_request_id() {
+        let app = Router::new()
+            .route("/breaks", get(breaks))
+            .layer(catch_panic())
+            .layer(middleware::from_fn(finalize_problem))
+            .layer(PropagateRequestIdLayer::new(request_id_header()))
+            .layer(SetRequestIdLayer::new(request_id_header(), MakeRequestIdV7));
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/breaks")
+                    .body(Body::empty())
+                    .expect("a request"),
+            )
+            .await
+            .expect("the layer answers");
+
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            response
+                .headers()
+                .get(header::CONTENT_TYPE)
+                .map(HeaderValue::as_bytes),
+            Some(PROBLEM_CONTENT_TYPE.as_bytes())
+        );
+        let request_id = response
+            .headers()
+            .get(REQUEST_ID_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .expect("the request ID header")
+            .to_owned();
+        let bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("a body")
+            .to_bytes();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).expect("a JSON body");
+        assert_eq!(body["code"], "internal_error");
+        assert_eq!(body["request_id"], request_id);
+    }
 
     #[test]
     fn the_api_namespace_is_recognized() {

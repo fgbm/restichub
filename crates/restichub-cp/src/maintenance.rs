@@ -14,6 +14,7 @@ use time::OffsetDateTime;
 use crate::clock::Clock;
 use crate::job_signing::{JobSigningError, JobSigningService};
 use crate::rate_limit::RateLimiter;
+use crate::supervisor::Supervisor;
 
 pub const CLEANUP_INTERVAL: Duration = Duration::from_secs(3600);
 
@@ -96,19 +97,22 @@ pub async fn retire_signing_keys(
 /// The task bounds the rotation overlap without a manual call (ADR-0026). It runs in one process;
 /// two instances both run it and the retirement is idempotent.
 pub fn spawn_signing_key_retirement(
+    supervisor: &Supervisor,
     db: Database,
     signing: JobSigningService,
     clock: Arc<dyn Clock>,
     interval: Duration,
 ) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        let mut ticker = tokio::time::interval(interval);
-        // The first tick of `interval` fires immediately. Skip it.
-        ticker.tick().await;
-        loop {
-            ticker.tick().await;
-            if let Err(error) = retire_signing_keys(&db, &signing, clock.as_ref()).await {
-                tracing::warn!(%error, "the job signing key retirement failed");
+    supervisor.spawn_loop("signing_key_retirement", move |start| {
+        let (db, signing, clock) = (db.clone(), signing.clone(), clock.clone());
+        async move {
+            let mut ticker = tokio::time::interval(interval);
+            start.skip_first_tick(&mut ticker).await;
+            loop {
+                ticker.tick().await;
+                if let Err(error) = retire_signing_keys(&db, &signing, clock.as_ref()).await {
+                    tracing::warn!(%error, "the job signing key retirement failed");
+                }
             }
         }
     })
@@ -151,18 +155,21 @@ pub async fn expire_jobs(db: &Database, now: OffsetDateTime) -> Result<(), DbErr
 
 /// Starts the periodic job expiry sweep.
 pub fn spawn_job_expiry(
+    supervisor: &Supervisor,
     db: Database,
     clock: Arc<dyn Clock>,
     interval: Duration,
 ) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        let mut ticker = tokio::time::interval(interval);
-        // The first tick of `interval` fires immediately. Skip it.
-        ticker.tick().await;
-        loop {
-            ticker.tick().await;
-            if let Err(error) = expire_jobs(&db, clock.now()).await {
-                tracing::warn!(%error, "the job expiry sweep failed");
+    supervisor.spawn_loop("job_expiry", move |start| {
+        let (db, clock) = (db.clone(), clock.clone());
+        async move {
+            let mut ticker = tokio::time::interval(interval);
+            start.skip_first_tick(&mut ticker).await;
+            loop {
+                ticker.tick().await;
+                if let Err(error) = expire_jobs(&db, clock.now()).await {
+                    tracing::warn!(%error, "the job expiry sweep failed");
+                }
             }
         }
     })
@@ -172,15 +179,21 @@ pub fn spawn_job_expiry(
 ///
 /// The task waits one interval before the first run, because the server prepares the setup token at
 /// start.
-pub fn spawn(db: Database, interval: Duration) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        let mut ticker = tokio::time::interval(interval);
-        // The first tick of `interval` fires immediately. Skip it.
-        ticker.tick().await;
-        loop {
-            ticker.tick().await;
-            if let Err(error) = cleanup(&db, OffsetDateTime::now_utc()).await {
-                tracing::warn!(%error, "the maintenance cleanup failed");
+pub fn spawn(
+    supervisor: &Supervisor,
+    db: Database,
+    interval: Duration,
+) -> tokio::task::JoinHandle<()> {
+    supervisor.spawn_loop("maintenance", move |start| {
+        let db = db.clone();
+        async move {
+            let mut ticker = tokio::time::interval(interval);
+            start.skip_first_tick(&mut ticker).await;
+            loop {
+                ticker.tick().await;
+                if let Err(error) = cleanup(&db, OffsetDateTime::now_utc()).await {
+                    tracing::warn!(%error, "the maintenance cleanup failed");
+                }
             }
         }
     })
@@ -191,22 +204,30 @@ pub fn spawn(db: Database, interval: Duration) -> tokio::task::JoinHandle<()> {
 /// The sweep removes the full and the idle buckets of the user map, the IP map and the account
 /// create maps.
 pub fn spawn_limiter_sweep(
+    supervisor: &Supervisor,
     user_limiter: Arc<RateLimiter>,
     ip_limiter: Arc<RateLimiter>,
     create_user_limiter: Arc<RateLimiter>,
     create_user_tenant_limiter: Arc<RateLimiter>,
     interval: Duration,
 ) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        let mut ticker = tokio::time::interval(interval);
-        ticker.tick().await;
-        loop {
-            ticker.tick().await;
-            let now = std::time::Instant::now();
-            user_limiter.sweep(now);
-            ip_limiter.sweep(now);
-            create_user_limiter.sweep(now);
-            create_user_tenant_limiter.sweep(now);
+    supervisor.spawn_loop("limiter_sweep", move |start| {
+        let limiters = [
+            user_limiter.clone(),
+            ip_limiter.clone(),
+            create_user_limiter.clone(),
+            create_user_tenant_limiter.clone(),
+        ];
+        async move {
+            let mut ticker = tokio::time::interval(interval);
+            start.skip_first_tick(&mut ticker).await;
+            loop {
+                ticker.tick().await;
+                let now = std::time::Instant::now();
+                for limiter in &limiters {
+                    limiter.sweep(now);
+                }
+            }
         }
     })
 }
