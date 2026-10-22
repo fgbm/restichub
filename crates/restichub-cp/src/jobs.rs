@@ -88,9 +88,9 @@ const ACCESS_ERROR_CODE: &str = "repository_missing_here";
 /// The stable warning code of a `forget` step that selected no snapshot (FR-RP-08).
 const FORGET_SELECTED_NOTHING: &str = "forget_selected_nothing";
 
-/// The error code of a job that a restart of the agent cut short. The agent sends it with the
-/// outcome `failed` (ADR-0037); the control plane stores an interrupted backup as cancelled
-/// (FR-MN-03).
+/// The error code of a job with a script that the control plane delivered again after a restart
+/// of the agent. The agent sends it with the outcome `failed` (ADR-0037); the control plane stores
+/// an interrupted backup as cancelled (FR-MN-03).
 const INTERRUPTED_CODE: &str = "interrupted";
 
 /// The request body of an init or a test-access action.
@@ -1087,8 +1087,9 @@ fn outcome_of(result: &JobResult, kind: JobKind) -> Option<JobOutcome> {
         ProtoJobStatus::RepositoryLocked => JobResultCode::RepositoryLocked,
         ProtoJobStatus::Unspecified => return None,
     };
-    // A restart, a stop of the service and a reboot are no fault of a backup, and the RPO alert
-    // catches the missed backup. No alert covers the other kinds, so they stay failed (FR-MN-03).
+    // An honest agent sends `interrupted` only for a job with a script, and only a backup has one.
+    // The lost acknowledgement is no fault of the backup, and the RPO alert catches the missed
+    // backup. No alert covers another kind, so it stays failed (FR-MN-03).
     let interrupted = kind == JobKind::Backup
         && result_code == JobResultCode::Failed
         && result

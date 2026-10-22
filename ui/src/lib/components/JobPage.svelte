@@ -327,7 +327,7 @@
 	{#snippet banners()}
 		{#if job}
 			{#if jobDetailReason(job)}
-				<p class="head__reason">{jobDetailReason(job)}</p>
+				<p class="head__reason" class:head__reason--muted={cancelled}>{jobDetailReason(job)}</p>
 			{/if}
 			{#if stats.length > 0}
 				<Panel title={t('jobDetail.summary')} subtitle={t('jobDetail.summaryHint')}>
@@ -477,6 +477,10 @@
 		margin: var(--rh-space-2) 0 0;
 		color: var(--rh-color-danger-text);
 		font-size: var(--rh-font-size-sm);
+	}
+
+	.head__reason--muted {
+		color: var(--rh-color-text-muted);
 	}
 
 	.stats {

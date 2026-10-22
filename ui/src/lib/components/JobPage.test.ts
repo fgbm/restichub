@@ -91,6 +91,21 @@ describe('the job page of a cancelled job', () => {
 		).toBeVisible();
 	});
 
+	it('ac_mn_10_shows_the_reason_of_a_cancelled_job_in_the_muted_tone', async () => {
+		mocks.getJob.mockResolvedValue(job({ result_message: 'interrupted' }));
+		const { unmount } = render(JobPage, { jobId: 'j_01' });
+		const line = await screen.findByText('Interrupted: the agent restarted while scripts ran');
+		expect(line).toHaveClass('head__reason--muted');
+		unmount();
+
+		mocks.getJob.mockResolvedValue(
+			job({ result_code: 'failed', result_message: 'agent_lost', kind: 'prune' })
+		);
+		render(JobPage, { jobId: 'j_01' });
+		const failed = await screen.findByText(/The host went offline during the job/);
+		expect(failed).not.toHaveClass('head__reason--muted');
+	});
+
 	it('ac_mn_10_shows_no_reason_for_a_plain_cancel', async () => {
 		for (const message of [null, 'cancelled']) {
 			mocks.getJob.mockResolvedValue(job({ result_message: message }));

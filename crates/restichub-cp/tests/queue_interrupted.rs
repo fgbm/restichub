@@ -1,6 +1,6 @@
-//! A backup that a stop of the service, a restart of the agent or a reboot interrupts ends as
-//! cancelled and raises no job alert; every other interrupted job, a real failure and a lost job
-//! stay failed and raise the alert (FR-MN-03, AC-MN-10, AC-SC-10).
+//! A service stop cancels a job and a backup that the control plane delivered again after a restart
+//! ends as cancelled, both without a job alert; another kind with `interrupted`, a real failure and
+//! a lost job stay failed and raise the alert (FR-MN-03, AC-MN-10, AC-SC-10).
 
 #![allow(clippy::expect_used)]
 
@@ -8,9 +8,9 @@ mod alert_support;
 mod common;
 mod queue_support;
 
-use alert_support::{judged_view, local_sender, plan_created_at};
+use alert_support::{finish_job, judged_view, local_sender};
 use restichub_cp::clock::ManualClock;
-use restichub_db::{JobKind, PlanId};
+use restichub_db::{JobId, JobKind};
 use restichub_proto::agent::v1::{JobStatus, StepStatus};
 use serde_json::{Value, json};
 use time::{Duration, OffsetDateTime};
@@ -123,13 +123,38 @@ async fn ac_mn_10_a_service_stop_ends_the_job_as_cancelled() {
 }
 
 /// AC-MN-10: an interrupted backup ends as cancelled and keeps the reason. It raises no job alert,
-/// and the RPO alert of the plan fires when no backup succeeds in time.
+/// and the RPO alert of the plan fires because the interrupted backup is no success.
 #[tokio::test]
 async fn ac_mn_10_an_interrupted_backup_is_cancelled_and_only_the_rpo_alert_fires() {
     let Some(db) = common::test_db().await else {
         return;
     };
     let mut w = world(db).await;
+    let objective = Duration::hours(1);
+    let mut tx = w.cp.scoped().await;
+    sqlx::query("UPDATE plans SET rpo_seconds = $2 WHERE id = $1")
+        .bind(w.plan)
+        .bind(objective.whole_seconds())
+        .execute(&mut *tx)
+        .await
+        .expect("cannot set the objective");
+    tx.commit().await.expect("cannot end the write");
+
+    // A success 50 minutes ago keeps the plan inside the objective for 10 more minutes.
+    let (first, first_id) = running_job(&mut w).await;
+    w.agent.finish(&w.cp, &first_id).await;
+    let success_at = w.cp.now() - Duration::minutes(50);
+    finish_job(
+        &w.cp.db,
+        w.cp.tenant,
+        JobId::from_uuid(first),
+        "succeeded",
+        "succeeded",
+        None,
+        success_at,
+    )
+    .await;
+
     let (job, id) = running_job(&mut w).await;
     w.agent
         .result_with_error(
@@ -144,15 +169,9 @@ async fn ac_mn_10_an_interrupted_backup_is_cancelled_and_only_the_rpo_alert_fire
     assert_eq!(body["result_code"], "cancelled", "{body}");
     assert_eq!(body["result_message"], INTERRUPTED);
 
-    let soon = w.cp.now() + Duration::minutes(1);
-    assert!(
-        open_alerts(&w.cp, soon).await.is_empty(),
-        "the interrupted backup raised an alert"
-    );
-
-    let created = plan_created_at(&w.cp.db, w.cp.tenant, PlanId::from_uuid(w.plan)).await;
-    let later = created + Duration::days(400);
-    // The agent is silent for 400 days, so its own alert is open too.
+    // 11 minutes after now, the success is 61 minutes old. A cancelled backup that counted as a
+    // success would keep the plan inside the objective.
+    let later = w.cp.now() + Duration::minutes(11);
     let alerts = open_alerts(&w.cp, later).await;
     assert!(alerts.contains(&"rpo_violated".to_owned()), "{alerts:?}");
     assert!(!alerts.contains(&"job_failed".to_owned()), "{alerts:?}");
