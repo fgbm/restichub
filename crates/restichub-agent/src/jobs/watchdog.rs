@@ -29,10 +29,9 @@ const LONG_STALL: Duration = Duration::from_secs(6 * 60 * 60);
 /// command of a job sets no pack size, so a pack can reach this size.
 const MAX_PACK_BYTES: u64 = 128 * 1024 * 1024;
 
-/// Packs that the window of a limited upload covers. A backup reads the files into packs and
-/// restic reports `bytes_done` again only when an upload ends, so the window must hold a whole
-/// pack at the limit; two packs leave room for an upload that shares the limit with the others that
-/// restic keeps in flight.
+/// How many packs the raised window covers. A backup reads the files into packs and restic reports
+/// `bytes_done` again only when an upload ends, so the window must hold a whole pack at the limit;
+/// two packs leave room for one upload that shares the limit with the others in flight.
 const UPLOAD_PACKS: u64 = 2;
 
 /// The verify phase of a restore prints nothing on either stream, and a healthy verification of a
@@ -376,7 +375,7 @@ mod tests {
             StepLimits::for_step(&limited(50), None, 300).stall,
             upload_stall(&limited(50))
         );
-        // A window longer than the raised one stays.
+        // The agent takes the maximum, so a longer window of the job stays.
         assert_eq!(
             StepLimits::for_step(&limited(50), None, 7200).stall,
             Duration::from_secs(7200)
