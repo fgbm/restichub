@@ -103,12 +103,11 @@ pub fn spawn_signing_key_retirement(
     clock: Arc<dyn Clock>,
     interval: Duration,
 ) -> tokio::task::JoinHandle<()> {
-    supervisor.spawn_loop("signing_key_retirement", move || {
+    supervisor.spawn_loop("signing_key_retirement", move |start| {
         let (db, signing, clock) = (db.clone(), signing.clone(), clock.clone());
         async move {
             let mut ticker = tokio::time::interval(interval);
-            // The first tick of `interval` fires immediately. Skip it.
-            ticker.tick().await;
+            start.skip_first_tick(&mut ticker).await;
             loop {
                 ticker.tick().await;
                 if let Err(error) = retire_signing_keys(&db, &signing, clock.as_ref()).await {
@@ -161,12 +160,11 @@ pub fn spawn_job_expiry(
     clock: Arc<dyn Clock>,
     interval: Duration,
 ) -> tokio::task::JoinHandle<()> {
-    supervisor.spawn_loop("job_expiry", move || {
+    supervisor.spawn_loop("job_expiry", move |start| {
         let (db, clock) = (db.clone(), clock.clone());
         async move {
             let mut ticker = tokio::time::interval(interval);
-            // The first tick of `interval` fires immediately. Skip it.
-            ticker.tick().await;
+            start.skip_first_tick(&mut ticker).await;
             loop {
                 ticker.tick().await;
                 if let Err(error) = expire_jobs(&db, clock.now()).await {
@@ -186,12 +184,11 @@ pub fn spawn(
     db: Database,
     interval: Duration,
 ) -> tokio::task::JoinHandle<()> {
-    supervisor.spawn_loop("maintenance", move || {
+    supervisor.spawn_loop("maintenance", move |start| {
         let db = db.clone();
         async move {
             let mut ticker = tokio::time::interval(interval);
-            // The first tick of `interval` fires immediately. Skip it.
-            ticker.tick().await;
+            start.skip_first_tick(&mut ticker).await;
             loop {
                 ticker.tick().await;
                 if let Err(error) = cleanup(&db, OffsetDateTime::now_utc()).await {
@@ -214,7 +211,7 @@ pub fn spawn_limiter_sweep(
     create_user_tenant_limiter: Arc<RateLimiter>,
     interval: Duration,
 ) -> tokio::task::JoinHandle<()> {
-    supervisor.spawn_loop("limiter_sweep", move || {
+    supervisor.spawn_loop("limiter_sweep", move |start| {
         let limiters = [
             user_limiter.clone(),
             ip_limiter.clone(),
@@ -223,7 +220,7 @@ pub fn spawn_limiter_sweep(
         ];
         async move {
             let mut ticker = tokio::time::interval(interval);
-            ticker.tick().await;
+            start.skip_first_tick(&mut ticker).await;
             loop {
                 ticker.tick().await;
                 let now = std::time::Instant::now();

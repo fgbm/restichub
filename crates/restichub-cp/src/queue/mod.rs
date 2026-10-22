@@ -734,7 +734,7 @@ async fn revert(state: &AppState, tenant: TenantId, job: JobId) {
 /// Starts the dispatcher loop. A wake from [`AppState::wake_dispatcher`] runs a pass at once.
 pub fn spawn(state: AppState, clock: Arc<dyn Clock>) -> tokio::task::JoinHandle<()> {
     let supervisor = state.supervisor().clone();
-    supervisor.spawn_loop("dispatcher", move || {
+    supervisor.spawn_loop("dispatcher", move |_| {
         let (state, clock) = (state.clone(), clock.clone());
         async move {
             let wake = state.dispatch_wake();

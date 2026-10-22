@@ -201,15 +201,14 @@ pub fn spawn(
     view: Arc<AgentView>,
     interval: Duration,
 ) -> tokio::task::JoinHandle<()> {
-    supervisor.spawn_loop("alerts", move || {
+    supervisor.spawn_loop("alerts", move |start| {
         let (db, sender) = (db.clone(), sender.clone());
         let (provider, clock, view) = (provider.clone(), clock.clone(), view.clone());
         async move {
             let mut ticker = tokio::time::interval(interval);
             // A pass that takes longer than the interval must not queue the missed ticks.
             ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            // The first tick of `interval` fires immediately. Skip it.
-            ticker.tick().await;
+            start.skip_first_tick(&mut ticker).await;
             let mut pass = 0_usize;
             loop {
                 ticker.tick().await;

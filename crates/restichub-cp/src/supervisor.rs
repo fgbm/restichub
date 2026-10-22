@@ -13,6 +13,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use tokio::task::JoinHandle;
+use tokio::time::Interval;
 
 const INITIAL_BACKOFF: Duration = Duration::from_secs(1);
 const MAX_BACKOFF: Duration = Duration::from_secs(60);
@@ -33,6 +34,26 @@ impl Default for Policy {
             initial_backoff: INITIAL_BACKOFF,
             max_backoff: MAX_BACKOFF,
             stable_after: STABLE_AFTER,
+        }
+    }
+}
+
+/// Tells a task whether the supervisor starts it for the first time or after a stop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Start {
+    First,
+    Restart,
+}
+
+impl Start {
+    /// Consumes the tick of a new `interval` that fires at once, at the first start only.
+    ///
+    /// A restarted loop runs its pass at once. A pass that always breaks then stops the loop again
+    /// within the pause, so the loop stays failing. A loop that waits a whole interval for its first
+    /// pass would count as healthy after the stable period without a pass (NFR-OPS-02).
+    pub async fn skip_first_tick(self, ticker: &mut Interval) {
+        if self == Self::First {
+            ticker.tick().await;
         }
     }
 }
@@ -86,11 +107,11 @@ impl Supervisor {
     /// The returned handle stops the supervisor and its task when it is aborted.
     pub fn spawn_loop<F, Fut>(&self, name: &'static str, mut make: F) -> JoinHandle<()>
     where
-        F: FnMut() -> Fut + Send + 'static,
+        F: FnMut(Start) -> Fut + Send + 'static,
         Fut: Future<Output = ()> + Send + 'static,
     {
-        self.supervise(name, move || {
-            let task = make();
+        self.supervise(name, move |start| {
+            let task = make(start);
             async move {
                 task.await;
                 Exit::Failed("the task returned".to_owned())
@@ -105,7 +126,7 @@ impl Supervisor {
         Fut: Future<Output = Result<(), E>> + Send + 'static,
         E: std::error::Error,
     {
-        self.supervise(name, move || {
+        self.supervise(name, move |_| {
             let task = make();
             async move {
                 match task.await {
@@ -128,7 +149,7 @@ impl Supervisor {
 
     fn supervise<F, Fut>(&self, name: &'static str, make: F) -> JoinHandle<()>
     where
-        F: FnMut() -> Fut + Send + 'static,
+        F: FnMut(Start) -> Fut + Send + 'static,
         Fut: Future<Output = Exit> + Send + 'static,
     {
         tokio::spawn(run(Arc::clone(&self.inner), name, make))
@@ -146,13 +167,14 @@ impl Drop for AbortOnDrop {
 
 async fn run<F, Fut>(inner: Arc<Inner>, name: &'static str, mut make: F)
 where
-    F: FnMut() -> Fut,
+    F: FnMut(Start) -> Fut,
     Fut: Future<Output = Exit> + Send + 'static,
 {
     let policy = inner.policy;
     let mut backoff = policy.initial_backoff;
+    let mut start = Start::First;
     loop {
-        let mut task = AbortOnDrop(tokio::spawn(make()));
+        let mut task = AbortOnDrop(tokio::spawn(make(start)));
         let joined = match tokio::time::timeout(policy.stable_after, &mut task.0).await {
             Ok(joined) => joined,
             Err(_) => {
@@ -173,6 +195,7 @@ where
         tracing::error!(task = name, %reason, restart_in = ?backoff, "a background task stopped");
         tokio::time::sleep(backoff).await;
         backoff = (backoff * 2).min(policy.max_backoff);
+        start = Start::Restart;
     }
 }
 
@@ -217,7 +240,7 @@ mod tests {
         let supervisor = Supervisor::with_policy(POLICY);
         let starts = counter();
         let seen = Arc::clone(&starts);
-        supervisor.spawn_loop("test_loop", move || {
+        supervisor.spawn_loop("test_loop", move |_| {
             let run = seen.fetch_add(1, Ordering::SeqCst);
             async move {
                 assert!(run > 0, "the first pass breaks");
@@ -243,7 +266,7 @@ mod tests {
         let supervisor = Supervisor::with_policy(POLICY);
         let starts = counter();
         let seen = Arc::clone(&starts);
-        supervisor.spawn_loop("test_loop", move || {
+        supervisor.spawn_loop("test_loop", move |_| {
             seen.fetch_add(1, Ordering::SeqCst);
             async {}
         });
@@ -259,7 +282,7 @@ mod tests {
         let supervisor = Supervisor::with_policy(POLICY);
         let starts = counter();
         let seen = Arc::clone(&starts);
-        supervisor.spawn_loop("test_loop", move || {
+        supervisor.spawn_loop("test_loop", move |_| {
             seen.fetch_add(1, Ordering::SeqCst);
             async { panic!("always") }
         });
@@ -269,6 +292,40 @@ mod tests {
         assert_eq!(starts.load(Ordering::SeqCst), 3);
         tokio::time::sleep(Duration::from_millis(5_000)).await;
         assert_eq!(starts.load(Ordering::SeqCst), 5);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_restarted_hourly_loop_that_breaks_every_pass_stays_failing() {
+        let supervisor = Supervisor::with_policy(POLICY);
+        supervisor.spawn_loop("hourly_loop", |start| async move {
+            let mut ticker = tokio::time::interval(Duration::from_secs(3600));
+            start.skip_first_tick(&mut ticker).await;
+            ticker.tick().await;
+            panic!("every pass breaks");
+        });
+
+        tokio::time::sleep(Duration::from_secs(3601)).await;
+        for second in 0..2 * 3600 {
+            assert_eq!(supervisor.failing(), ["hourly_loop"], "second {second}");
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn only_the_first_start_skips_the_first_tick() {
+        let supervisor = Supervisor::with_policy(POLICY);
+        let starts = Arc::new(Mutex::new(Vec::new()));
+        let seen = Arc::clone(&starts);
+        supervisor.spawn_loop("test_loop", move |start| {
+            seen.lock().expect("lock").push(start);
+            async { panic!("stops") }
+        });
+
+        tokio::time::sleep(Duration::from_secs(4)).await;
+        let starts = starts.lock().expect("lock");
+        assert_eq!(starts[0], Start::First);
+        assert!(starts.len() > 1);
+        assert!(starts[1..].iter().all(|start| *start == Start::Restart));
     }
 
     #[tokio::test(start_paused = true)]
@@ -313,7 +370,7 @@ mod tests {
         let supervisor = Supervisor::with_policy(POLICY);
         let alive = Arc::new(());
         let held = Arc::clone(&alive);
-        let handle = supervisor.spawn_loop("test_loop", move || {
+        let handle = supervisor.spawn_loop("test_loop", move |_| {
             let held = Arc::clone(&held);
             async move {
                 let _held = held;

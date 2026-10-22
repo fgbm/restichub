@@ -221,12 +221,11 @@ pub fn spawn(
     clock: Arc<dyn Clock>,
     interval: Duration,
 ) -> tokio::task::JoinHandle<()> {
-    supervisor.spawn_loop("scheduler", move || {
+    supervisor.spawn_loop("scheduler", move |start| {
         let (db, clock) = (db.clone(), clock.clone());
         async move {
             let mut ticker = tokio::time::interval(interval);
-            // The first tick of `interval` fires immediately. Skip it.
-            ticker.tick().await;
+            start.skip_first_tick(&mut ticker).await;
             loop {
                 ticker.tick().await;
                 if let Err(error) = run_once(&db, clock.as_ref()).await {

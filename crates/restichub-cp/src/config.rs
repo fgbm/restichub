@@ -81,11 +81,11 @@ pub const QUEUE_GLOBAL_LIMIT_ENV: &str = "RESTICHUB_QUEUE_GLOBAL_LIMIT";
 pub const QUEUE_LEASE_SECS_ENV: &str = "RESTICHUB_QUEUE_LEASE_SECS";
 /// The shortest lease that the configuration accepts.
 const MIN_QUEUE_LEASE: Duration = Duration::from_secs(15);
-/// The longest lease that the configuration accepts. A larger value overflows the date arithmetic
-/// of the dispatcher.
+/// The longest lease that the configuration accepts. A larger value is far beyond any real need;
+/// the bound keeps the date arithmetic of the dispatcher in range.
 const MAX_QUEUE_LEASE: Duration = Duration::from_secs(24 * 60 * 60);
-/// The longest session lifetime that the configuration accepts. A larger value overflows the date
-/// arithmetic of the sign-in.
+/// The longest session lifetime that the configuration accepts. A larger value is far beyond any
+/// real need; the bound keeps the date arithmetic of the sign-in in range.
 const MAX_SESSION_LIFETIME: Duration = Duration::from_secs(365 * 24 * 60 * 60);
 /// The lock results after which a job goes to the dead-letter status (FR-SC-05).
 pub const QUEUE_LOCK_RETRY_LIMIT_ENV: &str = "RESTICHUB_QUEUE_LOCK_RETRY_LIMIT";

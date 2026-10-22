@@ -45,7 +45,7 @@ async fn ac_nfr_11_readyz_fails_while_a_background_task_is_failing()
     };
     assert_eq!(ready(app.clone()).await?, StatusCode::OK);
 
-    supervisor.spawn_loop("broken_loop", || async { panic!("the loop breaks") });
+    supervisor.spawn_loop("broken_loop", |_| async { panic!("the loop breaks") });
     tokio::time::timeout(Duration::from_secs(10), async {
         while supervisor.failing().is_empty() {
             tokio::time::sleep(Duration::from_millis(5)).await;

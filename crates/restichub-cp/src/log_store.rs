@@ -250,7 +250,7 @@ pub fn spawn_retention(
 ) -> tokio::task::JoinHandle<()> {
     let store = DatabaseLogStore::new(db.clone());
     let retention = time::Duration::days(i64::from(retention_days));
-    supervisor.spawn_loop("log_retention", move || {
+    supervisor.spawn_loop("log_retention", move |_| {
         let (db, store, clock) = (db.clone(), store.clone(), clock.clone());
         async move {
             let mut ticker = tokio::time::interval(interval);
