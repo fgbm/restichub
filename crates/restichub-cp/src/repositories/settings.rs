@@ -64,9 +64,8 @@ where
 }
 
 /// The write-only secret fields of a repository create.
-///
-/// The type does not derive `Debug`, so a log line cannot print a value by accident. Each value is
-/// a [`SecretString`], so the buffer is zeroized on drop.
+// The type does not derive `Debug`, so a log line cannot print a value by accident. Each value is
+// a `SecretString`, so the buffer is zeroized on drop.
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CreateRepositoryRequest {
@@ -141,7 +140,7 @@ pub struct RepositoryView {
     pub name: String,
     pub backend: BackendSettings,
     pub credentials: CredentialsView,
-    /// False until an agent runs the init step. The MVP control plane never sets it true.
+    /// False until an agent runs the init step. The control plane never sets it true.
     pub initialized: bool,
     pub maintenance_agent_id: Option<String>,
     #[schema(format = DateTime)]

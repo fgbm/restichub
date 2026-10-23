@@ -70,7 +70,8 @@ pub struct SetRoleRequest {
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct UpdateAccountRequest {
     pub disabled: Option<bool>,
-    /// Written by the update; the MVP treats it as unverified. An empty value removes the email.
+    /// Written by the update; the control plane treats it as unverified. An empty value removes
+    /// the email.
     pub email: Option<String>,
     /// True when the account holds the installation-wide right.
     pub platform_admin: Option<bool>,

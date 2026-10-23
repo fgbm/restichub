@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-/// The role of an actor in a tenant (requirements section 2).
+/// What an actor may do in the tenant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
 #[sqlx(type_name = "text", rename_all = "snake_case")]
@@ -156,8 +156,8 @@ impl ServerScriptsState {
 
 /// Administrator state of a tenant, derived from the memberships.
 ///
-/// The control plane computes the state from the memberships: an active Admin count of zero gives
-/// [`AdminState::None`]. The state is not stored, so it cannot drift from the memberships.
+/// The control plane computes the state from the memberships, and it is not stored, so it cannot
+/// drift. An active Admin count of zero gives `none`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AdminState {
@@ -286,8 +286,9 @@ impl BackendKind {
     }
 }
 
-/// The kind is general, not init-specific. The string value of each variant is the stored value of
-/// the `kind` column. It is stable: do not change a string.
+/// What a job does: a backup, a restore or a maintenance step. It is general, not init-specific.
+// The string value of each variant is the stored value of the `kind` column. It is stable: do not
+// change a string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
 #[sqlx(type_name = "text", rename_all = "snake_case")]
@@ -441,9 +442,12 @@ impl JobKind {
     }
 }
 
+/// Where a job is between the queue and its result.
+///
 /// `queued` is the state before the send and `sent` the state after it, until the agent
-/// acknowledges the job. The string value of each variant is the stored value of the `status`
-/// column. It is stable: do not change a string.
+/// acknowledges the job.
+// The string value of each variant is the stored value of the `status` column. It is stable: do not
+// change a string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
 #[sqlx(type_name = "text", rename_all = "snake_case")]
@@ -501,10 +505,8 @@ impl JobStatus {
 }
 
 /// How many jobs the scheduler creates after a downtime, or after an agent was not active.
-///
-/// The policy decides how many jobs the scheduler creates after the control plane was down, or
-/// after an agent that was not active for a while. The string value of each variant is the stored
-/// value of the `missed_run_policy` column. It is stable: do not change a string.
+// The string value of each variant is the stored value of the `missed_run_policy` column. It is
+// stable: do not change a string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
 #[sqlx(type_name = "text", rename_all = "snake_case")]
@@ -538,9 +540,8 @@ impl MissedRunPolicy {
 }
 
 /// The maintenance task of a repository schedule.
-///
-/// The string value of each variant is the stored value of the `task` column. It is stable: do not
-/// change a string.
+// The string value of each variant is the stored value of the `task` column. It is stable: do not
+// change a string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
 #[sqlx(type_name = "text", rename_all = "snake_case")]
@@ -580,8 +581,9 @@ impl MaintenanceTask {
     }
 }
 
-/// The value comes from the `outcome` field of the `JobResult` message. It is a closed set, so the
-/// `result_code` column holds one of these strings. It is stable: do not change a string.
+/// The final outcome of a job, as one of the values below.
+// The value comes from the `outcome` field of the `JobResult` message. The `result_code` column
+// holds one of these strings. It is stable: do not change a string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
 #[sqlx(type_name = "text", rename_all = "snake_case")]
@@ -998,8 +1000,7 @@ pub enum PlannedPhase {
 }
 
 /// The kind of a parameter of a profile and of its value.
-///
-/// The string value is the stored value of the `kind` column and of the profile JSON. It is stable.
+// The string value is the stored value of the `kind` column and of the profile JSON. It is stable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
 #[sqlx(type_name = "text", rename_all = "snake_case")]

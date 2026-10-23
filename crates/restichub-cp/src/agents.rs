@@ -102,7 +102,7 @@ pub struct AgentView {
     #[schema(format = DateTime)]
     pub last_certificate_rotation_at: Option<String>,
     /// Null unless a connection presented the certificate that the last rotation replaced. It can
-    /// mean a copy of the old key (T17).
+    /// mean a copy of the old key.
     #[schema(format = DateTime)]
     pub superseded_certificate_used_at: Option<String>,
     /// Reported in the last hello as `major.minor`. Null before the first hello.

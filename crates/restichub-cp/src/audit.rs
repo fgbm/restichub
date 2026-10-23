@@ -145,9 +145,11 @@ pub struct AuditQuery {
 #[into_params(parameter_in = Query)]
 #[allow(dead_code)]
 pub struct TenantAuditParams {
-    /// Start of the time range in RFC 3339.
+    /// Start of the time range.
+    #[param(format = DateTime)]
     from: Option<String>,
-    /// End of the time range in RFC 3339.
+    /// End of the time range.
+    #[param(format = DateTime)]
     to: Option<String>,
     action: Option<String>,
     actor_type: Option<String>,

@@ -588,12 +588,13 @@ const TAGS: &[(&str, &str)] = &[
     ),
     (
         "repositories",
-        "Repositories, their maintenance, their snapshots and the secrets that they bind.",
+        "Repositories, their maintenance and their snapshots.",
     ),
     (
-        "jobs",
-        "Jobs, their logs, the job templates and the manual runs.",
+        "secrets",
+        "Secrets of the tenant: repository credentials, channel endpoints and the values that scripts and parameters use.",
     ),
+    ("jobs", "Jobs, their logs and the job templates."),
     ("restore", "Restore requests."),
     ("alerts", "Alert rules and the alerts that they raise."),
     ("channels", "Notification channels."),
@@ -610,7 +611,7 @@ const TAGS: &[(&str, &str)] = &[
     ),
     (
         "system",
-        "The process and the instance: the probes, the metrics, the OpenAPI document, the instance settings, the event stream and the dashboard.",
+        "The process and the instance: the probes, the metrics, the OpenAPI document, the mode and the setup state of the instance, the event stream and the dashboard.",
     ),
 ];
 

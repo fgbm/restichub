@@ -22,21 +22,40 @@ fn operations(document: &Value) -> Vec<(String, String, &Value)> {
     found
 }
 
-/// True if the text names a requirement, an acceptance criterion or a decision of the repository.
-fn holds_internal_id(text: &str) -> bool {
+/// True if the text holds a reference that only the repository uses: a requirement, an acceptance
+/// criterion, a decision, a requirements section, a threat model entry, a rustdoc link or the name
+/// of an unfinished stage.
+fn holds_internal_reference(text: &str) -> bool {
     const PREFIXES: [&str; 4] = ["FR-", "AC-", "ADR-", "NFR-"];
-    text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
-        .filter_map(|token| {
-            let prefix = PREFIXES.iter().find(|prefix| token.starts_with(**prefix))?;
-            Some(&token[prefix.len()..])
-        })
-        .any(|rest| {
-            !rest.is_empty()
-                && rest
-                    .chars()
-                    .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '-')
-                && rest.chars().any(|c| c.is_ascii_digit())
-        })
+    if text.contains('[') || text.contains("MVP") {
+        return true;
+    }
+    let tokens: Vec<&str> = text
+        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+        .collect();
+    tokens.iter().enumerate().any(|(index, token)| {
+        // A threat model entry is `T` and a number, for example `T17`.
+        let threat_model_entry = token.len() > 1
+            && token.starts_with('T')
+            && token[1..].chars().all(|c| c.is_ascii_digit());
+        // A requirements section is the word and a number, for example `section 2`.
+        let requirements_section = *token == "section"
+            && tokens
+                .get(index + 1)
+                .is_some_and(|next| !next.is_empty() && next.chars().all(|c| c.is_ascii_digit()));
+        let named_id = PREFIXES
+            .iter()
+            .find(|prefix| token.starts_with(**prefix))
+            .is_some_and(|prefix| {
+                let rest = &token[prefix.len()..];
+                !rest.is_empty()
+                    && rest
+                        .chars()
+                        .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '-')
+                    && rest.chars().any(|c| c.is_ascii_digit())
+            });
+        named_id || threat_model_entry || requirements_section
+    })
 }
 
 fn descriptions(document: &Value) -> Vec<String> {
@@ -110,58 +129,99 @@ fn every_operation_carries_one_declared_tag() {
 }
 
 #[test]
-fn no_description_holds_an_internal_id() {
+fn no_description_holds_an_internal_reference() {
     let document = document();
     for text in descriptions(&document) {
         assert!(
-            !holds_internal_id(&text),
-            "a description names an internal identifier: {text}"
+            !holds_internal_reference(&text),
+            "a description holds an internal reference: {text}"
         );
     }
 }
 
+/// The names that the document gives to a time without the `_at` suffix: a log line, a snapshot and
+/// a tree entry, the fire times of a plan and the ends of a time range.
+const TIME_NAMES: [&str; 6] = ["ts", "time", "mtime", "runs", "from", "to"];
+
+fn is_time_name(name: &str) -> bool {
+    TIME_NAMES.contains(&name) || name.ends_with("_at") || name.ends_with("_time")
+}
+
+/// True for a schema of `string`, of `string` or null, and of an array of one of these.
+fn is_string_schema(schema: &Value) -> bool {
+    match schema.get("type") {
+        Some(Value::String(kind)) => kind == "string",
+        Some(Value::Array(kinds)) => kinds.iter().any(|kind| kind == "string"),
+        _ => false,
+    }
+}
+
+/// The schema that holds the text of a time: the string itself or the items of the array.
+fn time_schema(schema: &Value) -> Option<&Value> {
+    if is_string_schema(schema) {
+        return Some(schema);
+    }
+    let items = schema.get("items")?;
+    is_string_schema(items).then_some(items)
+}
+
+/// Checks that the documented time holds a string, and that the string is a `date-time`.
+fn assert_date_time(location: &str, name: &str, schema: &Value, found: &mut usize) {
+    let text = time_schema(schema)
+        .unwrap_or_else(|| panic!("{location}: the time `{name}` is not a string: {schema}"));
+    assert_eq!(
+        text.get("format").and_then(Value::as_str),
+        Some("date-time"),
+        "{location}: the time `{name}` has no `date-time` format"
+    );
+    *found += 1;
+}
+
 #[test]
-fn the_time_fields_are_date_time_strings() {
+fn the_time_fields_and_parameters_are_date_time_strings() {
     let document = document();
     let mut found = 0;
-    fn walk(node: &Value, found: &mut usize) {
+    fn walk(node: &Value, schema: &str, found: &mut usize) {
         match node {
             Value::Object(object) => {
                 if let Some(Value::Object(properties)) = object.get("properties") {
                     for (name, property) in properties {
-                        let Some(kind) = property.get("type") else {
-                            continue;
-                        };
-                        let is_string = kind == "string"
-                            || kind
-                                == &Value::Array(vec![
-                                    Value::String("string".to_owned()),
-                                    Value::String("null".to_owned()),
-                                ]);
-                        if is_string && name.ends_with("_at") {
-                            assert_eq!(
-                                property.get("format").and_then(Value::as_str),
-                                Some("date-time"),
-                                "the field `{name}` is a time without the `date-time` format"
-                            );
-                            *found += 1;
+                        if is_time_name(name) {
+                            assert_date_time(schema, name, property, found);
                         }
                     }
                 }
                 for value in object.values() {
-                    walk(value, found);
+                    walk(value, schema, found);
                 }
             }
             Value::Array(items) => {
                 for item in items {
-                    walk(item, found);
+                    walk(item, schema, found);
                 }
             }
             Value::String(_) | Value::Null | Value::Bool(_) | Value::Number(_) => {}
         }
     }
-    walk(&document["components"]["schemas"], &mut found);
-    assert!(found >= 50, "only {found} time fields are covered");
+    let schemas = document["components"]["schemas"]
+        .as_object()
+        .expect("the schemas");
+    for (name, schema) in schemas {
+        walk(schema, name, &mut found);
+    }
+    for (method, path, operation) in operations(&document) {
+        let Some(parameters) = operation["parameters"].as_array() else {
+            continue;
+        };
+        for parameter in parameters {
+            let name = parameter["name"].as_str().unwrap_or_default();
+            if is_time_name(name) {
+                let location = format!("{method} {path}");
+                assert_date_time(&location, name, &parameter["schema"], &mut found);
+            }
+        }
+    }
+    assert!(found >= 70, "only {found} times are covered");
 }
 
 #[test]

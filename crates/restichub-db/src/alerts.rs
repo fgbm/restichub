@@ -28,7 +28,8 @@ const OPEN_PAGE: i64 = 1000;
 /// failed with the error `queue_full`, so the outbox stays bounded (ADR-0036).
 pub const MAX_PENDING_DELIVERIES: i64 = 1000;
 
-/// The kind of an alert. The string value of each variant is stored: do not change a string.
+/// Tells why the control plane raised an alert.
+// The string value of each variant is stored: do not change a string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
 #[sqlx(type_name = "text", rename_all = "snake_case")]

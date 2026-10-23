@@ -21,8 +21,9 @@ const SECRET_DOMAIN: &[u8] = b"restichub-secret-v1\0";
 
 const JOB_DOMAIN: &[u8] = b"restichub-signed-job-v1\0";
 
-/// A part of the associated data. The string value of each variant is stable and MUST NOT
-/// change: a change makes every stored ciphertext of that purpose undecryptable.
+/// What a secret is for.
+// The string value of each variant is a part of the associated data. It is stable: a change makes
+// every stored ciphertext of that purpose undecryptable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(
     feature = "serde",

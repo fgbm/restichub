@@ -125,8 +125,7 @@ pub struct ParameterValueDef {
 }
 
 /// The declaration of one parameter as a reader sees it.
-///
-/// The type is separate from [`ParameterDef`] because it holds the marker of a hidden value.
+// The type is separate from `ParameterDef` because it holds the marker of a hidden value.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
 pub struct ParameterDefView {
     pub name: String,

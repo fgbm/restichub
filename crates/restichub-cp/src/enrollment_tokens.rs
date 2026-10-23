@@ -8,7 +8,7 @@
 //! API tokens of ADR-0023. The value appears once, at the create. The token is never logged.
 
 use axum::Json;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use restichub_db::audit::{AuditAction, diff};
 use restichub_db::enrollment_tokens as repo;
@@ -22,6 +22,7 @@ use uuid::Uuid;
 use crate::context::{Operation, RequestContext};
 use crate::error::ApiError;
 use crate::json::ApiJson;
+use crate::list_query::ApiQuery;
 use crate::server::AppState;
 use crate::token;
 use crate::validation::{self, Reason};
@@ -230,7 +231,7 @@ pub(crate) async fn issue_token(
 pub async fn list_enrollment_tokens(
     State(state): State<AppState>,
     context: RequestContext,
-    Query(query): Query<EnrollmentTokenListQuery>,
+    ApiQuery(query): ApiQuery<EnrollmentTokenListQuery>,
 ) -> Result<Json<EnrollmentTokenListResponse>, ApiError> {
     context.authorize(Operation::EnrollmentTokensRead)?;
     let page = repo::EnrollmentTokenPage {

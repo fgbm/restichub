@@ -43,7 +43,7 @@ pub struct MaintenanceScheduleView {
     /// In UTC. Null when the schedule is disabled or the scheduler has not set it yet.
     #[schema(format = DateTime)]
     pub next_run_at: Option<String>,
-    /// Holds the fire that the scheduler processed.
+    /// Holds the last fire time that the scheduler processed, in UTC.
     #[schema(format = DateTime)]
     pub last_fire_time: Option<String>,
 }

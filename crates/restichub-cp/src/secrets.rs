@@ -39,8 +39,9 @@ use crate::validation;
 use crate::validation::Reason;
 use crate::views::{SecretDetailView, SecretView};
 
-/// The type does not derive `Debug`, so a log line cannot print the value by accident. The value is
-/// a [`SecretString`], so the buffer is zeroized on drop.
+/// Write-only: the API never returns the value.
+// The type does not derive `Debug`, so a log line cannot print the value by accident. The value is
+// a `SecretString`, so the buffer is zeroized on drop.
 #[derive(Deserialize, ToSchema)]
 pub struct CreateSecretRequest {
     /// Holds 1 to 64 characters from `a-z`, `0-9`, `.`, `_` and `-`.
@@ -51,8 +52,9 @@ pub struct CreateSecretRequest {
     pub value: SecretString,
 }
 
-/// The type does not derive `Debug`, so a log line cannot print the value by accident. The value is
-/// a [`SecretString`], so the buffer is zeroized on drop.
+/// Write-only: the API never returns the value.
+// The type does not derive `Debug`, so a log line cannot print the value by accident. The value is
+// a `SecretString`, so the buffer is zeroized on drop.
 #[derive(Deserialize, ToSchema)]
 pub struct ReplaceSecretRequest {
     /// Holds 1 to 64 KiB bytes.
@@ -127,7 +129,7 @@ pub(crate) async fn replace_bound_secret(
 #[utoipa::path(
     get,
     path = "/api/v1/secrets",
-    tags = ["repositories"],
+    tags = ["secrets"],
     security(("cookie" = []), ("bearer" = [])),
     responses(
         (status = 200, description = "The metadata of the secrets of the tenant.", body = SecretListResponse),
@@ -168,7 +170,7 @@ pub async fn list_secrets(
 #[utoipa::path(
     post,
     path = "/api/v1/secrets",
-    tags = ["repositories"],
+    tags = ["secrets"],
     summary = "Creates a secret in the tenant.",
     description = "The response holds the metadata only. The control plane never returns the value.",
     security(("cookie" = []), ("bearer" = [])),
@@ -245,7 +247,7 @@ pub async fn create_secret(
 #[utoipa::path(
     get,
     path = "/api/v1/secrets/{id}",
-    tags = ["repositories"],
+    tags = ["secrets"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the secret.")),
     responses(
@@ -274,7 +276,7 @@ pub async fn get_secret(
 #[utoipa::path(
     put,
     path = "/api/v1/secrets/{id}/value",
-    tags = ["repositories"],
+    tags = ["secrets"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the secret.")),
     request_body = ReplaceSecretRequest,
@@ -339,7 +341,7 @@ pub async fn replace_secret_value(
 #[utoipa::path(
     delete,
     path = "/api/v1/secrets/{id}",
-    tags = ["repositories"],
+    tags = ["secrets"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the secret.")),
     responses(

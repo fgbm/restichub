@@ -1568,8 +1568,8 @@ export interface components {
         /**
          * @description Administrator state of a tenant, derived from the memberships.
          *
-         *     The control plane computes the state from the memberships: an active Admin count of zero gives
-         *     [`AdminState::None`]. The state is not stored, so it cannot drift from the memberships.
+         *     The control plane computes the state from the memberships, and it is not stored, so it cannot
+         *     drift. An active Admin count of zero gives `none`.
          * @enum {string}
          */
         AdminState: "none" | "present";
@@ -1667,7 +1667,7 @@ export interface components {
             /**
              * Format: date-time
              * @description Null unless a connection presented the certificate that the last rotation replaced. It can
-             *     mean a copy of the old key (T17).
+             *     mean a copy of the old key.
              */
             superseded_certificate_used_at?: string | null;
             version_status: components["schemas"]["AgentVersionStatus"];
@@ -1677,7 +1677,7 @@ export interface components {
             resolved: components["schemas"]["TabCount"];
         };
         /**
-         * @description The kind of an alert. The string value of each variant is stored: do not change a string.
+         * @description Tells why the control plane raised an alert.
          * @enum {string}
          */
         AlertKind: "rpo_violated" | "job_failed" | "job_dead_letter" | "job_warnings" | "agent_offline" | "stale_lock";
@@ -2000,7 +2000,7 @@ export interface components {
             new_password: string;
         };
         /**
-         * @description The kind of a channel. The string value of each variant is stored: do not change a string.
+         * @description Tells how a notification reaches a person.
          * @enum {string}
          */
         ChannelKind: "email" | "webhook";
@@ -2158,12 +2158,7 @@ export interface components {
             scripts?: components["schemas"]["ScriptDef"][];
             tags?: string[];
         };
-        /**
-         * @description The write-only secret fields of a repository create.
-         *
-         *     The type does not derive `Debug`, so a log line cannot print a value by accident. Each value is
-         *     a [`SecretString`], so the buffer is zeroized on drop.
-         */
+        /** @description The write-only secret fields of a repository create. */
         CreateRepositoryRequest: {
             backend: components["schemas"]["BackendSettings"];
             /**
@@ -2193,10 +2188,7 @@ export interface components {
             /** Format: int32 */
             timeout_seconds?: number;
         };
-        /**
-         * @description The type does not derive `Debug`, so a log line cannot print the value by accident. The value is
-         *     a [`SecretString`], so the buffer is zeroized on drop.
-         */
+        /** @description Write-only: the API never returns the value. */
         CreateSecretRequest: {
             /** @description Holds 1 to 64 characters from `a-z`, `0-9`, `.`, `_` and `-`. */
             name: string;
@@ -2531,8 +2523,7 @@ export interface components {
             succeeded_with_warnings: components["schemas"]["TabCount"];
         };
         /**
-         * @description The kind is general, not init-specific. The string value of each variant is the stored value of
-         *     the `kind` column. It is stable: do not change a string.
+         * @description What a job does: a backup, a restore or a maintenance step. It is general, not init-specific.
          * @enum {string}
          */
         JobKind: "init" | "test_access" | "backup" | "check" | "forget" | "prune" | "restore" | "unlock" | "unlock_all" | "snapshots" | "ls" | "other";
@@ -2557,15 +2548,15 @@ export interface components {
             total_capped: boolean;
         };
         /**
-         * @description The value comes from the `outcome` field of the `JobResult` message. It is a closed set, so the
-         *     `result_code` column holds one of these strings. It is stable: do not change a string.
+         * @description The final outcome of a job, as one of the values below.
          * @enum {string}
          */
         JobResultCode: "succeeded" | "failed" | "config_error" | "not_initialized" | "access_error" | "cancelled" | "succeeded_with_warnings" | "repository_locked" | "incompatible";
         /**
-         * @description `queued` is the state before the send and `sent` the state after it, until the agent
-         *     acknowledges the job. The string value of each variant is the stored value of the `status`
-         *     column. It is stable: do not change a string.
+         * @description Where a job is between the queue and its result.
+         *
+         *     `queued` is the state before the send and `sent` the state after it, until the agent
+         *     acknowledges the job.
          * @enum {string}
          */
         JobStatus: "queued" | "sent" | "running" | "succeeded" | "failed" | "expired" | "dead_letter";
@@ -2776,7 +2767,7 @@ export interface components {
             enabled: boolean;
             /**
              * Format: date-time
-             * @description Holds the fire that the scheduler processed.
+             * @description Holds the last fire time that the scheduler processed, in UTC.
              */
             last_fire_time?: string | null;
             /**
@@ -2789,9 +2780,6 @@ export interface components {
         };
         /**
          * @description The maintenance task of a repository schedule.
-         *
-         *     The string value of each variant is the stored value of the `task` column. It is stable: do not
-         *     change a string.
          * @enum {string}
          */
         MaintenanceTask: "retention" | "check";
@@ -2825,17 +2813,13 @@ export interface components {
         };
         /**
          * @description How many jobs the scheduler creates after a downtime, or after an agent was not active.
-         *
-         *     The policy decides how many jobs the scheduler creates after the control plane was down, or
-         *     after an agent that was not active for a while. The string value of each variant is the stored
-         *     value of the `missed_run_policy` column. It is stable: do not change a string.
          * @enum {string}
          */
         MissedRunPolicy: "run_all" | "latest_only" | "skip";
-        /** @description Fire times of the plan, in UTC. */
+        /** @description Answers with the next fire times of the plan, in UTC. */
         NextRunsResponse: {
             plan_id: string;
-            /** @description The fire times in UTC, formatted as RFC 3339. */
+            /** @description Fire times after the current time, in UTC, oldest first. */
             runs: string[];
             /** @description The time zone of the plan; the user interface renders each run in it. */
             time_zone: string;
@@ -2882,11 +2866,7 @@ export interface components {
             /** @description A plan without a value for a required parameter is refused. */
             required?: boolean;
         };
-        /**
-         * @description The declaration of one parameter as a reader sees it.
-         *
-         *     The type is separate from [`ParameterDef`] because it holds the marker of a hidden value.
-         */
+        /** @description The declaration of one parameter as a reader sees it. */
         ParameterDefView: {
             /** @description What a text parameter falls back to. Empty with the flag `hidden` for a Viewer. */
             default_value?: string | null;
@@ -2899,8 +2879,6 @@ export interface components {
         };
         /**
          * @description The kind of a parameter of a profile and of its value.
-         *
-         *     The string value is the stored value of the `kind` column and of the profile JSON. It is stable.
          * @enum {string}
          */
         ParameterKind: "text" | "secret";
@@ -2964,7 +2942,7 @@ export interface components {
             id: string;
             /**
              * Format: date-time
-             * @description Holds the fire that the scheduler processed.
+             * @description Holds the last fire time that the scheduler processed, in UTC.
              */
             last_fire_time?: string | null;
             /**
@@ -3086,7 +3064,7 @@ export interface components {
             display_name: string;
             /** @description Unique in the installation when it is set. */
             email?: string | null;
-            /** @description False until an invitation verifies the address; the MVP leaves it false. */
+            /** @description False until an invitation verifies the address; the control plane leaves it false. */
             email_verified: boolean;
             id: string;
             memberships: components["schemas"]["PlatformMembershipView"][];
@@ -3203,8 +3181,7 @@ export interface components {
             windows?: string[];
         };
         /**
-         * @description The process and I/O priority of the restic steps of a profile. The string value of each variant
-         *     is stored: do not change a string.
+         * @description The process and I/O priority of the restic steps of a profile.
          * @enum {string}
          */
         ProfilePriority: "normal" | "low";
@@ -3299,10 +3276,7 @@ export interface components {
             /** @description The whole set. A name that the body leaves out loses its value. */
             parameters: components["schemas"]["ParameterValueDef"][];
         };
-        /**
-         * @description The type does not derive `Debug`, so a log line cannot print the value by accident. The value is
-         *     a [`SecretString`], so the buffer is zeroized on drop.
-         */
+        /** @description Write-only: the API never returns the value. */
         ReplaceSecretRequest: {
             /** @description Holds 1 to 64 KiB bytes. */
             value: string;
@@ -3318,7 +3292,7 @@ export interface components {
             created_by?: string | null;
             credentials: components["schemas"]["CredentialsView"];
             id: string;
-            /** @description False until an agent runs the init step. The MVP control plane never sets it true. */
+            /** @description False until an agent runs the init step. The control plane never sets it true. */
             initialized: boolean;
             last_check?: components["schemas"]["LastCheckView"] | null;
             /** @description Uses the same lock marks as the dashboard. */
@@ -3430,7 +3404,7 @@ export interface components {
             keep_yearly?: number;
         };
         /**
-         * @description The role of an actor in a tenant (requirements section 2).
+         * @description What an actor may do in the tenant.
          * @enum {string}
          */
         Role: "platform_admin" | "admin" | "operator" | "viewer";
@@ -3441,7 +3415,7 @@ export interface components {
         };
         /** @description The next fire times of an unsaved schedule, in UTC. */
         SchedulePreviewResponse: {
-            /** @description The fire times in UTC, formatted as RFC 3339. */
+            /** @description Fire times after the current time, in UTC, oldest first. */
             runs: string[];
             /** @description The time zone that the user interface renders each run in. */
             time_zone: string;
@@ -3533,8 +3507,7 @@ export interface components {
             items: components["schemas"]["SecretView"][];
         };
         /**
-         * @description A part of the associated data. The string value of each variant is stable and MUST NOT
-         *     change: a change makes every stored ciphertext of that purpose undecryptable.
+         * @description What a secret is for.
          * @enum {string}
          */
         SecretPurpose: "repository_password" | "s3_access_key" | "s3_secret_key" | "rest_server_password" | "webhook_secret" | "webhook_url" | "hook_secret";
@@ -3813,7 +3786,10 @@ export interface components {
         /** @description Absent fields leave the value unchanged. */
         UpdateAccountRequest: {
             disabled?: boolean | null;
-            /** @description Written by the update; the MVP treats it as unverified. An empty value removes the email. */
+            /**
+             * @description Written by the update; the control plane treats it as unverified. An empty value removes
+             *     the email.
+             */
             email?: string | null;
             /**
              * @description The new secret of a grant. It is required when `platform_admin` is true and it is not used
@@ -4790,9 +4766,9 @@ export interface operations {
     list_tenant_audit: {
         parameters: {
             query?: {
-                /** @description Start of the time range in RFC 3339. */
+                /** @description Start of the time range. */
                 from?: string;
-                /** @description End of the time range in RFC 3339. */
+                /** @description End of the time range. */
                 to?: string;
                 action?: string;
                 actor_type?: string;

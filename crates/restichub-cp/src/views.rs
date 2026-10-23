@@ -139,7 +139,7 @@ pub struct PlatformUserView {
     pub display_name: String,
     /// Unique in the installation when it is set.
     pub email: Option<String>,
-    /// False until an invitation verifies the address; the MVP leaves it false.
+    /// False until an invitation verifies the address; the control plane leaves it false.
     pub email_verified: bool,
     /// A Platform Admin set it for the whole installation.
     pub disabled: bool,
@@ -188,7 +188,6 @@ pub struct SecretUsageView {
     pub name: String,
 }
 
-///
 /// The view never holds the value. The API cannot return a secret value after a user saves it.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct SecretView {

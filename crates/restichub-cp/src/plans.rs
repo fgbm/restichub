@@ -13,7 +13,7 @@
 //! returns the next fire times in UTC, for the user interface preview in the plan time zone.
 
 use axum::Json;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use restichub_db::agents::{self as agents_repo};
 use restichub_db::audit::{AuditAction, diff};
@@ -29,6 +29,7 @@ use crate::alerts::rpo::{self, RpoState};
 use crate::context::{Operation, RequestContext};
 use crate::error::{ApiError, map_write_error};
 use crate::json::ApiJson;
+use crate::list_query::ApiQuery;
 use crate::parameters::{self, ParameterValueDef, PlanParameterValueView};
 use crate::schedule::{Schedule, ScheduleError};
 use crate::server::AppState;
@@ -138,7 +139,7 @@ pub struct PlanView {
     /// In UTC. Null when the plan is disabled.
     #[schema(format = DateTime)]
     pub next_run_at: Option<String>,
-    /// Holds the fire that the scheduler processed.
+    /// Holds the last fire time that the scheduler processed, in UTC.
     #[schema(format = DateTime)]
     pub last_fire_time: Option<String>,
     /// The finish time of the last succeeded backup. Null when the plan never succeeded.
@@ -226,13 +227,14 @@ pub struct PlanResponse {
     pub plan: PlanView,
 }
 
-/// Fire times of the plan, in UTC.
+/// Answers with the next fire times of the plan, in UTC.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct NextRunsResponse {
     pub plan_id: String,
     /// The time zone of the plan; the user interface renders each run in it.
     pub time_zone: String,
-    /// The fire times in UTC, formatted as RFC 3339.
+    /// Fire times after the current time, in UTC, oldest first.
+    #[schema(format = DateTime)]
     pub runs: Vec<String>,
 }
 
@@ -252,7 +254,7 @@ pub struct NextRunsResponse {
 pub async fn list_plans(
     State(state): State<AppState>,
     context: RequestContext,
-    Query(query): Query<PlanListQuery>,
+    ApiQuery(query): ApiQuery<PlanListQuery>,
 ) -> Result<Json<PlanListResponse>, ApiError> {
     context.authorize(Operation::PlansRead)?;
     let page = PlanPage {
@@ -683,7 +685,7 @@ pub async fn next_runs(
     State(state): State<AppState>,
     context: RequestContext,
     Path(id): Path<String>,
-    Query(query): Query<NextRunsQuery>,
+    ApiQuery(query): ApiQuery<NextRunsQuery>,
 ) -> Result<Json<NextRunsResponse>, ApiError> {
     context.authorize(Operation::PlansRead)?;
     let plan_id = parse_plan_id(&id)?;
@@ -727,7 +729,8 @@ fn default_preview_count() -> usize {
 pub struct SchedulePreviewResponse {
     /// The time zone that the user interface renders each run in.
     pub time_zone: String,
-    /// The fire times in UTC, formatted as RFC 3339.
+    /// Fire times after the current time, in UTC, oldest first.
+    #[schema(format = DateTime)]
     pub runs: Vec<String>,
 }
 
