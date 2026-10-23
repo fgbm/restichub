@@ -407,7 +407,7 @@ pub async fn update(
     let result = sqlx::query(
         "UPDATE plans SET name = $2, profile_id = $3, agent_id = $4, repository_id = $5, \
                 cron = $6, time_zone = $7, missed_run_policy = $8, enabled = $9, \
-                rpo_seconds = $10, updated_at = now() \
+                rpo_seconds = $10, schedule_error = NULL, updated_at = now() \
          WHERE id = $1",
     )
     .bind(id)
@@ -504,11 +504,51 @@ pub async fn advance(
     last_fire_time: OffsetDateTime,
 ) -> Result<bool, DbError> {
     let result = sqlx::query(
-        "UPDATE plans SET next_run_at = $2, last_fire_time = $3, updated_at = now() WHERE id = $1",
+        "UPDATE plans SET next_run_at = $2, last_fire_time = $3, schedule_error = NULL, \
+                updated_at = now() WHERE id = $1",
     )
     .bind(id)
     .bind(next_run_at)
     .bind(last_fire_time)
+    .execute(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(result.rows_affected() == 1)
+}
+
+/// Moves a plan whose pass failed to its next fire time and records the cause (FR-SC-02).
+///
+/// The plan does not stay due, so the next pass does not claim it again at once.
+pub async fn defer_failed(
+    tx: &mut TenantTx<'_>,
+    id: PlanId,
+    next_run_at: OffsetDateTime,
+    cause: &str,
+) -> Result<bool, DbError> {
+    let result = sqlx::query(
+        "UPDATE plans SET next_run_at = $2, schedule_error = $3, updated_at = now() WHERE id = $1",
+    )
+    .bind(id)
+    .bind(next_run_at)
+    .bind(cause)
+    .execute(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(result.rows_affected() == 1)
+}
+
+/// Disables a plan whose schedule the control plane cannot compute and records the cause.
+pub async fn disable_failed(
+    tx: &mut TenantTx<'_>,
+    id: PlanId,
+    cause: &str,
+) -> Result<bool, DbError> {
+    let result = sqlx::query(
+        "UPDATE plans SET enabled = false, next_run_at = NULL, schedule_error = $2, \
+                updated_at = now() WHERE id = $1",
+    )
+    .bind(id)
+    .bind(cause)
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;

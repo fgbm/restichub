@@ -10,6 +10,9 @@
 //! A repository without a maintenance agent, with a revoked one, or that is not initialized gets no
 //! job; its schedule still advances. A repository that holds an exclusive job waits: the
 //! schedule stays due, and the next pass creates the job after the other job ends.
+//!
+//! A schedule whose pass fails does not stay due: the pass logs the cause, keeps it on the row and
+//! moves the schedule to its next fire time. A schedule that cannot be computed is disabled.
 
 use restichub_db::jobs::{self, NewJob};
 use restichub_db::maintenance::{self as schedules, DueMaintenance, NewMaintenanceSchedule};
@@ -93,7 +96,7 @@ pub async fn process_tenant(
             Ok(()) => tx.release_savepoint(SCHEDULE_SAVEPOINT).await?,
             Err(error) => {
                 tx.rollback_to_savepoint(SCHEDULE_SAVEPOINT).await?;
-                tracing::warn!(repository = %repository_id, %error, "the default maintenance schedule failed");
+                tracing::error!(repository = %repository_id, %error, "the default maintenance schedule failed");
             }
         }
     }
@@ -105,7 +108,9 @@ pub async fn process_tenant(
                 schedules::arm(&mut tx, schedule.id, next_run_at).await?;
             }
             Err(error) => {
-                tracing::warn!(schedule = %schedule.id, %error, "the maintenance schedule cannot be armed");
+                // A schedule that never arms stays unarmed, and the claim reads it on every pass.
+                tracing::error!(schedule = %schedule.id, %error, "the maintenance schedule cannot be armed, so the scheduler disables it");
+                schedules::disable_failed(&mut tx, schedule.id, &error.to_string()).await?;
             }
         }
     }
@@ -116,11 +121,42 @@ pub async fn process_tenant(
             Ok(()) => tx.release_savepoint(SCHEDULE_SAVEPOINT).await?,
             Err(error) => {
                 tx.rollback_to_savepoint(SCHEDULE_SAVEPOINT).await?;
-                tracing::warn!(schedule = %schedule.id, %error, "the scheduler skipped a maintenance schedule");
+                tracing::error!(schedule = %schedule.id, %error, "the scheduler failed to process a maintenance schedule");
+                // The rollback also removed the advance of the schedule (FR-SC-02).
+                if let Err(park_error) = park_schedule(&mut tx, schedule, &error, now).await {
+                    tx.rollback_to_savepoint(SCHEDULE_SAVEPOINT).await?;
+                    tracing::error!(schedule = %schedule.id, error = %park_error, "the scheduler cannot record the failure of a maintenance schedule");
+                }
             }
         }
     }
     tx.commit().await?;
+    Ok(())
+}
+
+/// Keeps the cause of a failed pass on the row and takes the row out of the due set, as the plan
+/// pass of [`crate::scheduler`] does.
+async fn park_schedule(
+    tx: &mut TenantTx<'_>,
+    due: &DueMaintenance,
+    error: &ScheduleFailure,
+    now: OffsetDateTime,
+) -> Result<(), DbError> {
+    let next_run_at = match error {
+        ScheduleFailure::Schedule(schedule_error) => Err(*schedule_error),
+        ScheduleFailure::Db(_) => {
+            Schedule::parse(&due.cron, &due.time_zone).and_then(|schedule| schedule.next_after(now))
+        }
+    };
+    match next_run_at {
+        Ok(next_run_at) => {
+            schedules::defer_failed(tx, due.id, next_run_at, &error.cause()).await?;
+        }
+        Err(schedule_error) => {
+            schedules::disable_failed(tx, due.id, &schedule_error.to_string()).await?;
+            tracing::error!(schedule = %due.id, %schedule_error, "the scheduler disabled a maintenance schedule");
+        }
+    }
     Ok(())
 }
 
@@ -130,6 +166,16 @@ enum ScheduleFailure {
     Db(#[from] DbError),
     #[error("{0}")]
     Schedule(#[from] ScheduleError),
+}
+
+impl ScheduleFailure {
+    /// The text that the row keeps for the failure. A database failure gives its code only.
+    fn cause(&self) -> String {
+        match self {
+            Self::Db(error) => format!("database error: {}", error.code()),
+            Self::Schedule(error) => error.to_string(),
+        }
+    }
 }
 
 async fn process_schedule(

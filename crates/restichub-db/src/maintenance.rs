@@ -158,7 +158,7 @@ pub async fn update(
 ) -> Result<bool, DbError> {
     let result = sqlx::query(
         "UPDATE maintenance_schedules SET cron = $2, time_zone = $3, enabled = $4, \
-                next_run_at = $5, updated_at = now() WHERE id = $1",
+                next_run_at = $5, schedule_error = NULL, updated_at = now() WHERE id = $1",
     )
     .bind(id)
     .bind(cron)
@@ -279,11 +279,49 @@ pub async fn advance(
 ) -> Result<bool, DbError> {
     let result = sqlx::query(
         "UPDATE maintenance_schedules SET next_run_at = $2, last_fire_time = $3, \
-                updated_at = now() WHERE id = $1",
+                schedule_error = NULL, updated_at = now() WHERE id = $1",
     )
     .bind(id)
     .bind(next_run_at)
     .bind(last_fire_time)
+    .execute(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(result.rows_affected() == 1)
+}
+
+/// Moves a schedule whose pass failed to its next fire time and records the cause (FR-SC-02).
+pub async fn defer_failed(
+    tx: &mut TenantTx<'_>,
+    id: MaintenanceScheduleId,
+    next_run_at: OffsetDateTime,
+    cause: &str,
+) -> Result<bool, DbError> {
+    let result = sqlx::query(
+        "UPDATE maintenance_schedules SET next_run_at = $2, schedule_error = $3, \
+                updated_at = now() WHERE id = $1",
+    )
+    .bind(id)
+    .bind(next_run_at)
+    .bind(cause)
+    .execute(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(result.rows_affected() == 1)
+}
+
+/// Disables a schedule that the control plane cannot compute and records the cause.
+pub async fn disable_failed(
+    tx: &mut TenantTx<'_>,
+    id: MaintenanceScheduleId,
+    cause: &str,
+) -> Result<bool, DbError> {
+    let result = sqlx::query(
+        "UPDATE maintenance_schedules SET enabled = false, next_run_at = NULL, \
+                schedule_error = $2, updated_at = now() WHERE id = $1",
+    )
+    .bind(id)
+    .bind(cause)
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
@@ -297,7 +335,8 @@ pub async fn arm(
     next_run_at: OffsetDateTime,
 ) -> Result<bool, DbError> {
     let result = sqlx::query(
-        "UPDATE maintenance_schedules SET next_run_at = $2, updated_at = now() WHERE id = $1",
+        "UPDATE maintenance_schedules SET next_run_at = $2, schedule_error = NULL, \
+                updated_at = now() WHERE id = $1",
     )
     .bind(id)
     .bind(next_run_at)

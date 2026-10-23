@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use time::OffsetDateTime;
 
 use crate::DbError;
-use crate::enums::{JobKind, JobStatus};
+use crate::enums::{JobKind, JobStatus, MaintenanceTask};
 use crate::ids::{AgentId, PlanId, RepositoryId};
 use crate::tx::TenantTx;
 
@@ -42,6 +42,8 @@ pub struct MetricsSnapshot {
     /// For each repository, whether a job that waits or runs reported a held lock.
     pub repo_lock_held: Vec<(RepositoryId, bool)>,
     pub agents: Vec<AgentId>,
+    pub plan_schedule_failed: Vec<PlanId>,
+    pub maintenance_schedule_failed: Vec<(RepositoryId, MaintenanceTask)>,
 }
 
 const TERMINAL: [JobStatus; 4] = [
@@ -166,6 +168,21 @@ pub async fn snapshot(tx: &mut TenantTx<'_>) -> Result<MetricsSnapshot, DbError>
     .await
     .map_err(DbError::Query)?;
 
+    let plan_schedule_failed = sqlx::query_scalar::<_, PlanId>(
+        "SELECT id FROM plans WHERE schedule_error IS NOT NULL ORDER BY id",
+    )
+    .fetch_all(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+
+    let maintenance_schedule_failed = sqlx::query_as::<_, (RepositoryId, MaintenanceTask)>(
+        "SELECT repository_id, task FROM maintenance_schedules \
+         WHERE schedule_error IS NOT NULL ORDER BY repository_id, task",
+    )
+    .fetch_all(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+
     Ok(MetricsSnapshot {
         last_success,
         durations,
@@ -173,5 +190,7 @@ pub async fn snapshot(tx: &mut TenantTx<'_>) -> Result<MetricsSnapshot, DbError>
         jobs_total,
         repo_lock_held,
         agents,
+        plan_schedule_failed,
+        maintenance_schedule_failed,
     })
 }

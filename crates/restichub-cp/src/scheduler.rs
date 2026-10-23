@@ -15,6 +15,9 @@
 //! A suspended tenant and a plan whose agent is revoked create no jobs (AC-TN-03). A plan whose
 //! agent is revoked still advances its fire time, so the control plane does not reprocess it on
 //! every pass.
+//!
+//! A plan whose pass fails does not stay due: the pass logs the cause, keeps it on the row and moves
+//! the plan to its next fire time. A plan whose schedule cannot be computed is disabled.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -103,16 +106,54 @@ async fn process_tenant(
             Ok(()) => tx.release_savepoint(PLAN_SAVEPOINT).await?,
             Err(error) => {
                 tx.rollback_to_savepoint(PLAN_SAVEPOINT).await?;
-                tracing::warn!(
+                tracing::error!(
                     plan = %plan.id,
                     code = error.code(),
                     %error,
-                    "the scheduler skipped a plan"
+                    "the scheduler failed to process a plan"
                 );
+                // The rollback also removed the advance of the plan. Without a new fire time the
+                // plan stays due, and failed plans fill the claim of the tenant (FR-SC-02).
+                if let Err(park_error) = park_plan(&mut tx, plan, &error, now).await {
+                    tx.rollback_to_savepoint(PLAN_SAVEPOINT).await?;
+                    tracing::error!(
+                        plan = %plan.id,
+                        error = %park_error,
+                        "the scheduler cannot record the failure of a plan"
+                    );
+                }
             }
         }
     }
     tx.commit().await?;
+    Ok(())
+}
+
+/// Keeps the cause of a failed pass on the row and takes the row out of the due set.
+///
+/// A database failure moves the plan to its next fire time, so the failed fire time is dropped like
+/// a skipped missed run. A schedule that the binary cannot compute never succeeds, so the plan is
+/// disabled.
+async fn park_plan(
+    tx: &mut restichub_db::TenantTx<'_>,
+    plan: &restichub_db::plans::DuePlan,
+    error: &PlanError,
+    now: OffsetDateTime,
+) -> Result<(), DbError> {
+    let next_run_at = match error {
+        PlanError::Schedule(schedule_error) => Err(*schedule_error),
+        PlanError::Db(_) => Schedule::parse(&plan.cron, &plan.time_zone)
+            .and_then(|schedule| schedule.next_after(now)),
+    };
+    match next_run_at {
+        Ok(next_run_at) => {
+            plans::defer_failed(tx, plan.id, next_run_at, &error.cause()).await?;
+        }
+        Err(schedule_error) => {
+            plans::disable_failed(tx, plan.id, &schedule_error.to_string()).await?;
+            tracing::error!(plan = %plan.id, %schedule_error, "the scheduler disabled a plan");
+        }
+    }
     Ok(())
 }
 
@@ -187,6 +228,14 @@ impl PlanError {
         match self {
             Self::Db(error) => error.code(),
             Self::Schedule(_) => "schedule",
+        }
+    }
+
+    /// The text that the row keeps for the failure. A database failure gives its code only.
+    fn cause(&self) -> String {
+        match self {
+            Self::Db(error) => format!("database error: {}", error.code()),
+            Self::Schedule(error) => error.to_string(),
         }
     }
 }
