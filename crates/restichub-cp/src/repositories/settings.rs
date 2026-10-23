@@ -95,8 +95,9 @@ pub struct CreateRepositoryRequest {
 
 /// The write-only secret fields of a repository update.
 ///
-/// An absent field keeps the current value. A present value replaces it. The type does not derive
-/// `Debug`, so a log line cannot print a value by accident.
+/// An absent field keeps the current value. A present value replaces it.
+// The type does not derive `Debug`, so a log line cannot print a value by accident. Each value is
+// a `SecretString`, so the buffer is zeroized on drop.
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UpdateRepositoryRequest {
@@ -140,7 +141,7 @@ pub struct RepositoryView {
     pub name: String,
     pub backend: BackendSettings,
     pub credentials: CredentialsView,
-    /// False until an agent runs the init step. The control plane never sets it true.
+    /// True after a successful init or access test of the current repository location.
     pub initialized: bool,
     pub maintenance_agent_id: Option<String>,
     #[schema(format = DateTime)]

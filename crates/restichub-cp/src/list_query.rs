@@ -1,6 +1,8 @@
 //! The query values that the filtered lists share (FR-UI-01): comma lists, the sort order and the
 //! page window.
 
+// The raw extractor is the only place that parses a query: this wrapper maps its rejection.
+#[allow(clippy::disallowed_types)]
 use axum::extract::{FromRequestParts, Query};
 use axum::http::request::Parts;
 use serde::de::DeserializeOwned;
@@ -27,6 +29,7 @@ pub const MAX_OFFSET: i64 = restichub_db::job_search::COUNT_LIMIT;
 #[derive(Debug)]
 pub struct ApiQuery<T>(pub T);
 
+#[allow(clippy::disallowed_types)]
 impl<T, S> FromRequestParts<S> for ApiQuery<T>
 where
     T: DeserializeOwned,

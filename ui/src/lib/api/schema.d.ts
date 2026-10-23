@@ -2523,7 +2523,8 @@ export interface components {
             succeeded_with_warnings: components["schemas"]["TabCount"];
         };
         /**
-         * @description What a job does: a backup, a restore or a maintenance step. It is general, not init-specific.
+         * @description What a job does: a backup, a restore, an initialization or an access test, a listing of a
+         *     repository, or a maintenance step.
          * @enum {string}
          */
         JobKind: "init" | "test_access" | "backup" | "check" | "forget" | "prune" | "restore" | "unlock" | "unlock_all" | "snapshots" | "ls" | "other";
@@ -3064,7 +3065,7 @@ export interface components {
             display_name: string;
             /** @description Unique in the installation when it is set. */
             email?: string | null;
-            /** @description False until an invitation verifies the address; the control plane leaves it false. */
+            /** @description The control plane does not verify the address, so the value is false. */
             email_verified: boolean;
             id: string;
             memberships: components["schemas"]["PlatformMembershipView"][];
@@ -3292,7 +3293,7 @@ export interface components {
             created_by?: string | null;
             credentials: components["schemas"]["CredentialsView"];
             id: string;
-            /** @description False until an agent runs the init step. The control plane never sets it true. */
+            /** @description True after a successful init or access test of the current repository location. */
             initialized: boolean;
             last_check?: components["schemas"]["LastCheckView"] | null;
             /** @description Uses the same lock marks as the dashboard. */
@@ -3869,8 +3870,7 @@ export interface components {
         /**
          * @description The write-only secret fields of a repository update.
          *
-         *     An absent field keeps the current value. A present value replaces it. The type does not derive
-         *     `Debug`, so a log line cannot print a value by accident.
+         *     An absent field keeps the current value. A present value replaces it.
          */
         UpdateRepositoryRequest: {
             backend?: components["schemas"]["BackendSettings"] | null;

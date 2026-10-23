@@ -51,11 +51,18 @@ async fn adr_0023_a_bad_query_parameter_gives_a_problem_on_every_route() {
 
     // Each case names the route, the cookie, the query and the field that the problem reports. An
     // unknown parameter reports the parameter `query`, so the response never echoes the request.
+    // Every route that refuses an unknown parameter has a `colour` case: a raw `Query` extractor
+    // answers such a request with `text/plain`, so the case fails on that code.
     let cases = [
         (
             "/api/v1/enrollment-tokens?limit=x".to_owned(),
             &admin,
             "limit",
+        ),
+        (
+            "/api/v1/enrollment-tokens?colour=red".to_owned(),
+            &admin,
+            "query",
         ),
         (
             "/api/v1/platform/tenants?limit=x".to_owned(),
@@ -68,18 +75,43 @@ async fn adr_0023_a_bad_query_parameter_gives_a_problem_on_every_route() {
             "from",
         ),
         (
+            format!("/api/v1/repositories/{repository}/snapshots?colour=red"),
+            &admin,
+            "query",
+        ),
+        (
             format!("/api/v1/repositories/{repository}/ls?job={job}&colour=red"),
             &admin,
             "query",
         ),
         ("/api/v1/profiles?colour=red".to_owned(), &admin, "query"),
         ("/api/v1/plans?limit=x".to_owned(), &admin, "limit"),
+        ("/api/v1/plans?colour=red".to_owned(), &admin, "query"),
         (
             format!("/api/v1/plans/{plan}/next-runs?count=x"),
             &admin,
             "count",
         ),
+        (
+            format!("/api/v1/plans/{plan}/next-runs?colour=red"),
+            &admin,
+            "query",
+        ),
         (format!("/api/v1/jobs/{job}/logs?limit=x"), &admin, "limit"),
+        (
+            format!("/api/v1/jobs/{job}/logs?colour=red"),
+            &admin,
+            "query",
+        ),
+        ("/api/v1/jobs?colour=red".to_owned(), &admin, "query"),
+        ("/api/v1/agents?colour=red".to_owned(), &admin, "query"),
+        ("/api/v1/alerts?colour=red".to_owned(), &admin, "query"),
+        ("/api/v1/audit?colour=red".to_owned(), &admin, "query"),
+        (
+            "/api/v1/platform/audit?colour=red".to_owned(),
+            &platform_admin,
+            "query",
+        ),
     ];
     for (uri, cookie, field) in cases {
         let (status, content_type, body) =

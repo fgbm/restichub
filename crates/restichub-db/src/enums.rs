@@ -286,7 +286,8 @@ impl BackendKind {
     }
 }
 
-/// What a job does: a backup, a restore or a maintenance step. It is general, not init-specific.
+/// What a job does: a backup, a restore, an initialization or an access test, a listing of a
+/// repository, or a maintenance step.
 // The string value of each variant is the stored value of the `kind` column. It is stable: do not
 // change a string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]

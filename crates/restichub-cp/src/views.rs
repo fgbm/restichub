@@ -139,7 +139,7 @@ pub struct PlatformUserView {
     pub display_name: String,
     /// Unique in the installation when it is set.
     pub email: Option<String>,
-    /// False until an invitation verifies the address; the control plane leaves it false.
+    /// The control plane does not verify the address, so the value is false.
     pub email_verified: bool,
     /// A Platform Admin set it for the whole installation.
     pub disabled: bool,
