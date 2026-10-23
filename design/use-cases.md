@@ -478,19 +478,29 @@ The sign-in screen asks for the username and the password only. The account is i
 
 ## 14. Retention, prune and check
 
-### UC-MNT-01: Run retention, prune and check
+### UC-MNT-01: Run the cleanup and the check of a repository
 
-- **Actor:** an Admin or an Operator.
-- **Preconditions:** the person signs in. A repository has a maintenance agent.
+- **Actor:** an Admin sets the schedules. An Operator runs a task now.
+- **Preconditions:** the person signs in. The repository has a maintenance host. A plan of the repository runs a profile with a retention.
 - **Main flow:**
-  1. Set the retention in the profile.
-  2. Let the plan run.
-  3. Read the job log of the maintenance agent.
-- **Expected result:** only the maintenance agent runs `forget`, `prune` and `check`. No backup runs at the same time on the repository. After a stale lock, the control plane runs `unlock` when the repository is idle.
+  1. Open the list "Repositories" and open the repository.
+  2. In the section "Maintenance host", select the host that runs `forget`, `prune` and `check`.
+  3. In the section "Cleanup", enter the cron expression and the time zone, then turn the schedule on.
+  4. In the section "Check", enter the cron expression, then turn the schedule on.
+  5. Read "Next runs" in each section.
+  6. Wait for the fire time, or select "Delete expired snapshots now" or "Run check now" in the menu "…" of the repository row.
+  7. Open "Jobs" and filter by the kind `forget`, `prune` or `check` and by the repository.
+  8. Read the log of the job on the maintenance host.
+- **Expected result:** the task `retention` creates one job of the kind `forget`. The job has one `forget` step for each distinct profile of the plans of the repository. One `prune` step follows. The task `check` creates one job of the kind `check`. Only the maintenance host receives these steps. No backup of the repository runs at the same time. The page of the repository shows the last run of each task.
+- **Alternative flows:**
+  - The repository has no maintenance host, or its host is revoked. The control plane creates no maintenance job. The schedule moves to the next fire time. The page shows the warning "No maintenance host".
+  - Another exclusive job holds the repository. The schedule stays due. The control plane creates the job after that job ends.
+  - No profile of the plans of the repository has a retention: the task `retention` creates no job.
+  - After a stale lock, the control plane runs `unlock` when the repository is idle.
 - **Requirements:** FR-RP-08, FR-SC-04, FR-SC-06.
-- **Acceptance criteria:** AC-RP-04, AC-SC-03, AC-SC-06.
-- **Note:** the issue #73 (maintenance agent assignment and barriers) delivers the rule that only the maintenance agent runs these steps.
-- **Status:** Blocked by #73.
+- **Acceptance criteria:** AC-RP-04, AC-RP-13, AC-SC-03, AC-SC-06.
+- **Note:** the retention rules are in the profiles. The schedule of the repository runs `forget` with these rules, and it does not run the plans (ADR-0034). A profile with a retention and without a plan in the repository gives no `forget` step.
+- **Status:** Ready on the stage.
 
 ## 15. Scripts on a trusted host
 
@@ -653,7 +663,7 @@ The sign-in screen asks for the username and the password only. The account is i
 | UC-JOB-05 | FR-AG-09 | AC-AG-05 | Ready on the stage |
 | UC-JOB-03 | FR-MN-01, FR-MN-02 | AC-MN-04, AC-UI-02 | Blocked by #9 |
 | UC-RS-01 | FR-RS-01, FR-RS-03, FR-RS-04 | AC-RS-01, AC-RS-03, AC-RS-04 | Blocked by #8 |
-| UC-MNT-01 | FR-RP-08, FR-SC-04, FR-SC-06 | AC-RP-04, AC-SC-03, AC-SC-06 | Blocked by #73 |
+| UC-MNT-01 | FR-RP-08, FR-SC-04, FR-SC-06 | AC-RP-04, AC-RP-13, AC-SC-03, AC-SC-06 | Ready on the stage |
 | UC-HK-01 | FR-HK-01, FR-HK-05, FR-HK-08, FR-HK-09, FR-HK-10 | AC-HK-02, AC-HK-07, AC-HK-13 | Blocked by #3 |
 | UC-AUD-01 | FR-AU-01 | AC-AU-01 | Ready on the stage |
 | UC-AUD-02 | FR-AU-01, FR-TN-02 | AC-AU-01 | Ready on the stage |

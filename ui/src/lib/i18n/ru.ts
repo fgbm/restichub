@@ -578,9 +578,9 @@ export const ru: Record<MessageKey, string> = {
 	'repositories.maintenance.timeZone': 'Часовой пояс',
 	'repositories.maintenance.timeZoneHint':
 		'Имя IANA, например Europe/Berlin. Действует для обоих расписаний.',
-	'repositories.maintenance.retention': 'Правила хранения',
+	'repositories.maintenance.retention': 'Очистка',
 	'repositories.maintenance.retentionHint':
-		'Удаляет снимки по правилам хранения профилей (forget), затем освобождает место (prune).',
+		'Правила хранения заданы в профилях планов. Очистка выполняет forget по этим правилам, затем prune освобождает место.',
 	'repositories.maintenance.check': 'Проверка',
 	'repositories.maintenance.checkHint': 'Проверяет структуру репозитория.',
 	'repositories.maintenance.cron': 'Выражение cron',
@@ -771,7 +771,7 @@ export const ru: Record<MessageKey, string> = {
 	'jobs.kind.backup': 'Резервная копия',
 	'jobs.kind.check': 'Проверка',
 	'jobs.kind.forget': 'Удаление устаревших снимков',
-	'jobs.kind.prune': 'Очистка',
+	'jobs.kind.prune': 'Освобождение места',
 	'jobs.kind.restore': 'Восстановление',
 	'jobs.kind.unlock': 'Снятие блокировок',
 	'jobs.kind.unlock_all': 'Снятие всех блокировок',
@@ -1905,7 +1905,7 @@ export const ru: Record<MessageKey, string> = {
 	'rp.summary.accessKeep': 'Сохранённые секреты не меняются',
 	'rp.summary.accessReplace': 'Секрет будет заменён',
 	'rp.summary.off': 'Выключено',
-	'rp.check.zone': 'Расписание идёт в часовом поясе раздела «Правила хранения»: {zone}.',
+	'rp.check.zone': 'Расписание идёт в часовом поясе раздела «Очистка»: {zone}.',
 	'rp.side.result': 'Что получится',
 	'record.save.dirty': 'Изменения не сохранены',
 	'record.save.clean': 'Изменений нет',
@@ -1943,7 +1943,7 @@ export const ru: Record<MessageKey, string> = {
 	'pe.options.lowPriorityHelp':
 		'Резервное копирование и удаление устаревших снимков этого профиля работают с пониженным приоритетом процессора, а в Linux и диска. Шаги могут занять больше времени.',
 	'pe.check.lead':
-		'Проверка целостности репозитория после копирования. Без доли чтения проверяется только структура: это быстро.',
+		'Проверка репозитория — задание обслуживания, а не шаг после резервной копии. Хост обслуживания выполняет его по расписанию репозитория. Проверка читает наибольшую долю чтения данных среди профилей планов репозитория. Профиль задаёт свою долю. Без доли проверяется только структура. Это быстро.',
 	'pe.check.help':
 		'Пример: 5% или 1/10. Чем больше доля, тем дольше проверка и тем больше трафика.',
 	'pe.check.placeholder': 'Только структура',
