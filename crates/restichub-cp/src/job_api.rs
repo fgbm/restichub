@@ -96,9 +96,11 @@ pub struct JobListQuery {
     pub group: Option<JobGroupKey>,
     /// A part of the plan, host or repository name, in any case; at most 200 characters.
     pub q: Option<String>,
-    /// In RFC 3339: the first creation time that the list holds.
+    /// Only the jobs created at or after this time.
+    #[param(format = DateTime)]
     pub from: Option<String>,
-    /// In RFC 3339: the last creation time that the list holds. Not before `from`.
+    /// The last creation time that the list holds. Not before `from`.
+    #[param(format = DateTime)]
     pub to: Option<String>,
     /// Default: `created_at`. A cursor takes only the default order. `duration` puts an unfinished
     /// job last.
@@ -167,7 +169,6 @@ impl From<&GroupCounts> for JobGroupCounts {
     }
 }
 
-/// The request body of the `unlock_all` action (FR-SC-06).
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UnlockAllRequest {
@@ -182,13 +183,14 @@ pub struct UnlockAllRequest {
 #[utoipa::path(
     get,
     path = "/api/v1/jobs",
+    tags = ["jobs"],
     summary = "Lists the jobs of the tenant.",
     description = "The list is newest first by default. Filter by plan, repository, agent, kind, status, state tab, name search and creation time; sort by a column; read the next page with the cursor or with an offset. With `counts=true` the response counts the jobs of each state tab.",
     security(("cookie" = []), ("bearer" = [])),
     params(JobListQuery),
     responses(
         (status = 200, description = "The jobs of the tenant.", body = JobListResponse),
-        (status = 400, description = "A query parameter is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "A query parameter is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
     )
 )]
@@ -275,6 +277,7 @@ pub async fn list_jobs(
 #[utoipa::path(
     post,
     path = "/api/v1/jobs/{id}/cancel",
+    tags = ["jobs"],
     summary = "Cancels a job.",
     description = "A queued job is cancelled at once. For a sent or running job the control plane sends the cancel message to the agent, and an offline agent gives HTTP 409 `agent_offline`.",
     security(("cookie" = []), ("bearer" = [])),
@@ -283,8 +286,8 @@ pub async fn list_jobs(
         (status = 200, description = "The queued job is cancelled.", body = JobView),
         (status = 202, description = "The cancel message is sent to the agent.", body = JobView),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The job is not found.", body = crate::error::ProblemBody),
-        (status = 409, description = "The job finished, or the agent is offline.", body = crate::error::ProblemBody)
+        (status = 404, description = "The job is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 409, description = "The job finished, or the agent is offline.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn cancel_job(
@@ -362,16 +365,17 @@ pub async fn cancel_job(
 #[utoipa::path(
     post,
     path = "/api/v1/plans/{id}/run",
+    tags = ["plans"],
     summary = "Runs a plan now.",
     description = "The job waits in the queue and starts as soon as the agent is online and the limits allow it. A plan holds at most one queued manual run: a second run gives HTTP 409 `already_queued`.",
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the plan.")),
     responses(
         (status = 202, description = "The job is queued.", body = JobView),
-        (status = 400, description = "The profile does not compile for the agent.", body = crate::error::ProblemBody),
+        (status = 400, description = "The profile does not compile for the agent.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The plan is not found.", body = crate::error::ProblemBody),
-        (status = 409, description = "The agent of the plan is revoked, a manual run of the plan is already queued (`already_queued`), or the plan runs on another host than its local repository (`not_repository_host`).", body = crate::error::ProblemBody)
+        (status = 404, description = "The plan is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 409, description = "The agent of the plan is revoked, a manual run of the plan is already queued (`already_queued`), or the plan runs on another host than its local repository (`not_repository_host`).", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn run_plan(
@@ -470,6 +474,7 @@ pub async fn run_plan(
 #[utoipa::path(
     post,
     path = "/api/v1/repositories/{id}/unlock-all",
+    tags = ["repositories"],
     summary = "Removes every lock of a repository.",
     description = "The body must hold the repository name as the confirmation. A repository with a waiting or running job gives HTTP 409.",
     security(("cookie" = []), ("bearer" = [])),
@@ -477,10 +482,10 @@ pub async fn run_plan(
     request_body = UnlockAllRequest,
     responses(
         (status = 202, description = "The job is queued.", body = JobView),
-        (status = 400, description = "The confirmation or a field is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "The confirmation or a field is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The repository is not found.", body = crate::error::ProblemBody),
-        (status = 409, description = "A job waits or runs on the repository.", body = crate::error::ProblemBody)
+        (status = 404, description = "The repository is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 409, description = "A job waits or runs on the repository.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn unlock_all_repository(

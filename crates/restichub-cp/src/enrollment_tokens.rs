@@ -46,8 +46,9 @@ pub struct CreateEnrollmentTokenResponse {
     pub token: String,
     pub display_prefix: String,
     pub labels: Vec<String>,
-    /// In RFC 3339.
+    #[schema(format = DateTime)]
     pub expires_at: String,
+    #[schema(format = DateTime)]
     pub created_at: String,
     /// The host that the token re-registers. Null for a token of a new host.
     pub replaces_agent_id: Option<String>,
@@ -74,12 +75,14 @@ pub struct EnrollmentTokenView {
     pub id: String,
     pub display_prefix: String,
     pub labels: Vec<String>,
-    /// In RFC 3339.
+    #[schema(format = DateTime)]
     pub expires_at: String,
+    #[schema(format = DateTime)]
     pub used_at: Option<String>,
+    #[schema(format = DateTime)]
     pub revoked_at: Option<String>,
     pub revoked_by_user_id: Option<String>,
-    /// In RFC 3339.
+    #[schema(format = DateTime)]
     pub created_at: String,
     pub created_by: String,
     /// The host that the token re-registers. Null for a token of a new host.
@@ -128,12 +131,13 @@ pub struct EnrollmentTokenListQuery {
 #[utoipa::path(
     post,
     path = "/api/v1/enrollment-tokens",
+    tags = ["tokens"],
     summary = "Creates an enrollment token in the tenant.",
     security(("cookie" = []), ("bearer" = [])),
     request_body = CreateEnrollmentTokenRequest,
     responses(
         (status = 201, description = "The token is created. The value appears once.", body = CreateEnrollmentTokenResponse),
-        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
     )
 )]
@@ -214,11 +218,12 @@ pub(crate) async fn issue_token(
 #[utoipa::path(
     get,
     path = "/api/v1/enrollment-tokens",
+    tags = ["tokens"],
     security(("cookie" = []), ("bearer" = [])),
     params(EnrollmentTokenListQuery),
     responses(
         (status = 200, description = "The enrollment tokens of the tenant.", body = EnrollmentTokenListResponse),
-        (status = 400, description = "A query parameter is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "A query parameter is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
     )
 )]
@@ -270,13 +275,14 @@ pub async fn list_enrollment_tokens(
 #[utoipa::path(
     get,
     path = "/api/v1/enrollment-tokens/{id}",
+    tags = ["tokens"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the token.")),
     responses(
         (status = 200, description = "The token metadata.", body = EnrollmentTokenView),
-        (status = 400, description = "The identifier is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "The identifier is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The token is not found.", body = crate::error::ProblemBody)
+        (status = 404, description = "The token is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn get_enrollment_token(
@@ -302,13 +308,14 @@ pub async fn get_enrollment_token(
 #[utoipa::path(
     delete,
     path = "/api/v1/enrollment-tokens/{id}",
+    tags = ["tokens"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the token.")),
     responses(
         (status = 204, description = "The token is revoked."),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The token is not found.", body = crate::error::ProblemBody),
-        (status = 409, description = "The token is used (`token_used`), already revoked (`token_already_revoked`) or expired (`token_expired`).", body = crate::error::ProblemBody)
+        (status = 404, description = "The token is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 409, description = "The token is used (`token_used`), already revoked (`token_already_revoked`) or expired (`token_expired`).", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn revoke_enrollment_token(

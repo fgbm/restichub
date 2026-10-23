@@ -66,10 +66,10 @@ pub struct ParameterDef {
     #[schema(pattern = "^[a-z][a-z0-9_]{0,63}$")]
     pub name: String,
     pub kind: ParameterKind,
-    /// A plan without a value for a required parameter is refused (FR-PF-11).
+    /// A plan without a value for a required parameter is refused.
     #[serde(default)]
     pub required: bool,
-    /// A text parameter only. A secret default would give one password to every host (ADR-0047).
+    /// A text parameter only. A secret default would give one password to every host.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_value: Option<String>,
     /// At most 200 characters.
@@ -77,7 +77,7 @@ pub struct ParameterDef {
     pub description: Option<String>,
 }
 
-/// The declaration of one parameter in a profile request (FR-PF-09).
+/// The declaration of one parameter in a profile request.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ParameterDefRequest {
@@ -85,10 +85,10 @@ pub struct ParameterDefRequest {
     #[schema(pattern = "^[a-z][a-z0-9_]{0,63}$")]
     pub name: String,
     pub kind: ParameterKind,
-    /// A plan without a value for a required parameter is refused (FR-PF-11).
+    /// A plan without a value for a required parameter is refused.
     #[serde(default)]
     pub required: bool,
-    /// A text parameter only. A secret default would give one password to every host (ADR-0047).
+    /// A text parameter only. A secret default would give one password to every host.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_value: Option<String>,
     /// At most 200 characters.
@@ -108,7 +108,7 @@ impl From<ParameterDefRequest> for ParameterDef {
     }
 }
 
-/// One value of a parameter in a plan request or in a host request (FR-PF-10).
+/// One value of a parameter in a plan request or in a host request.
 ///
 /// The kind must agree with the declaration. Exactly one of `value` and `secret_id` is set.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -124,7 +124,7 @@ pub struct ParameterValueDef {
     pub secret_id: Option<String>,
 }
 
-/// The declaration of one parameter as a reader sees it (FR-PF-09, FR-PF-12).
+/// The declaration of one parameter as a reader sees it.
 ///
 /// The type is separate from [`ParameterDef`] because it holds the marker of a hidden value.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
@@ -135,7 +135,7 @@ pub struct ParameterDefView {
     /// What a text parameter falls back to. Empty with the flag `hidden` for a Viewer.
     pub default_value: Option<String>,
     pub description: Option<String>,
-    /// True when the server hid the default value from this reader (FR-PF-12).
+    /// True when the server hid the default value from this reader.
     pub hidden: bool,
 }
 
@@ -160,17 +160,17 @@ impl ParameterDefView {
     }
 }
 
-/// One override of a plan as a reader sees it (FR-PF-10, FR-PF-12).
+/// One override of a plan as a reader sees it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
 pub struct PlanParameterValueView {
     pub name: String,
     pub kind: ParameterKind,
-    /// The text as the reader sees it: empty with the flag `hidden` for a Viewer (FR-PF-12).
+    /// The text as the reader sees it: empty with the flag `hidden` for a Viewer.
     pub value: Option<String>,
     /// The identifier of the secret of a secret parameter.
     pub secret_id: Option<String>,
     pub secret_name: Option<String>,
-    /// True when the server hid a text value from this reader (FR-PF-12).
+    /// True when the server hid a text value from this reader.
     pub hidden: bool,
 }
 

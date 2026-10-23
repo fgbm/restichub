@@ -25,7 +25,7 @@ pub struct Account {
     pub disabled: bool,
     /// The tenant that was last used through this account.
     pub last_used_tenant_id: Option<TenantId>,
-    /// True when the account holds the installation-wide right (ADR-0029).
+    /// True when the account holds the installation-wide right.
     pub platform_admin: bool,
 }
 
@@ -38,7 +38,7 @@ pub struct AccountAuth {
     pub disabled: bool,
     /// The tenant that was last used through this account.
     pub last_used_tenant_id: Option<TenantId>,
-    /// True when the account holds the installation-wide right (ADR-0029).
+    /// True when the account holds the installation-wide right.
     pub platform_admin: bool,
 }
 
@@ -55,7 +55,7 @@ pub struct Member {
     pub account_disabled: bool,
     /// The account holds a membership in another tenant that is not deleted.
     pub shared: bool,
-    /// True when the account holds the installation-wide right (ADR-0029).
+    /// True when the account holds the installation-wide right.
     pub platform_admin: bool,
 }
 
@@ -370,7 +370,7 @@ pub struct PlatformAccount {
     pub email_verified: bool,
     /// A Platform Admin set it for the whole installation.
     pub disabled: bool,
-    /// True when the account holds the installation-wide right (ADR-0029).
+    /// True when the account holds the installation-wide right.
     pub platform_admin: bool,
 }
 
@@ -382,7 +382,7 @@ pub struct NewPlatformAccount<'a> {
     pub password_hash: &'a str,
     pub display_name: &'a str,
     pub email: Option<&'a str>,
-    /// Grants the installation-wide right at the create (ADR-0029).
+    /// Grants the installation-wide right at the create.
     pub platform_admin: bool,
 }
 

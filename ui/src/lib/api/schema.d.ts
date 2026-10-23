@@ -17,7 +17,7 @@ export interface paths {
          * Enrolls an agent with a one-time token and a certificate signing request.
          * @description The control plane serves the route on the agent listener and on the public web origin, so an
          *     agent reaches it with a publicly trusted certificate and pins the returned installation root CA
-         *     for the stream (ADR-0033).
+         *     for the stream.
          */
         post: operations["enroll"];
         delete?: never;
@@ -68,7 +68,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Reads the parameter table of a host (FR-PF-10, FR-PF-12). */
+        /** Reads the parameter table of a host. */
         get: operations["get_parameters"];
         /**
          * Replaces the parameter values of a host.
@@ -117,7 +117,7 @@ export interface paths {
          * @description Both records must be active and must report the same machine identifier. This record must be
          *     newer than the old one, and the old one must have been silent for the online window, otherwise
          *     the answer is HTTP 404 or HTTP 409 `agent_recently_online`. The move and the revoke commit in
-         *     one transaction; the running jobs of the old record are cancelled as for a revoke (FR-ID-04).
+         *     one transaction; the running jobs of the old record are cancelled as for a revoke.
          */
         post: operations["replace_agent"];
         delete?: never;
@@ -136,7 +136,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Revokes an agent of the tenant (FR-ID-04, AC-ID-04).
+         * Revokes an agent of the tenant.
          * @description The endpoint is idempotent: a second call changes nothing. The status change and the audit
          *     record commit in one transaction.
          */
@@ -328,7 +328,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Switches the session to another tenant (ADR-0025).
+         * Switches the session to another tenant.
          * @description The endpoint checks the membership of the caller in the target tenant, deletes the source
          *     session, creates a new session in the target tenant with the source expiry and the source user
          *     agent, and rotates the cookie. A source session that another request already removed gives HTTP
@@ -349,9 +349,9 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Lists the memberships of the caller only (ADR-0025).
+         * Lists the memberships of the caller only.
          * @description The platform tenant is included for a Platform Admin in multi mode. In single mode the platform
-         *     tenant is hidden (ADR-0024).
+         *     tenant is hidden.
          */
         get: operations["list_tenants"];
         put?: never;
@@ -450,6 +450,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /** Reads the mode and the setup state of the installation. */
         get: operations["instance"];
         put?: never;
         post?: never;
@@ -659,7 +660,7 @@ export interface paths {
         put?: never;
         /**
          * Creates a plan in the tenant.
-         * @description The control plane validates the cron expression, the time zone and the stored profile against the agent before the write (FR-PF-05).
+         * @description The control plane validates the cron expression, the time zone and the stored profile against the agent before the write.
          */
         post: operations["create_plan"];
         delete?: never;
@@ -910,7 +911,7 @@ export interface paths {
         /**
          * Changes an account itself (Platform Admin only).
          * @description The endpoint refuses the caller's own account and the last active Platform Admin. A grant of the
-         *     right requires a new password and ends every session of the account (ADR-0029).
+         *     right requires a new password and ends every session of the account.
          */
         patch: operations["update_account"];
         trace?: never;
@@ -973,7 +974,7 @@ export interface paths {
          * Resets the password of an account and ends every session of it (Platform Admin only).
          * @description The caller's own account is refused with HTTP 403: the caller changes its own password with the
          *     current password. A shared account and another Platform Admin are no obstacle in the platform
-         *     scope (ADR-0025, ADR-0029). The reset is recorded in the platform audit and in the audit of each
+         *     scope. The reset is recorded in the platform audit and in the audit of each
          *     organization of the account.
          */
         post: operations["reset_password"];
@@ -995,7 +996,7 @@ export interface paths {
         put?: never;
         /**
          * Creates a profile in the tenant.
-         * @description The control plane validates the settings before the write (FR-PF-05).
+         * @description The control plane validates the settings before the write.
          */
         post: operations["create_profile"];
         delete?: never;
@@ -1011,7 +1012,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Reads the job limits that a new profile gets when its request names none (ADR-0039). */
+        /** Reads the job limits that a new profile gets when its request names none. */
         get: operations["job_limit_defaults"];
         put?: never;
         post?: never;
@@ -1032,7 +1033,7 @@ export interface paths {
         put?: never;
         /**
          * Previews a profile draft for one target agent.
-         * @description The steps and the command lines agree with the command that the agent runs. The draft is not stored. Secrets are masked (AC-PF-01). A caller without the profile write right receives the preview of the stored profile that `profile_id` names, and its draft fields are ignored. A caller without the script write right receives the stored scripts and its draft scripts are ignored. A caller without the script read right receives the parameter values of the requested host only when a plan of the stored profile runs there.
+         * @description The steps and the command lines agree with the command that the agent runs. The draft is not stored. Secrets are masked. A caller without the profile write right receives the preview of the stored profile that `profile_id` names, and its draft fields are ignored. A caller without the script write right receives the stored scripts and its draft scripts are ignored. A caller without the script read right receives the parameter values of the requested host only when a plan of the stored profile runs there.
          */
         post: operations["preview_profile"];
         delete?: never;
@@ -1089,7 +1090,7 @@ export interface paths {
         put?: never;
         /**
          * Creates a repository in the tenant.
-         * @description The control plane encrypts the secret values and never returns them (AC-RP-02).
+         * @description The control plane encrypts the secret values and never returns them.
          */
         post: operations["create_repository"];
         delete?: never;
@@ -1128,7 +1129,7 @@ export interface paths {
         put?: never;
         /**
          * Initializes a repository from an agent.
-         * @description The control plane sends the repository password and the backend credentials with the signed job only (ADR-0003). An offline agent gives HTTP 409 `agent_offline`.
+         * @description The control plane sends the repository password and the backend credentials with the signed job only. An offline agent gives HTTP 409 `agent_offline`.
          */
         post: operations["init_repository"];
         delete?: never;
@@ -1355,7 +1356,7 @@ export interface paths {
         put?: never;
         /**
          * Creates a secret in the tenant.
-         * @description The response holds the metadata only. The control plane never returns the value (AC-RP-02).
+         * @description The response holds the metadata only. The control plane never returns the value.
          */
         post: operations["create_secret"];
         delete?: never;
@@ -1373,9 +1374,7 @@ export interface paths {
         };
         /**
          * Reads the metadata of one secret of the tenant.
-         * @description Reads the metadata of one secret of the tenant.
-         *
-         *     The response holds the metadata and the marker `set`. It never holds the value (AC-RP-02).
+         * @description The response holds the metadata and the marker `set`. It never holds the value.
          */
         get: operations["get_secret"];
         put?: never;
@@ -1567,7 +1566,7 @@ export interface components {
             tenant_id: string;
         };
         /**
-         * @description The derived administrator state of a tenant (ADR-0028).
+         * @description Administrator state of a tenant, derived from the memberships.
          *
          *     The control plane computes the state from the memberships: an active Admin count of zero gives
          *     [`AdminState::None`]. The state is not stored, so it cannot drift from the memberships.
@@ -1605,10 +1604,7 @@ export interface components {
             /** Format: int64 */
             waiting: number;
         };
-        /**
-         * @description The status of an enrolled agent (ADR-0026, FR-ID-04).
-         * @enum {string}
-         */
+        /** @enum {string} */
         AgentStatus: "active" | "revoked";
         /**
          * @description How the version of an agent relates to the control plane. The Hosts screen shows it.
@@ -1618,20 +1614,28 @@ export interface components {
         AgentView: {
             agent_version: string;
             arch: string;
-            /** @description In RFC 3339. */
+            /** Format: date-time */
             certificate_expires_at: string;
             /** @description Lower-case hexadecimal. */
             certificate_serial: string;
             /** @description The package version of the control plane that serves the request. */
             control_plane_version: string;
+            /** Format: date-time */
             created_at: string;
-            /** @description The time of the first stream open. Null while an active host waits for its first connection. */
+            /**
+             * Format: date-time
+             * @description The time of the first stream open. Null while an active host waits for its first connection.
+             */
             first_connected_at?: string | null;
             hostname: string;
             id: string;
             labels: string[];
-            /** @description In RFC 3339. Null until the first rotation of the certificate. */
+            /**
+             * Format: date-time
+             * @description Null until the first rotation of the certificate.
+             */
             last_certificate_rotation_at?: string | null;
+            /** Format: date-time */
             last_seen_at?: string | null;
             /**
              * @description Whether the host has an open stream to a control plane instance, as the database records it.
@@ -1649,19 +1653,21 @@ export interface components {
              *     target must lie inside one of them.
              */
             restore_roots: string[];
+            /** Format: date-time */
             revoked_at?: string | null;
             revoked_by_user_id?: string | null;
             /** @description The interpreters the agent found, for example `bash`. Empty unless the mode is enabled. */
             script_interpreters: string[];
             /**
-             * @description Whether the host trusts scripts from the control plane (FR-HK-08, ADR-0037). The host
-             *     administrator changes it with `restichub-agent trust-server-scripts`.
+             * @description Whether the host trusts scripts from the control plane. The host administrator changes it
+             *     with `restichub-agent trust-server-scripts`.
              */
             server_scripts: components["schemas"]["ServerScriptsState"];
             status: components["schemas"]["AgentStatus"];
             /**
-             * @description In RFC 3339. Null unless a connection presented the certificate that the last rotation
-             *     replaced. It can mean a copy of the old key (T17).
+             * Format: date-time
+             * @description Null unless a connection presented the certificate that the last rotation replaced. It can
+             *     mean a copy of the old key (T17).
              */
             superseded_certificate_used_at?: string | null;
             version_status: components["schemas"]["AgentVersionStatus"];
@@ -1703,8 +1709,8 @@ export interface components {
             error_code?: string | null;
             job_kind?: components["schemas"]["JobKind"] | null;
             /**
-             * @description The finish time of the last succeeded backup, in RFC 3339. Absent when the plan never
-             *     succeeded.
+             * Format: date-time
+             * @description The finish time of the last succeeded backup. Absent when the plan never succeeded.
              */
             last_success_at?: string | null;
             /**
@@ -1739,6 +1745,7 @@ export interface components {
             id: string;
             job_id?: string | null;
             kind: components["schemas"]["AlertKind"];
+            /** Format: date-time */
             opened_at: string;
             /**
              * @description The typed values of the condition. A client builds the sentence from them in the language of
@@ -1749,6 +1756,7 @@ export interface components {
             plan_name?: string | null;
             repository_id?: string | null;
             repository_name?: string | null;
+            /** Format: date-time */
             resolved_at?: string | null;
             status: components["schemas"]["AlertStatus"];
             /** @description The link of the alert. Absent when the installation sets no public origin. */
@@ -1758,12 +1766,16 @@ export interface components {
             items: components["schemas"]["ApiTokenView"][];
         };
         ApiTokenView: {
+            /** Format: date-time */
             created_at: string;
             display_prefix: string;
+            /** Format: date-time */
             expires_at?: string | null;
             id: string;
+            /** Format: date-time */
             last_used_at?: string | null;
             name: string;
+            /** Format: date-time */
             revoked_at?: string | null;
             role: components["schemas"]["Role"];
         };
@@ -1849,7 +1861,7 @@ export interface components {
              */
             object_name?: string | null;
             object_type: string;
-            /** @description In RFC 3339. */
+            /** Format: date-time */
             occurred_at: string;
             source_ip?: string | null;
             tenant_id: string;
@@ -1867,9 +1879,7 @@ export interface components {
             total_capped: boolean;
         };
         /**
-         * @description The backend settings of a repository (FR-RP-01).
-         *
-         *     The type is internally tagged on `kind`. Each variant carries the typed settings of its backend
+         * @description The type is internally tagged on `kind`. Each variant carries the typed settings of its backend
          *     only, so a client cannot send a setting of another backend.
          */
         BackendSettings: {
@@ -1893,42 +1903,41 @@ export interface components {
             kind: "local";
             path: string;
         };
-        /** @description The restic flags that a profile sets (FR-PF-01). */
         BackupOptions: {
             exclude_caches?: boolean;
             /**
              * Format: int64
-             * @description Download limit in kibibytes each second. Zero means no limit (FR-AG-15).
+             * @description Download limit in kibibytes each second. Zero means no limit.
              */
             limit_download_kib?: number;
             /**
              * Format: int64
-             * @description Upload limit in kibibytes each second. Zero means no limit (FR-AG-15).
+             * @description Upload limit in kibibytes each second. Zero means no limit.
              */
             limit_upload_kib?: number;
             /**
              * Format: int32
-             * @description Minutes after which the agent stops the job whatever its progress. Zero means no limit.
-             *     At most 43200. A missing value behaves as the stall timeout does (ADR-0039).
+             * @description Minutes after which the agent stops the job whatever its progress. Zero means no limit. At
+             *     most 43200. A missing value behaves as the stall timeout does.
              */
             max_duration_minutes?: number | null;
             one_file_system?: boolean;
             /**
              * @description `low` runs the backup and the `forget` step of the profile at a lower process priority, and
-             *     on Linux at a lower I/O priority (FR-AG-15). The `prune` and `check` steps of a repository
-             *     keep the normal priority. A missing value gives `normal`, also in an update.
+             *     on Linux at a lower I/O priority. The `prune` and `check` steps of a repository keep the
+             *     normal priority. A missing value gives `normal`, also in an update.
              */
             priority?: components["schemas"]["ProfilePriority"];
             /**
              * Format: int32
              * @description Minutes without progress after which the agent stops a step. From 5 to 10080. A missing
-             *     value gives the default of a new profile and keeps the stored value of an update (ADR-0039).
+             *     value gives the default of a new profile and keeps the stored value of an update.
              */
             stall_timeout_minutes?: number | null;
-            /** @description Use a file system snapshot. VSS on Windows only (FR-PF-01). */
+            /** @description Use a file system snapshot. VSS on Windows only. */
             use_fs_snapshot?: boolean;
         };
-        /** @description The summary of a `restic backup` run (FR-MN-02). The counts are never negative. */
+        /** @description The summary of a `restic backup` run. The counts are never negative. */
         BackupSummary: {
             /**
              * Format: int64
@@ -2008,22 +2017,27 @@ export interface components {
             signing_secret?: string | null;
         };
         ChannelView: {
+            /** Format: date-time */
             created_at: string;
             enabled: boolean;
             id: string;
             kind: components["schemas"]["ChannelKind"];
-            /** @description The end of the last delivery attempt of an alert, in RFC 3339. A test send does not count. */
+            /**
+             * Format: date-time
+             * @description The end of the last delivery attempt of an alert. A test send does not count.
+             */
             last_delivery_at?: string | null;
             /** @description Null when no alert delivery was attempted. False also for an attempt that waits for a retry. */
             last_delivery_ok?: boolean | null;
             name: string;
             /** @description The addresses of an email channel. Empty for a webhook. */
             recipients: string[];
+            /** Format: date-time */
             updated_at: string;
             /** @description The scheme, the host and the port of a webhook URL. The path and the query are write-only. */
             url_origin?: string | null;
         };
-        /** @description Settings of the verification step (FR-PF-01). */
+        /** @description Settings of the verification step. */
         CheckOptions: {
             /** @description Portion to check, for example `10%` or `1/7`. */
             read_data_subset?: string;
@@ -2053,13 +2067,13 @@ export interface components {
         };
         CreateAccountRequest: {
             display_name: string;
-            /** @description Unique in the installation when it is set (ADR-0028). An empty value means no email. */
+            /** @description Unique in the installation when it is set. An empty value means no email. */
             email?: string | null;
             /** @description The organizations of the account with the role in each one. */
             memberships?: components["schemas"]["MembershipInput"][];
             /** @description At least 12 characters. */
             password: string;
-            /** @description Grants the installation-wide right at the create (ADR-0029). */
+            /** @description Grants the installation-wide right at the create. */
             platform_admin?: boolean;
             /** @description Unique in the installation; ignores the letter case. */
             username: string;
@@ -2087,9 +2101,10 @@ export interface components {
             ttl_seconds?: number | null;
         };
         CreateEnrollmentTokenResponse: {
+            /** Format: date-time */
             created_at: string;
             display_prefix: string;
-            /** @description In RFC 3339. */
+            /** Format: date-time */
             expires_at: string;
             id: string;
             labels: string[];
@@ -2103,7 +2118,6 @@ export interface components {
             name: string;
             scripts?: components["schemas"]["ScriptDef"][];
         };
-        /** @description The request body of a plan create (FR-SC-01, FR-SC-07, FR-SC-11). */
         CreatePlanRequest: {
             agent_id: string;
             cron: string;
@@ -2111,21 +2125,21 @@ export interface components {
             missed_run_policy: components["schemas"]["MissedRunPolicy"];
             /** @description Free text of 1 to 100 characters. Unique in the tenant, ignoring the letter case. Holds no control or format character. */
             name: string;
-            /** @description The values that the plan sets instead of the values of the host (FR-PF-10). At most 64. */
+            /** @description The values that the plan sets instead of the values of the host. At most 64. */
             parameter_values?: components["schemas"]["ParameterValueDef"][];
             profile_id: string;
-            /** @description The repository that the plan backs up into (ADR-0047). */
+            /** @description Repository that the plan backs up into. */
             repository_id: string;
             /**
              * Format: int32
              * @description The recovery point objective in seconds, from 900 to 34560000. Absent or null uses the
-             *     default of the schedule (ADR-0036).
+             *     default of the schedule.
              */
             rpo_seconds?: number | null;
             /** @description An IANA name, such as `Europe/Berlin`, validated before the write. */
             time_zone: string;
         };
-        /** @description The fields that arrive at the create endpoint (FR-PF-01). */
+        /** @description The fields that arrive at the create endpoint. */
         CreateProfileRequest: {
             check?: components["schemas"]["CheckOptions"] | null;
             exclude_files?: string[];
@@ -2133,13 +2147,13 @@ export interface components {
             /** @description Free text of 1 to 100 characters. Unique in the tenant, ignoring the letter case. Holds no control or format character. */
             name: string;
             options?: components["schemas"]["BackupOptions"];
-            /** @description What the profile offers to its hosts (FR-PF-09). At most 64. */
+            /** @description What the profile offers to its hosts. At most 64. */
             parameters?: components["schemas"]["ParameterDefRequest"][];
             paths?: components["schemas"]["ProfilePaths"];
             retention?: components["schemas"]["Retention"] | null;
             /**
-             * @description Scripts from the control plane, in the order they run in their phase (FR-HK-09). Only an
-             *     Admin can set them.
+             * @description Scripts from the control plane, in the order they run in their phase. Only an Admin can set
+             *     them.
              */
             scripts?: components["schemas"]["ScriptDef"][];
             tags?: string[];
@@ -2153,8 +2167,8 @@ export interface components {
         CreateRepositoryRequest: {
             backend: components["schemas"]["BackendSettings"];
             /**
-             * @description The identifier of the maintenance agent (FR-RP-08). Required for a local repository: the
-             *     path is on the disk of this host, and every job of the repository runs there.
+             * @description The identifier of the maintenance agent. Required for a local repository: the path is on the
+             *     disk of this host, and every job of the repository runs there.
              */
             maintenance_agent_id?: string | null;
             /** @description Holds 1 to 48 characters from `a-z`, `0-9`, `.`, `_` and `-`. */
@@ -2198,13 +2212,14 @@ export interface components {
             name: string;
         };
         CreateTokenRequest: {
-            /** @description In RFC 3339. */
+            /** Format: date-time */
             expires_at?: string | null;
             name: string;
             role: components["schemas"]["Role"];
         };
         CreateTokenResponse: {
             display_prefix: string;
+            /** Format: date-time */
             expires_at?: string | null;
             id: string;
             name: string;
@@ -2220,7 +2235,7 @@ export interface components {
             /** @description Unique in the installation; ignores the letter case. */
             username: string;
         };
-        /** @description The presence of the bound secrets. The view never holds a value (AC-RP-02). */
+        /** @description The presence of the bound secrets. The view never holds a value. */
         CredentialsView: {
             /** @description True when the value is set. A repository always holds one. */
             password: boolean;
@@ -2235,6 +2250,7 @@ export interface components {
         };
         DashboardFailedJob: {
             agent_hostname: string;
+            /** Format: date-time */
             finished_at: string;
             id: string;
             kind: components["schemas"]["JobKind"];
@@ -2246,6 +2262,7 @@ export interface components {
         DashboardHost: {
             hostname: string;
             id: string;
+            /** Format: date-time */
             last_seen_at?: string | null;
             online: boolean;
             /** @description The host never opened a stream since its enrollment. It counts as neither online nor offline. */
@@ -2269,7 +2286,10 @@ export interface components {
             agent_hostname: string;
             enabled: boolean;
             id: string;
-            /** @description The finish time of the last succeeded backup. Null when the plan never succeeded. */
+            /**
+             * Format: date-time
+             * @description The finish time of the last succeeded backup. Null when the plan never succeeded.
+             */
             last_success_at?: string | null;
             name: string;
             repository_name: string;
@@ -2292,20 +2312,23 @@ export interface components {
         DashboardResponse: {
             alerts: components["schemas"]["DashboardAlerts"];
             failed_jobs: components["schemas"]["DashboardFailedJob"][];
+            /** Format: date-time */
             generated_at: string;
             hosts: components["schemas"]["DashboardHosts"];
             plans: components["schemas"]["DashboardPlans"];
             repositories: components["schemas"]["DashboardRepository"][];
         };
         DuplicateOfView: {
+            /** Format: date-time */
             created_at: string;
             hostname: string;
             id: string;
             /**
              * @description True when the other record was created before this one. Only the newer record offers the
-             *     replacement of the older one (FR-ID-11).
+             *     replacement of the older one.
              */
             is_older: boolean;
+            /** Format: date-time */
             last_seen_at?: string | null;
         };
         EnrollRequest: {
@@ -2330,7 +2353,7 @@ export interface components {
             ca_chain: string[];
             /** @description The issued leaf in DER, base64 (standard alphabet). */
             certificate: string;
-            /** @description In RFC 3339. */
+            /** Format: date-time */
             certificate_expires_at: string;
             /** @description The gRPC endpoint of the agent listener, when the installation sets it. */
             grpc_endpoint?: string | null;
@@ -2341,22 +2364,19 @@ export interface components {
             reenrolled: boolean;
             /**
              * @description The signed job signing key set, the serialized `SigningKeyUpdate` message in base64. The
-             *     agent verifies the update before it uses the next key (FR-PR-04, FR-PR-11).
+             *     agent verifies the update before it uses the next key.
              */
             signing_key_update: string;
             /**
-             * @description The public job signing key set: the current key and the next key (ADR-0026). The agent
-             *     verifies a job that the current key signed with this set at once.
+             * @description The public job signing key set: the current key and the next key. The agent verifies a job
+             *     that the current key signed with this set at once.
              */
             signing_keys: components["schemas"]["EnrollmentKeyBody"][];
-            /**
-             * @description Ed25519 signature over the key set, base64 (standard alphabet). The current key signs it
-             *     (ADR-0026).
-             */
+            /** @description Ed25519 signature over the key set, base64 (standard alphabet). The current key signs it. */
             signing_keys_signature: string;
             tenant_id: string;
         };
-        /** @description One public job signing key of the enrollment response (ADR-0026). */
+        /** @description One public job signing key of the enrollment response. */
         EnrollmentKeyBody: {
             key_id: string;
             /** @description Base64 of the 32 Ed25519 bytes (standard alphabet). */
@@ -2370,18 +2390,20 @@ export interface components {
             next_cursor?: string | null;
         };
         EnrollmentTokenView: {
-            /** @description In RFC 3339. */
+            /** Format: date-time */
             created_at: string;
             created_by: string;
             display_prefix: string;
-            /** @description In RFC 3339. */
+            /** Format: date-time */
             expires_at: string;
             id: string;
             labels: string[];
             /** @description The host that the token re-registers. Null for a token of a new host. */
             replaces_agent_id?: string | null;
+            /** Format: date-time */
             revoked_at?: string | null;
             revoked_by_user_id?: string | null;
+            /** Format: date-time */
             used_at?: string | null;
             /** @description The host that the token enrolled. Null until the token is used. */
             used_by_agent_id?: string | null;
@@ -2418,11 +2440,11 @@ export interface components {
          */
         GroupBy: "host" | "paths" | "tags";
         /**
-         * @description Position of a script in the job (FR-HK-05).
+         * @description Position of a script in the job.
          * @enum {string}
          */
         HookPhase: "before" | "after" | "on_success" | "on_error" | "finally";
-        /** @description One row of the parameter table of a host (FR-PF-10, FR-PF-12). */
+        /** @description One row of the parameter table of a host. */
         HostParameterView: {
             /**
              * @description What a text parameter falls back to. Null for a secret, when no profile declares a value
@@ -2430,7 +2452,7 @@ export interface components {
              */
             default_value?: string | null;
             description?: string | null;
-            /** @description True when the server hid a text value from this reader (FR-PF-12). */
+            /** @description True when the server hid a text value from this reader. */
             hidden: boolean;
             kind: components["schemas"]["ParameterKind"];
             name: string;
@@ -2444,7 +2466,7 @@ export interface components {
         };
         /**
          * @description What the page of a host shows: the values that it holds and the parameters of the profiles of
-         *     its plans (FR-PF-10).
+         *     its plans.
          */
         HostParametersResponse: {
             agent_id: string;
@@ -2469,18 +2491,18 @@ export interface components {
         /** @description The request body of an init or a test-access action. */
         JobActionRequest: {
             /**
-             * @description The agent that runs the job. An absent value uses the maintenance agent of the repository
-             *     (FR-RP-08). A local-path repository needs an explicit or a maintenance agent.
+             * @description The agent that runs the job. An absent value uses the maintenance agent of the repository. A
+             *     local-path repository needs an explicit or a maintenance agent.
              */
             agent_id?: string | null;
         };
-        /** @description One job with its steps, its summary and its progress (FR-MN-02). */
+        /** @description One job with its steps, its summary and its progress. */
         JobDetailView: components["schemas"]["JobView"] & {
             limits: components["schemas"]["LimitsView"];
             log: components["schemas"]["LogInfo"];
             /**
              * @description The same steps with their kind, name and phase, so the job detail shows every script in
-             *     order before it runs (FR-HK-11).
+             *     order before it runs.
              */
             planned: components["schemas"]["PlannedStepView"][];
             /**
@@ -2509,14 +2531,12 @@ export interface components {
             succeeded_with_warnings: components["schemas"]["TabCount"];
         };
         /**
-         * @description The kind of a job (FR-PR-02, the seed of the scheduler of epic #7).
-         *
-         *     The kind is general, not init-specific. The string value of each variant is the stored value of
+         * @description The kind is general, not init-specific. The string value of each variant is the stored value of
          *     the `kind` column. It is stable: do not change a string.
          * @enum {string}
          */
         JobKind: "init" | "test_access" | "backup" | "check" | "forget" | "prune" | "restore" | "unlock" | "unlock_all" | "snapshots" | "ls" | "other";
-        /** @description The job limits that a new profile gets when the request names none (ADR-0039). */
+        /** @description The job limits that a new profile gets when the request names none. */
         JobLimitDefaults: {
             /** Format: int32 */
             max_duration_minutes: number;
@@ -2537,17 +2557,13 @@ export interface components {
             total_capped: boolean;
         };
         /**
-         * @description The typed result of a finished job (FR-AG-09, AC-RP-01).
-         *
-         *     The value comes from the `outcome` field of the `JobResult` message. It is a closed set, so the
+         * @description The value comes from the `outcome` field of the `JobResult` message. It is a closed set, so the
          *     `result_code` column holds one of these strings. It is stable: do not change a string.
          * @enum {string}
          */
         JobResultCode: "succeeded" | "failed" | "config_error" | "not_initialized" | "access_error" | "cancelled" | "succeeded_with_warnings" | "repository_locked" | "incompatible";
         /**
-         * @description The lifecycle status of a job (FR-SC-03, FR-SC-07).
-         *
-         *     `queued` is the state before the send and `sent` the state after it, until the agent
+         * @description `queued` is the state before the send and `sent` the state after it, until the agent
          *     acknowledges the job. The string value of each variant is the stored value of the `status`
          *     column. It is stable: do not change a string.
          * @enum {string}
@@ -2559,14 +2575,20 @@ export interface components {
         /** @description A job template: an ordered set of scripts from which a profile is made. */
         JobTemplateView: {
             builtin: boolean;
-            /** @description In RFC 3339. Absent for a built-in template. */
+            /**
+             * Format: date-time
+             * @description Absent for a built-in template.
+             */
             created_at?: string | null;
             description: string;
             /** @description A UUID, or `builtin:<name>` for a template of the control plane. */
             id: string;
             name: string;
             scripts: components["schemas"]["ScriptDef"][];
-            /** @description In RFC 3339. Absent for a built-in template. */
+            /**
+             * Format: date-time
+             * @description Absent for a built-in template.
+             */
             updated_at?: string | null;
         };
         /**
@@ -2574,7 +2596,7 @@ export interface components {
          * @enum {string}
          */
         JobTrigger: "schedule" | "manual" | "maintenance";
-        /** @description One job with its lifecycle (FR-PR-01). */
+        /** @description One job with its lifecycle. */
         JobView: {
             /** @description Null in a response that joins no display names. */
             agent_hostname?: string | null;
@@ -2584,14 +2606,18 @@ export interface components {
              * @description Lock retries so far (restic exit code 11).
              */
             attempt: number;
-            /** @description In RFC 3339. */
+            /** Format: date-time */
             created_at: string;
             /**
-             * @description In RFC 3339. The end of the acceptance window of the signed job: the agent refuses the job
-             *     after this time. It is not a limit of the run. Null when the job holds no expiry.
+             * Format: date-time
+             * @description The end of the acceptance window of the signed job: the agent refuses the job after this
+             *     time. It is not a limit of the run. Null when the job holds no expiry.
              */
             expires_at?: string | null;
-            /** @description In RFC 3339. Null until the job finishes. */
+            /**
+             * Format: date-time
+             * @description Null until the job finishes.
+             */
             finished_at?: string | null;
             id: string;
             kind: components["schemas"]["JobKind"];
@@ -2605,21 +2631,27 @@ export interface components {
             repository_name?: string | null;
             result_code?: components["schemas"]["JobResultCode"] | null;
             /**
-             * @description A machine-readable error code from the agent. The user interface translates it (NFR-DOC-04).
-             *     It never holds a secret.
+             * @description A machine-readable error code from the agent. The user interface translates it. It never
+             *     holds a secret.
              */
             result_message?: string | null;
             result_params?: components["schemas"]["IncompatibleParams"] | null;
-            /** @description In RFC 3339. The earliest time at which the queue sends the job. */
+            /**
+             * Format: date-time
+             * @description The earliest time at which the queue sends the job.
+             */
             run_at: string;
-            /** @description In RFC 3339. Null until the agent starts the job. */
+            /**
+             * Format: date-time
+             * @description Null until the agent starts the job.
+             */
             started_at?: string | null;
             status: components["schemas"]["JobStatus"];
-            /** @description In RFC 3339. */
+            /** Format: date-time */
             updated_at: string;
         };
         LastCheckView: {
-            /** @description In RFC 3339. */
+            /** Format: date-time */
             finished_at: string;
             result: components["schemas"]["CheckResult"];
         };
@@ -2664,7 +2696,10 @@ export interface components {
             step_id: string;
             stream: components["schemas"]["LogStream"];
             text: string;
-            /** @description The time at which the control plane stored the line, in RFC 3339. */
+            /**
+             * Format: date-time
+             * @description The time at which the control plane stored the line.
+             */
             ts: string;
         };
         LogPageView: {
@@ -2675,7 +2710,7 @@ export interface components {
             truncated: boolean;
         };
         /**
-         * @description Where a log line came from: a restic stream or the agent itself (FR-AG-08).
+         * @description Where a log line came from: a restic stream or the agent itself.
          * @enum {string}
          */
         LogStream: "stdout" | "stderr" | "agent";
@@ -2707,7 +2742,10 @@ export interface components {
             cached: boolean;
             /** @description A stable code that the user interface translates. Set when the state is `failed`. */
             error_code?: string | null;
-            /** @description In RFC 3339. Null unless the state is `done`. */
+            /**
+             * Format: date-time
+             * @description Null unless the state is `done`.
+             */
             fetched_at?: string | null;
             job_id: string;
             /** @description True when the directory has no entry after this page. */
@@ -2736,22 +2774,27 @@ export interface components {
             /** @description Five fields: minute, hour, day of month, month, day of week. */
             cron: string;
             enabled: boolean;
-            /** @description The last fire time that the scheduler processed, in RFC 3339. */
+            /**
+             * Format: date-time
+             * @description Holds the fire that the scheduler processed.
+             */
             last_fire_time?: string | null;
-            /** @description In UTC, in RFC 3339. Null when the schedule is disabled or the scheduler has not set it yet. */
+            /**
+             * Format: date-time
+             * @description In UTC. Null when the schedule is disabled or the scheduler has not set it yet.
+             */
             next_run_at?: string | null;
             /** @description IANA name, for example `Europe/Berlin`. */
             time_zone: string;
         };
         /**
-         * @description The maintenance task of a repository schedule (FR-RP-08, ADR-0034).
+         * @description The maintenance task of a repository schedule.
          *
          *     The string value of each variant is the stored value of the `task` column. It is stable: do not
          *     change a string.
          * @enum {string}
          */
         MaintenanceTask: "retention" | "check";
-        /** @description The maintenance state of a repository (FR-RP-08). */
         MaintenanceView: {
             check: components["schemas"]["MaintenanceScheduleView"];
             last_check?: components["schemas"]["JobView"] | null;
@@ -2765,7 +2808,7 @@ export interface components {
             retention: components["schemas"]["MaintenanceScheduleView"];
         };
         MeResponse: {
-            /** @description True when the account holds the installation-wide right (ADR-0029). */
+            /** @description True when the account holds the installation-wide right. */
             platform_admin: boolean;
             role: components["schemas"]["Role"];
             tenant?: components["schemas"]["TenantView"] | null;
@@ -2781,16 +2824,15 @@ export interface components {
             tenant_id: string;
         };
         /**
-         * @description How many jobs the scheduler creates after a downtime, or after an agent was not active
-         *     (FR-SC-07).
+         * @description How many jobs the scheduler creates after a downtime, or after an agent was not active.
          *
          *     The policy decides how many jobs the scheduler creates after the control plane was down, or
-         *     after an agent that was not active for a while (FR-SC-07). The string value of each variant is
-         *     the stored value of the `missed_run_policy` column. It is stable: do not change a string.
+         *     after an agent that was not active for a while. The string value of each variant is the stored
+         *     value of the `missed_run_policy` column. It is stable: do not change a string.
          * @enum {string}
          */
         MissedRunPolicy: "run_all" | "latest_only" | "skip";
-        /** @description The next fire times of a plan, in UTC (FR-SC-01). */
+        /** @description Fire times of the plan, in UTC. */
         NextRunsResponse: {
             plan_id: string;
             /** @description The fire times in UTC, formatted as RFC 3339. */
@@ -2803,7 +2845,10 @@ export interface components {
             kind: components["schemas"]["NodeKind"];
             /** @description Empty unless the entry is a symbolic link. */
             link_target: string;
-            /** @description In RFC 3339. Null when restic gave no valid time. */
+            /**
+             * Format: date-time
+             * @description Null when restic did not report a valid one.
+             */
             mtime?: string | null;
             name: string;
             /** @description The path of the entry from the root of the snapshot. */
@@ -2821,24 +2866,24 @@ export interface components {
          */
         NodeKind: "file" | "dir" | "symlink" | "other";
         /**
-         * @description The policy for a file that exists in the restore target (FR-RS-04).
+         * @description The policy for a file that exists in the restore target.
          * @enum {string}
          */
         OverwriteMode: "always" | "if-changed" | "if-newer" | "never";
-        /** @description The declaration of one parameter in a profile request (FR-PF-09). */
+        /** @description The declaration of one parameter in a profile request. */
         ParameterDefRequest: {
-            /** @description A text parameter only. A secret default would give one password to every host (ADR-0047). */
+            /** @description A text parameter only. A secret default would give one password to every host. */
             default_value?: string | null;
             /** @description At most 200 characters. */
             description?: string | null;
             kind: components["schemas"]["ParameterKind"];
             /** @description A lower-case letter, then letters, digits and underscores; at most 64 characters. */
             name: string;
-            /** @description A plan without a value for a required parameter is refused (FR-PF-11). */
+            /** @description A plan without a value for a required parameter is refused. */
             required?: boolean;
         };
         /**
-         * @description The declaration of one parameter as a reader sees it (FR-PF-09, FR-PF-12).
+         * @description The declaration of one parameter as a reader sees it.
          *
          *     The type is separate from [`ParameterDef`] because it holds the marker of a hidden value.
          */
@@ -2846,21 +2891,21 @@ export interface components {
             /** @description What a text parameter falls back to. Empty with the flag `hidden` for a Viewer. */
             default_value?: string | null;
             description?: string | null;
-            /** @description True when the server hid the default value from this reader (FR-PF-12). */
+            /** @description True when the server hid the default value from this reader. */
             hidden: boolean;
             kind: components["schemas"]["ParameterKind"];
             name: string;
             required: boolean;
         };
         /**
-         * @description The kind of a parameter of a profile and of its value (FR-PF-09, ADR-0047).
+         * @description The kind of a parameter of a profile and of its value.
          *
          *     The string value is the stored value of the `kind` column and of the profile JSON. It is stable.
          * @enum {string}
          */
         ParameterKind: "text" | "secret";
         /**
-         * @description One value of a parameter in a plan request or in a host request (FR-PF-10).
+         * @description One value of a parameter in a plan request or in a host request.
          *
          *     The kind must agree with the declaration. Exactly one of `value` and `secret_id` is set.
          */
@@ -2872,7 +2917,7 @@ export interface components {
             /** @description A text of 1 to 4096 bytes, for a `text` parameter. */
             value?: string | null;
         };
-        /** @description The value of one parameter on a host (FR-PF-12). */
+        /** @description One value of a parameter on a host. */
         ParameterValueView: {
             kind: components["schemas"]["ParameterKind"];
             /** @description The identifier of the secret of a secret parameter. */
@@ -2886,16 +2931,16 @@ export interface components {
             items: components["schemas"]["PlanView"][];
             next_cursor?: string | null;
         };
-        /** @description One override of a plan as a reader sees it (FR-PF-10, FR-PF-12). */
+        /** @description One override of a plan as a reader sees it. */
         PlanParameterValueView: {
-            /** @description True when the server hid a text value from this reader (FR-PF-12). */
+            /** @description True when the server hid a text value from this reader. */
             hidden: boolean;
             kind: components["schemas"]["ParameterKind"];
             name: string;
             /** @description The identifier of the secret of a secret parameter. */
             secret_id?: string | null;
             secret_name?: string | null;
-            /** @description The text as the reader sees it: empty with the flag `hidden` for a Viewer (FR-PF-12). */
+            /** @description The text as the reader sees it: empty with the flag `hidden` for a Viewer. */
             value?: string | null;
         };
         PlanResponse: {
@@ -2903,33 +2948,40 @@ export interface components {
         };
         /** @enum {string} */
         PlanRpoState: "ok" | "at_risk" | "violated" | "unknown";
-        /** @description One plan with its display values (FR-SC-01). */
+        /** @description One plan with its display values. */
         PlanView: {
             agent_hostname: string;
             agent_id: string;
+            /** Format: date-time */
             created_at: string;
             cron: string;
             /**
              * Format: int64
-             * @description The objective that the control plane applies, in seconds (ADR-0036).
+             * @description The objective that the control plane applies, in seconds.
              */
             effective_rpo_seconds: number;
             enabled: boolean;
             id: string;
-            /** @description The last fire time that the scheduler processed, in RFC 3339. */
+            /**
+             * Format: date-time
+             * @description Holds the fire that the scheduler processed.
+             */
             last_fire_time?: string | null;
             /**
-             * @description The finish time of the last succeeded backup, in RFC 3339. Null when the plan never
-             *     succeeded.
+             * Format: date-time
+             * @description The finish time of the last succeeded backup. Null when the plan never succeeded.
              */
             last_success_at?: string | null;
             missed_run_policy: components["schemas"]["MissedRunPolicy"];
             name: string;
-            /** @description In UTC, in RFC 3339. Null when the plan is disabled. */
+            /**
+             * Format: date-time
+             * @description In UTC. Null when the plan is disabled.
+             */
             next_run_at?: string | null;
             /**
-             * @description The values that the plan sets instead of the values of the host (FR-PF-10). For a Viewer, a
-             *     text value is empty with the flag `hidden` (FR-PF-12).
+             * @description The values that the plan sets instead of the values of the host. For a Viewer, a text value
+             *     is empty with the flag `hidden`.
              */
             parameter_values: components["schemas"]["PlanParameterValueView"][];
             profile_id: string;
@@ -2940,16 +2992,17 @@ export interface components {
              * @description The stored recovery point objective in seconds. Null means the default of the schedule.
              */
             rpo_seconds?: number | null;
-            /** @description The state of the dashboard (ADR-0036). `unknown` when the host of the plan is revoked. */
+            /** @description The state of the dashboard. `unknown` when the host of the plan is revoked. */
             rpo_state: components["schemas"]["PlanRpoState"];
             time_zone: string;
+            /** Format: date-time */
             updated_at: string;
         };
         /**
-         * @description A plan that the updated profile no longer compiles for (FR-SC-11).
+         * @description A plan that the updated profile no longer compiles for.
          *
          *     The update does not refuse the change. The plan keeps its schedule and fails at dispatch time,
-         *     when the queue recompiles the profile for the facts of the agent, in a later part of epic #7.
+         *     when the queue recompiles the profile for the facts of the agent.
          */
         PlanWarning: {
             /** @description The compiler field that the profile fails on, for example `paths`. */
@@ -2960,16 +3013,16 @@ export interface components {
             reason: string;
         };
         /**
-         * @description The kind of a planned step, as the job detail shows it (FR-HK-11).
+         * @description The kind of a planned step, as the job detail shows it.
          * @enum {string}
          */
         PlannedKind: "backup" | "hook" | "script" | "other";
         /**
-         * @description Position of a script in the job (FR-HK-05).
+         * @description Position of a script in the job.
          * @enum {string}
          */
         PlannedPhase: "before" | "after" | "on_success" | "on_error" | "finally";
-        /** @description One planned step of a job (FR-HK-11). */
+        /** @description One planned step of a job. */
         PlannedStepView: {
             /** @description The SHA-256 hash of the script body, in lowercase hex. Present for a script step only. */
             content_sha256?: string | null;
@@ -2979,7 +3032,7 @@ export interface components {
             phase?: components["schemas"]["PlannedPhase"] | null;
             step_id: string;
         };
-        /** @description One membership of an account in the platform account list (ADR-0028). */
+        /** @description One membership of an account in the platform account list. */
         PlatformMembershipView: {
             /** @description Off in this organization only. */
             disabled: boolean;
@@ -2988,20 +3041,20 @@ export interface components {
             tenant_name: string;
         };
         /**
-         * @description A tenant in a platform administration response (FR-TN-02).
+         * @description A tenant in a platform administration response.
          *
          *     The view holds the user and host counts only. It never holds a user list or a secret of the
          *     tenant.
          */
         PlatformTenantView: {
-            /** @description Derived from the memberships: `none` when the tenant has no active Admin (ADR-0028). */
+            /** @description Derived from the memberships: `none` when the tenant has no active Admin. */
             admin_state: components["schemas"]["AdminState"];
             /**
              * Format: int64
              * @description Revoked hosts do not count.
              */
             agent_count: number;
-            /** @description In RFC 3339. */
+            /** Format: date-time */
             created_at: string;
             id: string;
             name: string;
@@ -3015,8 +3068,8 @@ export interface components {
         /** @description One installation account for its record page. */
         PlatformUserRecordView: components["schemas"]["PlatformUserView"] & {
             /**
-             * @description The last sign-in into any organization or the platform, or switch to an organization, in
-             *     RFC 3339.
+             * Format: date-time
+             * @description The last sign-in into any organization or the platform, or switch to an organization.
              */
             last_sign_in_at?: string | null;
             /**
@@ -3026,7 +3079,7 @@ export interface components {
              */
             platform_admin_count: number;
         };
-        /** @description An installation account with its memberships (ADR-0028). */
+        /** @description An installation account with its memberships. */
         PlatformUserView: {
             /** @description A Platform Admin set it for the whole installation. */
             disabled: boolean;
@@ -3037,19 +3090,17 @@ export interface components {
             email_verified: boolean;
             id: string;
             memberships: components["schemas"]["PlatformMembershipView"][];
-            /** @description True when the account holds the installation-wide right (ADR-0029). */
+            /** @description True when the account holds the installation-wide right. */
             platform_admin: boolean;
             username: string;
         };
-        /** @description One environment variable of a previewed step. A secret value is masked (AC-PF-01). */
+        /** @description One environment variable of a previewed step. A secret value is masked. */
         PreviewEnvView: {
             name: string;
             value: string;
         };
         /**
-         * @description The body of the draft preview (FR-PF-04, AC-PF-01).
-         *
-         *     The profile fields describe a draft: the server validates them as a create request, stores
+         * @description The profile fields describe a draft: the server validates them as a create request, stores
          *     nothing and checks no name uniqueness. A caller without the profile write right sends the
          *     identifiers only, and the server compiles the stored profile.
          */
@@ -3065,10 +3116,7 @@ export interface components {
              */
             name?: string;
             options?: components["schemas"]["BackupOptions"];
-            /**
-             * @description A caller without the profile write right sends no fields, and the stored profile gives them
-             *     (FR-PF-09).
-             */
+            /** @description A caller without the profile write right sends no fields, and the stored profile gives them. */
             parameters?: components["schemas"]["ParameterDefRequest"][];
             paths?: components["schemas"]["ProfilePaths"];
             /**
@@ -3077,21 +3125,20 @@ export interface components {
              */
             profile_id?: string | null;
             /**
-             * @description The repository of the commands. Absent uses the repository of the first plan of
-             *     `profile_id` on this agent, then of the first plan of `profile_id`, and no repository when
-             *     the draft holds no stored profile or plan (ADR-0047).
+             * @description The repository of the commands. Absent uses the repository of the first plan of `profile_id`
+             *     on this agent, then of the first plan of `profile_id`, and no repository when the draft
+             *     holds no stored profile or plan.
              */
             repository_id?: string | null;
             retention?: components["schemas"]["Retention"] | null;
             /**
-             * @description Scripts from the control plane, in the order they run in their phase (FR-HK-09). The
-             *     preview accepts them from a caller with the script write right only; another caller gets
-             *     the stored scripts (FR-HK-12).
+             * @description Scripts from the control plane, in the order they run in their phase. The preview accepts
+             *     them from a caller with the script write right only; another caller gets the stored scripts.
              */
             scripts?: components["schemas"]["ScriptDef"][];
             tags?: string[];
         };
-        /** @description The preview of a profile draft for one target agent (FR-PF-04). */
+        /** @description The preview of a profile draft for one target agent. */
         PreviewResponse: {
             /**
              * @description Null when the draft names no repository and its stored profile has no plan, so the steps
@@ -3100,16 +3147,12 @@ export interface components {
             repository_id?: string | null;
             steps: components["schemas"]["PreviewStepView"][];
         };
-        /** @description The request body of the schedule preview (FR-SC-01). */
         PreviewScheduleRequest: {
             count?: number;
             cron: string;
             time_zone: string;
         };
-        /**
-         * @description One previewed step: the kind, the maintenance flag, the command line and the environment
-         *     (FR-PF-04, AC-PF-01).
-         */
+        /** @description One previewed step: the kind, the maintenance flag, the command line and the environment. */
         PreviewStepView: {
             /** @description Rendered argv with masked secrets. */
             command: string;
@@ -3117,7 +3160,7 @@ export interface components {
             environment: components["schemas"]["PreviewEnvView"][];
             /** @description The step kind, for example `backup`, `forget`, `prune`, `check` or `script`. */
             kind: string;
-            /** @description True for `forget`, `prune` and `check` (FR-RP-08). */
+            /** @description True for `forget`, `prune` and `check`. */
             maintenance: boolean;
         };
         ProblemBody: {
@@ -3133,8 +3176,7 @@ export interface components {
             field?: string | null;
             /**
              * @description Only a validation refusal sets it: `parameter_missing`, `parameter_kind_mismatch`,
-             *     `parameter_not_declared` and `parameter_needs_default` (FR-PF-05, FR-PF-11); the last two
-             *     list one name.
+             *     `parameter_not_declared` and `parameter_needs_default`; the last two list one name.
              */
             parameters?: string[] | null;
             /** @description In snake_case; only `invalid_argument` sets it. */
@@ -3151,9 +3193,7 @@ export interface components {
             next_cursor?: string | null;
         };
         /**
-         * @description The source paths for each operating system (FR-PF-01).
-         *
-         *     `all` applies to every operating system. `windows`, `linux` and `macos` add the paths of one
+         * @description `all` applies to every operating system. `windows`, `linux` and `macos` add the paths of one
          *     operating system.
          */
         ProfilePaths: {
@@ -3163,25 +3203,22 @@ export interface components {
             windows?: string[];
         };
         /**
-         * @description The process and I/O priority of the restic steps of a profile (FR-AG-15). The string value of
-         *     each variant is stored: do not change a string.
+         * @description The process and I/O priority of the restic steps of a profile. The string value of each variant
+         *     is stored: do not change a string.
          * @enum {string}
          */
         ProfilePriority: "normal" | "low";
-        /**
-         * @description The result of a profile create or update: the stored profile and the save-time warnings
-         *     (FR-PF-05).
-         */
+        /** @description The result of a profile create or update: the stored profile and the save-time warnings. */
         ProfileResponse: {
-            /** @description The plans of the profile that the updated settings no longer compile for (FR-SC-11). */
+            /** @description The plans of the profile that the updated settings no longer compile for. */
             plan_warnings: components["schemas"]["PlanWarning"][];
             profile: components["schemas"]["ProfileView"];
             warnings: components["schemas"]["ProfileWarning"][];
         };
-        /** @description One stored profile (FR-PF-01). It holds no secret. */
+        /** @description One stored profile. It holds no secret. */
         ProfileView: {
             check?: components["schemas"]["CheckOptions"] | null;
-            /** @description In RFC 3339. */
+            /** Format: date-time */
             created_at: string;
             /** @description Null for an API token actor. */
             created_by?: string | null;
@@ -3190,19 +3227,16 @@ export interface components {
             id: string;
             name: string;
             options: components["schemas"]["BackupOptions"];
-            /**
-             * @description What the profile declares (FR-PF-09). For a Viewer, a text default is empty with the flag
-             *     `hidden` (FR-PF-12).
-             */
+            /** @description What the profile declares. For a Viewer, a text default is empty with the flag `hidden`. */
             parameters: components["schemas"]["ParameterDefView"][];
             paths: components["schemas"]["ProfilePaths"];
             retention?: components["schemas"]["Retention"] | null;
             scripts: components["schemas"]["ScriptDef"][];
             tags: string[];
-            /** @description In RFC 3339. */
+            /** Format: date-time */
             updated_at: string;
         };
-        /** @description A warning that the save-time compile reported for one target (FR-PF-05). */
+        /** @description A warning that the save-time compile reported for one target. */
         ProfileWarning: {
             /** @description Where the warning applies, for example `paths.all`. */
             field: string;
@@ -3235,7 +3269,7 @@ export interface components {
             total_bytes: number;
             /** Format: int64 */
             total_files: number;
-            /** @description In RFC 3339. */
+            /** Format: date-time */
             updated_at: string;
         };
         ReenrollAgentRequest: {
@@ -3260,7 +3294,7 @@ export interface components {
             /** Format: int64 */
             repositories_moved: number;
         };
-        /** @description The request body that replaces the values of a host (FR-PF-10). */
+        /** @description The request body that replaces the values of a host. */
         ReplaceParametersRequest: {
             /** @description The whole set. A name that the body leaves out loses its value. */
             parameters: components["schemas"]["ParameterValueDef"][];
@@ -3278,7 +3312,7 @@ export interface components {
         };
         RepositoryView: {
             backend: components["schemas"]["BackendSettings"];
-            /** @description In RFC 3339. */
+            /** Format: date-time */
             created_at: string;
             /** @description Null for an API token actor. */
             created_by?: string | null;
@@ -3287,13 +3321,13 @@ export interface components {
             /** @description False until an agent runs the init step. The MVP control plane never sets it true. */
             initialized: boolean;
             last_check?: components["schemas"]["LastCheckView"] | null;
-            /** @description Uses the same lock marks as the dashboard (FR-SC-06). */
+            /** @description Uses the same lock marks as the dashboard. */
             lock_state: components["schemas"]["LockState"];
             maintenance_agent_id?: string | null;
             name: string;
             /**
-             * @description The names of the other repositories that hold the same location (FR-RP-11). Only the list
-             *     fills it; a duplicate came from before the rule.
+             * @description The names of the other repositories that hold the same location. Only the list fills it; a
+             *     duplicate came from before the rule.
              */
             shares_location_with: string[];
             /**
@@ -3302,14 +3336,13 @@ export interface components {
              *     listing or when the listing was cut.
              */
             snapshot_count?: number | null;
-            /** @description In RFC 3339. */
+            /** Format: date-time */
             updated_at: string;
         };
         ResetPasswordRequest: {
             /** @description At least 12 characters. */
             new_password: string;
         };
-        /** @description The body of a restore request (FR-RS-03, FR-RS-04). */
         RestoreBody: {
             /**
              * @description The agent that writes the files. An absent value uses the maintenance agent. A repository
@@ -3343,7 +3376,7 @@ export interface components {
              */
             verify?: boolean;
         };
-        /** @description The parameters that the operator chose for a restore (FR-RS-03, FR-RS-04). */
+        /** @description The parameters that the operator chose for a restore. */
         RestoreParamsView: {
             dry_run: boolean;
             /** @description Empty unless `includes` is empty. */
@@ -3355,7 +3388,7 @@ export interface components {
             target: string;
             verify: boolean;
         };
-        /** @description What `restic restore --json` reported (FR-RS-04). */
+        /** @description What `restic restore --json` reported. */
         RestoreSummary: {
             /** Format: int64 */
             bytes_restored: number;
@@ -3376,7 +3409,7 @@ export interface components {
             /** Format: int64 */
             total_files: number;
         };
-        /** @description How long the snapshots stay (FR-PF-01). */
+        /** @description How long the snapshots stay. */
         Retention: {
             filter?: components["schemas"]["SnapshotFilter"];
             group_by?: components["schemas"]["GroupBy"][];
@@ -3406,7 +3439,7 @@ export interface components {
         RunMaintenanceRequest: {
             task: components["schemas"]["MaintenanceTask"];
         };
-        /** @description The next fire times of an unsaved schedule, in UTC (FR-SC-01). */
+        /** @description The next fire times of an unsaved schedule, in UTC. */
         SchedulePreviewResponse: {
             /** @description The fire times in UTC, formatted as RFC 3339. */
             runs: string[];
@@ -3457,7 +3490,10 @@ export interface components {
         ScriptTemplateView: {
             body: string;
             builtin: boolean;
-            /** @description In RFC 3339. Absent for a built-in template. */
+            /**
+             * Format: date-time
+             * @description Absent for a built-in template.
+             */
             created_at?: string | null;
             description: string;
             failure_policy: components["schemas"]["FailurePolicy"];
@@ -3469,23 +3505,26 @@ export interface components {
             phase: components["schemas"]["HookPhase"];
             /** Format: int32 */
             timeout_seconds: number;
-            /** @description In RFC 3339. Absent for a built-in template. */
+            /**
+             * Format: date-time
+             * @description Absent for a built-in template.
+             */
             updated_at?: string | null;
         };
         /**
-         * @description The metadata of one secret with the marker that the value is set (FR-RP-05).
+         * @description The metadata of one secret with the marker that the value is set.
          *
-         *     The field `value` holds the marker `set` only. The API never returns the value (AC-RP-02).
+         *     The field `value` holds the marker `set` only. The API never returns the value.
          */
         SecretDetailView: {
-            /** @description In RFC 3339. */
+            /** Format: date-time */
             created_at: string;
             /** @description Null for an API token actor. */
             created_by?: string | null;
             id: string;
             name: string;
             purpose: string;
-            /** @description In RFC 3339. */
+            /** Format: date-time */
             updated_at: string;
             value: string;
         };
@@ -3510,27 +3549,25 @@ export interface components {
             kind: components["schemas"]["SecretUsageKind"];
             name: string;
         };
-        /**
-         * @description The metadata of a secret in a response (FR-RP-05).
-         *
-         *     The view never holds the value. The API cannot return a secret value after a user saves it
-         *     (AC-RP-02).
-         */
+        /** @description The view never holds the value. The API cannot return a secret value after a user saves it. */
         SecretView: {
-            /** @description In RFC 3339. */
+            /** Format: date-time */
             created_at: string;
             /** @description Null for an API token actor. */
             created_by?: string | null;
             id: string;
             name: string;
             purpose: string;
-            /** @description The time of the last value replace. In RFC 3339. */
+            /**
+             * Format: date-time
+             * @description Holds the time of the last replace of the value.
+             */
             updated_at: string;
             /** @description The repositories, channels and profiles that use the secret. */
             used_by: components["schemas"]["SecretUsageView"][];
         };
         /**
-         * @description Whether a host trusts scripts from the control plane (FR-HK-08, ADR-0037).
+         * @description Whether a host trusts scripts from the control plane.
          * @enum {string}
          */
         ServerScriptsState: "unknown" | "disabled" | "enabled" | "insecure";
@@ -3552,7 +3589,7 @@ export interface components {
         };
         /**
          * @description The sign-in body. It holds the username and the password only. An unknown field, for example
-         *     `tenant`, is ignored (ADR-0025).
+         *     `tenant`, is ignored.
          */
         SignInRequest: {
             password: string;
@@ -3560,7 +3597,7 @@ export interface components {
             username: string;
         };
         SignInResponse: {
-            /** @description True when the account holds the installation-wide right (ADR-0029). */
+            /** @description True when the account holds the installation-wide right. */
             platform_admin: boolean;
             role: components["schemas"]["Role"];
             tenant?: components["schemas"]["TenantView"] | null;
@@ -3582,7 +3619,10 @@ export interface components {
             program_version: string;
             short_id: string;
             tags: string[];
-            /** @description In RFC 3339. Null when restic gave no valid time. */
+            /**
+             * Format: date-time
+             * @description Null when restic did not report a valid one.
+             */
             time?: string | null;
             /**
              * Format: int64
@@ -3625,7 +3665,10 @@ export interface components {
             agent_id?: string | null;
             /** @description A stable code that the user interface translates. Set when the state is `failed`. */
             error_code?: string | null;
-            /** @description In RFC 3339. Null unless the state is `done`. */
+            /**
+             * Format: date-time
+             * @description Null unless the state is `done`.
+             */
             fetched_at?: string | null;
             /** @description The filters that the job applied. Empty lists mean no filter. */
             hosts: string[];
@@ -3678,13 +3721,13 @@ export interface components {
             kind: "ls";
         };
         /**
-         * @description How one step of a job ended. The agent maps the restic exit code to it (FR-AG-09).
+         * @description How one step of a job ended. The agent maps the restic exit code to it.
          * @enum {string}
          */
         StepStatus: "success" | "warning" | "retry" | "config_error" | "cancelled" | "failed" | "skipped";
         /** @description One step of a job with its typed result. */
         StepView: {
-            /** @description Translated by the user interface (NFR-DOC-04). */
+            /** @description Translated by the user interface. */
             error_code?: string | null;
             error_params: {
                 [key: string]: string;
@@ -3694,7 +3737,7 @@ export interface components {
              * @description The exit code of restic, or -1 when no process ran.
              */
             exit_code: number;
-            /** @description In RFC 3339. */
+            /** Format: date-time */
             finished_at?: string | null;
             kind?: components["schemas"]["PlannedKind"] | null;
             /** @description Empty for a step that is not a script. */
@@ -3703,7 +3746,7 @@ export interface components {
             phase?: components["schemas"]["PlannedPhase"] | null;
             /** @description True after a hard kill that can leave a stale lock. */
             possible_stale_lock: boolean;
-            /** @description In RFC 3339. */
+            /** Format: date-time */
             started_at?: string | null;
             status: components["schemas"]["StepStatus"];
             step_id: string;
@@ -3724,15 +3767,12 @@ export interface components {
         /**
          * @description The type of a script template parameter. The value becomes an environment variable of the script.
          *
-         *     The name is separate from the kind of a profile parameter (ADR-0047), so the two enums keep two
-         *     schemas.
+         *     The name is separate from the kind of a profile parameter, so the two enums keep two schemas.
          * @enum {string}
          */
         TemplateParameterKind: "string" | "secret_ref" | "integer" | "boolean";
         /**
-         * @description The tenancy mode of the installation (ADR-0024).
-         *
-         *     The mode changes the API surface and the user interface. It never changes the storage model.
+         * @description The mode changes the API surface and the user interface. It never changes the storage model.
          * @enum {string}
          */
         TenancyMode: "single" | "multi";
@@ -3751,7 +3791,7 @@ export interface components {
             next_cursor?: string | null;
         };
         /**
-         * @description Tenant status (FR-TN-02).
+         * @description Tenant status.
          * @enum {string}
          */
         TenantStatus: "active" | "suspended" | "deleted";
@@ -3764,7 +3804,6 @@ export interface components {
             error?: string | null;
             ok: boolean;
         };
-        /** @description The request body of the `unlock_all` action (FR-SC-06). */
         UnlockAllRequest: {
             /** @description The agent that runs the step. An absent value uses the maintenance agent of the repository. */
             agent_id?: string | null;
@@ -3781,7 +3820,7 @@ export interface components {
              *     otherwise.
              */
             password?: string | null;
-            /** @description True when the account holds the installation-wide right (ADR-0029). */
+            /** @description True when the account holds the installation-wide right. */
             platform_admin?: boolean | null;
         };
         UpdateAlertRulesRequest: {
@@ -3823,10 +3862,10 @@ export interface components {
             missed_run_policy: components["schemas"]["MissedRunPolicy"];
             /** @description Free text of 1 to 100 characters. Unique in the tenant, ignoring the letter case. Holds no control or format character. */
             name?: string | null;
-            /** @description Replaces the whole list of the values of the plan (FR-PF-10). */
+            /** @description Replaces the whole list of the values of the plan. */
             parameter_values?: components["schemas"]["ParameterValueDef"][];
             profile_id: string;
-            /** @description The repository that the plan backs up into (ADR-0047). An absent value is refused. */
+            /** @description The repository that the plan backs up into. An absent value is refused. */
             repository_id: string;
             /**
              * Format: int32
@@ -3843,11 +3882,11 @@ export interface components {
             /** @description Free text of 1 to 100 characters. Unique in the tenant, ignoring the letter case. Holds no control or format character. */
             name?: string | null;
             options?: components["schemas"]["BackupOptions"];
-            /** @description Replaces the whole list (FR-PF-09). */
+            /** @description Replaces the whole list. */
             parameters?: components["schemas"]["ParameterDefRequest"][];
             paths?: components["schemas"]["ProfilePaths"];
             retention?: components["schemas"]["Retention"] | null;
-            /** @description Replaces the whole list. Only an Admin can change it (FR-HK-12). */
+            /** @description Replaces the whole list. Only an Admin can change it. */
             scripts?: components["schemas"]["ScriptDef"][];
             tags?: string[];
         };
@@ -3903,14 +3942,12 @@ export interface components {
             display_name: string;
             id: string;
             /**
-             * @description The last sign-in into the tenant or switch to it, in RFC 3339. Set in the user list and the
-             *     user record only.
+             * Format: date-time
+             * @description The last sign-in into the tenant or switch to it. Set in the user list and the user record
+             *     only.
              */
             last_sign_in_at?: string | null;
-            /**
-             * @description The account holds the installation-wide right, so a tenant scope cannot change it
-             *     (ADR-0029).
-             */
+            /** @description The account holds the installation-wide right, so a tenant scope cannot change it. */
             platform_admin: boolean;
             role: components["schemas"]["Role"];
             /** @description The account holds an active membership in another active tenant. */
@@ -3954,7 +3991,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request body is larger than the limit. */
@@ -3963,7 +4000,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The rate limit is reached. */
@@ -3972,7 +4009,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -4024,7 +4061,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -4033,7 +4070,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -4042,7 +4079,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -4074,7 +4111,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -4083,7 +4120,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The agent is not found. */
@@ -4092,7 +4129,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -4128,7 +4165,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -4137,7 +4174,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -4146,7 +4183,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The agent is not found. */
@@ -4155,7 +4192,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -4187,7 +4224,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -4196,7 +4233,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The agent is not found. */
@@ -4205,7 +4242,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -4241,7 +4278,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -4250,7 +4287,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -4259,7 +4296,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The agent is not found. */
@@ -4268,7 +4305,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -4304,7 +4341,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -4313,7 +4350,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -4322,7 +4359,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The agent is not found. */
@@ -4331,7 +4368,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The agent is revoked. */
@@ -4340,7 +4377,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -4376,7 +4413,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -4385,7 +4422,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -4394,7 +4431,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The pair is not a possible duplicate. */
@@ -4403,7 +4440,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The old record was online recently (`agent_recently_online`). */
@@ -4412,7 +4449,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -4442,7 +4479,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -4451,7 +4488,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The agent is not found. */
@@ -4460,7 +4497,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -4489,7 +4526,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -4498,7 +4535,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -4531,7 +4568,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -4540,7 +4577,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -4549,7 +4586,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -4590,7 +4627,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -4599,7 +4636,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -4608,7 +4645,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -4637,7 +4674,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -4646,7 +4683,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -4679,7 +4716,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -4688,7 +4725,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -4697,7 +4734,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -4727,7 +4764,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -4736,7 +4773,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The token is not found. */
@@ -4745,7 +4782,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -4794,7 +4831,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
             };
             /** @description The request is not authenticated. */
             401: {
@@ -4802,7 +4841,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -4811,7 +4850,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -4840,7 +4879,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -4871,7 +4910,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -4880,7 +4919,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The actor is an API token or the CSRF header is missing. */
@@ -4889,7 +4928,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description Too many attempts. */
@@ -4898,7 +4937,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The password work is busy. */
@@ -4907,7 +4946,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -4939,7 +4978,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
             };
             /** @description The credentials are not valid. */
             401: {
@@ -4947,7 +4988,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The CSRF header is missing. */
@@ -4956,7 +4997,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description Too many sign-in attempts. */
@@ -4965,7 +5006,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The password work is busy. */
@@ -4974,7 +5015,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -5001,7 +5042,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The CSRF header is missing. */
@@ -5010,7 +5051,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -5043,7 +5084,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -5052,7 +5093,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The caller is not a member of the target tenant. */
@@ -5061,7 +5102,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -5090,7 +5131,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -5119,7 +5160,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -5128,7 +5169,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -5165,7 +5206,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -5174,7 +5215,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -5183,7 +5224,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -5216,7 +5257,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -5225,7 +5266,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -5234,7 +5275,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -5266,7 +5307,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -5275,7 +5316,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -5284,7 +5325,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The token is not found. */
@@ -5293,7 +5334,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -5323,7 +5364,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -5332,7 +5373,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The token is not found. */
@@ -5341,7 +5382,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The token is used (`token_used`), already revoked (`token_already_revoked`) or expired (`token_expired`). */
@@ -5350,7 +5391,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -5379,7 +5420,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -5388,7 +5429,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The session, the token, the address, the tenant or the server has too many open streams. */
@@ -5397,7 +5438,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -5411,7 +5452,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The instance. */
+            /** @description The mode and the setup state. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5446,7 +5487,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -5455,7 +5496,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -5488,7 +5529,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -5497,7 +5538,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -5506,7 +5547,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The name exists, or the tenant holds the most templates. */
@@ -5515,7 +5556,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -5547,7 +5588,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -5556,7 +5597,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The template is not found. */
@@ -5565,7 +5606,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -5595,7 +5636,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -5604,7 +5645,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -5613,7 +5654,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The template is not found. */
@@ -5622,7 +5663,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -5658,7 +5699,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -5667,7 +5708,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -5676,7 +5717,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The template is not found. */
@@ -5685,7 +5726,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The name exists. */
@@ -5694,7 +5735,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -5722,9 +5763,9 @@ export interface operations {
                 group?: "running" | "failed" | "succeeded" | "succeeded_with_warnings";
                 /** @description A part of the plan, host or repository name, in any case; at most 200 characters. */
                 q?: string;
-                /** @description In RFC 3339: the first creation time that the list holds. */
+                /** @description Only the jobs created at or after this time. */
                 from?: string;
-                /** @description In RFC 3339: the last creation time that the list holds. Not before `from`. */
+                /** @description The last creation time that the list holds. Not before `from`. */
                 to?: string;
                 /**
                  * @description Default: `created_at`. A cursor takes only the default order. `duration` puts an unfinished
@@ -5757,7 +5798,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -5766,7 +5807,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -5775,7 +5816,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -5807,7 +5848,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -5816,7 +5857,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The job is not found. */
@@ -5825,7 +5866,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -5866,7 +5907,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -5875,7 +5916,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The job is not found. */
@@ -5884,7 +5925,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The job finished, or the agent is offline. */
@@ -5893,7 +5934,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -5909,8 +5950,8 @@ export interface operations {
                 /** @description The most lines in the page, from 1 to 2000. The default is 500. */
                 limit?: number;
                 /**
-                 * @description Reads the lines of one step only, for example `script-0` (FR-HK-11). The default is every
-                 *     line of the job. Use an empty value for the lines of the job itself.
+                 * @description Reads the lines of one step only, for example `script-0`. The default is every line of the
+                 *     job. Use an empty value for the lines of the job itself.
                  */
                 step_id?: string;
             };
@@ -5938,7 +5979,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -5947,7 +5988,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -5956,7 +5997,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The job is not found. */
@@ -5965,7 +6006,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -5994,7 +6035,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -6003,7 +6044,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -6036,7 +6077,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -6045,7 +6086,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -6054,7 +6095,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The name exists, or the tenant holds the most channels. */
@@ -6063,7 +6104,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -6095,7 +6136,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -6104,7 +6145,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The channel is not found. */
@@ -6113,7 +6154,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -6143,7 +6184,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -6152,7 +6193,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The channel is not found. */
@@ -6161,7 +6202,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -6197,7 +6238,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -6206,7 +6247,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -6215,7 +6256,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The channel is not found. */
@@ -6224,7 +6265,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The name exists. */
@@ -6233,7 +6274,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -6265,7 +6306,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -6274,7 +6315,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The channel is not found. */
@@ -6283,7 +6324,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The actor or the tenant sent too many tests. */
@@ -6292,7 +6333,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The server runs the most tests that it allows. */
@@ -6301,7 +6342,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -6351,7 +6392,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -6360,7 +6401,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -6369,7 +6410,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -6402,7 +6443,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -6411,7 +6452,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -6420,7 +6461,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The name exists. */
@@ -6429,7 +6470,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -6462,7 +6503,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -6471,7 +6512,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -6480,7 +6521,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -6512,7 +6553,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -6521,7 +6562,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The plan is not found. */
@@ -6530,7 +6571,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -6560,7 +6601,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -6569,7 +6610,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The plan is not found. */
@@ -6578,7 +6619,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -6614,7 +6655,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -6623,7 +6664,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -6632,7 +6673,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The plan is not found. */
@@ -6641,7 +6682,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -6675,7 +6716,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -6684,7 +6725,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -6693,7 +6734,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The plan is not found. */
@@ -6702,7 +6743,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -6734,7 +6775,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -6743,7 +6784,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -6752,7 +6793,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The plan is not found. */
@@ -6761,7 +6802,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The agent of the plan is revoked, a manual run of the plan is already queued (`already_queued`), or the plan runs on another host than its local repository (`not_repository_host`). */
@@ -6770,7 +6811,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -6778,9 +6819,9 @@ export interface operations {
     list_platform_audit: {
         parameters: {
             query?: {
-                /** @description Start of the time range in RFC 3339. */
+                /** @description Start of the time range. */
                 from?: string;
-                /** @description End of the time range in RFC 3339. */
+                /** @description End of the time range. */
                 to?: string;
                 action?: string;
                 actor_type?: string;
@@ -6821,7 +6862,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
             };
             /** @description The request is not authenticated. */
             401: {
@@ -6829,7 +6872,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -6838,7 +6881,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -6871,7 +6914,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -6880,7 +6923,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The current key is not the expected one. */
@@ -6889,7 +6932,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -6923,7 +6966,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -6932,7 +6975,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -6941,7 +6984,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -6974,7 +7017,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -6983,7 +7026,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -6992,7 +7035,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The name exists. */
@@ -7001,7 +7044,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -7033,7 +7076,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -7042,7 +7085,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The tenant is not found. */
@@ -7051,7 +7094,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -7081,7 +7124,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -7090,7 +7133,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The tenant is not found. */
@@ -7099,7 +7142,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The tenant is the platform tenant or it is not suspended. */
@@ -7108,7 +7151,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -7138,7 +7181,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -7147,7 +7190,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The tenant is not found. */
@@ -7156,7 +7199,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The tenant is deleted. */
@@ -7165,7 +7208,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -7195,7 +7238,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -7204,7 +7247,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The tenant is not found. */
@@ -7213,7 +7256,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The tenant is the platform tenant or it is deleted. */
@@ -7222,7 +7265,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -7251,7 +7294,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -7260,7 +7303,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -7293,7 +7336,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -7302,7 +7345,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -7311,7 +7354,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description A membership names an unknown organization. */
@@ -7320,7 +7363,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The username or the email exists. */
@@ -7329,7 +7372,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The password work is busy. */
@@ -7338,7 +7381,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -7370,7 +7413,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -7379,7 +7422,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The account is not found. */
@@ -7388,7 +7431,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -7422,7 +7465,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -7431,7 +7474,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -7440,7 +7483,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The account is not found. */
@@ -7449,7 +7492,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The account is the last active Platform Admin or the email exists. */
@@ -7458,7 +7501,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -7494,7 +7537,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -7503,7 +7546,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -7512,7 +7555,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The account or the tenant is not found. */
@@ -7521,7 +7564,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -7553,7 +7596,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -7562,7 +7605,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The membership is not found. */
@@ -7571,7 +7614,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The membership is the caller's own membership. */
@@ -7580,7 +7623,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -7616,7 +7659,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -7625,7 +7668,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -7634,7 +7677,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The membership is not found. */
@@ -7643,7 +7686,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -7677,7 +7720,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -7686,7 +7729,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -7695,7 +7738,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The account is not found. */
@@ -7704,7 +7747,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The password work is busy. */
@@ -7713,7 +7756,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -7745,7 +7788,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -7754,7 +7797,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -7763,7 +7806,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -7796,7 +7839,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -7805,7 +7848,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -7814,7 +7857,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The name exists. */
@@ -7823,7 +7866,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -7852,7 +7895,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -7861,7 +7904,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -7894,7 +7937,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -7903,7 +7946,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -7912,7 +7955,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The stored profile of the draft is not found. */
@@ -7921,7 +7964,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -7953,7 +7996,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -7962,7 +8005,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The profile is not found. */
@@ -7971,7 +8014,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -8001,7 +8044,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -8010,7 +8053,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The profile is not found. */
@@ -8019,7 +8062,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description A plan holds the profile (`profile_in_use`). The body lists the plans. */
@@ -8028,7 +8071,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -8064,7 +8107,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -8073,7 +8116,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -8082,7 +8125,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The profile is not found. */
@@ -8091,7 +8134,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -8123,7 +8166,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -8132,7 +8175,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The profile is not found. */
@@ -8141,7 +8184,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -8170,7 +8213,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -8179,7 +8222,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -8212,7 +8255,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -8221,7 +8264,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -8230,7 +8273,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The name exists. */
@@ -8239,7 +8282,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -8271,7 +8314,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -8280,7 +8323,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The repository is not found. */
@@ -8289,7 +8332,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -8319,7 +8362,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -8328,7 +8371,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The repository is not found. */
@@ -8337,7 +8380,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description A plan backs up into the repository (`repository_in_use`), or an active job holds it (`repository_has_active_job`). The body lists the records. */
@@ -8346,7 +8389,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -8382,7 +8425,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -8391,7 +8434,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -8400,7 +8443,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The repository is not found. */
@@ -8409,7 +8452,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The location of an initialized repository cannot change, and neither can the host of an initialized local repository (`repository_host_locked`). */
@@ -8418,7 +8461,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -8454,7 +8497,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -8463,7 +8506,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -8472,7 +8515,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The repository is not found. */
@@ -8481,7 +8524,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The agent is offline. */
@@ -8490,7 +8533,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -8525,7 +8568,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -8534,7 +8577,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -8543,7 +8586,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The repository or the job is not found. */
@@ -8552,7 +8595,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -8597,7 +8640,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -8606,7 +8649,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -8615,7 +8658,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The repository is not found. */
@@ -8624,7 +8667,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The repository is not initialized, the agent is offline, or the agent is too old. */
@@ -8633,7 +8676,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -8665,7 +8708,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -8674,7 +8717,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The repository is not found. */
@@ -8683,7 +8726,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -8719,7 +8762,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -8728,7 +8771,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -8737,7 +8780,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The repository is not found. */
@@ -8746,7 +8789,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -8782,7 +8825,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -8791,7 +8834,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -8800,7 +8843,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The repository is not found. */
@@ -8809,7 +8852,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The repository is not initialized, has nothing to forget, or holds an active exclusive job. */
@@ -8818,7 +8861,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -8854,7 +8897,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -8863,7 +8906,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -8872,7 +8915,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The repository is not found. */
@@ -8881,7 +8924,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The repository is not initialized, the agent is offline, or the agent is too old. */
@@ -8890,7 +8933,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -8900,9 +8943,9 @@ export interface operations {
             query?: {
                 /** @description Identifier that an earlier POST returned. Without it the call returns the newest stored list. */
                 job?: string;
-                /** @description Keep the snapshots made at this time or later, in RFC 3339. The control plane applies it. */
+                /** @description Keep the snapshots made at this time or later. The control plane applies it. */
                 from?: string;
-                /** @description Keep the snapshots made at this time or earlier, in RFC 3339. The control plane applies it. */
+                /** @description Keep the snapshots made at this time or earlier. The control plane applies it. */
                 to?: string;
             };
             header?: never;
@@ -8929,7 +8972,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -8938,7 +8981,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -8947,7 +8990,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The repository or the job is not found. */
@@ -8956,7 +8999,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -8992,7 +9035,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -9001,7 +9044,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -9010,7 +9053,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The repository is not found. */
@@ -9019,7 +9062,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The repository is not initialized, or the agent is offline. */
@@ -9028,7 +9071,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -9064,7 +9107,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -9073,7 +9116,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -9082,7 +9125,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The repository is not found. */
@@ -9091,7 +9134,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The agent is offline. */
@@ -9100,7 +9143,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -9136,7 +9179,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -9145,7 +9188,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -9154,7 +9197,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The repository is not found. */
@@ -9163,7 +9206,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description A job waits or runs on the repository. */
@@ -9172,7 +9215,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -9204,7 +9247,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -9213,7 +9256,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The repository is not found. */
@@ -9222,7 +9265,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -9251,7 +9294,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -9260,7 +9303,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -9293,7 +9336,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -9302,7 +9345,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -9311,7 +9354,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The name exists, or the tenant holds the most templates. */
@@ -9320,7 +9363,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -9352,7 +9395,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -9361,7 +9404,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The template is not found. */
@@ -9370,7 +9413,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -9400,7 +9443,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -9409,7 +9452,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -9418,7 +9461,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The template is not found. */
@@ -9427,7 +9470,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -9463,7 +9506,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -9472,7 +9515,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -9481,7 +9524,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The template is not found. */
@@ -9490,7 +9533,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The name exists. */
@@ -9499,7 +9542,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -9528,7 +9571,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -9537,7 +9580,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -9570,7 +9613,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -9579,7 +9622,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -9588,7 +9631,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The name exists. */
@@ -9597,7 +9640,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -9629,7 +9672,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -9638,7 +9681,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The secret is not found. */
@@ -9647,7 +9690,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -9677,7 +9720,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -9686,7 +9729,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The secret is not found. */
@@ -9695,7 +9738,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description An object uses the secret (`secret_in_use`). The body lists the objects. */
@@ -9704,7 +9747,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -9738,7 +9781,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -9747,7 +9790,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -9756,7 +9799,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The secret is not found. */
@@ -9765,7 +9808,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -9798,7 +9841,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The setup token is not valid. */
@@ -9807,7 +9850,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The CSRF header is missing. */
@@ -9816,7 +9859,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The setup is already done. */
@@ -9825,7 +9868,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description Too many setup attempts. */
@@ -9834,7 +9877,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The password work is busy. */
@@ -9843,7 +9886,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -9892,7 +9935,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -9901,7 +9944,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -9934,7 +9977,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -9943,7 +9986,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -9952,7 +9995,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The username exists in the installation. */
@@ -9961,7 +10004,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The password work is busy. */
@@ -9970,7 +10013,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -10002,7 +10045,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -10011,7 +10054,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The account is not a member of the tenant. */
@@ -10020,7 +10063,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -10050,7 +10093,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -10059,7 +10102,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The account is not a member of the tenant. */
@@ -10068,7 +10111,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The account is the last Admin. */
@@ -10077,7 +10120,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -10113,7 +10156,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -10122,7 +10165,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The account is shared. */
@@ -10131,7 +10174,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The account is not a member of the tenant. */
@@ -10140,7 +10183,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The change removes the last Admin. */
@@ -10149,7 +10192,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -10183,7 +10226,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The request is not authenticated. */
@@ -10192,7 +10235,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The account is shared or is the account of the caller. */
@@ -10201,7 +10244,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The account is not a member of the tenant. */
@@ -10210,7 +10253,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The password work is busy. */
@@ -10219,7 +10262,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -10266,7 +10309,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description The role is not sufficient. */
@@ -10275,7 +10318,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemBody"];
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };
@@ -10301,7 +10344,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
             };
         };
     };

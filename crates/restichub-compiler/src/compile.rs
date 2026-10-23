@@ -34,7 +34,7 @@ pub struct Plan {
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlannedStep {
     pub step: Step,
-    /// True for `forget`, `prune` and `check` (FR-RP-08).
+    /// True for `forget`, `prune` and `check`.
     pub maintenance: bool,
 }
 

@@ -36,8 +36,6 @@ use super::{
     repository_access, script_secrets, target_facts_with,
 };
 
-/// The body of the draft preview (FR-PF-04, AC-PF-01).
-///
 /// The profile fields describe a draft: the server validates them as a create request, stores
 /// nothing and checks no name uniqueness. A caller without the profile write right sends the
 /// identifiers only, and the server compiles the stored profile.
@@ -46,9 +44,9 @@ use super::{
 pub struct PreviewRequest {
     /// The identifier of the registered agent that supplies the target facts.
     pub agent_id: String,
-    /// The repository of the commands. Absent uses the repository of the first plan of
-    /// `profile_id` on this agent, then of the first plan of `profile_id`, and no repository when
-    /// the draft holds no stored profile or plan (ADR-0047).
+    /// The repository of the commands. Absent uses the repository of the first plan of `profile_id`
+    /// on this agent, then of the first plan of `profile_id`, and no repository when the draft
+    /// holds no stored profile or plan.
     #[serde(default)]
     pub repository_id: Option<String>,
     /// The stored profile that the draft edits. Required for a caller without the profile write
@@ -70,17 +68,15 @@ pub struct PreviewRequest {
     pub tags: Vec<String>,
     #[serde(default)]
     pub options: BackupOptions,
-    /// Scripts from the control plane, in the order they run in their phase (FR-HK-09). The
-    /// preview accepts them from a caller with the script write right only; another caller gets
-    /// the stored scripts (FR-HK-12).
+    /// Scripts from the control plane, in the order they run in their phase. The preview accepts
+    /// them from a caller with the script write right only; another caller gets the stored scripts.
     #[serde(default)]
     pub scripts: Vec<ScriptDef>,
     #[serde(default)]
     pub retention: Option<Retention>,
     #[serde(default)]
     pub check: Option<CheckOptions>,
-    /// A caller without the profile write right sends no fields, and the stored profile gives them
-    /// (FR-PF-09).
+    /// A caller without the profile write right sends no fields, and the stored profile gives them.
     #[serde(default)]
     pub parameters: Vec<ParameterDefRequest>,
     /// Accepted only as an empty list, so an old client keeps working; use `scripts` instead
@@ -108,20 +104,19 @@ impl From<PreviewRequest> for CreateProfileRequest {
     }
 }
 
-/// One environment variable of a previewed step. A secret value is masked (AC-PF-01).
+/// One environment variable of a previewed step. A secret value is masked.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct PreviewEnvView {
     pub name: String,
     pub value: String,
 }
 
-/// One previewed step: the kind, the maintenance flag, the command line and the environment
-/// (FR-PF-04, AC-PF-01).
+/// One previewed step: the kind, the maintenance flag, the command line and the environment.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct PreviewStepView {
     /// The step kind, for example `backup`, `forget`, `prune`, `check` or `script`.
     pub kind: String,
-    /// True for `forget`, `prune` and `check` (FR-RP-08).
+    /// True for `forget`, `prune` and `check`.
     pub maintenance: bool,
     /// Rendered argv with masked secrets.
     pub command: String,
@@ -129,7 +124,7 @@ pub struct PreviewStepView {
     pub environment: Vec<PreviewEnvView>,
 }
 
-/// The preview of a profile draft for one target agent (FR-PF-04).
+/// The preview of a profile draft for one target agent.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct PreviewResponse {
     /// Null when the draft names no repository and its stored profile has no plan, so the steps
@@ -147,15 +142,16 @@ pub struct PreviewResponse {
 #[utoipa::path(
     post,
     path = "/api/v1/profiles/preview",
+    tags = ["profiles"],
     summary = "Previews a profile draft for one target agent.",
-    description = "The steps and the command lines agree with the command that the agent runs. The draft is not stored. Secrets are masked (AC-PF-01). A caller without the profile write right receives the preview of the stored profile that `profile_id` names, and its draft fields are ignored. A caller without the script write right receives the stored scripts and its draft scripts are ignored. A caller without the script read right receives the parameter values of the requested host only when a plan of the stored profile runs there.",
+    description = "The steps and the command lines agree with the command that the agent runs. The draft is not stored. Secrets are masked. A caller without the profile write right receives the preview of the stored profile that `profile_id` names, and its draft fields are ignored. A caller without the script write right receives the stored scripts and its draft scripts are ignored. A caller without the script read right receives the parameter values of the requested host only when a plan of the stored profile runs there.",
     security(("cookie" = []), ("bearer" = [])),
     request_body = PreviewRequest,
     responses(
         (status = 200, description = "The previewed steps.", body = PreviewResponse),
-        (status = 400, description = "The draft or the agent is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "The draft or the agent is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The stored profile of the draft is not found.", body = crate::error::ProblemBody)
+        (status = 404, description = "The stored profile of the draft is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn preview_profile(

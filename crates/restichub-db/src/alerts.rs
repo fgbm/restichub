@@ -217,9 +217,9 @@ pub struct AlertParams {
     /// The recovery point objective of a plan, in seconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rpo_seconds: Option<i64>,
-    /// The finish time of the last succeeded backup, in RFC 3339. Absent when the plan never
-    /// succeeded.
+    /// The finish time of the last succeeded backup. Absent when the plan never succeeded.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(format = DateTime)]
     pub last_success_at: Option<String>,
     /// The threshold of the rule at the time of the alert, in minutes.
     #[serde(default, skip_serializing_if = "Option::is_none")]

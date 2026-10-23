@@ -666,8 +666,7 @@ pub struct ProblemBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub blockers: Option<Blockers>,
     /// Only a validation refusal sets it: `parameter_missing`, `parameter_kind_mismatch`,
-    /// `parameter_not_declared` and `parameter_needs_default` (FR-PF-05, FR-PF-11); the last two
-    /// list one name.
+    /// `parameter_not_declared` and `parameter_needs_default`; the last two list one name.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parameters: Option<Vec<String>>,
     /// The name of the repository that holds the location; only `repository_location_taken` sets
@@ -740,9 +739,17 @@ impl Blockers {
 /// definition.
 #[derive(utoipa::IntoResponses)]
 pub enum ProtectedResponses {
-    #[response(status = 401, description = "The request is not authenticated.")]
+    #[response(
+        status = 401,
+        description = "The request is not authenticated.",
+        content_type = "application/problem+json"
+    )]
     Unauthenticated(ProblemBody),
-    #[response(status = 403, description = "The role is not sufficient.")]
+    #[response(
+        status = 403,
+        description = "The role is not sufficient.",
+        content_type = "application/problem+json"
+    )]
     Forbidden(ProblemBody),
 }
 

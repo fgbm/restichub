@@ -51,8 +51,6 @@ pub const MAX_TAGS: usize = 64;
 /// Limit of the retention lists: the keep tags, the group-by keys and the snapshot filter.
 pub const MAX_RETENTION_LIST: usize = 64;
 
-/// The source paths for each operating system (FR-PF-01).
-///
 /// `all` applies to every operating system. `windows`, `linux` and `macos` add the paths of one
 /// operating system.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
@@ -68,39 +66,38 @@ pub struct ProfilePaths {
     pub macos: Vec<String>,
 }
 
-/// The restic flags that a profile sets (FR-PF-01).
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct BackupOptions {
-    /// Use a file system snapshot. VSS on Windows only (FR-PF-01).
+    /// Use a file system snapshot. VSS on Windows only.
     #[serde(default)]
     pub use_fs_snapshot: bool,
     #[serde(default)]
     pub one_file_system: bool,
     #[serde(default)]
     pub exclude_caches: bool,
-    /// Upload limit in kibibytes each second. Zero means no limit (FR-AG-15).
+    /// Upload limit in kibibytes each second. Zero means no limit.
     #[serde(default)]
     pub limit_upload_kib: u64,
-    /// Download limit in kibibytes each second. Zero means no limit (FR-AG-15).
+    /// Download limit in kibibytes each second. Zero means no limit.
     #[serde(default)]
     pub limit_download_kib: u64,
     /// `low` runs the backup and the `forget` step of the profile at a lower process priority, and
-    /// on Linux at a lower I/O priority (FR-AG-15). The `prune` and `check` steps of a repository
-    /// keep the normal priority. A missing value gives `normal`, also in an update.
+    /// on Linux at a lower I/O priority. The `prune` and `check` steps of a repository keep the
+    /// normal priority. A missing value gives `normal`, also in an update.
     #[serde(default)]
     pub priority: ProfilePriority,
     /// Minutes without progress after which the agent stops a step. From 5 to 10080. A missing
-    /// value gives the default of a new profile and keeps the stored value of an update (ADR-0039).
+    /// value gives the default of a new profile and keeps the stored value of an update.
     #[serde(default)]
     pub stall_timeout_minutes: Option<u32>,
-    /// Minutes after which the agent stops the job whatever its progress. Zero means no limit.
-    /// At most 43200. A missing value behaves as the stall timeout does (ADR-0039).
+    /// Minutes after which the agent stops the job whatever its progress. Zero means no limit. At
+    /// most 43200. A missing value behaves as the stall timeout does.
     #[serde(default)]
     pub max_duration_minutes: Option<u32>,
 }
 
-/// The job limits that a new profile gets when the request names none (ADR-0039).
+/// The job limits that a new profile gets when the request names none.
 #[derive(Debug, Clone, Copy, Serialize, ToSchema)]
 pub struct JobLimitDefaults {
     pub stall_timeout_minutes: u32,
@@ -174,7 +171,7 @@ impl BackupOptions {
     }
 }
 
-/// Position of a script in the job (FR-HK-05).
+/// Position of a script in the job.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum HookPhase {
@@ -206,7 +203,7 @@ pub struct SnapshotFilter {
     pub paths: Vec<String>,
 }
 
-/// How long the snapshots stay (FR-PF-01).
+/// How long the snapshots stay.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Retention {
@@ -233,7 +230,7 @@ pub struct Retention {
     pub filter: SnapshotFilter,
 }
 
-/// Settings of the verification step (FR-PF-01).
+/// Settings of the verification step.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CheckOptions {
@@ -242,7 +239,7 @@ pub struct CheckOptions {
     pub read_data_subset: String,
 }
 
-/// The fields that arrive at the create endpoint (FR-PF-01).
+/// The fields that arrive at the create endpoint.
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CreateProfileRequest {
@@ -259,8 +256,8 @@ pub struct CreateProfileRequest {
     pub tags: Vec<String>,
     #[serde(default)]
     pub options: BackupOptions,
-    /// Scripts from the control plane, in the order they run in their phase (FR-HK-09). Only an
-    /// Admin can set them.
+    /// Scripts from the control plane, in the order they run in their phase. Only an Admin can set
+    /// them.
     #[serde(default)]
     pub scripts: Vec<ScriptDef>,
     /// Absent when the profile keeps every snapshot.
@@ -269,7 +266,7 @@ pub struct CreateProfileRequest {
     /// Absent when the profile runs no verification step.
     #[serde(default)]
     pub check: Option<CheckOptions>,
-    /// What the profile offers to its hosts (FR-PF-09). At most 64.
+    /// What the profile offers to its hosts. At most 64.
     #[serde(default)]
     #[schema(max_items = 64)]
     pub parameters: Vec<ParameterDefRequest>,
@@ -298,14 +295,14 @@ pub struct UpdateProfileRequest {
     pub tags: Vec<String>,
     #[serde(default)]
     pub options: BackupOptions,
-    /// Replaces the whole list. Only an Admin can change it (FR-HK-12).
+    /// Replaces the whole list. Only an Admin can change it.
     #[serde(default)]
     pub scripts: Vec<ScriptDef>,
     #[serde(default)]
     pub retention: Option<Retention>,
     #[serde(default)]
     pub check: Option<CheckOptions>,
-    /// Replaces the whole list (FR-PF-09).
+    /// Replaces the whole list.
     #[serde(default)]
     #[schema(max_items = 64)]
     pub parameters: Vec<ParameterDefRequest>,
@@ -316,7 +313,7 @@ pub struct UpdateProfileRequest {
     pub hooks: Option<Vec<serde_json::Value>>,
 }
 
-/// One stored profile (FR-PF-01). It holds no secret.
+/// One stored profile. It holds no secret.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct ProfileView {
     pub id: String,
@@ -329,12 +326,11 @@ pub struct ProfileView {
     pub scripts: Vec<ScriptDef>,
     pub retention: Option<Retention>,
     pub check: Option<CheckOptions>,
-    /// What the profile declares (FR-PF-09). For a Viewer, a text default is empty with the flag
-    /// `hidden` (FR-PF-12).
+    /// What the profile declares. For a Viewer, a text default is empty with the flag `hidden`.
     pub parameters: Vec<ParameterDefView>,
-    /// In RFC 3339.
+    #[schema(format = DateTime)]
     pub created_at: String,
-    /// In RFC 3339.
+    #[schema(format = DateTime)]
     pub updated_at: String,
     /// Null for an API token actor.
     pub created_by: Option<String>,
@@ -371,7 +367,7 @@ pub struct ProfileListResponse {
     pub next_cursor: Option<String>,
 }
 
-/// A warning that the save-time compile reported for one target (FR-PF-05).
+/// A warning that the save-time compile reported for one target.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct ProfileWarning {
     /// Where the warning applies, for example `paths.all`.
@@ -383,20 +379,19 @@ pub struct ProfileWarning {
     pub os: Option<String>,
 }
 
-/// The result of a profile create or update: the stored profile and the save-time warnings
-/// (FR-PF-05).
+/// The result of a profile create or update: the stored profile and the save-time warnings.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct ProfileResponse {
     pub profile: ProfileView,
     pub warnings: Vec<ProfileWarning>,
-    /// The plans of the profile that the updated settings no longer compile for (FR-SC-11).
+    /// The plans of the profile that the updated settings no longer compile for.
     pub plan_warnings: Vec<PlanWarning>,
 }
 
-/// A plan that the updated profile no longer compiles for (FR-SC-11).
+/// A plan that the updated profile no longer compiles for.
 ///
 /// The update does not refuse the change. The plan keeps its schedule and fails at dispatch time,
-/// when the queue recompiles the profile for the facts of the agent, in a later part of epic #7.
+/// when the queue recompiles the profile for the facts of the agent.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct PlanWarning {
     pub plan_id: String,

@@ -36,7 +36,7 @@ use crate::views::{TenantView, UserView};
 const MAX_SIGN_IN_FIELD: usize = 128;
 
 /// The sign-in body. It holds the username and the password only. An unknown field, for example
-/// `tenant`, is ignored (ADR-0025).
+/// `tenant`, is ignored.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct SignInRequest {
     /// Unique in the installation; ignores the letter case.
@@ -47,10 +47,10 @@ pub struct SignInRequest {
 #[derive(Debug, Serialize, ToSchema)]
 pub struct SignInResponse {
     pub user: UserView,
-    /// Null for a session with no organization (ADR-0029).
+    /// Null for a session with no organization.
     pub tenant: Option<TenantView>,
     pub role: Role,
-    /// True when the account holds the installation-wide right (ADR-0029).
+    /// True when the account holds the installation-wide right.
     pub platform_admin: bool,
 }
 
@@ -65,10 +65,10 @@ pub struct ChangePasswordRequest {
 pub struct MeResponse {
     /// Null for an API token.
     pub user: Option<UserView>,
-    /// Null for a session with no organization (ADR-0029).
+    /// Null for a session with no organization.
     pub tenant: Option<TenantView>,
     pub role: Role,
-    /// True when the account holds the installation-wide right (ADR-0029).
+    /// True when the account holds the installation-wide right.
     pub platform_admin: bool,
 }
 
@@ -98,14 +98,15 @@ pub struct SwitchTenantRequest {
 #[utoipa::path(
     post,
     path = "/api/v1/auth/sign-in",
+    tags = ["auth"],
     request_body = SignInRequest,
     responses(
         (status = 200, description = "The session cookie is set.", body = SignInResponse),
-        (status = 400, description = "The request body is not valid."),
-        (status = 401, description = "The credentials are not valid.", body = crate::error::ProblemBody),
-        (status = 403, description = "The CSRF header is missing.", body = crate::error::ProblemBody),
-        (status = 429, description = "Too many sign-in attempts.", body = crate::error::ProblemBody),
-        (status = 503, description = "The password work is busy.", body = crate::error::ProblemBody)
+        (status = 400, description = "The request body is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 401, description = "The credentials are not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 403, description = "The CSRF header is missing.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 429, description = "Too many sign-in attempts.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 503, description = "The password work is busy.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn sign_in(
@@ -239,17 +240,18 @@ pub async fn sign_in(
         .into_response())
 }
 
-/// Lists the memberships of the caller only (ADR-0025).
+/// Lists the memberships of the caller only.
 ///
 /// The platform tenant is included for a Platform Admin in multi mode. In single mode the platform
-/// tenant is hidden (ADR-0024).
+/// tenant is hidden.
 #[utoipa::path(
     get,
     path = "/api/v1/auth/tenants",
+    tags = ["auth"],
     security(("cookie" = []), ("bearer" = [])),
     responses(
         (status = 200, description = "The memberships of the caller.", body = TenantAccessListResponse),
-        (status = 401, description = "The request is not authenticated.", body = crate::error::ProblemBody)
+        (status = 401, description = "The request is not authenticated.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn list_tenants(
@@ -299,7 +301,7 @@ async fn tenant_name(state: &AppState, tenant_id: TenantId) -> String {
     name
 }
 
-/// Switches the session to another tenant (ADR-0025).
+/// Switches the session to another tenant.
 ///
 /// The endpoint checks the membership of the caller in the target tenant, deletes the source
 /// session, creates a new session in the target tenant with the source expiry and the source user
@@ -308,13 +310,14 @@ async fn tenant_name(state: &AppState, tenant_id: TenantId) -> String {
 #[utoipa::path(
     post,
     path = "/api/v1/auth/switch",
+    tags = ["auth"],
     security(("cookie" = []), ("bearer" = [])),
     request_body = SwitchTenantRequest,
     responses(
         (status = 200, description = "The session moved to the target tenant.", body = SignInResponse),
-        (status = 400, description = "The target tenant is the current tenant.", body = crate::error::ProblemBody),
-        (status = 401, description = "The request is not authenticated.", body = crate::error::ProblemBody),
-        (status = 403, description = "The caller is not a member of the target tenant.", body = crate::error::ProblemBody)
+        (status = 400, description = "The target tenant is the current tenant.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 401, description = "The request is not authenticated.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 403, description = "The caller is not a member of the target tenant.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn switch_tenant(
@@ -436,11 +439,12 @@ async fn write_switch_audit(
 #[utoipa::path(
     post,
     path = "/api/v1/auth/sign-out",
+    tags = ["auth"],
     security(("cookie" = []), ("bearer" = [])),
     responses(
         (status = 204, description = "The session is removed."),
-        (status = 401, description = "The request is not authenticated.", body = crate::error::ProblemBody),
-        (status = 403, description = "The CSRF header is missing.", body = crate::error::ProblemBody)
+        (status = 401, description = "The request is not authenticated.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 403, description = "The CSRF header is missing.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn sign_out(
@@ -465,10 +469,11 @@ pub async fn sign_out(
 #[utoipa::path(
     get,
     path = "/api/v1/auth/me",
+    tags = ["auth"],
     security(("cookie" = []), ("bearer" = [])),
     responses(
         (status = 200, description = "The current actor.", body = MeResponse),
-        (status = 401, description = "The request is not authenticated.", body = crate::error::ProblemBody)
+        (status = 401, description = "The request is not authenticated.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn me(
@@ -515,15 +520,16 @@ pub async fn me(
 #[utoipa::path(
     post,
     path = "/api/v1/auth/password",
+    tags = ["auth"],
     security(("cookie" = []), ("bearer" = [])),
     request_body = ChangePasswordRequest,
     responses(
         (status = 204, description = "The password is changed."),
-        (status = 400, description = "The new password is not valid.", body = crate::error::ProblemBody),
-        (status = 401, description = "The request is not authenticated.", body = crate::error::ProblemBody),
-        (status = 403, description = "The actor is an API token or the CSRF header is missing.", body = crate::error::ProblemBody),
-        (status = 429, description = "Too many attempts.", body = crate::error::ProblemBody),
-        (status = 503, description = "The password work is busy.", body = crate::error::ProblemBody)
+        (status = 400, description = "The new password is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 401, description = "The request is not authenticated.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 403, description = "The actor is an API token or the CSRF header is missing.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 429, description = "Too many attempts.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 503, description = "The password work is busy.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn change_password(

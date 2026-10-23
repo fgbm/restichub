@@ -62,6 +62,7 @@ pub struct DashboardHost {
     pub online: bool,
     /// The host never opened a stream since its enrollment. It counts as neither online nor offline.
     pub waiting: bool,
+    #[schema(format = DateTime)]
     pub last_seen_at: Option<String>,
 }
 
@@ -84,6 +85,7 @@ pub struct DashboardPlan {
     pub repository_name: String,
     pub enabled: bool,
     /// The finish time of the last succeeded backup. Null when the plan never succeeded.
+    #[schema(format = DateTime)]
     pub last_success_at: Option<String>,
     /// The seconds since the last success, or since the creation of a plan that never succeeded.
     pub age_seconds: i64,
@@ -126,6 +128,7 @@ pub struct DashboardFailedJob {
     pub agent_hostname: String,
     pub plan_name: Option<String>,
     pub repository_name: Option<String>,
+    #[schema(format = DateTime)]
     pub finished_at: String,
 }
 
@@ -138,6 +141,7 @@ pub struct DashboardAlerts {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct DashboardResponse {
+    #[schema(format = DateTime)]
     pub generated_at: String,
     pub hosts: DashboardHosts,
     pub plans: DashboardPlans,
@@ -232,6 +236,7 @@ impl Default for DashboardCache {
 #[utoipa::path(
     get,
     path = "/api/v1/dashboard",
+    tags = ["system"],
     security(("cookie" = []), ("bearer" = [])),
     responses(
         (status = 200, description = "The overview of the tenant.", body = DashboardResponse),

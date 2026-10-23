@@ -45,7 +45,7 @@ impl From<AgentSortKey> for AgentSort {
     }
 }
 
-/// Whether the host trusts the scripts of the control plane (FR-HK-08).
+/// Whether the host trusts the scripts of the control plane.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ServerScriptsFilter {
@@ -121,11 +121,12 @@ pub struct AgentListResponse {
 #[utoipa::path(
     get,
     path = "/api/v1/agents",
+    tags = ["hosts"],
     security(("cookie" = []), ("bearer" = [])),
     params(AgentListQuery),
     responses(
         (status = 200, description = "The agents of the tenant.", body = AgentListResponse),
-        (status = 400, description = "A query parameter is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "A query parameter is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
     )
 )]

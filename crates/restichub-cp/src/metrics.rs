@@ -69,6 +69,7 @@ impl Default for SnapshotCache {
 #[utoipa::path(
     get,
     path = "/metrics",
+    tags = ["system"],
     summary = "Prometheus metrics of the tenant.",
     description = "The text format of Prometheus. The credential needs the Viewer role; use an API token with the Viewer role for the scraper. Each sample has the label `tenant`.",
     security(("cookie" = []), ("bearer" = [])),

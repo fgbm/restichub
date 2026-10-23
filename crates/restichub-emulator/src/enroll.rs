@@ -49,7 +49,7 @@ pub struct EnrolledIdentity {
     pub grpc_endpoint: Option<String>,
 }
 
-/// One public job signing key of the enrollment response (ADR-0026).
+/// One public job signing key of the enrollment response.
 #[derive(Debug, Clone)]
 pub struct EnrollmentKeyBody {
     /// `current` or `next`.

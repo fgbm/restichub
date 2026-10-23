@@ -89,19 +89,21 @@ pub struct AgentView {
     /// Absolute directories where the agent restores files, from its last connection. A restore
     /// target must lie inside one of them.
     pub restore_roots: Vec<String>,
-    /// Whether the host trusts scripts from the control plane (FR-HK-08, ADR-0037). The host
-    /// administrator changes it with `restichub-agent trust-server-scripts`.
+    /// Whether the host trusts scripts from the control plane. The host administrator changes it
+    /// with `restichub-agent trust-server-scripts`.
     pub server_scripts: restichub_db::ServerScriptsState,
     /// The interpreters the agent found, for example `bash`. Empty unless the mode is enabled.
     pub script_interpreters: Vec<String>,
     /// Lower-case hexadecimal.
     pub certificate_serial: String,
-    /// In RFC 3339.
+    #[schema(format = DateTime)]
     pub certificate_expires_at: String,
-    /// In RFC 3339. Null until the first rotation of the certificate.
+    /// Null until the first rotation of the certificate.
+    #[schema(format = DateTime)]
     pub last_certificate_rotation_at: Option<String>,
-    /// In RFC 3339. Null unless a connection presented the certificate that the last rotation
-    /// replaced. It can mean a copy of the old key (T17).
+    /// Null unless a connection presented the certificate that the last rotation replaced. It can
+    /// mean a copy of the old key (T17).
+    #[schema(format = DateTime)]
     pub superseded_certificate_used_at: Option<String>,
     /// Reported in the last hello as `major.minor`. Null before the first hello.
     pub protocol_version: Option<String>,
@@ -113,10 +115,14 @@ pub struct AgentView {
     /// After an instance stops without a close, the value stays true for up to 90 seconds. Always
     /// false for a revoked host.
     pub online: bool,
+    #[schema(format = DateTime)]
     pub last_seen_at: Option<String>,
     /// The time of the first stream open. Null while an active host waits for its first connection.
+    #[schema(format = DateTime)]
     pub first_connected_at: Option<String>,
+    #[schema(format = DateTime)]
     pub created_at: String,
+    #[schema(format = DateTime)]
     pub revoked_at: Option<String>,
     pub revoked_by_user_id: Option<String>,
     /// Another active host of the tenant that reported the same machine identifier.
@@ -127,10 +133,12 @@ pub struct AgentView {
 pub struct DuplicateOfView {
     pub id: String,
     pub hostname: String,
+    #[schema(format = DateTime)]
     pub created_at: String,
+    #[schema(format = DateTime)]
     pub last_seen_at: Option<String>,
     /// True when the other record was created before this one. Only the newer record offers the
-    /// replacement of the older one (FR-ID-11).
+    /// replacement of the older one.
     pub is_older: bool,
 }
 
@@ -198,12 +206,13 @@ pub struct RenameAgentRequest {
 #[utoipa::path(
     get,
     path = "/api/v1/agents/{id}",
+    tags = ["hosts"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the agent.")),
     responses(
         (status = 200, description = "The agent.", body = AgentView),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The agent is not found.", body = crate::error::ProblemBody)
+        (status = 404, description = "The agent is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn get_agent(
@@ -226,14 +235,15 @@ pub async fn get_agent(
 #[utoipa::path(
     patch,
     path = "/api/v1/agents/{id}",
+    tags = ["hosts"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the agent.")),
     request_body = RenameAgentRequest,
     responses(
         (status = 200, description = "The renamed agent.", body = AgentView),
-        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The agent is not found.", body = crate::error::ProblemBody)
+        (status = 404, description = "The agent is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn rename_agent(
@@ -270,19 +280,20 @@ pub async fn rename_agent(
     }
 }
 
-/// Revokes an agent of the tenant (FR-ID-04, AC-ID-04).
+/// Revokes an agent of the tenant.
 ///
 /// The endpoint is idempotent: a second call changes nothing. The status change and the audit
 /// record commit in one transaction.
 #[utoipa::path(
     post,
     path = "/api/v1/agents/{id}/revoke",
+    tags = ["hosts"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the agent.")),
     responses(
         (status = 204, description = "The agent is revoked."),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The agent is not found.", body = crate::error::ProblemBody)
+        (status = 404, description = "The agent is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn revoke_agent(
@@ -332,16 +343,17 @@ pub struct ReenrollAgentRequest {
 #[utoipa::path(
     post,
     path = "/api/v1/agents/{id}/reenroll",
+    tags = ["hosts"],
     summary = "Issues an enrollment token that re-registers an existing host.",
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the agent.")),
     request_body = ReenrollAgentRequest,
     responses(
         (status = 201, description = "The token is created. The value appears once.", body = crate::enrollment_tokens::CreateEnrollmentTokenResponse),
-        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The agent is not found.", body = crate::error::ProblemBody),
-        (status = 409, description = "The agent is revoked.", body = crate::error::ProblemBody)
+        (status = 404, description = "The agent is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 409, description = "The agent is revoked.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn reenroll_agent(
@@ -387,25 +399,26 @@ pub struct ReplaceAgentResponse {
 }
 
 /// Moves the plans, maintenance host references and labels of an old duplicate record to this host
-/// and revokes the old record (FR-ID-01).
+/// and revokes the old record.
 ///
 /// Both records must be active and must report the same machine identifier. This record must be
 /// newer than the old one, and the old one must have been silent for the online window, otherwise
 /// the answer is HTTP 404 or HTTP 409 `agent_recently_online`. The move and the revoke commit in
-/// one transaction; the running jobs of the old record are cancelled as for a revoke (FR-ID-04).
+/// one transaction; the running jobs of the old record are cancelled as for a revoke.
 #[utoipa::path(
     post,
     path = "/api/v1/agents/{id}/replace",
+    tags = ["hosts"],
     summary = "Replaces the old duplicate record of a host.",
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the new agent record.")),
     request_body = ReplaceAgentRequest,
     responses(
         (status = 200, description = "The old record is replaced.", body = ReplaceAgentResponse),
-        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The pair is not a possible duplicate.", body = crate::error::ProblemBody),
-        (status = 409, description = "The old record was online recently (`agent_recently_online`).", body = crate::error::ProblemBody)
+        (status = 404, description = "The pair is not a possible duplicate.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 409, description = "The old record was online recently (`agent_recently_online`).", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn replace_agent(

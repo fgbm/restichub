@@ -51,13 +51,13 @@ impl ProfilePaths {
 /// Backup options (FR-PF-01).
 #[derive(Debug, Clone, Default)]
 pub struct BackupOptions {
-    /// Use a file system snapshot. VSS on Windows only (FR-PF-01).
+    /// Use a file system snapshot. VSS on Windows only.
     pub use_fs_snapshot: bool,
     pub one_file_system: bool,
     pub exclude_caches: bool,
-    /// Upload limit in kibibytes each second. Zero means no limit (FR-AG-15).
+    /// Upload limit in kibibytes each second. Zero means no limit.
     pub limit_upload_kib: u64,
-    /// Download limit in kibibytes each second. Zero means no limit (FR-AG-15).
+    /// Download limit in kibibytes each second. Zero means no limit.
     pub limit_download_kib: u64,
     /// Low asks the agent to lower the process and I/O priority of the compiled steps (FR-AG-15).
     /// The maintenance job of a repository builds its own `prune` and `check` steps, which do not
@@ -85,7 +85,7 @@ pub struct JobLimits {
     pub max_duration_seconds: u32,
 }
 
-/// Position of a script in the job (FR-HK-05).
+/// Position of a script in the job.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HookPhase {

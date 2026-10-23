@@ -40,13 +40,14 @@ pub struct MaintenanceScheduleView {
     /// IANA name, for example `Europe/Berlin`.
     pub time_zone: String,
     pub enabled: bool,
-    /// In UTC, in RFC 3339. Null when the schedule is disabled or the scheduler has not set it yet.
+    /// In UTC. Null when the schedule is disabled or the scheduler has not set it yet.
+    #[schema(format = DateTime)]
     pub next_run_at: Option<String>,
-    /// The last fire time that the scheduler processed, in RFC 3339.
+    /// Holds the fire that the scheduler processed.
+    #[schema(format = DateTime)]
     pub last_fire_time: Option<String>,
 }
 
-/// The maintenance state of a repository (FR-RP-08).
 #[derive(Debug, Serialize, ToSchema)]
 pub struct MaintenanceView {
     pub repository_id: String,
@@ -132,6 +133,7 @@ async fn read_view(
 #[utoipa::path(
     get,
     path = "/api/v1/repositories/{id}/maintenance",
+    tags = ["repositories"],
     summary = "Reads the maintenance of a repository.",
     description = "The view holds the retention and check schedules and the latest job of each task. Without a maintenance agent the control plane creates no maintenance job.",
     security(("cookie" = []), ("bearer" = [])),
@@ -139,7 +141,7 @@ async fn read_view(
     responses(
         (status = 200, description = "The maintenance of the repository.", body = MaintenanceView),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The repository is not found.", body = crate::error::ProblemBody)
+        (status = 404, description = "The repository is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn get_maintenance(
@@ -164,6 +166,7 @@ pub async fn get_maintenance(
 #[utoipa::path(
     put,
     path = "/api/v1/repositories/{id}/maintenance",
+    tags = ["repositories"],
     summary = "Replaces the maintenance schedules of a repository.",
     description = "The body holds one time zone and the cron expression of each task. The control plane validates the expressions before the write.",
     security(("cookie" = []), ("bearer" = [])),
@@ -171,9 +174,9 @@ pub async fn get_maintenance(
     request_body = UpdateMaintenanceRequest,
     responses(
         (status = 200, description = "The updated maintenance.", body = MaintenanceView),
-        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The repository is not found.", body = crate::error::ProblemBody)
+        (status = 404, description = "The repository is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn update_maintenance(
@@ -280,6 +283,7 @@ fn parse_task_schedule(
 #[utoipa::path(
     post,
     path = "/api/v1/repositories/{id}/maintenance/run",
+    tags = ["repositories"],
     summary = "Runs a maintenance task now.",
     description = "The job runs on the maintenance agent and follows the barriers of the queue. The retention task needs a profile with a retention that a plan runs. A repository with an active exclusive job gives HTTP 409.",
     security(("cookie" = []), ("bearer" = [])),
@@ -287,10 +291,10 @@ fn parse_task_schedule(
     request_body = RunMaintenanceRequest,
     responses(
         (status = 202, description = "The job is queued.", body = JobView),
-        (status = 400, description = "The repository has no maintenance agent.", body = crate::error::ProblemBody),
+        (status = 400, description = "The repository has no maintenance agent.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The repository is not found.", body = crate::error::ProblemBody),
-        (status = 409, description = "The repository is not initialized, has nothing to forget, or holds an active exclusive job.", body = crate::error::ProblemBody)
+        (status = 404, description = "The repository is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 409, description = "The repository is not initialized, has nothing to forget, or holds an active exclusive job.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn run_maintenance(

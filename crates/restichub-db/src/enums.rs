@@ -58,7 +58,7 @@ impl Role {
     }
 }
 
-/// Tenant status (FR-TN-02).
+/// Tenant status.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
 #[sqlx(type_name = "text", rename_all = "snake_case")]
@@ -90,7 +90,6 @@ impl TenantStatus {
     }
 }
 
-/// The status of an enrolled agent (ADR-0026, FR-ID-04).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
 #[sqlx(type_name = "text", rename_all = "snake_case")]
@@ -119,7 +118,7 @@ impl AgentStatus {
     }
 }
 
-/// Whether a host trusts scripts from the control plane (FR-HK-08, ADR-0037).
+/// Whether a host trusts scripts from the control plane.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
 #[sqlx(type_name = "text", rename_all = "snake_case")]
@@ -155,7 +154,7 @@ impl ServerScriptsState {
     }
 }
 
-/// The derived administrator state of a tenant (ADR-0028).
+/// Administrator state of a tenant, derived from the memberships.
 ///
 /// The control plane computes the state from the memberships: an active Admin count of zero gives
 /// [`AdminState::None`]. The state is not stored, so it cannot drift from the memberships.
@@ -287,8 +286,6 @@ impl BackendKind {
     }
 }
 
-/// The kind of a job (FR-PR-02, the seed of the scheduler of epic #7).
-///
 /// The kind is general, not init-specific. The string value of each variant is the stored value of
 /// the `kind` column. It is stable: do not change a string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
@@ -444,8 +441,6 @@ impl JobKind {
     }
 }
 
-/// The lifecycle status of a job (FR-SC-03, FR-SC-07).
-///
 /// `queued` is the state before the send and `sent` the state after it, until the agent
 /// acknowledges the job. The string value of each variant is the stored value of the `status`
 /// column. It is stable: do not change a string.
@@ -505,12 +500,11 @@ impl JobStatus {
     }
 }
 
-/// How many jobs the scheduler creates after a downtime, or after an agent was not active
-/// (FR-SC-07).
+/// How many jobs the scheduler creates after a downtime, or after an agent was not active.
 ///
 /// The policy decides how many jobs the scheduler creates after the control plane was down, or
-/// after an agent that was not active for a while (FR-SC-07). The string value of each variant is
-/// the stored value of the `missed_run_policy` column. It is stable: do not change a string.
+/// after an agent that was not active for a while. The string value of each variant is the stored
+/// value of the `missed_run_policy` column. It is stable: do not change a string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
 #[sqlx(type_name = "text", rename_all = "snake_case")]
@@ -543,7 +537,7 @@ impl MissedRunPolicy {
     }
 }
 
-/// The maintenance task of a repository schedule (FR-RP-08, ADR-0034).
+/// The maintenance task of a repository schedule.
 ///
 /// The string value of each variant is the stored value of the `task` column. It is stable: do not
 /// change a string.
@@ -586,8 +580,6 @@ impl MaintenanceTask {
     }
 }
 
-/// The typed result of a finished job (FR-AG-09, AC-RP-01).
-///
 /// The value comes from the `outcome` field of the `JobResult` message. It is a closed set, so the
 /// `result_code` column holds one of these strings. It is stable: do not change a string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
@@ -680,7 +672,7 @@ impl ActorType {
     }
 }
 
-/// How one step of a job ended. The agent maps the restic exit code to it (FR-AG-09).
+/// How one step of a job ended. The agent maps the restic exit code to it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
 #[sqlx(type_name = "text", rename_all = "snake_case")]
@@ -722,7 +714,7 @@ impl StepStatus {
     }
 }
 
-/// Where a log line came from: a restic stream or the agent itself (FR-AG-08).
+/// Where a log line came from: a restic stream or the agent itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
 #[sqlx(type_name = "text", rename_all = "snake_case")]
@@ -980,7 +972,7 @@ mod tests {
     }
 }
 
-/// The kind of a planned step, as the job detail shows it (FR-HK-11).
+/// The kind of a planned step, as the job detail shows it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
 #[sqlx(type_name = "text", rename_all = "snake_case")]
@@ -993,7 +985,7 @@ pub enum PlannedKind {
     Other,
 }
 
-/// Position of a script in the job (FR-HK-05).
+/// Position of a script in the job.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
 #[sqlx(type_name = "text", rename_all = "snake_case")]
@@ -1005,7 +997,7 @@ pub enum PlannedPhase {
     Finally,
 }
 
-/// The kind of a parameter of a profile and of its value (FR-PF-09, ADR-0047).
+/// The kind of a parameter of a profile and of its value.
 ///
 /// The string value is the stored value of the `kind` column and of the profile JSON. It is stable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]

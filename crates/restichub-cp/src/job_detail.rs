@@ -40,11 +40,11 @@ pub struct StepView {
     pub status: StepStatus,
     /// The exit code of restic, or -1 when no process ran.
     pub exit_code: i32,
-    /// In RFC 3339.
+    #[schema(format = DateTime)]
     pub started_at: Option<String>,
-    /// In RFC 3339.
+    #[schema(format = DateTime)]
     pub finished_at: Option<String>,
-    /// Translated by the user interface (NFR-DOC-04).
+    /// Translated by the user interface.
     pub error_code: Option<String>,
     pub error_params: BTreeMap<String, String>,
     /// True after a hard kill that can leave a stale lock.
@@ -84,7 +84,7 @@ impl From<&JobStep> for StepView {
     }
 }
 
-/// One planned step of a job (FR-HK-11).
+/// One planned step of a job.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct PlannedStepView {
     pub step_id: String,
@@ -111,7 +111,7 @@ pub struct ProgressView {
     /// An estimate. Zero when restic gives none.
     pub seconds_remaining: i64,
     pub current_files: Vec<String>,
-    /// In RFC 3339.
+    #[schema(format = DateTime)]
     pub updated_at: String,
 }
 
@@ -166,7 +166,7 @@ impl JobTrigger {
     }
 }
 
-/// One job with its steps, its summary and its progress (FR-MN-02).
+/// One job with its steps, its summary and its progress.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct JobDetailView {
     #[serde(flatten)]
@@ -176,7 +176,7 @@ pub struct JobDetailView {
     /// before the control plane sent the job. A step that did not start has no entry in `steps`.
     pub planned_steps: Vec<String>,
     /// The same steps with their kind, name and phase, so the job detail shows every script in
-    /// order before it runs (FR-HK-11).
+    /// order before it runs.
     pub planned: Vec<PlannedStepView>,
     /// Ordered by first arrival from the agent.
     pub steps: Vec<StepView>,
@@ -193,7 +193,7 @@ pub struct JobDetailView {
     pub restore: Option<RestoreParamsView>,
 }
 
-/// The parameters that the operator chose for a restore (FR-RS-03, FR-RS-04).
+/// The parameters that the operator chose for a restore.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct RestoreParamsView {
     pub snapshot_id: String,
@@ -220,6 +220,7 @@ pub struct LimitsView {
 #[utoipa::path(
     get,
     path = "/api/v1/jobs/{id}",
+    tags = ["jobs"],
     summary = "Reads one job with its steps, summary and progress.",
     description = "A running job holds the last progress of its step. A finished job holds the typed result of each step and the summary of the run.",
     security(("cookie" = []), ("bearer" = [])),
@@ -227,7 +228,7 @@ pub struct LimitsView {
     responses(
         (status = 200, description = "The job.", body = JobDetailView),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The job is not found.", body = crate::error::ProblemBody)
+        (status = 404, description = "The job is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn get_job(
@@ -337,8 +338,8 @@ pub struct LogQuery {
     pub after_seq: Option<i64>,
     /// The most lines in the page, from 1 to 2000. The default is 500.
     pub limit: Option<i64>,
-    /// Reads the lines of one step only, for example `script-0` (FR-HK-11). The default is every
-    /// line of the job. Use an empty value for the lines of the job itself.
+    /// Reads the lines of one step only, for example `script-0`. The default is every line of the
+    /// job. Use an empty value for the lines of the job itself.
     pub step_id: Option<String>,
 }
 
@@ -351,7 +352,8 @@ pub struct LogLineView {
     pub step_id: String,
     pub stream: LogStream,
     pub level: LogLevel,
-    /// The time at which the control plane stored the line, in RFC 3339.
+    /// The time at which the control plane stored the line.
+    #[schema(format = DateTime)]
     pub ts: String,
     pub text: String,
 }
@@ -369,15 +371,16 @@ pub struct LogPageView {
 #[utoipa::path(
     get,
     path = "/api/v1/jobs/{id}/logs",
+    tags = ["jobs"],
     summary = "Reads a page of the log of a job.",
     description = "The lines are in log order. Pass the `seq` of the last line as `after_seq` to read the next page or to follow a running job. The control plane deletes the lines after the retention period; the job and its summary stay.",
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the job."), LogQuery),
     responses(
         (status = 200, description = "A page of log lines.", body = LogPageView),
-        (status = 400, description = "A query parameter is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "A query parameter is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The job is not found.", body = crate::error::ProblemBody)
+        (status = 404, description = "The job is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn get_job_logs(

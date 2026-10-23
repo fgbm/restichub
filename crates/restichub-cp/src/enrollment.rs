@@ -68,16 +68,15 @@ pub struct EnrollResponse {
     pub certificate: String,
     /// The issuing CA and the root CA, in DER, base64, in that order.
     pub ca_chain: Vec<String>,
-    /// In RFC 3339.
+    #[schema(format = DateTime)]
     pub certificate_expires_at: String,
     /// The signed job signing key set, the serialized `SigningKeyUpdate` message in base64. The
-    /// agent verifies the update before it uses the next key (FR-PR-04, FR-PR-11).
+    /// agent verifies the update before it uses the next key.
     pub signing_key_update: String,
-    /// The public job signing key set: the current key and the next key (ADR-0026). The agent
-    /// verifies a job that the current key signed with this set at once.
+    /// The public job signing key set: the current key and the next key. The agent verifies a job
+    /// that the current key signed with this set at once.
     pub signing_keys: Vec<EnrollmentKeyBody>,
-    /// Ed25519 signature over the key set, base64 (standard alphabet). The current key signs it
-    /// (ADR-0026).
+    /// Ed25519 signature over the key set, base64 (standard alphabet). The current key signs it.
     pub signing_keys_signature: String,
     /// The gRPC endpoint of the agent listener, when the installation sets it.
     pub grpc_endpoint: Option<String>,
@@ -86,7 +85,7 @@ pub struct EnrollResponse {
     pub reenrolled: bool,
 }
 
-/// One public job signing key of the enrollment response (ADR-0026).
+/// One public job signing key of the enrollment response.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct EnrollmentKeyBody {
     /// `current` or `next`.
@@ -96,21 +95,22 @@ pub struct EnrollmentKeyBody {
     pub public_key: String,
 }
 
-/// Enrolls an agent with a one-time token and a certificate signing request (FR-ID-01, FR-ID-02).
+/// Enrolls an agent with a one-time token and a certificate signing request.
 ///
 /// The control plane serves the route on the agent listener and on the public web origin, so an
 /// agent reaches it with a publicly trusted certificate and pins the returned installation root CA
-/// for the stream (ADR-0033).
+/// for the stream.
 #[utoipa::path(
     post,
     path = "/agent/v1/enroll",
+    tags = ["hosts"],
     summary = "Enrolls an agent with a one-time token and a certificate signing request.",
     request_body = EnrollRequest,
     responses(
         (status = 201, description = "The agent is enrolled.", body = EnrollResponse),
-        (status = 400, description = "The request or the certificate signing request is not valid.", body = crate::error::ProblemBody),
-        (status = 413, description = "The request body is larger than the limit.", body = crate::error::ProblemBody),
-        (status = 429, description = "The rate limit is reached.", body = crate::error::ProblemBody),
+        (status = 400, description = "The request or the certificate signing request is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 413, description = "The request body is larger than the limit.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 429, description = "The rate limit is reached.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
     )
 )]
 pub async fn enroll(

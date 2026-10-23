@@ -64,7 +64,7 @@ impl AuditService {
 pub struct AuditItem {
     pub id: String,
     pub tenant_id: String,
-    /// In RFC 3339.
+    #[schema(format = DateTime)]
     pub occurred_at: String,
     pub actor_type: String,
     pub actor_id: Option<String>,
@@ -115,9 +115,11 @@ pub struct AuditPageResponse {
 #[into_params(parameter_in = Query)]
 #[serde(deny_unknown_fields)]
 pub struct AuditQuery {
-    /// Start of the time range in RFC 3339.
+    /// Start of the time range.
+    #[param(format = DateTime)]
     pub from: Option<String>,
-    /// End of the time range in RFC 3339.
+    /// End of the time range.
+    #[param(format = DateTime)]
     pub to: Option<String>,
     pub action: Option<String>,
     pub actor_type: Option<String>,
@@ -300,11 +302,12 @@ fn decode_cursor(value: &str) -> Result<repo::AuditCursor, String> {
 #[utoipa::path(
     get,
     path = "/api/v1/audit",
+    tags = ["audit"],
     security(("cookie" = []), ("bearer" = [])),
     params(TenantAuditParams),
     responses(
         (status = 200, description = "The audit records of the tenant.", body = AuditPageResponse),
-        (status = 400, description = "A query parameter is not valid."),
+        (status = 400, description = "A query parameter is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses
     )
 )]
@@ -326,11 +329,12 @@ pub async fn list_tenant_audit(
 #[utoipa::path(
     get,
     path = "/api/v1/platform/audit",
+    tags = ["audit"],
     security(("cookie" = []), ("bearer" = [])),
     params(AuditQuery),
     responses(
         (status = 200, description = "The audit records of the platform.", body = AuditPageResponse),
-        (status = 400, description = "A query parameter is not valid."),
+        (status = 400, description = "A query parameter is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses
     )
 )]

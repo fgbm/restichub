@@ -26,7 +26,7 @@ use crate::validation::Reason;
 pub struct CreateTokenRequest {
     pub name: String,
     pub role: Role,
-    /// In RFC 3339.
+    #[schema(format = DateTime)]
     pub expires_at: Option<String>,
 }
 
@@ -38,6 +38,7 @@ pub struct CreateTokenResponse {
     pub name: String,
     pub role: Role,
     pub display_prefix: String,
+    #[schema(format = DateTime)]
     pub expires_at: Option<String>,
 }
 
@@ -47,9 +48,13 @@ pub struct ApiTokenView {
     pub name: String,
     pub role: Role,
     pub display_prefix: String,
+    #[schema(format = DateTime)]
     pub created_at: String,
+    #[schema(format = DateTime)]
     pub expires_at: Option<String>,
+    #[schema(format = DateTime)]
     pub last_used_at: Option<String>,
+    #[schema(format = DateTime)]
     pub revoked_at: Option<String>,
 }
 
@@ -77,6 +82,7 @@ pub struct ApiTokenListResponse {
 #[utoipa::path(
     get,
     path = "/api/v1/api-tokens",
+    tags = ["tokens"],
     security(("cookie" = []), ("bearer" = [])),
     responses(
         (status = 200, description = "The API tokens of the tenant.", body = ApiTokenListResponse),
@@ -99,12 +105,13 @@ pub async fn list_tokens(
 #[utoipa::path(
     post,
     path = "/api/v1/api-tokens",
+    tags = ["tokens"],
     summary = "Creates an API token in the tenant.",
     security(("cookie" = []), ("bearer" = [])),
     request_body = CreateTokenRequest,
     responses(
         (status = 201, description = "The token is created. The value appears once.", body = CreateTokenResponse),
-        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
     )
 )]
@@ -186,12 +193,13 @@ pub async fn create_token(
 #[utoipa::path(
     delete,
     path = "/api/v1/api-tokens/{id}",
+    tags = ["tokens"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the token.")),
     responses(
         (status = 204, description = "The token is revoked."),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The token is not found.", body = crate::error::ProblemBody)
+        (status = 404, description = "The token is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn revoke_token(

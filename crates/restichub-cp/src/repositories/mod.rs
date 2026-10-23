@@ -52,6 +52,7 @@ pub(crate) use settings::{parse_repository_id, stored_location};
 #[utoipa::path(
     get,
     path = "/api/v1/repositories",
+    tags = ["repositories"],
     security(("cookie" = []), ("bearer" = [])),
     responses(
         (status = 200, description = "The repositories of the tenant.", body = RepositoryListResponse),
@@ -88,12 +89,13 @@ pub async fn list_repositories(
 #[utoipa::path(
     get,
     path = "/api/v1/repositories/{id}",
+    tags = ["repositories"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the repository.")),
     responses(
         (status = 200, description = "The repository.", body = RepositoryView),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The repository is not found.", body = crate::error::ProblemBody)
+        (status = 404, description = "The repository is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn get_repository(
@@ -120,15 +122,16 @@ pub async fn get_repository(
 #[utoipa::path(
     post,
     path = "/api/v1/repositories",
+    tags = ["repositories"],
     summary = "Creates a repository in the tenant.",
-    description = "The control plane encrypts the secret values and never returns them (AC-RP-02).",
+    description = "The control plane encrypts the secret values and never returns them.",
     security(("cookie" = []), ("bearer" = [])),
     request_body = CreateRepositoryRequest,
     responses(
         (status = 201, description = "The repository is created.", body = RepositoryView),
-        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
-        (status = 409, description = "The name exists.", body = crate::error::ProblemBody)
+        (status = 409, description = "The name exists.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn create_repository(
@@ -240,15 +243,16 @@ pub async fn create_repository(
 #[utoipa::path(
     patch,
     path = "/api/v1/repositories/{id}",
+    tags = ["repositories"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the repository.")),
     request_body = UpdateRepositoryRequest,
     responses(
         (status = 200, description = "The updated repository.", body = RepositoryView),
-        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The repository is not found.", body = crate::error::ProblemBody),
-        (status = 409, description = "The location of an initialized repository cannot change, and neither can the host of an initialized local repository (`repository_host_locked`).", body = crate::error::ProblemBody)
+        (status = 404, description = "The repository is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 409, description = "The location of an initialized repository cannot change, and neither can the host of an initialized local repository (`repository_host_locked`).", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn update_repository(
@@ -438,12 +442,13 @@ pub async fn update_repository(
 #[utoipa::path(
     get,
     path = "/api/v1/repositories/{id}/usage",
+    tags = ["repositories"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the repository.")),
     responses(
         (status = 200, description = "What blocks the delete now.", body = delete_check::UsageView),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The repository is not found.", body = crate::error::ProblemBody)
+        (status = 404, description = "The repository is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn repository_usage(
@@ -466,13 +471,14 @@ pub async fn repository_usage(
 #[utoipa::path(
     delete,
     path = "/api/v1/repositories/{id}",
+    tags = ["repositories"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the repository.")),
     responses(
         (status = 204, description = "The repository is removed."),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The repository is not found.", body = crate::error::ProblemBody),
-        (status = 409, description = "A plan backs up into the repository (`repository_in_use`), or an active job holds it (`repository_has_active_job`). The body lists the records.", body = crate::error::ProblemBody)
+        (status = 404, description = "The repository is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 409, description = "A plan backs up into the repository (`repository_in_use`), or an active job holds it (`repository_has_active_job`). The body lists the records.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn delete_repository(
