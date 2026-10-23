@@ -26,6 +26,7 @@ use crate::maintenance_scheduler::{DEFAULT_TIME_ZONE, default_cron};
 use crate::plans::next_run_at;
 use crate::repositories::parse_repository_id;
 use crate::schedule::{Schedule, ScheduleError};
+use crate::schedule_failure::ScheduleFailureView;
 use crate::server::AppState;
 use crate::validation::Reason;
 
@@ -44,6 +45,8 @@ pub struct MaintenanceScheduleView {
     pub next_run_at: Option<String>,
     /// The last fire time that the scheduler processed, in RFC 3339.
     pub last_fire_time: Option<String>,
+    /// Set while the scheduler cannot run the schedule (FR-SC-12). Null for a healthy schedule.
+    pub schedule_failure: Option<ScheduleFailureView>,
 }
 
 /// The maintenance state of a repository (FR-RP-08).
@@ -95,6 +98,7 @@ fn schedule_view(
             enabled: row.enabled,
             next_run_at: row.next_run_at.map(format_time),
             last_fire_time: row.last_fire_time.map(format_time),
+            schedule_failure: row.failure.as_ref().map(ScheduleFailureView::of),
         },
         // A repository that exists before the migration has no row until the next scheduler pass.
         None => MaintenanceScheduleView {
@@ -103,6 +107,7 @@ fn schedule_view(
             enabled: true,
             next_run_at: None,
             last_fire_time: None,
+            schedule_failure: None,
         },
     }
 }
@@ -217,11 +222,12 @@ pub async fn update_maintenance(
         let current = schedules::get_for_update(&mut tx, repository_id, *task).await?;
         match current {
             Some(row) => {
-                // An unchanged schedule keeps its pending fire time.
+                // An unchanged schedule keeps its pending fire time and its failure state.
                 let changed =
                     row.cron != *cron || row.time_zone != time_zone || row.enabled != *enabled;
-                let next_run = if changed { next } else { row.next_run_at };
-                schedules::update(&mut tx, row.id, cron, &time_zone, *enabled, next_run).await?;
+                if changed {
+                    schedules::update(&mut tx, row.id, cron, &time_zone, *enabled, next).await?;
+                }
             }
             None => {
                 schedules::create(

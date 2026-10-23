@@ -61,6 +61,15 @@ pub fn state_of(age: Duration, rpo: Duration) -> RpoState {
     }
 }
 
+/// A plan that the scheduler cannot run counts as at risk, even while its last backup is fresh
+/// (FR-SC-12). A violated plan stays violated, so the alert of the plan keeps its rule.
+pub fn with_schedule_failure(state: RpoState, failed: bool) -> RpoState {
+    match state {
+        RpoState::Ok if failed => RpoState::AtRisk,
+        other => other,
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct RpoStatus {
     pub state: RpoState,
@@ -76,7 +85,7 @@ pub fn evaluate(plan: &RpoPlan, now: OffsetDateTime) -> RpoStatus {
     let age = (now - reference).max(Duration::ZERO);
     let rpo = effective_rpo(&plan.cron, &plan.time_zone, plan.rpo_seconds, now);
     RpoStatus {
-        state: state_of(age, rpo),
+        state: with_schedule_failure(state_of(age, rpo), plan.schedule_failure.is_some()),
         reference,
         has_success: plan.last_success_at.is_some(),
         age,
@@ -123,5 +132,20 @@ mod tests {
         assert_eq!(state_of(Duration::hours(18), rpo), RpoState::AtRisk);
         assert_eq!(state_of(Duration::hours(24), rpo), RpoState::AtRisk);
         assert_eq!(state_of(Duration::hours(25), rpo), RpoState::Violated);
+    }
+
+    /// AC-SC-12: a plan with a failed schedule is at risk, and a violated plan stays violated.
+    #[test]
+    fn ac_sc_12_a_failed_schedule_raises_ok_to_at_risk() {
+        assert_eq!(with_schedule_failure(RpoState::Ok, true), RpoState::AtRisk);
+        assert_eq!(with_schedule_failure(RpoState::Ok, false), RpoState::Ok);
+        assert_eq!(
+            with_schedule_failure(RpoState::Violated, true),
+            RpoState::Violated
+        );
+        assert_eq!(
+            with_schedule_failure(RpoState::AtRisk, true),
+            RpoState::AtRisk
+        );
     }
 }

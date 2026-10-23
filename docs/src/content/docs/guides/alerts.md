@@ -42,6 +42,8 @@ The age of a plan is the time since its last successful backup. A plan without a
 - `At risk`: the age is 75 % of the RPO or more.
 - `Violated`: the age is above the RPO.
 
+A plan in the schedule failure state is `At risk` at the least, also when its last backup is recent. See [Plans](/restichub/concepts/plans/).
+
 ## Delivery
 
 A loop in each control plane instance evaluates the rules every 30 seconds. A message therefore reaches a channel well inside 5 minutes of a violation.

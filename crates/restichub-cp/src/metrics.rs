@@ -237,6 +237,33 @@ pub fn render(
             u8::from(*held)
         );
     }
+
+    family(
+        &mut out,
+        "restichub_plan_schedule_failed",
+        "gauge",
+        "1 for a plan whose last scheduler pass failed. A plan without a failure has no sample.",
+    );
+    for plan in &snapshot.plan_schedule_failed {
+        let _ = writeln!(
+            out,
+            "restichub_plan_schedule_failed{{tenant=\"{tenant}\",plan=\"{plan}\"}} 1"
+        );
+    }
+
+    family(
+        &mut out,
+        "restichub_maintenance_schedule_failed",
+        "gauge",
+        "1 for a maintenance schedule whose last scheduler pass failed. A schedule without a failure has no sample.",
+    );
+    for (repository, task) in &snapshot.maintenance_schedule_failed {
+        let _ = writeln!(
+            out,
+            "restichub_maintenance_schedule_failed{{tenant=\"{tenant}\",repository=\"{repository}\",task=\"{}\"}} 1",
+            task.as_str()
+        );
+    }
     out
 }
 

@@ -24,6 +24,7 @@
 	import ProfilePicker from './ProfilePicker.svelte';
 	import RepositoryPicker from './RepositoryPicker.svelte';
 	import ProfileSection from './ProfileSection.svelte';
+	import ScheduleFailureAlert from './ScheduleFailureAlert.svelte';
 	import { RecordPage, SummaryPanel } from './layout/index.ts';
 	import {
 		Alert,
@@ -696,6 +697,9 @@
 	{#snippet banners()}
 		{#if formError}
 			<Alert tone="danger" title={formError} />
+		{/if}
+		{#if existing?.schedule_failure}
+			<ScheduleFailureAlert failure={existing.schedule_failure} subject="plan" />
 		{/if}
 	{/snippet}
 	{#snippet side()}

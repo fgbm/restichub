@@ -10,14 +10,21 @@
 //! A repository without a maintenance agent, with a revoked one, or that is not initialized gets no
 //! job; its schedule still advances. A repository that holds an exclusive job waits: the
 //! schedule stays due, and the next pass creates the job after the other job ends.
+//!
+//! A schedule whose pass fails does not stay due: the pass logs the cause and keeps a typed failure
+//! on the row, as the plan pass does (FR-SC-12). The `enabled` switch never changes.
 
 use restichub_db::jobs::{self, NewJob};
 use restichub_db::maintenance::{self as schedules, DueMaintenance, NewMaintenanceSchedule};
 use restichub_db::queue as queue_repo;
-use restichub_db::{AgentStatus, Database, DbError, JobId, MaintenanceTask, TenantId, TenantTx};
+use restichub_db::{
+    AgentStatus, Database, DbError, JobId, MaintenanceTask, ScheduleFailureReason, TenantId,
+    TenantTx,
+};
 use time::OffsetDateTime;
 
-use crate::schedule::{Schedule, ScheduleError};
+use crate::schedule::Schedule;
+use crate::schedule_failure::{self, PassError, Target};
 
 /// The default cron expression of a task: the retention cycle on Sunday at 03:00 and the check on
 /// the first day of the month at 04:00.
@@ -93,7 +100,7 @@ pub async fn process_tenant(
             Ok(()) => tx.release_savepoint(SCHEDULE_SAVEPOINT).await?,
             Err(error) => {
                 tx.rollback_to_savepoint(SCHEDULE_SAVEPOINT).await?;
-                tracing::warn!(repository = %repository_id, %error, "the default maintenance schedule failed");
+                tracing::error!(repository = %repository_id, %error, "the default maintenance schedule failed");
             }
         }
     }
@@ -105,7 +112,14 @@ pub async fn process_tenant(
                 schedules::arm(&mut tx, schedule.id, next_run_at).await?;
             }
             Err(error) => {
-                tracing::warn!(schedule = %schedule.id, %error, "the maintenance schedule cannot be armed");
+                // A schedule that never arms stays unarmed, and the claim would read it on every
+                // pass. The failure state takes it out of the claim until a user edits it
+                // (FR-SC-12).
+                tracing::error!(schedule = %schedule.id, %error, "the maintenance schedule cannot be armed");
+                let reason = ScheduleFailureReason::from(error);
+                schedules::halt_failed(&mut tx, schedule.id, reason, now).await?;
+                let target = Target::maintenance(schedule.repository_id, schedule.task);
+                schedule_failure::record_failed(&mut tx, &target, reason).await?;
             }
         }
     }
@@ -116,7 +130,18 @@ pub async fn process_tenant(
             Ok(()) => tx.release_savepoint(SCHEDULE_SAVEPOINT).await?,
             Err(error) => {
                 tx.rollback_to_savepoint(SCHEDULE_SAVEPOINT).await?;
-                tracing::warn!(schedule = %schedule.id, %error, "the scheduler skipped a maintenance schedule");
+                tracing::error!(
+                    schedule = %schedule.id,
+                    code = error.code(),
+                    %error,
+                    sqlstate = error.sqlstate(),
+                    "the scheduler failed to process a maintenance schedule"
+                );
+                // The rollback also removed the advance of the schedule (FR-SC-02).
+                if let Err(park_error) = park_schedule(&mut tx, schedule, &error, now).await {
+                    tx.rollback_to_savepoint(SCHEDULE_SAVEPOINT).await?;
+                    tracing::error!(schedule = %schedule.id, error = %park_error, "the scheduler cannot record the failure of a maintenance schedule");
+                }
             }
         }
     }
@@ -124,19 +149,51 @@ pub async fn process_tenant(
     Ok(())
 }
 
-#[derive(Debug, thiserror::Error)]
-enum ScheduleFailure {
-    #[error("{0}")]
-    Db(#[from] DbError),
-    #[error("{0}")]
-    Schedule(#[from] ScheduleError),
+/// Records the failed pass on the row and takes the row out of the due set, as the plan pass of
+/// [`crate::scheduler`] does (FR-SC-12).
+async fn park_schedule(
+    tx: &mut TenantTx<'_>,
+    due: &DueMaintenance,
+    error: &PassError,
+    now: OffsetDateTime,
+) -> Result<(), DbError> {
+    let reason = error.reason();
+    if reason.is_permanent() {
+        schedules::halt_failed(tx, due.id, reason, now).await?;
+    } else {
+        let attempts = schedule_failure::next_attempt(due.failure.as_ref());
+        let retry_after = schedule_failure::retry_after(now, attempts);
+        schedules::defer_failed(tx, due.id, reason, now, retry_after).await?;
+    }
+    if schedule_failure::is_news(due.failure.as_ref(), reason) {
+        schedule_failure::record_failed(tx, &target_of(due), reason).await?;
+    }
+    Ok(())
+}
+
+fn target_of(due: &DueMaintenance) -> Target {
+    Target::maintenance(due.repository_id, due.task)
+}
+
+/// Moves the schedule to its next fire time and closes a failure state of the schedule.
+async fn advance_schedule(
+    tx: &mut TenantTx<'_>,
+    due: &DueMaintenance,
+    next_run_at: OffsetDateTime,
+    last_fire_time: OffsetDateTime,
+) -> Result<(), DbError> {
+    schedules::advance(tx, due.id, next_run_at, last_fire_time).await?;
+    if let Some(previous) = &due.failure {
+        schedule_failure::record_recovered(tx, &target_of(due), previous).await?;
+    }
+    Ok(())
 }
 
 async fn process_schedule(
     tx: &mut TenantTx<'_>,
     due: &DueMaintenance,
     now: OffsetDateTime,
-) -> Result<(), ScheduleFailure> {
+) -> Result<(), PassError> {
     let schedule = Schedule::parse(&due.cron, &due.time_zone)?;
     let next_run_at = schedule.next_after(now)?;
 
@@ -147,7 +204,7 @@ async fn process_schedule(
         _ => None,
     };
     let Some(agent_id) = agent else {
-        schedules::advance(tx, due.id, next_run_at, due.next_run_at).await?;
+        advance_schedule(tx, due, next_run_at, due.next_run_at).await?;
         return Ok(());
     };
 
@@ -159,14 +216,14 @@ async fn process_schedule(
         MAINTENANCE_JOB_LIFETIME,
     )?;
     let Some(fire_time) = missed.last().copied() else {
-        schedules::advance(tx, due.id, next_run_at, due.next_run_at).await?;
+        advance_schedule(tx, due, next_run_at, due.next_run_at).await?;
         return Ok(());
     };
 
     if due.task == MaintenanceTask::Retention
         && !schedules::has_retention_in_use(tx, due.repository_id).await?
     {
-        schedules::advance(tx, due.id, next_run_at, fire_time).await?;
+        advance_schedule(tx, due, next_run_at, fire_time).await?;
         return Ok(());
     }
     // The repository holds one exclusive job at a time. The schedule stays due until it ends.
@@ -186,6 +243,6 @@ async fn process_schedule(
         created_by: None,
     };
     jobs::create_maintenance(tx, &job, due.id).await?;
-    schedules::advance(tx, due.id, next_run_at, fire_time).await?;
+    advance_schedule(tx, due, next_run_at, fire_time).await?;
     Ok(())
 }

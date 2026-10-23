@@ -543,6 +543,40 @@ impl MissedRunPolicy {
     }
 }
 
+/// Why the scheduler could not process a plan or a maintenance schedule (FR-SC-12).
+///
+/// The string value of each variant is the stored value of the `schedule_failure` column. It is
+/// stable: do not change a string. The user interface shows a text for each variant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
+#[serde(rename_all = "snake_case")]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
+pub enum ScheduleFailureReason {
+    /// A database error stopped the pass. The scheduler tries again after a pause.
+    DatabaseError,
+    /// The cron expression is not valid for this version of the control plane.
+    InvalidCron,
+    /// The time zone is not a known IANA name for this version of the control plane.
+    UnknownTimeZone,
+    /// The cron expression has no fire time within the search limit of the cron library.
+    NoFireTime,
+}
+
+impl ScheduleFailureReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::DatabaseError => "database_error",
+            Self::InvalidCron => "invalid_cron",
+            Self::UnknownTimeZone => "unknown_time_zone",
+            Self::NoFireTime => "no_fire_time",
+        }
+    }
+
+    /// True when a retry cannot succeed: the user has to edit the schedule.
+    pub fn is_permanent(self) -> bool {
+        !matches!(self, Self::DatabaseError)
+    }
+}
+
 /// The maintenance task of a repository schedule (FR-RP-08, ADR-0034).
 ///
 /// The string value of each variant is the stored value of the `task` column. It is stable: do not

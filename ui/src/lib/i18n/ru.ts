@@ -1176,6 +1176,18 @@ export const ru: Record<MessageKey, string> = {
 	'audit.actorType.agent': 'Агент',
 	'audit.actorType.system': 'Система',
 
+	'schedule.failure.badge': 'Ошибка',
+	'schedule.failure.titlePlan': 'Ошибка расписания плана',
+	'schedule.failure.titleMaintenance': 'Ошибка расписания',
+	'schedule.failure.reason.database_error':
+		'База данных отклонила запись. Следующий запуск сохранён.',
+	'schedule.failure.reason.invalid_cron': 'Выражение cron недопустимо.',
+	'schedule.failure.reason.unknown_time_zone': 'Часовой пояс неизвестен.',
+	'schedule.failure.reason.no_fire_time': 'У расписания нет следующего запуска.',
+	'schedule.failure.since': 'Ошибка с {time}.',
+	'schedule.failure.retry': 'Система повторит попытку {time}.',
+	'schedule.failure.edit': 'Система не повторяет попытку. Исправьте расписание.',
+
 	// Audit actions (the stored snake_case names)
 	'audit.action.sign_in': 'Вход',
 	'audit.action.sign_in_failed': 'Неудачный вход',
@@ -1212,6 +1224,8 @@ export const ru: Record<MessageKey, string> = {
 	'audit.action.repository_update': 'Изменение репозитория',
 	'audit.action.repository_delete': 'Удаление репозитория',
 	'audit.action.repository_unlock_all': 'Снятие всех блокировок репозитория',
+	'audit.action.schedule_failed': 'Ошибка расписания',
+	'audit.action.schedule_recovered': 'Расписание восстановлено',
 
 	// Diff view
 	'diff.title': 'Изменение',
