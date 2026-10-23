@@ -76,23 +76,44 @@ async fn fr_ag_08_the_log_states_a_vss_snapshot_for_each_volume() {
     );
 }
 
-/// FR-AG-08: a volume that restic could not snapshot gets a failure line, not a success line. The
-/// outcome of the step stays the one of the exit code.
+/// FR-AG-08: a volume that restic could not snapshot gets a failure line, not a success line. A
+/// VSS failure alone leaves the exit code 0 and the step green.
 #[tokio::test(flavor = "multi_thread")]
 async fn fr_ag_08_the_log_states_a_vss_snapshot_that_restic_could_not_make() {
     let fixture = Fixture::new("vss-failed");
     script_stdout(&fixture.path, "backup", &format!("{SUMMARY}\n"));
     script_stderr(&fixture.path, "backup", &format!("{FAILURE}\n"));
-    script_code(&fixture.path, "backup", 3);
+    script_code(&fixture.path, "backup", 0);
     let result = fixture.run("job-vss-failed", true).await;
-    assert_eq!(result.step("backup").status, StepStatus::Warning as i32);
+    assert_eq!(result.step("backup").status, StepStatus::Success as i32);
     let log = result.log_text();
     assert!(
         log.contains(
-            r"VSS snapshot for d:\ failed: VSS error: the volume is not supported; restic reads the files of this volume without a snapshot"
+            r"VSS snapshot for D:\ failed: VSS error: the volume is not supported; restic reads the files of this volume without a snapshot"
         ),
         "{log}"
     );
+    assert!(
+        log.contains(r"VSS snapshot made for C:\ (restic reported no VSS error)"),
+        "{log}"
+    );
+    assert!(!log.contains(r"VSS snapshot made for D:\"), "{log}");
+}
+
+/// FR-AG-08: a volume whose paths restic left out is not read, so the log claims no snapshot of it.
+#[tokio::test(flavor = "multi_thread")]
+async fn fr_ag_08_a_volume_with_a_skipped_path_has_no_vss_snapshot_line() {
+    let fixture = Fixture::new("vss-skipped");
+    script_stdout(&fixture.path, "backup", &format!("{SUMMARY}\n"));
+    script_stderr(
+        &fixture.path,
+        "backup",
+        "D:\\more does not exist, skipping\n",
+    );
+    script_code(&fixture.path, "backup", 3);
+    let result = fixture.run("job-vss-skipped", true).await;
+    assert_eq!(result.step("backup").status, StepStatus::Warning as i32);
+    let log = result.log_text();
     assert!(
         log.contains(r"VSS snapshot made for C:\ (restic reported no VSS error)"),
         "{log}"

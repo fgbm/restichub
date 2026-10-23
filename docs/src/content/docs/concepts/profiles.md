@@ -25,7 +25,9 @@ The profile editor is one page. Select "Add profile" on the "Profiles" screen, o
 A profile has no hooks. Use [server scripts](/restichub/guides/scripts/) to run a command on the host before or after a backup.
 
 :::note
-The log of a backup step with VSS states each volume that restic made a snapshot of, for example `VSS snapshot made for C:\`. restic prints no VSS message in its JSON output. The agent writes this line when the backup ends and restic reported no VSS error for the volume. When restic cannot make a snapshot, the log states the volume and the reason. restic then reads the files of that volume without a snapshot.
+The log of a backup step with VSS has a line for each volume that the agent expects restic to have snapshotted, for example `VSS snapshot made for C:\`. restic prints no message about a VSS snapshot that it made. The agent writes this line when the backup ends, restic read a path on the volume, and restic reported no VSS error for the volume. The line is for the drive letter only. restic reads a path under a folder mount point of a FAT or exFAT volume without a snapshot. The line still names the parent volume. A path that goes through a junction to another volume can behave the same way.
+
+restic prints a VSS failure as a JSON error. The log then states the volume and the reason, and restic reads the files of that volume without a snapshot. A VSS failure alone does not change the result: restic exits with code 0 and the job succeeds. Read the log of the step to find the failure.
 
 restic can leave a file out of a VSS snapshot when another program holds the file open with an exclusive lock. The snapshot then lacks the file, and the backup job ends with warnings (`succeeded_with_warnings`). The log of the step names the file. Stop the program before the backup to get a complete copy.
 :::

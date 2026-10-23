@@ -4,7 +4,8 @@
 //! created snapshot" lines exist in text mode only. restic reports a failure, and only as an `error`
 //! message on the standard error. A backup that ends with a summary and has no such error made a
 //! snapshot of each volume that it read, because restic makes the snapshot of a volume when it
-//! reads the first path on it.
+//! reads the first path on it. restic drops a path that is missing or unreadable before it makes
+//! any snapshot, and says so in plain text on the standard error.
 
 use restichub_proto::agent::v1::{Step, step};
 use serde_json::Value;
@@ -12,11 +13,21 @@ use serde_json::Value;
 /// The text that opens the restic error for a volume without a snapshot.
 const FAILURE_PREFIX: &str = "failed to create snapshot for [";
 
+/// The texts that restic prints after a path that it leaves out of the backup.
+const SKIP_SUFFIXES: [&str; 2] = [" does not exist, skipping", " cannot be accessed, skipping"];
+
+struct Volume {
+    /// In the form of `C:\`.
+    name: String,
+    paths: Vec<String>,
+}
+
 /// The volumes of a backup step that asks for a file system snapshot.
 pub(super) struct VssReport {
-    /// The drive-letter volumes of the paths, in the form of `C:\`.
-    volumes: Vec<String>,
-    /// The volumes that restic named in a failure, in lower case.
+    volumes: Vec<Volume>,
+    /// The paths that restic left out of the backup.
+    skipped: Vec<String>,
+    /// The volumes that restic failed to snapshot, in the form of `C:\`.
     failed: Vec<String>,
 }
 
@@ -29,42 +40,64 @@ impl VssReport {
         if !backup.use_fs_snapshot {
             return None;
         }
-        let mut volumes: Vec<String> = Vec::new();
+        let mut volumes: Vec<Volume> = Vec::new();
         for path in &backup.paths {
-            if let Some(volume) = volume_of(path)
-                && !volumes
-                    .iter()
-                    .any(|known| known.eq_ignore_ascii_case(&volume))
+            let Some(name) = volume_of(path) else {
+                continue;
+            };
+            match volumes
+                .iter_mut()
+                .find(|known| known.name.eq_ignore_ascii_case(&name))
             {
-                volumes.push(volume);
+                Some(volume) => volume.paths.push(path.clone()),
+                None => volumes.push(Volume {
+                    name,
+                    paths: vec![path.clone()],
+                }),
             }
         }
         Some(Self {
             volumes,
+            skipped: Vec::new(),
             failed: Vec::new(),
         })
     }
 
     /// Reads one line of the standard error. Returns the log line for a snapshot that restic could
     /// not make.
-    pub(super) fn failure(&mut self, line: &str, truncated: bool) -> Option<String> {
-        if truncated || !line.starts_with('{') {
+    pub(super) fn observe(&mut self, line: &str, truncated: bool) -> Option<String> {
+        if truncated {
+            return None;
+        }
+        if !line.starts_with('{') {
+            self.note_skip(line);
             return None;
         }
         let message: Value = serde_json::from_str(line).ok()?;
         if message.get("message_type").and_then(Value::as_str) != Some("error") {
             return None;
         }
-        let text = message
-            .get("error")?
-            .get("message")?
-            .as_str()?
-            .strip_prefix(FAILURE_PREFIX)?;
-        let (volume, reason) = text.split_once("]: ")?;
-        self.failed.push(volume.to_ascii_lowercase());
-        Some(format!(
+        // restic names the volume of a failed snapshot as the item of the error.
+        let volume = drive_root(message.get("item")?.as_str()?)?;
+        let text = message.get("error")?.get("message")?.as_str()?;
+        let reason = text
+            .strip_prefix(FAILURE_PREFIX)
+            .and_then(|rest| rest.split_once("]: "))
+            .map_or(text, |(_, reason)| reason);
+        let line = format!(
             "VSS snapshot for {volume} failed: {reason}; restic reads the files of this volume without a snapshot"
-        ))
+        );
+        self.failed.push(volume);
+        Some(line)
+    }
+
+    fn note_skip(&mut self, line: &str) {
+        let line = line.trim_end();
+        for suffix in SKIP_SUFFIXES {
+            if let Some(path) = line.strip_suffix(suffix) {
+                self.skipped.push(path.to_owned());
+            }
+        }
     }
 
     /// The log lines for the volumes with a snapshot, once the backup ended with a summary.
@@ -72,12 +105,19 @@ impl VssReport {
         self.volumes
             .iter()
             .filter(|volume| {
-                !self
+                let failed = self
                     .failed
                     .iter()
-                    .any(|failed| failed.eq_ignore_ascii_case(volume))
+                    .any(|failed| failed.eq_ignore_ascii_case(&volume.name));
+                let read = volume.paths.iter().any(|path| !self.skipped.contains(path));
+                !failed && read
             })
-            .map(|volume| format!("VSS snapshot made for {volume} (restic reported no VSS error)"))
+            .map(|volume| {
+                format!(
+                    "VSS snapshot made for {} (restic reported no VSS error)",
+                    volume.name
+                )
+            })
             .collect()
     }
 }
@@ -89,6 +129,14 @@ fn volume_of(path: &str) -> Option<String> {
     let mut chars = path.chars();
     let letter = chars.next().filter(char::is_ascii_alphabetic)?;
     (chars.next() == Some(':')).then(|| format!(r"{}:\", letter.to_ascii_uppercase()))
+}
+
+/// The drive root `C:\` of an item that is exactly a drive root, in upper case.
+fn drive_root(item: &str) -> Option<String> {
+    let mut chars = item.chars();
+    let letter = chars.next().filter(char::is_ascii_alphabetic)?;
+    (chars.next() == Some(':') && chars.next() == Some('\\') && chars.next().is_none())
+        .then(|| format!(r"{}:\", letter.to_ascii_uppercase()))
 }
 
 #[cfg(test)]
@@ -136,9 +184,9 @@ mod tests {
     fn fr_ag_08_a_failure_line_names_the_volume_and_the_reason() {
         let mut report = report(&[r"C:\data", r"D:\x"], true).expect("a report");
         assert_eq!(
-            report.failure(FAILURE, false).as_deref(),
+            report.observe(FAILURE, false).as_deref(),
             Some(
-                r"VSS snapshot for c:\ failed: VSS error: access denied; restic reads the files of this volume without a snapshot"
+                r"VSS snapshot for C:\ failed: VSS error: access denied; restic reads the files of this volume without a snapshot"
             )
         );
         assert_eq!(
@@ -148,15 +196,61 @@ mod tests {
     }
 
     #[test]
+    fn fr_ag_08_a_reworded_error_for_a_drive_root_is_a_failure() {
+        let mut report = report(&[r"C:\data", r"D:\x"], true).expect("a report");
+        let line = r#"{"message_type":"error","error":{"message":"something new"},"item":"d:\\"}"#;
+        assert_eq!(
+            report.observe(line, false).as_deref(),
+            Some(
+                r"VSS snapshot for D:\ failed: something new; restic reads the files of this volume without a snapshot"
+            )
+        );
+        assert_eq!(
+            report.made(),
+            [r"VSS snapshot made for C:\ (restic reported no VSS error)"]
+        );
+    }
+
+    #[test]
+    fn fr_ag_08_a_volume_with_every_path_left_out_has_no_snapshot() {
+        let mut report = report(&[r"C:\data", r"D:\more", r"D:\other"], true).expect("a report");
+        assert_eq!(
+            report.observe(r"D:\more does not exist, skipping", false),
+            None
+        );
+        assert_eq!(
+            report.made(),
+            [
+                r"VSS snapshot made for C:\ (restic reported no VSS error)",
+                r"VSS snapshot made for D:\ (restic reported no VSS error)",
+            ]
+        );
+        assert_eq!(
+            report.observe(r"D:\other cannot be accessed, skipping", false),
+            None
+        );
+        assert_eq!(
+            report.made(),
+            [r"VSS snapshot made for C:\ (restic reported no VSS error)"]
+        );
+    }
+
+    #[test]
     fn fr_ag_08_other_stderr_lines_are_not_a_failure() {
         let mut report = report(&[r"C:\data"], true).expect("a report");
         for line in [
             "plain text",
             r#"{"message_type":"error","error":{"message":"open x: access denied"},"during":"archival","item":"x"}"#,
+            r#"{"message_type":"error","error":{"message":"open c:\\data: access denied"},"during":"archival","item":"c:\\data"}"#,
             r#"{"message_type":"exit_error","message":"failed","code":1}"#,
         ] {
-            assert_eq!(report.failure(line, false), None, "{line}");
+            assert_eq!(report.observe(line, false), None, "{line}");
         }
-        assert_eq!(report.failure(FAILURE, true), None);
+        assert_eq!(report.observe(FAILURE, true), None);
+        assert_eq!(
+            report.observe(r"C:\data does not exist, skipping", true),
+            None
+        );
+        assert_eq!(report.made().len(), 1);
     }
 }

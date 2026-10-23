@@ -419,7 +419,7 @@ impl StepOutput {
                 let failure = self
                     .vss
                     .as_mut()
-                    .and_then(|vss| vss.failure(&text, line.truncated));
+                    .and_then(|vss| vss.observe(&text, line.truncated));
                 let text = crate::output::stderr_text(&text, line.truncated);
                 log.push(
                     &self.step_id,
