@@ -52,7 +52,7 @@ Keep a copy of the repository password outside ResticHub. If you lose the contro
 
 The repository appears in the list with the status "Not initialized". The control plane does not show a secret value again. You can only replace the S3 keys and the REST server password.
 
-The sections "Maintenance" and "Check" hold the schedules of the maintenance jobs. Keep the defaults for the first repository. See [Repositories](/restichub/concepts/repositories/#maintenance).
+The sections "Cleanup" and "Check" hold the schedules of the maintenance jobs. Keep the defaults for the first repository. See [Repositories](/restichub/concepts/repositories/#maintenance).
 
 ## A local repository on Linux
 
