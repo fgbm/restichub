@@ -6,6 +6,10 @@
 //! snapshot of each volume that it read, because restic makes the snapshot of a volume when it
 //! reads the first path on it. restic drops a path that is missing or unreadable before it makes
 //! any snapshot, and says so in plain text on the standard error.
+//!
+//! restic gives the same `error` message for a failed snapshot and for another error on the root of
+//! a volume, so only the opening text of the error tells them apart. The agent claims a snapshot
+//! for neither.
 
 use restichub_proto::agent::v1::{Step, step};
 use serde_json::Value;
@@ -27,8 +31,8 @@ pub(super) struct VssReport {
     volumes: Vec<Volume>,
     /// The paths that restic left out of the backup.
     skipped: Vec<String>,
-    /// The volumes that restic failed to snapshot, in the form of `C:\`.
-    failed: Vec<String>,
+    /// The volumes with an error of restic on their root, in the form of `C:\`.
+    reported: Vec<String>,
 }
 
 impl VssReport {
@@ -59,12 +63,12 @@ impl VssReport {
         Some(Self {
             volumes,
             skipped: Vec::new(),
-            failed: Vec::new(),
+            reported: Vec::new(),
         })
     }
 
-    /// Reads one line of the standard error. Returns the log line for a snapshot that restic could
-    /// not make.
+    /// Reads one line of the standard error. Returns the log line for a volume whose root has an
+    /// error of restic.
     pub(super) fn observe(&mut self, line: &str, truncated: bool) -> Option<String> {
         if truncated {
             return None;
@@ -80,14 +84,16 @@ impl VssReport {
         // restic names the volume of a failed snapshot as the item of the error.
         let volume = drive_root(message.get("item")?.as_str()?)?;
         let text = message.get("error")?.get("message")?.as_str()?;
-        let reason = text
-            .strip_prefix(FAILURE_PREFIX)
-            .and_then(|rest| rest.split_once("]: "))
-            .map_or(text, |(_, reason)| reason);
-        let line = format!(
-            "VSS snapshot for {volume} failed: {reason}; restic reads the files of this volume without a snapshot"
-        );
-        self.failed.push(volume);
+        let line = match text.strip_prefix(FAILURE_PREFIX) {
+            Some(rest) => {
+                let reason = rest.split_once("]: ").map_or(text, |(_, reason)| reason);
+                format!(
+                    "VSS snapshot for {volume} failed: {reason}; restic reads the files of this volume without a snapshot"
+                )
+            }
+            None => format!("VSS snapshot for {volume} not confirmed: {text}"),
+        };
+        self.reported.push(volume);
         Some(line)
     }
 
@@ -105,12 +111,12 @@ impl VssReport {
         self.volumes
             .iter()
             .filter(|volume| {
-                let failed = self
-                    .failed
+                let reported = self
+                    .reported
                     .iter()
-                    .any(|failed| failed.eq_ignore_ascii_case(&volume.name));
+                    .any(|reported| reported.eq_ignore_ascii_case(&volume.name));
                 let read = volume.paths.iter().any(|path| !self.skipped.contains(path));
-                !failed && read
+                !reported && read
             })
             .map(|volume| {
                 format!(
@@ -196,19 +202,31 @@ mod tests {
     }
 
     #[test]
-    fn fr_ag_08_a_reworded_error_for_a_drive_root_is_a_failure() {
+    fn fr_ag_08_another_error_for_a_drive_root_is_not_confirmed() {
         let mut report = report(&[r"C:\data", r"D:\x"], true).expect("a report");
         let line = r#"{"message_type":"error","error":{"message":"something new"},"item":"d:\\"}"#;
         assert_eq!(
             report.observe(line, false).as_deref(),
-            Some(
-                r"VSS snapshot for D:\ failed: something new; restic reads the files of this volume without a snapshot"
-            )
+            Some(r"VSS snapshot for D:\ not confirmed: something new")
         );
         assert_eq!(
             report.made(),
             [r"VSS snapshot made for C:\ (restic reported no VSS error)"]
         );
+    }
+
+    #[test]
+    fn fr_ag_08_a_metadata_error_of_restic_0_17_2_is_not_a_vss_failure() {
+        let mut report = report(&[r"C:\data"], true).expect("a report");
+        let line = r#"{"message_type":"error","error":{"message":"incomplete metadata for C:\\: get EA failed while opening file handle for path \\\\?\\GLOBALROOT\\Device\\HarddiskVolumeShadowCopy12\\, with: Access is denied."},"during":"archival","item":"C:\\"}"#;
+        let logged = report.observe(line, false).expect("a log line");
+        assert!(
+            logged
+                .starts_with(r"VSS snapshot for C:\ not confirmed: incomplete metadata for C:\: "),
+            "{logged}"
+        );
+        assert!(!logged.contains("without a snapshot"), "{logged}");
+        assert!(report.made().is_empty());
     }
 
     #[test]

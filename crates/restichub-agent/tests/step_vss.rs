@@ -14,6 +14,8 @@ use restichub_proto::agent::v1::{BackupStep, StepStatus, step};
 
 const SUMMARY: &str = r#"{"message_type":"summary","files_new":3,"files_changed":0,"files_unmodified":0,"dirs_new":1,"dirs_changed":0,"dirs_unmodified":0,"data_blobs":1,"tree_blobs":1,"data_added":10,"data_added_packed":10,"total_files_processed":3,"total_bytes_processed":30,"total_duration":0.5,"snapshot_id":"abcdef0123456789"}"#;
 
+const METADATA_ERROR: &str = r#"{"message_type":"error","error":{"message":"incomplete metadata for C:\\: get EA failed while opening file handle for path \\\\?\\GLOBALROOT\\Device\\HarddiskVolumeShadowCopy12\\, with: Access is denied."},"during":"archival","item":"C:\\"}"#;
+
 const FAILURE: &str = r#"{"message_type":"error","error":{"message":"failed to create snapshot for [d:\\]: VSS error: the volume is not supported"},"during":"archival","item":"d:\\"}"#;
 
 struct Fixture {
@@ -100,6 +102,29 @@ async fn fr_ag_08_the_log_states_a_vss_snapshot_that_restic_could_not_make() {
     assert!(!log.contains(r"VSS snapshot made for D:\"), "{log}");
 }
 
+/// FR-AG-08: another error of restic on a drive root is not a VSS failure, and the log claims no
+/// snapshot for that volume.
+#[tokio::test(flavor = "multi_thread")]
+async fn fr_ag_08_an_error_on_a_drive_root_is_not_confirmed_as_a_vss_snapshot() {
+    let fixture = Fixture::new("vss-unconfirmed");
+    script_stdout(&fixture.path, "backup", &format!("{SUMMARY}\n"));
+    script_stderr(&fixture.path, "backup", &format!("{METADATA_ERROR}\n"));
+    script_code(&fixture.path, "backup", 3);
+    let result = fixture.run("job-vss-unconfirmed", true).await;
+    assert_eq!(result.step("backup").status, StepStatus::Warning as i32);
+    let log = result.log_text();
+    assert!(
+        log.contains(r"VSS snapshot for C:\ not confirmed: incomplete metadata for C:\: "),
+        "{log}"
+    );
+    assert!(!log.contains("without a snapshot"), "{log}");
+    assert!(!log.contains(r"VSS snapshot made for C:\"), "{log}");
+    assert!(
+        log.contains(r"VSS snapshot made for D:\ (restic reported no VSS error)"),
+        "{log}"
+    );
+}
+
 /// FR-AG-08: a volume whose paths restic left out is not read, so the log claims no snapshot of it.
 #[tokio::test(flavor = "multi_thread")]
 async fn fr_ag_08_a_volume_with_a_skipped_path_has_no_vss_snapshot_line() {
@@ -138,4 +163,46 @@ async fn fr_ag_08_a_backup_without_the_option_has_no_vss_line() {
     script_stdout(&fixture.path, "backup", &format!("{SUMMARY}\n"));
     let result = fixture.run("job-vss-off", false).await;
     assert!(!result.log_text().contains("VSS"));
+}
+
+/// FR-AG-08: the agent reads the line that restic prints for a missing path. A change of the text
+/// in a new restic must fail here, not make the log claim a snapshot of a volume that restic did not
+/// read.
+#[test]
+fn fr_ag_08_the_real_restic_prints_the_skip_line_that_the_agent_reads() {
+    let Some(restic) = real_restic_or_skip() else {
+        return;
+    };
+    let repository = temp_config_dir("vss-skip-repo");
+    let data = temp_config_dir("vss-skip-data");
+    std::fs::create_dir_all(&data).expect("cannot create the data directory");
+    std::fs::write(data.join("a.txt"), "file").expect("cannot write the file");
+    let missing = data.join("missing");
+
+    let restic_run = |args: &[&std::ffi::OsStr]| {
+        std::process::Command::new(&restic)
+            .env("RESTIC_PASSWORD", "CANARY-vss-skip")
+            .env("RESTIC_REPOSITORY", &repository)
+            .args(args)
+            .output()
+            .expect("cannot run restic")
+    };
+    let init = restic_run(&["init".as_ref()]);
+    assert!(init.status.success(), "{init:?}");
+    let backup = restic_run(&[
+        "backup".as_ref(),
+        "--json".as_ref(),
+        data.as_os_str(),
+        missing.as_os_str(),
+    ]);
+    // Exit code 3: restic made a snapshot and left a path out.
+    assert_eq!(backup.status.code(), Some(3), "{backup:?}");
+    let stderr = String::from_utf8_lossy(&backup.stderr);
+    let expected = format!("{} does not exist, skipping", missing.display());
+    assert!(
+        stderr.lines().any(|line| line == expected),
+        "expected the line {expected:?} in {stderr:?}"
+    );
+    let _ = std::fs::remove_dir_all(&repository);
+    let _ = std::fs::remove_dir_all(&data);
 }
