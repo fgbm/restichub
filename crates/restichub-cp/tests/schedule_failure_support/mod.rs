@@ -1,4 +1,4 @@
-//! Helpers of the tests for a scheduler pass that fails (FR-SC-02).
+//! Helpers of the tests for a scheduler pass that fails (FR-SC-12).
 //!
 //! A database trigger makes every job insert for one agent fail, so a plan or a maintenance schedule
 //! of that agent fails in the pass and the others do not.
@@ -18,9 +18,15 @@ const TRIGGER: &str = "test_fail_jobs";
 pub struct RowState {
     pub enabled: bool,
     pub next_run_at: Option<OffsetDateTime>,
-    pub schedule_error: Option<String>,
+    pub reason: Option<String>,
+    pub failed_since: Option<OffsetDateTime>,
+    pub retry_after: Option<OffsetDateTime>,
+    pub attempts: i32,
     pub updated_at: OffsetDateTime,
 }
+
+const COLUMNS: &str = "enabled, next_run_at, schedule_failure, failed_since, retry_after, \
+                       failure_attempts, updated_at";
 
 /// Installs a trigger that raises on each job insert for the agent.
 pub async fn fail_jobs_of_agent(db: &TestDatabase, agent: AgentId) {
@@ -90,7 +96,7 @@ pub async fn plan_state(db: &TestDatabase, tenant: TenantId, plan: Uuid) -> RowS
     state(
         db,
         tenant,
-        "SELECT enabled, next_run_at, schedule_error, updated_at FROM plans WHERE id = $1",
+        &format!("SELECT {COLUMNS} FROM plans WHERE id = $1"),
         plan,
     )
     .await
@@ -104,22 +110,24 @@ pub async fn check_schedule_state(
     state(
         db,
         tenant,
-        "SELECT enabled, next_run_at, schedule_error, updated_at FROM maintenance_schedules \
-         WHERE repository_id = $1 AND task = 'check'",
+        &format!(
+            "SELECT {COLUMNS} FROM maintenance_schedules WHERE repository_id = $1 AND task = 'check'"
+        ),
         repository.as_uuid(),
     )
     .await
 }
 
-/// The number of enabled plans and schedules of the tenant that are due at `now`.
-pub async fn due_rows(
+/// The number of enabled plans and schedules of the tenant that the claim takes at `now`.
+pub async fn claimable_rows(
     db: &TestDatabase,
     tenant: TenantId,
     table: &'static str,
     now: OffsetDateTime,
 ) -> i64 {
     let sql = format!(
-        "SELECT count(*) FROM {table} WHERE enabled AND next_run_at IS NOT NULL AND next_run_at <= $1"
+        "SELECT count(*) FROM {table} WHERE enabled AND next_run_at IS NOT NULL \
+         AND next_run_at <= $1 AND (retry_after IS NULL OR retry_after <= $1)"
     );
     let mut tx = db.owner_pool().begin().await.expect("cannot begin");
     scope(&mut tx, tenant).await;
@@ -144,6 +152,50 @@ pub async fn repository_jobs(db: &TestDatabase, tenant: TenantId, repository: Re
     count
 }
 
+/// The audit actions of the scheduler for one object, oldest first.
+pub async fn failure_audit(db: &TestDatabase, tenant: TenantId, object: Uuid) -> Vec<String> {
+    let mut tx = db.owner_pool().begin().await.expect("cannot begin");
+    scope(&mut tx, tenant).await;
+    let rows = sqlx::query(
+        "SELECT action, actor_type FROM audit_log \
+         WHERE object_id = $1 AND action IN ('schedule_failed', 'schedule_recovered') \
+         ORDER BY id",
+    )
+    .bind(object)
+    .fetch_all(&mut *tx)
+    .await
+    .expect("cannot read the audit");
+    tx.commit().await.expect("cannot commit the read");
+    rows.iter()
+        .map(|row| {
+            let actor: String = row.get("actor_type");
+            assert_eq!(actor, "system", "the scheduler acts as the system");
+            row.get("action")
+        })
+        .collect()
+}
+
+/// The diff of the first audit record of one action for an object.
+pub async fn failure_audit_diff(
+    db: &TestDatabase,
+    tenant: TenantId,
+    object: Uuid,
+    action: &str,
+) -> serde_json::Value {
+    let mut tx = db.owner_pool().begin().await.expect("cannot begin");
+    scope(&mut tx, tenant).await;
+    let diff: serde_json::Value = sqlx::query_scalar(
+        "SELECT diff FROM audit_log WHERE object_id = $1 AND action = $2 ORDER BY id LIMIT 1",
+    )
+    .bind(object)
+    .bind(action)
+    .fetch_one(&mut *tx)
+    .await
+    .expect("cannot read the audit diff");
+    tx.commit().await.expect("cannot commit the read");
+    diff
+}
+
 async fn state(db: &TestDatabase, tenant: TenantId, sql: &str, id: Uuid) -> RowState {
     let mut tx = db.owner_pool().begin().await.expect("cannot begin");
     scope(&mut tx, tenant).await;
@@ -156,12 +208,25 @@ async fn state(db: &TestDatabase, tenant: TenantId, sql: &str, id: Uuid) -> RowS
     RowState {
         enabled: row.get("enabled"),
         next_run_at: row.get("next_run_at"),
-        schedule_error: row.get("schedule_error"),
+        reason: row.get("schedule_failure"),
+        failed_since: row.get("failed_since"),
+        retry_after: row.get("retry_after"),
+        attempts: row.get("failure_attempts"),
         updated_at: row.get("updated_at"),
     }
 }
 
-async fn scope(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>, tenant: TenantId) {
+/// An owner transaction under the scope of the tenant.
+pub async fn owner_tx(
+    db: &TestDatabase,
+    tenant: TenantId,
+) -> sqlx::Transaction<'static, sqlx::Postgres> {
+    let mut tx = db.owner_pool().begin().await.expect("cannot begin");
+    scope(&mut tx, tenant).await;
+    tx
+}
+
+pub async fn scope(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>, tenant: TenantId) {
     sqlx::query("SELECT set_config('restichub.tenant_id', $1, true)")
         .bind(tenant.to_string())
         .execute(&mut **tx)

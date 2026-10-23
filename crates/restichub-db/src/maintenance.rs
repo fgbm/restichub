@@ -11,8 +11,9 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::DbError;
-use crate::enums::{AgentStatus, MaintenanceTask};
+use crate::enums::{AgentStatus, MaintenanceTask, ScheduleFailureReason};
 use crate::ids::{AgentId, MaintenanceScheduleId, RepositoryId};
+use crate::schedule_failure::ScheduleFailure;
 use crate::tx::TenantTx;
 
 /// One schedule of a repository.
@@ -26,6 +27,7 @@ pub struct MaintenanceSchedule {
     pub enabled: bool,
     pub next_run_at: Option<OffsetDateTime>,
     pub last_fire_time: Option<OffsetDateTime>,
+    pub failure: Option<ScheduleFailure>,
 }
 
 #[derive(Debug, Clone)]
@@ -52,38 +54,51 @@ pub struct DueMaintenance {
     /// `None` when the repository names no maintenance agent.
     pub agent_status: Option<AgentStatus>,
     pub initialized: bool,
+    /// The failure of the earlier pass, when the schedule is claimed again after a pause.
+    pub failure: Option<ScheduleFailure>,
 }
 
-type ScheduleRow = (
-    Uuid,
-    Uuid,
-    MaintenanceTask,
-    String,
-    String,
-    bool,
-    Option<OffsetDateTime>,
-    Option<OffsetDateTime>,
-);
+#[derive(sqlx::FromRow)]
+struct ScheduleRow {
+    id: Uuid,
+    repository_id: Uuid,
+    task: MaintenanceTask,
+    cron: String,
+    time_zone: String,
+    enabled: bool,
+    next_run_at: Option<OffsetDateTime>,
+    last_fire_time: Option<OffsetDateTime>,
+    schedule_failure: Option<ScheduleFailureReason>,
+    failed_since: Option<OffsetDateTime>,
+    retry_after: Option<OffsetDateTime>,
+    failure_attempts: i32,
+}
 
 impl From<ScheduleRow> for MaintenanceSchedule {
     fn from(row: ScheduleRow) -> Self {
-        let (id, repository_id, task, cron, time_zone, enabled, next_run_at, last_fire_time) = row;
         Self {
-            id: MaintenanceScheduleId::from_uuid(id),
-            repository_id: RepositoryId::from_uuid(repository_id),
-            task,
-            cron,
-            time_zone,
-            enabled,
-            next_run_at,
-            last_fire_time,
+            id: MaintenanceScheduleId::from_uuid(row.id),
+            repository_id: RepositoryId::from_uuid(row.repository_id),
+            task: row.task,
+            cron: row.cron,
+            time_zone: row.time_zone,
+            enabled: row.enabled,
+            next_run_at: row.next_run_at,
+            last_fire_time: row.last_fire_time,
+            failure: ScheduleFailure::from_columns(
+                row.schedule_failure,
+                row.failed_since,
+                row.retry_after,
+                row.failure_attempts,
+            ),
         }
     }
 }
 
 macro_rules! columns {
     () => {
-        "id, repository_id, task, cron, time_zone, enabled, next_run_at, last_fire_time"
+        "id, repository_id, task, cron, time_zone, enabled, next_run_at, last_fire_time, \
+         schedule_failure, failed_since, retry_after, failure_attempts"
     };
 }
 
@@ -147,7 +162,8 @@ pub async fn get_for_update(
     Ok(row.map(MaintenanceSchedule::from))
 }
 
-/// Writes the schedule of a row and its next fire time. A new schedule starts from `next_run_at`.
+/// Writes the schedule of a row and its next fire time, and clears the failure state (FR-SC-12). A
+/// new schedule starts from `next_run_at`.
 pub async fn update(
     tx: &mut TenantTx<'_>,
     id: MaintenanceScheduleId,
@@ -158,7 +174,8 @@ pub async fn update(
 ) -> Result<bool, DbError> {
     let result = sqlx::query(
         "UPDATE maintenance_schedules SET cron = $2, time_zone = $3, enabled = $4, \
-                next_run_at = $5, schedule_error = NULL, updated_at = now() WHERE id = $1",
+                next_run_at = $5, schedule_failure = NULL, failed_since = NULL, \
+                retry_after = NULL, failure_attempts = 0, updated_at = now() WHERE id = $1",
     )
     .bind(id)
     .bind(cron)
@@ -198,6 +215,9 @@ pub async fn missing_defaults(
 }
 
 /// Claims the enabled schedules whose first fire time is not set, so the caller computes it.
+///
+/// A schedule that failed and waits for an edit has no fire time on purpose and is not claimed
+/// (FR-SC-12).
 pub async fn claim_unarmed(
     tx: &mut TenantTx<'_>,
     limit: i64,
@@ -205,7 +225,8 @@ pub async fn claim_unarmed(
     let rows = sqlx::query_as::<_, ScheduleRow>(concat!(
         "SELECT ",
         columns!(),
-        " FROM maintenance_schedules WHERE enabled AND next_run_at IS NULL \
+        " FROM maintenance_schedules \
+          WHERE enabled AND next_run_at IS NULL AND schedule_failure IS NULL \
           ORDER BY created_at, id LIMIT $1 FOR UPDATE SKIP LOCKED"
     ))
     .bind(limit)
@@ -218,7 +239,8 @@ pub async fn claim_unarmed(
 /// Claims the enabled schedules that are due at `now`, oldest first.
 ///
 /// A row that another scheduler instance holds is skipped, so two instances never process the same
-/// row at the same time (ADR-0010).
+/// row at the same time (ADR-0010). A row that waits for the pause of a failed pass is not due
+/// until `retry_after` (FR-SC-12).
 pub async fn claim_due(
     tx: &mut TenantTx<'_>,
     now: OffsetDateTime,
@@ -235,14 +257,20 @@ pub async fn claim_due(
         maintenance_agent_id: Option<Uuid>,
         status: Option<AgentStatus>,
         initialized: bool,
+        schedule_failure: Option<ScheduleFailureReason>,
+        failed_since: Option<OffsetDateTime>,
+        retry_after: Option<OffsetDateTime>,
+        failure_attempts: i32,
     }
     let rows = sqlx::query_as::<_, Row>(
         "SELECT s.id, s.repository_id, s.task, s.cron, s.time_zone, s.next_run_at, \
-                r.maintenance_agent_id, a.status, r.initialized \
+                r.maintenance_agent_id, a.status, r.initialized, \
+                s.schedule_failure, s.failed_since, s.retry_after, s.failure_attempts \
          FROM maintenance_schedules s \
          JOIN repositories r ON r.tenant_id = s.tenant_id AND r.id = s.repository_id \
          LEFT JOIN agents a ON a.tenant_id = r.tenant_id AND a.id = r.maintenance_agent_id \
          WHERE s.enabled AND s.next_run_at IS NOT NULL AND s.next_run_at <= $1 \
+           AND (s.retry_after IS NULL OR s.retry_after <= $1) \
          ORDER BY s.next_run_at \
          LIMIT $2 \
          FOR UPDATE OF s SKIP LOCKED",
@@ -265,12 +293,19 @@ pub async fn claim_due(
                 maintenance_agent_id: row.maintenance_agent_id.map(AgentId::from_uuid),
                 agent_status: row.status,
                 initialized: row.initialized,
+                failure: ScheduleFailure::from_columns(
+                    row.schedule_failure,
+                    row.failed_since,
+                    row.retry_after,
+                    row.failure_attempts,
+                ),
             })
         })
         .collect())
 }
 
-/// Moves a schedule to its next fire time after the scheduler processed it.
+/// Moves a schedule to its next fire time after the scheduler processed it and clears the failure
+/// state (FR-SC-12).
 pub async fn advance(
     tx: &mut TenantTx<'_>,
     id: MaintenanceScheduleId,
@@ -279,7 +314,8 @@ pub async fn advance(
 ) -> Result<bool, DbError> {
     let result = sqlx::query(
         "UPDATE maintenance_schedules SET next_run_at = $2, last_fire_time = $3, \
-                schedule_error = NULL, updated_at = now() WHERE id = $1",
+                schedule_failure = NULL, failed_since = NULL, retry_after = NULL, \
+                failure_attempts = 0, updated_at = now() WHERE id = $1",
     )
     .bind(id)
     .bind(next_run_at)
@@ -290,38 +326,48 @@ pub async fn advance(
     Ok(result.rows_affected() == 1)
 }
 
-/// Moves a schedule whose pass failed to its next fire time and records the cause (FR-SC-02).
+/// Records a failed pass that a retry can fix and sets the pause (FR-SC-12).
+///
+/// The schedule keeps its fire time. The claim skips it until `retry_after`.
 pub async fn defer_failed(
     tx: &mut TenantTx<'_>,
     id: MaintenanceScheduleId,
-    next_run_at: OffsetDateTime,
-    cause: &str,
+    reason: ScheduleFailureReason,
+    now: OffsetDateTime,
+    retry_after: OffsetDateTime,
 ) -> Result<bool, DbError> {
     let result = sqlx::query(
-        "UPDATE maintenance_schedules SET next_run_at = $2, schedule_error = $3, \
-                updated_at = now() WHERE id = $1",
+        "UPDATE maintenance_schedules SET schedule_failure = $2, \
+                failed_since = COALESCE(failed_since, $3), retry_after = $4, \
+                failure_attempts = failure_attempts + 1, updated_at = now() WHERE id = $1",
     )
     .bind(id)
-    .bind(next_run_at)
-    .bind(cause)
+    .bind(reason.as_str())
+    .bind(now)
+    .bind(retry_after)
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
     Ok(result.rows_affected() == 1)
 }
 
-/// Disables a schedule that the control plane cannot compute and records the cause.
-pub async fn disable_failed(
+/// Records a failure that only an edit of the schedule fixes and clears the fire time
+/// (FR-SC-12). The schedule stays enabled.
+pub async fn halt_failed(
     tx: &mut TenantTx<'_>,
     id: MaintenanceScheduleId,
-    cause: &str,
+    reason: ScheduleFailureReason,
+    now: OffsetDateTime,
 ) -> Result<bool, DbError> {
     let result = sqlx::query(
-        "UPDATE maintenance_schedules SET enabled = false, next_run_at = NULL, \
-                schedule_error = $2, updated_at = now() WHERE id = $1",
+        "UPDATE maintenance_schedules SET schedule_failure = $2, \
+                failed_since = COALESCE(failed_since, $3), retry_after = NULL, \
+                next_run_at = NULL, failure_attempts = failure_attempts + 1, \
+                updated_at = now() WHERE id = $1",
     )
     .bind(id)
-    .bind(cause)
+    .bind(reason.as_str())
+    .bind(now)
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
@@ -335,7 +381,8 @@ pub async fn arm(
     next_run_at: OffsetDateTime,
 ) -> Result<bool, DbError> {
     let result = sqlx::query(
-        "UPDATE maintenance_schedules SET next_run_at = $2, schedule_error = NULL, \
+        "UPDATE maintenance_schedules SET next_run_at = $2, schedule_failure = NULL, \
+                failed_since = NULL, retry_after = NULL, failure_attempts = 0, \
                 updated_at = now() WHERE id = $1",
     )
     .bind(id)

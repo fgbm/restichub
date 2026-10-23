@@ -43,6 +43,7 @@ pub mod referrers;
 pub mod repositories;
 pub mod repository_health;
 pub mod restore;
+pub mod schedule_failure;
 pub mod script_templates;
 pub mod secrets;
 pub mod sessions;
@@ -58,8 +59,8 @@ pub mod test_util;
 pub use enums::{
     ActorType, AdminState, AgentStatus, BackendKind, CaRole, JobKind, JobResultCode, JobStatus,
     LogLevel, LogStream, MaintenanceTask, MissedRunPolicy, ParameterKind, PlannedKind,
-    PlannedPhase, Role, SecretUsageKind, ServerScriptsState, SigningKeyRole, StepStatus,
-    TenantStatus,
+    PlannedPhase, Role, ScheduleFailureReason, SecretUsageKind, ServerScriptsState, SigningKeyRole,
+    StepStatus, TenantStatus,
 };
 pub use ids::{
     AgentId, AlertId, ApiTokenId, AuditLogId, ChannelId, DeliveryId, EnrollmentTokenId, JobId,
@@ -175,7 +176,9 @@ impl DbError {
         self.sqlstate().as_deref() == Some("57014")
     }
 
-    pub(crate) fn sqlstate(&self) -> Option<String> {
+    /// The SQLSTATE of the database error, when the driver reports it. It holds no value, so a log
+    /// line may carry it.
+    pub fn sqlstate(&self) -> Option<String> {
         match self {
             Self::Query(error) => error
                 .as_database_error()

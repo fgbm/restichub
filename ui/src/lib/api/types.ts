@@ -148,6 +148,9 @@ export type Maintenance = components['schemas']['MaintenanceView'];
 
 export type MaintenanceSchedule = components['schemas']['MaintenanceScheduleView'];
 
+/** The typed failure of a plan or maintenance schedule (FR-SC-12). */
+export type ScheduleFailure = components['schemas']['ScheduleFailureView'];
+
 export type UpdateMaintenanceRequest = components['schemas']['UpdateMaintenanceRequest'];
 
 /** The kind of a job (FR-PR-02). */

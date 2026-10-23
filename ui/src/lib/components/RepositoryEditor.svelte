@@ -19,6 +19,7 @@
 	} from '#lib/api/index.ts';
 	import HostPicker from './HostPicker.svelte';
 	import ProfileSection from './ProfileSection.svelte';
+	import ScheduleFailureAlert from './ScheduleFailureAlert.svelte';
 	import { RecordPage, SummaryPanel } from './layout/index.ts';
 	import { Alert, Button, PasswordField, Select, StatusPill, TextField } from './ui/index.ts';
 	import type { KeyValueItem, SelectOption, StatusTone } from './ui/index.ts';
@@ -684,6 +685,12 @@
 			bind:enabled={retentionEnabled}
 			bind:open={open.retention}
 		>
+			{#if maintenance?.retention.schedule_failure}
+				<ScheduleFailureAlert
+					failure={maintenance.retention.schedule_failure}
+					subject="maintenance"
+				/>
+			{/if}
 			<p class="lead">{t('repositories.maintenance.description')}</p>
 			<TextField
 				id="maintenance-time-zone"
@@ -737,6 +744,9 @@
 			bind:enabled={checkEnabled}
 			bind:open={open.check}
 		>
+			{#if maintenance?.check.schedule_failure}
+				<ScheduleFailureAlert failure={maintenance.check.schedule_failure} subject="maintenance" />
+			{/if}
 			<p class="lead">{t('repositories.maintenance.checkHint')}</p>
 			<TextField
 				id="maintenance-check-cron"

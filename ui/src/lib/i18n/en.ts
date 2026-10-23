@@ -1170,6 +1170,16 @@ export const en = {
 	'audit.actorType.agent': 'Agent',
 	'audit.actorType.system': 'System',
 
+	'schedule.failure.titlePlan': 'The schedule of this plan failed',
+	'schedule.failure.titleMaintenance': 'The schedule failed',
+	'schedule.failure.reason.database_error': 'The database refused a write. The next run is kept.',
+	'schedule.failure.reason.invalid_cron': 'The cron expression is not valid.',
+	'schedule.failure.reason.unknown_time_zone': 'The time zone is not known.',
+	'schedule.failure.reason.no_fire_time': 'The schedule has no next run.',
+	'schedule.failure.since': 'Failed since {time}.',
+	'schedule.failure.retry': 'The system retries at {time}.',
+	'schedule.failure.edit': 'The system does not retry. Edit the schedule to fix it.',
+
 	// Audit actions (the stored snake_case names)
 	'audit.action.sign_in': 'Sign in',
 	'audit.action.sign_in_failed': 'Failed sign-in',
@@ -1206,6 +1216,8 @@ export const en = {
 	'audit.action.repository_update': 'Change repository',
 	'audit.action.repository_delete': 'Delete repository',
 	'audit.action.repository_unlock_all': 'Unlock all locks of a repository',
+	'audit.action.schedule_failed': 'Schedule failed',
+	'audit.action.schedule_recovered': 'Schedule recovered',
 
 	// Diff view
 	'diff.title': 'Change',

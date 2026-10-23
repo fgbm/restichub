@@ -38,8 +38,8 @@ Each sample has the label `tenant` with the tenant identifier. The identifier ho
 | `restichub_jobs_total` | counter | `tenant`, `status` | Jobs that reached the status `succeeded`, `failed`, `expired` or `dead_letter`. |
 | `restichub_agent_up` | gauge | `tenant`, `agent` | 1 when the agent holds an open stream, else 0. |
 | `restichub_repo_lock_held` | gauge | `tenant`, `repository` | 1 when a waiting or running job of the repository reported a held lock, else 0. |
-| `restichub_plan_schedule_failed` | gauge | `tenant`, `plan` | 1 when the last scheduler pass of the plan failed. A plan without a failure has no sample. |
-| `restichub_maintenance_schedule_failed` | gauge | `tenant`, `repository`, `task` | 1 when the last scheduler pass of the maintenance schedule failed. A schedule without a failure has no sample. |
+| `restichub_plan_schedule_failed` | gauge | `tenant`, `plan` | 1 when the last scheduler pass of the plan failed. A plan without a failure has no value. |
+| `restichub_maintenance_schedule_failed` | gauge | `tenant`, `repository`, `task` | 1 when the last scheduler pass of the maintenance schedule failed. A schedule without a failure has no value. |
 | `restichub_agent_connections_refused_total` | counter | `tenant`, `reason` | Agent connections that the agent listener closed at a limit. The reason is `cap` (the connection cap `RESTICHUB_AGENT_MAX_CONNECTIONS`), `anonymous_share` or `anonymous_per_ip` (the limits for connections without a client certificate), `handshakes` or `handshakes_per_ip` (the limits for TLS handshakes in progress). Single mode only. |
 | `restichub_agent_accept_errors_total` | counter | `tenant` | Errors of the agent listener when it accepts a connection, for example when the process has no free file descriptor. Single mode only. |
 
@@ -47,7 +47,13 @@ The control plane reuses the aggregates of a tenant for 15 seconds. A scrape int
 
 The agent listener serves all tenants. In multi mode, the endpoint therefore does not show the listener counters. The control plane log shows the refusals and the accept errors in all modes. Each minute that has refusals or accept errors, the log has one warning. The warning gives the count for each reason and the count of accept errors in that minute.
 
-When the pass of a plan or of a maintenance schedule fails, the control plane writes an error to its log. It moves the plan or the schedule to its next fire time, so the next pass does not process it again at once. The failed fire time creates no job. If the control plane cannot compute the schedule, for example when the cron expression is not valid, it disables the plan or the schedule. A successful pass or an edit of the plan or the schedule removes the failure sample.
+A failed pass of a plan or of a maintenance schedule writes an error to the log of the control plane. The control plane records the failure on the plan or on the schedule. The plan page and the repository page show the failure.
+
+A failure of the database is temporary. The control plane keeps the fire time and tries again after a pause. The first pause is 5 seconds. The pause doubles after each failed try and does not exceed 10 minutes. After the database recovers, the missed run policy of the plan decides which jobs the control plane creates.
+
+A cron expression that is not valid, an unknown time zone, or a schedule with no fire time is a permanent failure. The control plane does not try again until a user edits the cron expression, the time zone or the enabled state. The plan stays enabled, and its RPO alert stays active. The dashboard counts the plan as at risk.
+
+The control plane writes the audit records `schedule_failed` and `schedule_recovered` for the actor system. A successful pass, or an edit of the cron expression, the time zone or the enabled state, removes the failure and its value.
 
 To alert when a plan or a maintenance schedule fails, use this expression:
 

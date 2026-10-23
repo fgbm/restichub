@@ -136,6 +136,46 @@ describe('the repository page', () => {
 		});
 	});
 
+	it('ac_sc_12 shows the failure of the check schedule in the section of the check', async () => {
+		mocks.getMaintenance.mockResolvedValue({
+			...maintenance(),
+			check: {
+				...maintenance().check,
+				schedule_failure: {
+					reason: 'database_error',
+					since: '2026-10-20T04:00:00Z',
+					retry_after: '2026-10-20T04:10:00Z'
+				}
+			}
+		});
+		render(RepositoryEditor, { repositoryId: 'r_1' });
+
+		const alert = await screen.findByText('The schedule failed');
+		expect(alert).toBeInTheDocument();
+		expect(screen.getAllByText('The schedule failed')).toHaveLength(1);
+		expect(alert.closest('[data-section="check"]')).not.toBeNull();
+		expect(screen.getByText(/^The system retries at /)).toBeInTheDocument();
+	});
+
+	it('ac_sc_12 shows the failure of the retention schedule in the section of the retention', async () => {
+		mocks.getMaintenance.mockResolvedValue({
+			...maintenance(),
+			retention: {
+				...maintenance().retention,
+				schedule_failure: {
+					reason: 'invalid_cron',
+					since: '2026-10-20T03:00:00Z',
+					retry_after: null
+				}
+			}
+		});
+		render(RepositoryEditor, { repositoryId: 'r_1' });
+
+		const alert = await screen.findByText('The schedule failed');
+		expect(alert.closest('[data-section="retention"]')).not.toBeNull();
+		expect(screen.getByText('The cron expression is not valid.')).toBeInTheDocument();
+	});
+
 	it('fr_rp_08 saves the schedules with the repository', async () => {
 		const user = userEvent.setup();
 		mocks.updateRepository.mockResolvedValue(repository());

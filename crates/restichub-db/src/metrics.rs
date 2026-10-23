@@ -169,7 +169,7 @@ pub async fn snapshot(tx: &mut TenantTx<'_>) -> Result<MetricsSnapshot, DbError>
     .map_err(DbError::Query)?;
 
     let plan_schedule_failed = sqlx::query_scalar::<_, PlanId>(
-        "SELECT id FROM plans WHERE schedule_error IS NOT NULL ORDER BY id",
+        "SELECT id FROM plans WHERE schedule_failure IS NOT NULL ORDER BY id",
     )
     .fetch_all(tx.as_conn())
     .await
@@ -177,7 +177,7 @@ pub async fn snapshot(tx: &mut TenantTx<'_>) -> Result<MetricsSnapshot, DbError>
 
     let maintenance_schedule_failed = sqlx::query_as::<_, (RepositoryId, MaintenanceTask)>(
         "SELECT repository_id, task FROM maintenance_schedules \
-         WHERE schedule_error IS NOT NULL ORDER BY repository_id, task",
+         WHERE schedule_failure IS NOT NULL ORDER BY repository_id, task",
     )
     .fetch_all(tx.as_conn())
     .await
