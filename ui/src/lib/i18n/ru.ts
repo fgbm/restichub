@@ -1176,6 +1176,7 @@ export const ru: Record<MessageKey, string> = {
 	'audit.actorType.agent': 'Агент',
 	'audit.actorType.system': 'Система',
 
+	'schedule.failure.badge': 'Ошибка',
 	'schedule.failure.titlePlan': 'Ошибка расписания плана',
 	'schedule.failure.titleMaintenance': 'Ошибка расписания',
 	'schedule.failure.reason.database_error':

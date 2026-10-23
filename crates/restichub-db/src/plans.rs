@@ -466,7 +466,9 @@ pub async fn delete(tx: &mut TenantTx<'_>, id: PlanId) -> Result<bool, DbError> 
 /// The select locks each row with `SKIP LOCKED`, so a second control plane instance skips a plan
 /// that this transaction holds and exactly one instance creates the jobs of one fire time
 /// (AC-SC-02, ADR-0010). The caller advances `next_run_at` in the same transaction. A plan that
-/// waits for the pause of a failed pass is not due until `retry_after` (FR-SC-12).
+/// waits for the pause of a failed pass is not due until `retry_after` (FR-SC-12). Rows that
+/// failed before come after the other due rows, then by the time they became claimable again, so
+/// many failing rows never delay a healthy plan beyond the pass that finds it due.
 pub async fn claim_due(
     tx: &mut TenantTx<'_>,
     now: OffsetDateTime,
@@ -480,7 +482,7 @@ pub async fn claim_due(
          JOIN agents a ON a.tenant_id = p.tenant_id AND a.id = p.agent_id \
          WHERE p.enabled AND p.next_run_at IS NOT NULL AND p.next_run_at <= $1 \
            AND (p.retry_after IS NULL OR p.retry_after <= $1) \
-         ORDER BY p.next_run_at \
+         ORDER BY p.failure_attempts > 0, GREATEST(p.next_run_at, p.retry_after), p.next_run_at \
          LIMIT $2 \
          FOR UPDATE OF p SKIP LOCKED",
     )

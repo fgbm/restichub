@@ -1170,6 +1170,7 @@ export const en = {
 	'audit.actorType.agent': 'Agent',
 	'audit.actorType.system': 'System',
 
+	'schedule.failure.badge': 'Failed',
 	'schedule.failure.titlePlan': 'The schedule of this plan failed',
 	'schedule.failure.titleMaintenance': 'The schedule failed',
 	'schedule.failure.reason.database_error': 'The database refused a write. The next run is kept.',

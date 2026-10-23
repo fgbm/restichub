@@ -134,18 +134,13 @@ impl Target {
         }
     }
 
-    pub fn maintenance(
-        id: restichub_db::MaintenanceScheduleId,
-        repository_id: RepositoryId,
-        task: MaintenanceTask,
-    ) -> Self {
+    /// The record belongs to the repository, so the audit log names it and finds it by the
+    /// repository.
+    pub fn maintenance(repository_id: RepositoryId, task: MaintenanceTask) -> Self {
         Self {
-            object_type: "maintenance_schedule",
-            object_id: id.as_uuid(),
-            detail: json!({
-                "repository_id": repository_id.to_string(),
-                "task": task.as_str(),
-            }),
+            object_type: "repository",
+            object_id: repository_id.as_uuid(),
+            detail: json!({ "task": task.as_str() }),
         }
     }
 

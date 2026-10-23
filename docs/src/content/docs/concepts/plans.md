@@ -49,7 +49,7 @@ When the control plane cannot process the schedule of a plan, the plan page show
 | Unknown time zone | The time zone is not in the time zone database. | Edit the time zone. |
 | No fire time | The schedule has no next fire time. | Edit the cron expression. |
 
-A successful pass, or an edit of the cron expression, the time zone or the switch "Run on schedule", removes the message. The audit log records the actions `schedule_failed` and `schedule_recovered` for the actor system. A rename of the plan keeps the message.
+A successful pass, or an edit of the cron expression, the time zone or the switch "Run on schedule", removes the message. The audit log records the action `schedule_failed` for the actor system when the failure starts. It records `schedule_recovered` when a successful pass ends the failure. An edit that removes the message leaves only the audit record of the edit. A rename of the plan keeps the message.
 
 ## Missed runs
 

@@ -51,23 +51,6 @@ async fn repository_with_check(
     repository
 }
 
-async fn check_schedule_id(
-    db: &restichub_db::test_util::TestDatabase,
-    tenant: TenantId,
-    repository: RepositoryId,
-) -> uuid::Uuid {
-    let mut tx = schedule_failure_support::owner_tx(db, tenant).await;
-    let id: uuid::Uuid = sqlx::query_scalar(
-        "SELECT id FROM maintenance_schedules WHERE repository_id = $1 AND task = 'check'",
-    )
-    .bind(repository.as_uuid())
-    .fetch_one(&mut *tx)
-    .await
-    .expect("cannot read the schedule");
-    tx.commit().await.expect("commit");
-    id
-}
-
 #[tokio::test]
 async fn ac_sc_12_a_database_error_keeps_the_fire_time_of_a_maintenance_schedule() {
     let Some(db) = common::test_db().await else {
@@ -99,7 +82,6 @@ async fn ac_sc_12_a_database_error_keeps_the_fire_time_of_a_maintenance_schedule
         Some(t0),
     )
     .await;
-    let schedule = check_schedule_id(&db, tenant, bad).await;
     fail_jobs_of_agent(&db, bad_agent).await;
     let clock = ManualClock::new(t0);
     clock.advance(30);
@@ -129,10 +111,10 @@ async fn ac_sc_12_a_database_error_keeps_the_fire_time_of_a_maintenance_schedule
         Some(clock.now() + Duration::seconds(10))
     );
     assert_eq!(
-        failure_audit(&db, tenant, schedule).await,
+        failure_audit(&db, tenant, bad.as_uuid()).await,
         vec!["schedule_failed"]
     );
-    let diff = failure_audit_diff(&db, tenant, schedule, "schedule_failed").await;
+    let diff = failure_audit_diff(&db, tenant, bad.as_uuid(), "schedule_failed").await;
     let text = diff.to_string();
     assert!(
         text.contains("database_error") && text.contains("check"),
@@ -149,7 +131,7 @@ async fn ac_sc_12_a_database_error_keeps_the_fire_time_of_a_maintenance_schedule
     assert_eq!(healed.attempts, 0);
     assert_eq!(repository_jobs(&db, tenant, bad).await, 1);
     assert_eq!(
-        failure_audit(&db, tenant, schedule).await,
+        failure_audit(&db, tenant, bad.as_uuid()).await,
         vec!["schedule_failed", "schedule_recovered"]
     );
     db.cleanup().await;
@@ -230,9 +212,8 @@ async fn ac_sc_12_an_invalid_maintenance_cron_keeps_the_schedule_enabled() {
         assert_eq!(state.next_run_at, None);
         assert_eq!(state.reason.as_deref(), Some("invalid_cron"));
         assert_eq!(state.retry_after, None, "only an edit helps");
-        let schedule = check_schedule_id(&db, tenant, repository).await;
         assert_eq!(
-            failure_audit(&db, tenant, schedule).await,
+            failure_audit(&db, tenant, repository.as_uuid()).await,
             vec!["schedule_failed"]
         );
 

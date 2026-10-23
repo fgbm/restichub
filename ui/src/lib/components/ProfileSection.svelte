@@ -16,6 +16,7 @@
 		note,
 		required = false,
 		badge,
+		badgeDanger = false,
 		children
 	}: {
 		id: string;
@@ -32,6 +33,8 @@
 		note?: string;
 		required?: boolean;
 		badge?: string;
+		/** The badge reports a failure, so it takes the danger tone. */
+		badgeDanger?: boolean;
 		children: Snippet;
 	} = $props();
 
@@ -67,7 +70,9 @@
 			<span class="section__title">
 				{title}{#if required}<span class="section__req" aria-hidden="true">*</span>{/if}
 			</span>
-			{#if badge}<span class="section__badge">{badge}</span>{/if}
+			{#if badge}<span class="section__badge" class:section__badge--danger={badgeDanger}
+					>{badge}</span
+				>{/if}
 			{#if !open}<span class="section__summary">{summary}</span>{/if}
 		</button>
 		{#if switchable}
@@ -127,6 +132,11 @@
 		background-color: var(--rh-color-info-subtle);
 		color: var(--rh-color-info-subtle-text);
 		font-size: var(--rh-font-size-xs);
+	}
+
+	.section__badge--danger {
+		background-color: var(--rh-color-danger-subtle);
+		color: var(--rh-color-danger-subtle-text);
 	}
 
 	.section__summary {

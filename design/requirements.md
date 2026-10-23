@@ -180,7 +180,7 @@ A user can be a member of more than one tenant. In the MVP a role applies to the
 | FR-SC-09 | Manual run and cancellation from the UI. Cancellation on timeout. | M |
 | FR-SC-10 | Event triggers: agent connection, webhook, chain "after plan A succeeds". | 1.0 (chain), L (webhook) |
 | FR-SC-11 | Plan assignment to one agent or by a label selector (`os=windows, env=prod`). | M (agent), 1.0 (selector) |
-| FR-SC-12 | A failed scheduler pass for a plan or a maintenance schedule records a typed failure on the row and never disables the row. A temporary failure keeps the fire time and sets a growing pause (5 s, doubling, at most 10 min). A permanent failure stops the schedule until a user edits its cron expression, time zone or enabled state. The failure state does not mute the RPO alert, and the dashboard shows the plan at risk. The system writes an audit record when the failure starts and when it ends. | M |
+| FR-SC-12 | A failed scheduler pass for a plan or a maintenance schedule records a typed failure on the row and never disables the row. A temporary failure keeps the fire time and sets a growing pause (5 s, doubling, at most 10 min). A permanent failure stops the schedule until a user edits its cron expression, time zone or enabled state. The failure state does not mute the RPO alert, and the dashboard shows the plan at risk. The system writes an audit record when the failure starts and when a successful pass ends it. An edit that clears the failure writes its own record of the edit and no record of the end. A failing row never delays a healthy row in a pass. | M |
 
 ### 3.8. Restore
 

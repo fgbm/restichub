@@ -53,7 +53,7 @@ A failure of the database is temporary. The control plane keeps the fire time an
 
 A cron expression that is not valid, an unknown time zone, or a schedule with no fire time is a permanent failure. The control plane does not try again until a user edits the cron expression, the time zone or the enabled state. The plan stays enabled, and its RPO alert stays active. The dashboard counts the plan as at risk.
 
-The control plane writes the audit records `schedule_failed` and `schedule_recovered` for the actor system. A successful pass, or an edit of the cron expression, the time zone or the enabled state, removes the failure and its value.
+The control plane writes the audit record `schedule_failed` for the actor system when a failure starts, and `schedule_recovered` when a successful pass ends it. A successful pass, or an edit of the cron expression, the time zone or the enabled state, removes the failure and its value.
 
 To alert when a plan or a maintenance schedule fails, use this expression:
 

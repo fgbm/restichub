@@ -17,7 +17,7 @@
 </script>
 
 <Alert
-	tone={failure.retry_after ? 'attention' : 'danger'}
+	tone="danger"
 	title={t(subject === 'plan' ? 'schedule.failure.titlePlan' : 'schedule.failure.titleMaintenance')}
 >
 	<p>{t(reasonMessages[failure.reason])}</p>

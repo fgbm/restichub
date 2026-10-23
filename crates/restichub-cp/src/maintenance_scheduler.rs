@@ -118,8 +118,7 @@ pub async fn process_tenant(
                 tracing::error!(schedule = %schedule.id, %error, "the maintenance schedule cannot be armed");
                 let reason = ScheduleFailureReason::from(error);
                 schedules::halt_failed(&mut tx, schedule.id, reason, now).await?;
-                let target =
-                    Target::maintenance(schedule.id, schedule.repository_id, schedule.task);
+                let target = Target::maintenance(schedule.repository_id, schedule.task);
                 schedule_failure::record_failed(&mut tx, &target, reason).await?;
             }
         }
@@ -173,7 +172,7 @@ async fn park_schedule(
 }
 
 fn target_of(due: &DueMaintenance) -> Target {
-    Target::maintenance(due.id, due.repository_id, due.task)
+    Target::maintenance(due.repository_id, due.task)
 }
 
 /// Moves the schedule to its next fire time and closes a failure state of the schedule.

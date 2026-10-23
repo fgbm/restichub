@@ -271,7 +271,7 @@ pub async fn claim_due(
          LEFT JOIN agents a ON a.tenant_id = r.tenant_id AND a.id = r.maintenance_agent_id \
          WHERE s.enabled AND s.next_run_at IS NOT NULL AND s.next_run_at <= $1 \
            AND (s.retry_after IS NULL OR s.retry_after <= $1) \
-         ORDER BY s.next_run_at \
+         ORDER BY s.failure_attempts > 0, GREATEST(s.next_run_at, s.retry_after), s.next_run_at \
          LIMIT $2 \
          FOR UPDATE OF s SKIP LOCKED",
     )

@@ -389,6 +389,9 @@ describe('the plan page', () => {
 		expect(screen.getByText(/^Failed since /)).toBeInTheDocument();
 		expect(screen.getByText(/^The system retries at /)).toBeInTheDocument();
 		expect(screen.queryByText(/does not retry/)).not.toBeInTheDocument();
+		expect(
+			screen.getByText('The schedule of this plan failed').closest('.alert--danger')
+		).not.toBeNull();
 	});
 
 	it('ac_sc_12 says that only an edit fixes a permanent failure of the schedule', async () => {
