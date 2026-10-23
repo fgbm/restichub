@@ -573,9 +573,9 @@ export const en = {
 	'repositories.maintenance.timeZone': 'Time zone',
 	'repositories.maintenance.timeZoneHint':
 		'An IANA name, such as Europe/Berlin. It applies to both schedules.',
-	'repositories.maintenance.retention': 'Retention rules',
+	'repositories.maintenance.retention': 'Cleanup',
 	'repositories.maintenance.retentionHint':
-		'Deletes the snapshots by the retention rules of the profiles (forget), then frees the space (prune).',
+		'The retention rules are in the profiles of the plans. The cleanup runs forget with these rules, then prune frees the space.',
 	'repositories.maintenance.check': 'Check',
 	'repositories.maintenance.checkHint': 'Checks the structure of the repository.',
 	'repositories.maintenance.cron': 'Cron expression',
@@ -1897,7 +1897,7 @@ export const en = {
 	'rp.summary.accessKeep': 'The stored secrets stay as they are',
 	'rp.summary.accessReplace': 'A secret will be replaced',
 	'rp.summary.off': 'Off',
-	'rp.check.zone': 'The schedule uses the time zone of the Retention rules section: {zone}.',
+	'rp.check.zone': 'The schedule uses the time zone of the Cleanup section: {zone}.',
 	'rp.side.result': 'What you get',
 	'record.save.dirty': 'The changes are not saved',
 	'record.save.clean': 'No changes',
@@ -1937,7 +1937,7 @@ export const en = {
 	'pe.options.lowPriorityHelp':
 		'The backup and the deletion of expired snapshots of this profile run with a lower CPU priority, and on Linux also with a lower disk priority. The steps can take more time.',
 	'pe.check.lead':
-		'A check of the repository after the backup. Without a read-data share, the check reads the structure only, which is fast.',
+		'The check of the repository is a maintenance job, not a step after a backup. The maintenance host runs it on the schedule of the repository. The check reads the largest read-data subset among the profiles of the plans of the repository. This profile sets its subset. Without a subset, the check reads the structure only, which is fast.',
 	'pe.check.help':
 		'For example 5% or 1/10. A bigger share makes the check longer and uses more traffic.',
 	'pe.check.placeholder': 'Structure only',
