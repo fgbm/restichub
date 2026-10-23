@@ -71,7 +71,9 @@ pub struct AlertView {
     pub error_text: Option<String>,
     /// The link of the alert. Absent when the installation sets no public origin.
     pub url: Option<String>,
+    #[schema(format = DateTime)]
     pub opened_at: String,
+    #[schema(format = DateTime)]
     pub resolved_at: Option<String>,
 }
 
@@ -128,11 +130,12 @@ pub struct AlertCounts {
 #[utoipa::path(
     get,
     path = "/api/v1/alerts",
+    tags = ["alerts"],
     security(("cookie" = []), ("bearer" = [])),
     params(AlertListQuery),
     responses(
         (status = 200, description = "The alerts of the tenant.", body = AlertListResponse),
-        (status = 400, description = "A query parameter is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "A query parameter is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
     )
 )]
@@ -226,6 +229,7 @@ pub struct UpdateAlertRulesRequest {
 #[utoipa::path(
     get,
     path = "/api/v1/alert-rules",
+    tags = ["alerts"],
     security(("cookie" = []), ("bearer" = [])),
     responses(
         (status = 200, description = "The alert rules.", body = AlertRulesResponse),
@@ -249,11 +253,12 @@ pub async fn get_rules(
 #[utoipa::path(
     put,
     path = "/api/v1/alert-rules",
+    tags = ["alerts"],
     security(("cookie" = []), ("bearer" = [])),
     request_body = UpdateAlertRulesRequest,
     responses(
         (status = 200, description = "The alert rules after the change.", body = AlertRulesResponse),
-        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
     )
 )]

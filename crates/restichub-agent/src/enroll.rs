@@ -68,7 +68,7 @@ pub struct Enrolled {
     pub reenrolled: bool,
 }
 
-/// One public job signing key of the enrollment response (ADR-0026).
+/// One public job signing key of the enrollment response.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EnrollmentKeyBody {
     /// `current` or `next`.

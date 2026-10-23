@@ -50,7 +50,8 @@ pub struct SnapshotItem {
     /// The 64-character identifier. `restore` and `ls` take it.
     pub id: String,
     pub short_id: String,
-    /// In RFC 3339. Null when restic gave no valid time.
+    /// Null when restic did not report a valid one.
+    #[schema(format = DateTime)]
     pub time: Option<String>,
     pub hostname: String,
     pub username: String,
@@ -86,7 +87,8 @@ pub struct NodeItem {
     /// In bytes.
     pub size: i64,
     pub permissions: String,
-    /// In RFC 3339. Null when restic gave no valid time.
+    /// Null when restic did not report a valid one.
+    #[schema(format = DateTime)]
     pub mtime: Option<String>,
     /// Empty unless the entry is a symbolic link.
     pub link_target: String,

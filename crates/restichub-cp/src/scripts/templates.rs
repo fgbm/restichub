@@ -39,8 +39,7 @@ const MAX_PARAMETERS: usize = 32;
 
 /// The type of a script template parameter. The value becomes an environment variable of the script.
 ///
-/// The name is separate from the kind of a profile parameter (ADR-0047), so the two enums keep two
-/// schemas.
+/// The name is separate from the kind of a profile parameter, so the two enums keep two schemas.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TemplateParameterKind {
@@ -90,11 +89,13 @@ pub struct ScriptTemplateView {
     pub timeout_seconds: u32,
     pub failure_policy: FailurePolicy,
     pub parameters: Vec<ScriptTemplateParameter>,
-    /// In RFC 3339. Absent for a built-in template.
+    /// Absent for a built-in template.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(format = DateTime)]
     pub created_at: Option<String>,
-    /// In RFC 3339. Absent for a built-in template.
+    /// Absent for a built-in template.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(format = DateTime)]
     pub updated_at: Option<String>,
 }
 
@@ -112,11 +113,13 @@ pub struct JobTemplateView {
     pub name: String,
     pub description: String,
     pub scripts: Vec<ScriptDef>,
-    /// In RFC 3339. Absent for a built-in template.
+    /// Absent for a built-in template.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(format = DateTime)]
     pub created_at: Option<String>,
-    /// In RFC 3339. Absent for a built-in template.
+    /// Absent for a built-in template.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(format = DateTime)]
     pub updated_at: Option<String>,
 }
 
@@ -343,6 +346,7 @@ fn job_template_value(view: &JobTemplateView) -> Value {
 #[utoipa::path(
     get,
     path = "/api/v1/script-templates",
+    tags = ["profiles"],
     security(("cookie" = []), ("bearer" = [])),
     responses(
         (status = 200, description = "The script templates.", body = ScriptTemplateListResponse),
@@ -368,12 +372,13 @@ pub async fn list_script_templates(
 #[utoipa::path(
     get,
     path = "/api/v1/script-templates/{id}",
+    tags = ["profiles"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the template.")),
     responses(
         (status = 200, description = "The template.", body = ScriptTemplateView),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The template is not found.", body = crate::error::ProblemBody)
+        (status = 404, description = "The template is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn get_script_template(
@@ -404,13 +409,14 @@ pub async fn get_script_template(
 #[utoipa::path(
     post,
     path = "/api/v1/script-templates",
+    tags = ["profiles"],
     security(("cookie" = []), ("bearer" = [])),
     request_body = CreateScriptTemplateRequest,
     responses(
         (status = 201, description = "The template is created.", body = ScriptTemplateView),
-        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
-        (status = 409, description = "The name exists, or the tenant holds the most templates.", body = crate::error::ProblemBody)
+        (status = 409, description = "The name exists, or the tenant holds the most templates.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn create_script_template(
@@ -470,15 +476,16 @@ pub async fn create_script_template(
 #[utoipa::path(
     patch,
     path = "/api/v1/script-templates/{id}",
+    tags = ["profiles"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the template.")),
     request_body = UpdateScriptTemplateRequest,
     responses(
         (status = 200, description = "The updated template.", body = ScriptTemplateView),
-        (status = 400, description = "A field is not valid, or the template is built-in.", body = crate::error::ProblemBody),
+        (status = 400, description = "A field is not valid, or the template is built-in.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The template is not found.", body = crate::error::ProblemBody),
-        (status = 409, description = "The name exists.", body = crate::error::ProblemBody)
+        (status = 404, description = "The template is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 409, description = "The name exists.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn update_script_template(
@@ -555,13 +562,14 @@ pub async fn update_script_template(
 #[utoipa::path(
     delete,
     path = "/api/v1/script-templates/{id}",
+    tags = ["profiles"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the template.")),
     responses(
         (status = 204, description = "The template is removed."),
-        (status = 400, description = "The template is built-in.", body = crate::error::ProblemBody),
+        (status = 400, description = "The template is built-in.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The template is not found.", body = crate::error::ProblemBody)
+        (status = 404, description = "The template is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn delete_script_template(
@@ -624,6 +632,7 @@ fn validate_template_scripts(scripts: Vec<ScriptDef>) -> Result<Vec<ScriptDef>, 
 #[utoipa::path(
     get,
     path = "/api/v1/job-templates",
+    tags = ["jobs"],
     security(("cookie" = []), ("bearer" = [])),
     responses(
         (status = 200, description = "The job templates.", body = JobTemplateListResponse),
@@ -649,12 +658,13 @@ pub async fn list_job_templates(
 #[utoipa::path(
     get,
     path = "/api/v1/job-templates/{id}",
+    tags = ["jobs"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the template.")),
     responses(
         (status = 200, description = "The template.", body = JobTemplateView),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The template is not found.", body = crate::error::ProblemBody)
+        (status = 404, description = "The template is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn get_job_template(
@@ -685,13 +695,14 @@ pub async fn get_job_template(
 #[utoipa::path(
     post,
     path = "/api/v1/job-templates",
+    tags = ["jobs"],
     security(("cookie" = []), ("bearer" = [])),
     request_body = CreateJobTemplateRequest,
     responses(
         (status = 201, description = "The template is created.", body = JobTemplateView),
-        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
-        (status = 409, description = "The name exists, or the tenant holds the most templates.", body = crate::error::ProblemBody)
+        (status = 409, description = "The name exists, or the tenant holds the most templates.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn create_job_template(
@@ -742,15 +753,16 @@ pub async fn create_job_template(
 #[utoipa::path(
     patch,
     path = "/api/v1/job-templates/{id}",
+    tags = ["jobs"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the template.")),
     request_body = UpdateJobTemplateRequest,
     responses(
         (status = 200, description = "The updated template.", body = JobTemplateView),
-        (status = 400, description = "A field is not valid, or the template is built-in.", body = crate::error::ProblemBody),
+        (status = 400, description = "A field is not valid, or the template is built-in.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The template is not found.", body = crate::error::ProblemBody),
-        (status = 409, description = "The name exists.", body = crate::error::ProblemBody)
+        (status = 404, description = "The template is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 409, description = "The name exists.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn update_job_template(
@@ -811,13 +823,14 @@ pub async fn update_job_template(
 #[utoipa::path(
     delete,
     path = "/api/v1/job-templates/{id}",
+    tags = ["jobs"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the template.")),
     responses(
         (status = 204, description = "The template is removed."),
-        (status = 400, description = "The template is built-in.", body = crate::error::ProblemBody),
+        (status = 400, description = "The template is built-in.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The template is not found.", body = crate::error::ProblemBody)
+        (status = 404, description = "The template is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn delete_job_template(

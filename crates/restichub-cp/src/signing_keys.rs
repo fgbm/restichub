@@ -34,13 +34,14 @@ pub struct CompromiseResponse {
 #[utoipa::path(
     post,
     path = "/api/v1/platform/signing-keys/compromise",
+    tags = ["platform"],
     summary = "Marks the current job signing key as compromised.",
     description = "The next key becomes the current key and a new next key is created. The old current key retires with the reason `compromise` and the signed update revokes it on every open agent stream. An agent that was offline enrolls again.",
     request_body = CompromiseRequest,
     security(("cookie" = []), ("bearer" = [])),
     responses(
         (status = 200, description = "The key set is rotated.", body = CompromiseResponse),
-        (status = 409, description = "The current key is not the expected one.", body = crate::error::ProblemBody),
+        (status = 409, description = "The current key is not the expected one.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
     )
 )]

@@ -113,8 +113,6 @@ const DEFAULT_TENANT_NAME: &str = "default";
 const DEFAULT_AGENT_MAX_CONNECTIONS: usize = 2200;
 const DEFAULT_EVENTS_MAX_STREAMS: usize = 2000;
 
-/// The tenancy mode of the installation (ADR-0024).
-///
 /// The mode changes the API surface and the user interface. It never changes the storage model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]

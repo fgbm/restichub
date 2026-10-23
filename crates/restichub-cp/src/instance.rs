@@ -24,7 +24,9 @@ pub struct InstanceResponse {
 #[utoipa::path(
     get,
     path = "/api/v1/instance",
-    responses((status = 200, description = "The instance.", body = InstanceResponse))
+    tags = ["system"],
+    summary = "Reads the mode and the setup state of the installation.",
+    responses((status = 200, description = "The mode and the setup state.", body = InstanceResponse))
 )]
 pub async fn instance(State(state): State<AppState>) -> Result<Json<InstanceResponse>, ApiError> {
     let setup_required = setup::setup_required(&state).await?;

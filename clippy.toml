@@ -3,3 +3,9 @@
 # production code.
 allow-expect-in-tests = true
 allow-unwrap-in-tests = true
+
+# The control plane answers a query value that does not parse with an RFC 9457 problem body
+# (ADR-0023). The raw extractor answers with `text/plain`, so the handlers use `ApiQuery`.
+disallowed-types = [
+  { path = "axum::extract::Query", reason = "use ApiQuery, which maps a bad value to a problem (ADR-0023)" },
+]

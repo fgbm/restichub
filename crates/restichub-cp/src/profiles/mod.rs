@@ -22,7 +22,7 @@ mod settings;
 use std::collections::BTreeMap;
 
 use axum::Json;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use restichub_compiler::{
     Architecture, CompileError, OperatingSystem, Plan, ResticVersion, TargetFacts, compile,
@@ -43,6 +43,7 @@ use crate::context::{Operation, RequestContext};
 use crate::delete_check;
 use crate::error::{ApiError, map_write_error};
 use crate::json::ApiJson;
+use crate::list_query::ApiQuery;
 use crate::secrets::actor_user;
 use crate::server::AppState;
 use crate::validation::Reason;
@@ -72,18 +73,19 @@ pub struct ProfileListQuery {
 #[utoipa::path(
     get,
     path = "/api/v1/profiles",
+    tags = ["profiles"],
     security(("cookie" = []), ("bearer" = [])),
     params(ProfileListQuery),
     responses(
         (status = 200, description = "The profiles of the tenant. For a Viewer, each script has an empty body and empty values of string variables.", body = ProfileListResponse),
-        (status = 400, description = "A query parameter is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "A query parameter is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
     )
 )]
 pub async fn list_profiles(
     State(state): State<AppState>,
     context: RequestContext,
-    Query(query): Query<ProfileListQuery>,
+    ApiQuery(query): ApiQuery<ProfileListQuery>,
 ) -> Result<Json<ProfileListResponse>, ApiError> {
     context.authorize(Operation::ProfilesRead)?;
     let page = ProfilePage {
@@ -121,10 +123,11 @@ pub async fn list_profiles(
     Ok(Json(ProfileListResponse { items, next_cursor }))
 }
 
-/// Reads the job limits that a new profile gets when its request names none (ADR-0039).
+/// Reads the job limits that a new profile gets when its request names none.
 #[utoipa::path(
     get,
     path = "/api/v1/profiles/defaults",
+    tags = ["profiles"],
     security(("cookie" = []), ("bearer" = [])),
     responses(
         (status = 200, description = "The default job limits.", body = JobLimitDefaults),
@@ -142,12 +145,13 @@ pub async fn job_limit_defaults(
 #[utoipa::path(
     get,
     path = "/api/v1/profiles/{id}",
+    tags = ["profiles"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the profile.")),
     responses(
         (status = 200, description = "The profile. For a Viewer, each script has an empty body and empty values of string variables.", body = ProfileView),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The profile is not found.", body = crate::error::ProblemBody)
+        (status = 404, description = "The profile is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn get_profile(
@@ -176,15 +180,16 @@ pub async fn get_profile(
 #[utoipa::path(
     post,
     path = "/api/v1/profiles",
+    tags = ["profiles"],
     summary = "Creates a profile in the tenant.",
-    description = "The control plane validates the settings before the write (FR-PF-05).",
+    description = "The control plane validates the settings before the write.",
     security(("cookie" = []), ("bearer" = [])),
     request_body = CreateProfileRequest,
     responses(
         (status = 201, description = "The profile is created.", body = ProfileResponse),
-        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
-        (status = 409, description = "The name exists.", body = crate::error::ProblemBody)
+        (status = 409, description = "The name exists.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn create_profile(
@@ -236,14 +241,15 @@ pub async fn create_profile(
 #[utoipa::path(
     patch,
     path = "/api/v1/profiles/{id}",
+    tags = ["profiles"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the profile.")),
     request_body = UpdateProfileRequest,
     responses(
         (status = 200, description = "The updated profile.", body = ProfileResponse),
-        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The profile is not found.", body = crate::error::ProblemBody)
+        (status = 404, description = "The profile is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn update_profile(
@@ -367,12 +373,13 @@ pub async fn update_profile(
 #[utoipa::path(
     get,
     path = "/api/v1/profiles/{id}/usage",
+    tags = ["profiles"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the profile.")),
     responses(
         (status = 200, description = "What blocks the delete now.", body = delete_check::UsageView),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The profile is not found.", body = crate::error::ProblemBody)
+        (status = 404, description = "The profile is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn profile_usage(
@@ -395,13 +402,14 @@ pub async fn profile_usage(
 #[utoipa::path(
     delete,
     path = "/api/v1/profiles/{id}",
+    tags = ["profiles"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the profile.")),
     responses(
         (status = 204, description = "The profile is removed."),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The profile is not found.", body = crate::error::ProblemBody),
-        (status = 409, description = "A plan holds the profile (`profile_in_use`). The body lists the plans.", body = crate::error::ProblemBody)
+        (status = 404, description = "The profile is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 409, description = "A plan holds the profile (`profile_in_use`). The body lists the plans.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn delete_profile(

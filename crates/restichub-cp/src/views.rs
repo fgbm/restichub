@@ -26,11 +26,11 @@ pub struct UserView {
     pub role: Role,
     /// The account holds an active membership in another active tenant.
     pub shared: bool,
-    /// The account holds the installation-wide right, so a tenant scope cannot change it
-    /// (ADR-0029).
+    /// The account holds the installation-wide right, so a tenant scope cannot change it.
     pub platform_admin: bool,
-    /// The last sign-in into the tenant or switch to it, in RFC 3339. Set in the user list and the
-    /// user record only.
+    /// The last sign-in into the tenant or switch to it. Set in the user list and the user record
+    /// only.
+    #[schema(format = DateTime)]
     pub last_sign_in_at: Option<String>,
 }
 
@@ -78,7 +78,7 @@ impl From<&Tenant> for TenantView {
     }
 }
 
-/// A tenant in a platform administration response (FR-TN-02).
+/// A tenant in a platform administration response.
 ///
 /// The view holds the user and host counts only. It never holds a user list or a secret of the
 /// tenant.
@@ -87,12 +87,12 @@ pub struct PlatformTenantView {
     pub id: String,
     pub name: String,
     pub status: TenantStatus,
-    /// In RFC 3339.
+    #[schema(format = DateTime)]
     pub created_at: String,
     pub user_count: i64,
     /// Revoked hosts do not count.
     pub agent_count: i64,
-    /// Derived from the memberships: `none` when the tenant has no active Admin (ADR-0028).
+    /// Derived from the memberships: `none` when the tenant has no active Admin.
     pub admin_state: AdminState,
 }
 
@@ -110,7 +110,7 @@ impl From<&TenantSummary> for PlatformTenantView {
     }
 }
 
-/// One membership of an account in the platform account list (ADR-0028).
+/// One membership of an account in the platform account list.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct PlatformMembershipView {
     pub tenant_id: String,
@@ -131,7 +131,7 @@ impl From<&PlatformMembership> for PlatformMembershipView {
     }
 }
 
-/// An installation account with its memberships (ADR-0028).
+/// An installation account with its memberships.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct PlatformUserView {
     pub id: String,
@@ -139,11 +139,11 @@ pub struct PlatformUserView {
     pub display_name: String,
     /// Unique in the installation when it is set.
     pub email: Option<String>,
-    /// False until an invitation verifies the address; the MVP leaves it false.
+    /// The control plane does not verify the address, so the value is false.
     pub email_verified: bool,
     /// A Platform Admin set it for the whole installation.
     pub disabled: bool,
-    /// True when the account holds the installation-wide right (ADR-0029).
+    /// True when the account holds the installation-wide right.
     pub platform_admin: bool,
     pub memberships: Vec<PlatformMembershipView>,
 }
@@ -171,8 +171,8 @@ pub struct PlatformUserRecordView {
     /// The number of the active accounts with the Platform Admin right in the installation. The
     /// last one cannot lose the right or be disabled (HTTP 409).
     pub platform_admin_count: i64,
-    /// The last sign-in into any organization or the platform, or switch to an organization, in
-    /// RFC 3339.
+    /// The last sign-in into any organization or the platform, or switch to an organization.
+    #[schema(format = DateTime)]
     pub last_sign_in_at: Option<String>,
 }
 
@@ -188,18 +188,16 @@ pub struct SecretUsageView {
     pub name: String,
 }
 
-/// The metadata of a secret in a response (FR-RP-05).
-///
-/// The view never holds the value. The API cannot return a secret value after a user saves it
-/// (AC-RP-02).
+/// The view never holds the value. The API cannot return a secret value after a user saves it.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct SecretView {
     pub id: String,
     pub name: String,
     pub purpose: String,
-    /// In RFC 3339.
+    #[schema(format = DateTime)]
     pub created_at: String,
-    /// The time of the last value replace. In RFC 3339.
+    /// Holds the time of the last replace of the value.
+    #[schema(format = DateTime)]
     pub updated_at: String,
     /// Null for an API token actor.
     pub created_by: Option<String>,
@@ -229,17 +227,17 @@ impl SecretView {
     }
 }
 
-/// The metadata of one secret with the marker that the value is set (FR-RP-05).
+/// The metadata of one secret with the marker that the value is set.
 ///
-/// The field `value` holds the marker `set` only. The API never returns the value (AC-RP-02).
+/// The field `value` holds the marker `set` only. The API never returns the value.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct SecretDetailView {
     pub id: String,
     pub name: String,
     pub purpose: String,
-    /// In RFC 3339.
+    #[schema(format = DateTime)]
     pub created_at: String,
-    /// In RFC 3339.
+    #[schema(format = DateTime)]
     pub updated_at: String,
     /// Null for an API token actor.
     pub created_by: Option<String>,

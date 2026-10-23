@@ -97,13 +97,13 @@ const INTERRUPTED_CODE: &str = "interrupted";
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct JobActionRequest {
-    /// The agent that runs the job. An absent value uses the maintenance agent of the repository
-    /// (FR-RP-08). A local-path repository needs an explicit or a maintenance agent.
+    /// The agent that runs the job. An absent value uses the maintenance agent of the repository. A
+    /// local-path repository needs an explicit or a maintenance agent.
     #[serde(default)]
     pub agent_id: Option<String>,
 }
 
-/// One job with its lifecycle (FR-PR-01).
+/// One job with its lifecycle.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct JobView {
     pub id: String,
@@ -114,20 +114,22 @@ pub struct JobView {
     pub status: JobStatus,
     /// Null until the job finishes.
     pub result_code: Option<JobResultCode>,
-    /// A machine-readable error code from the agent. The user interface translates it (NFR-DOC-04).
-    /// It never holds a secret.
+    /// A machine-readable error code from the agent. The user interface translates it. It never
+    /// holds a secret.
     pub result_message: Option<String>,
     /// The typed values behind `result_message`: the user interface builds its text from them.
     /// Null when the message needs none.
     pub result_params: Option<IncompatibleParams>,
-    /// In RFC 3339.
+    #[schema(format = DateTime)]
     pub created_at: String,
-    /// In RFC 3339.
+    #[schema(format = DateTime)]
     pub updated_at: String,
-    /// In RFC 3339. Null until the job finishes.
+    /// Null until the job finishes.
+    #[schema(format = DateTime)]
     pub finished_at: Option<String>,
-    /// In RFC 3339. The end of the acceptance window of the signed job: the agent refuses the job
-    /// after this time. It is not a limit of the run. Null when the job holds no expiry.
+    /// The end of the acceptance window of the signed job: the agent refuses the job after this
+    /// time. It is not a limit of the run. Null when the job holds no expiry.
+    #[schema(format = DateTime)]
     pub expires_at: Option<String>,
     /// Null for an on-demand job and for a job whose plan was deleted.
     pub plan_id: Option<String>,
@@ -137,9 +139,11 @@ pub struct JobView {
     pub agent_hostname: Option<String>,
     /// Null in a response that joins no display names.
     pub repository_name: Option<String>,
-    /// In RFC 3339. Null until the agent starts the job.
+    /// Null until the agent starts the job.
+    #[schema(format = DateTime)]
     pub started_at: Option<String>,
-    /// In RFC 3339. The earliest time at which the queue sends the job.
+    /// The earliest time at which the queue sends the job.
+    #[schema(format = DateTime)]
     pub run_at: String,
     /// Lock retries so far (restic exit code 11).
     pub attempt: i32,
@@ -191,17 +195,18 @@ impl From<&Job> for JobView {
 #[utoipa::path(
     post,
     path = "/api/v1/repositories/{id}/init",
+    tags = ["repositories"],
     summary = "Initializes a repository from an agent.",
-    description = "The control plane sends the repository password and the backend credentials with the signed job only (ADR-0003). An offline agent gives HTTP 409 `agent_offline`.",
+    description = "The control plane sends the repository password and the backend credentials with the signed job only. An offline agent gives HTTP 409 `agent_offline`.",
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the repository.")),
     request_body = JobActionRequest,
     responses(
         (status = 202, description = "The job is sent to the agent.", body = JobView),
-        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The repository is not found.", body = crate::error::ProblemBody),
-        (status = 409, description = "The agent is offline.", body = crate::error::ProblemBody)
+        (status = 404, description = "The repository is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 409, description = "The agent is offline.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn init_repository(
@@ -225,6 +230,7 @@ pub async fn init_repository(
 #[utoipa::path(
     post,
     path = "/api/v1/repositories/{id}/test-access",
+    tags = ["repositories"],
     summary = "Tests the access to a repository from an agent.",
     description = "The job runs `restic cat config`. A missing repository gives the typed result `not_initialized`. An offline agent gives HTTP 409 `agent_offline`.",
     security(("cookie" = []), ("bearer" = [])),
@@ -232,10 +238,10 @@ pub async fn init_repository(
     request_body = JobActionRequest,
     responses(
         (status = 202, description = "The job is sent to the agent.", body = JobView),
-        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The repository is not found.", body = crate::error::ProblemBody),
-        (status = 409, description = "The agent is offline.", body = crate::error::ProblemBody)
+        (status = 404, description = "The repository is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 409, description = "The agent is offline.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn test_access_repository(

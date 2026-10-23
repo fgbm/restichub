@@ -33,7 +33,7 @@ use crate::secrets::actor_user;
 use crate::server::AppState;
 use crate::validation::Reason;
 
-/// The value of one parameter on a host (FR-PF-12).
+/// One value of a parameter on a host.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct ParameterValueView {
     pub kind: ParameterKind,
@@ -45,7 +45,7 @@ pub struct ParameterValueView {
     pub secret_name: Option<String>,
 }
 
-/// One row of the parameter table of a host (FR-PF-10, FR-PF-12).
+/// One row of the parameter table of a host.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct HostParameterView {
     pub name: String,
@@ -62,19 +62,19 @@ pub struct HostParameterView {
     pub value: Option<ParameterValueView>,
     /// True for a value that no profile of the plans of this host declares.
     pub unused: bool,
-    /// True when the server hid a text value from this reader (FR-PF-12).
+    /// True when the server hid a text value from this reader.
     pub hidden: bool,
 }
 
 /// What the page of a host shows: the values that it holds and the parameters of the profiles of
-/// its plans (FR-PF-10).
+/// its plans.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct HostParametersResponse {
     pub agent_id: String,
     pub parameters: Vec<HostParameterView>,
 }
 
-/// The request body that replaces the values of a host (FR-PF-10).
+/// The request body that replaces the values of a host.
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ReplaceParametersRequest {
@@ -82,16 +82,17 @@ pub struct ReplaceParametersRequest {
     pub parameters: Vec<ParameterValueDef>,
 }
 
-/// Reads the parameter table of a host (FR-PF-10, FR-PF-12).
+/// Reads the parameter table of a host.
 #[utoipa::path(
     get,
     path = "/api/v1/agents/{id}/parameters",
+    tags = ["hosts"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the agent.")),
     responses(
         (status = 200, description = "The values on the host and the parameters of the profiles of its plans. For a Viewer, a text value is empty with the flag `hidden`.", body = HostParametersResponse),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The agent is not found.", body = crate::error::ProblemBody)
+        (status = 404, description = "The agent is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn get_parameters(
@@ -124,6 +125,7 @@ pub async fn get_parameters(
 #[utoipa::path(
     put,
     path = "/api/v1/agents/{id}/parameters",
+    tags = ["hosts"],
     summary = "Replaces the parameter values of a host.",
     description = "The control plane refuses a change that leaves a plan without a required parameter (`parameter_missing_in_plans`).",
     security(("cookie" = []), ("bearer" = [])),
@@ -131,9 +133,9 @@ pub async fn get_parameters(
     request_body = ReplaceParametersRequest,
     responses(
         (status = 200, description = "The stored values.", body = HostParametersResponse),
-        (status = 400, description = "A field is not valid, or a plan loses a required value.", body = crate::error::ProblemBody),
+        (status = 400, description = "A field is not valid, or a plan loses a required value.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The agent is not found.", body = crate::error::ProblemBody)
+        (status = 404, description = "The agent is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn replace_parameters(

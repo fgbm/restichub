@@ -13,7 +13,7 @@
 //! and starts no job (AC-RS-02). A repository of another tenant gives HTTP 404 (AC-TN-01).
 
 use axum::Json;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use restichub_db::agents as agents_repo;
 use restichub_db::audit::{AuditAction, diff};
@@ -40,6 +40,7 @@ use crate::context::{Operation, RequestContext};
 use crate::error::{ApiError, map_write_error};
 use crate::jobs::{JobView, ensure_agent_active, format_time, parse_job_id, resolve_agent};
 use crate::json::ApiJson;
+use crate::list_query::ApiQuery;
 use crate::repositories::parse_repository_id;
 use crate::server::AppState;
 use crate::validation::Reason;
@@ -91,9 +92,11 @@ pub struct SnapshotsQuery {
 pub struct SnapshotsParams {
     /// Identifier that an earlier POST returned. Without it the call returns the newest stored list.
     pub job: Option<String>,
-    /// Keep the snapshots made at this time or later, in RFC 3339. The control plane applies it.
+    /// Keep the snapshots made at this time or later. The control plane applies it.
+    #[param(format = DateTime)]
     pub from: Option<String>,
-    /// Keep the snapshots made at this time or earlier, in RFC 3339. The control plane applies it.
+    /// Keep the snapshots made at this time or earlier. The control plane applies it.
+    #[param(format = DateTime)]
     pub to: Option<String>,
 }
 
@@ -105,7 +108,8 @@ pub struct SnapshotsView {
     pub job_id: Option<String>,
     /// The agent that read the repository. Null when the state is `empty`.
     pub agent_id: Option<String>,
-    /// In RFC 3339. Null unless the state is `done`.
+    /// Null unless the state is `done`.
+    #[schema(format = DateTime)]
     pub fetched_at: Option<String>,
     /// How old the list is, in whole seconds. Null unless the state is `done`.
     pub age_seconds: Option<i64>,
@@ -160,7 +164,8 @@ pub struct LsView {
     pub path: String,
     pub offset: u64,
     pub limit: u64,
-    /// In RFC 3339. Null unless the state is `done`.
+    /// Null unless the state is `done`.
+    #[schema(format = DateTime)]
     pub fetched_at: Option<String>,
     /// True when a stored page answered the request and no job ran.
     pub cached: bool,
@@ -173,7 +178,6 @@ pub struct LsView {
     pub nodes: Vec<NodeItem>,
 }
 
-/// The body of a restore request (FR-RS-03, FR-RS-04).
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RestoreBody {
@@ -638,6 +642,7 @@ fn ls_view(
 #[utoipa::path(
     post,
     path = "/api/v1/repositories/{id}/snapshots",
+    tags = ["repositories"],
     summary = "Lists the snapshots of a repository.",
     description = "An agent with access to the repository runs `restic snapshots` with the filters. Ask `GET /api/v1/repositories/{id}/snapshots?job=` for the result. An offline agent gives HTTP 409 `agent_offline`, and an agent without the capability gives HTTP 409 `agent_capability_missing`.",
     security(("cookie" = []), ("bearer" = [])),
@@ -645,10 +650,10 @@ fn ls_view(
     request_body = SnapshotsQuery,
     responses(
         (status = 202, description = "The job is queued.", body = SnapshotsView),
-        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The repository is not found.", body = crate::error::ProblemBody),
-        (status = 409, description = "The repository is not initialized, or the agent is offline.", body = crate::error::ProblemBody)
+        (status = 404, description = "The repository is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 409, description = "The repository is not initialized, or the agent is offline.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn start_snapshots(
@@ -692,22 +697,23 @@ pub async fn start_snapshots(
 #[utoipa::path(
     get,
     path = "/api/v1/repositories/{id}/snapshots",
+    tags = ["repositories"],
     summary = "Reads a snapshot list.",
     description = "With `job` the call returns the state and the result of that job. Without it the call returns the newest stored list of the repository with its age. The dates `from` and `to` filter the list.",
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the repository."), SnapshotsParams),
     responses(
         (status = 200, description = "The snapshot list.", body = SnapshotsView),
-        (status = 400, description = "A query parameter is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "A query parameter is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The repository or the job is not found.", body = crate::error::ProblemBody)
+        (status = 404, description = "The repository or the job is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn get_snapshots(
     State(state): State<AppState>,
     context: RequestContext,
     Path(id): Path<String>,
-    Query(params): Query<SnapshotsParams>,
+    ApiQuery(params): ApiQuery<SnapshotsParams>,
 ) -> Result<Json<SnapshotsView>, ApiError> {
     context.authorize(Operation::JobsRead)?;
     let repository_id = parse_repository_id(&id)?;
@@ -772,6 +778,7 @@ pub async fn get_snapshots(
 #[utoipa::path(
     post,
     path = "/api/v1/repositories/{id}/ls",
+    tags = ["repositories"],
     summary = "Lists one directory of a snapshot.",
     description = "An agent with access to the repository runs `restic ls` for one directory and returns one page of its entries. A page that a job listed in the last ten minutes comes from the stored copy with HTTP 200 and starts no job. Ask `GET /api/v1/repositories/{id}/ls?job=` for the result of a new job.",
     security(("cookie" = []), ("bearer" = [])),
@@ -780,10 +787,10 @@ pub async fn get_snapshots(
     responses(
         (status = 200, description = "A stored page answers the request.", body = LsView),
         (status = 202, description = "The job is queued.", body = LsView),
-        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The repository is not found.", body = crate::error::ProblemBody),
-        (status = 409, description = "The repository is not initialized, the agent is offline, or the agent is too old.", body = crate::error::ProblemBody)
+        (status = 404, description = "The repository is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 409, description = "The repository is not initialized, the agent is offline, or the agent is too old.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn start_ls(
@@ -822,22 +829,23 @@ pub async fn start_ls(
 #[utoipa::path(
     get,
     path = "/api/v1/repositories/{id}/ls",
+    tags = ["repositories"],
     summary = "Reads a page of a snapshot tree.",
     description = "The call returns the state and the entries of the page job. Ask again while the state is `pending`.",
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the repository."), LsParams),
     responses(
         (status = 200, description = "The page.", body = LsView),
-        (status = 400, description = "A query parameter is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "A query parameter is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The repository or the job is not found.", body = crate::error::ProblemBody)
+        (status = 404, description = "The repository or the job is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn get_ls(
     State(state): State<AppState>,
     context: RequestContext,
     Path(id): Path<String>,
-    Query(params): Query<LsParams>,
+    ApiQuery(params): ApiQuery<LsParams>,
 ) -> Result<Json<LsView>, ApiError> {
     context.authorize(Operation::JobsWrite)?;
     let repository_id = parse_repository_id(&id)?;
@@ -873,6 +881,7 @@ pub async fn get_ls(
 #[utoipa::path(
     post,
     path = "/api/v1/repositories/{id}/restore",
+    tags = ["restore"],
     summary = "Restores a snapshot.",
     description = "The target agent reads the repository directly and writes the files to the target directory. The data does not go through the control plane. The agent gets the secrets of this repository for this job only. An offline agent gives HTTP 409 `agent_offline`, and an agent without the capability `restore-v1` gives HTTP 409 `agent_capability_missing`.",
     security(("cookie" = []), ("bearer" = [])),
@@ -880,10 +889,10 @@ pub async fn get_ls(
     request_body = RestoreBody,
     responses(
         (status = 202, description = "The job is queued.", body = JobView),
-        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The repository is not found.", body = crate::error::ProblemBody),
-        (status = 409, description = "The repository is not initialized, the agent is offline, or the agent is too old.", body = crate::error::ProblemBody)
+        (status = 404, description = "The repository is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 409, description = "The repository is not initialized, the agent is offline, or the agent is too old.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn start_restore(

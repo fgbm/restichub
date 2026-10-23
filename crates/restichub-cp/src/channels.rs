@@ -85,9 +85,12 @@ pub struct ChannelView {
     pub recipients: Vec<String>,
     /// The scheme, the host and the port of a webhook URL. The path and the query are write-only.
     pub url_origin: Option<String>,
+    #[schema(format = DateTime)]
     pub created_at: String,
+    #[schema(format = DateTime)]
     pub updated_at: String,
-    /// The end of the last delivery attempt of an alert, in RFC 3339. A test send does not count.
+    /// The end of the last delivery attempt of an alert. A test send does not count.
+    #[schema(format = DateTime)]
     pub last_delivery_at: Option<String>,
     /// Null when no alert delivery was attempted. False also for an attempt that waits for a retry.
     pub last_delivery_ok: Option<bool>,
@@ -137,6 +140,7 @@ pub struct TestResponse {
 #[utoipa::path(
     get,
     path = "/api/v1/notification-channels",
+    tags = ["channels"],
     security(("cookie" = []), ("bearer" = [])),
     responses(
         (status = 200, description = "The channels of the tenant.", body = ChannelListResponse),
@@ -163,12 +167,13 @@ pub async fn list_channels(
 #[utoipa::path(
     get,
     path = "/api/v1/notification-channels/{id}",
+    tags = ["channels"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the channel.")),
     responses(
         (status = 200, description = "The channel.", body = ChannelView),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The channel is not found.", body = crate::error::ProblemBody)
+        (status = 404, description = "The channel is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn get_channel(
@@ -191,13 +196,14 @@ pub async fn get_channel(
 #[utoipa::path(
     post,
     path = "/api/v1/notification-channels",
+    tags = ["channels"],
     security(("cookie" = []), ("bearer" = [])),
     request_body = CreateChannelRequest,
     responses(
         (status = 201, description = "The channel is created.", body = ChannelResponse),
-        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
-        (status = 409, description = "The name exists, or the tenant holds the most channels.", body = crate::error::ProblemBody)
+        (status = 409, description = "The name exists, or the tenant holds the most channels.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn create_channel(
@@ -297,15 +303,16 @@ pub async fn create_channel(
 #[utoipa::path(
     patch,
     path = "/api/v1/notification-channels/{id}",
+    tags = ["channels"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the channel.")),
     request_body = UpdateChannelRequest,
     responses(
         (status = 200, description = "The updated channel.", body = ChannelResponse),
-        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The channel is not found.", body = crate::error::ProblemBody),
-        (status = 409, description = "The name exists.", body = crate::error::ProblemBody)
+        (status = 404, description = "The channel is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 409, description = "The name exists.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn update_channel(
@@ -432,12 +439,13 @@ pub async fn update_channel(
 #[utoipa::path(
     delete,
     path = "/api/v1/notification-channels/{id}",
+    tags = ["channels"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the channel.")),
     responses(
         (status = 204, description = "The channel is removed."),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The channel is not found.", body = crate::error::ProblemBody)
+        (status = 404, description = "The channel is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn delete_channel(
@@ -481,14 +489,15 @@ pub async fn delete_channel(
 #[utoipa::path(
     post,
     path = "/api/v1/notification-channels/{id}/test",
+    tags = ["channels"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the channel.")),
     responses(
         (status = 200, description = "The result of the send.", body = TestResponse),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The channel is not found.", body = crate::error::ProblemBody),
-        (status = 429, description = "The actor or the tenant sent too many tests.", body = crate::error::ProblemBody),
-        (status = 503, description = "The server runs the most tests that it allows.", body = crate::error::ProblemBody)
+        (status = 404, description = "The channel is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 429, description = "The actor or the tenant sent too many tests.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 503, description = "The server runs the most tests that it allows.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn test_channel(

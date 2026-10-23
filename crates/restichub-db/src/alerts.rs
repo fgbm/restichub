@@ -28,7 +28,8 @@ const OPEN_PAGE: i64 = 1000;
 /// failed with the error `queue_full`, so the outbox stays bounded (ADR-0036).
 pub const MAX_PENDING_DELIVERIES: i64 = 1000;
 
-/// The kind of an alert. The string value of each variant is stored: do not change a string.
+/// Tells why the control plane raised an alert.
+// The string value of each variant is stored: do not change a string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
 #[sqlx(type_name = "text", rename_all = "snake_case")]
@@ -217,9 +218,9 @@ pub struct AlertParams {
     /// The recovery point objective of a plan, in seconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rpo_seconds: Option<i64>,
-    /// The finish time of the last succeeded backup, in RFC 3339. Absent when the plan never
-    /// succeeded.
+    /// The finish time of the last succeeded backup. Absent when the plan never succeeded.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(format = DateTime)]
     pub last_success_at: Option<String>,
     /// The threshold of the rule at the time of the alert, in minutes.
     #[serde(default, skip_serializing_if = "Option::is_none")]

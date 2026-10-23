@@ -24,7 +24,7 @@ pub const MAX_STEPS_PER_JOB: i64 = 64;
 /// The most files in the progress of a running step.
 pub const MAX_CURRENT_FILES: usize = 5;
 
-/// The summary of a `restic backup` run (FR-MN-02). The counts are never negative.
+/// The summary of a `restic backup` run. The counts are never negative.
 #[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
 pub struct BackupSummary {
     pub files_new: i64,
@@ -88,7 +88,7 @@ pub struct StatsSummary {
     pub compression_ratio: f64,
 }
 
-/// What `restic restore --json` reported (FR-RS-04).
+/// What `restic restore --json` reported.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RestoreSummary {
@@ -108,13 +108,21 @@ pub struct RestoreSummary {
 #[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum StepOutput {
+    #[schema(title = "No summary")]
     None,
+    #[schema(title = "Backup")]
     Backup(BackupSummary),
+    #[schema(title = "Snapshots")]
     Snapshots(SnapshotsSummary),
+    #[schema(title = "Forget")]
     Forget(ForgetSummary),
+    #[schema(title = "Check")]
     Check(CheckSummary),
+    #[schema(title = "Stats")]
     Stats(StatsSummary),
+    #[schema(title = "Restore")]
     Restore(RestoreSummary),
+    #[schema(title = "File listing")]
     Ls,
 }
 

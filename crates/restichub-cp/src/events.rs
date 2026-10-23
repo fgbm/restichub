@@ -342,6 +342,7 @@ fn resync_event() -> SseEvent {
 #[utoipa::path(
     get,
     path = "/api/v1/events",
+    tags = ["system"],
     security(("cookie" = []), ("bearer" = [])),
     responses(
         (
@@ -350,7 +351,7 @@ fn resync_event() -> SseEvent {
             content_type = "text/event-stream",
             body = String
         ),
-        (status = 429, description = "The session, the token, the address, the tenant or the server has too many open streams.", body = crate::error::ProblemBody),
+        (status = 429, description = "The session, the token, the address, the tenant or the server has too many open streams.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
     )
 )]
