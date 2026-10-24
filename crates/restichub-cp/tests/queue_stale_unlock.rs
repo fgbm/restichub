@@ -94,7 +94,11 @@ async fn ac_sc_06_a_repository_with_three_busy_plans_gets_the_unlock_before_the_
         "the unlock waits for the running backup, and the queued backups wait for the unlock"
     );
     assert_eq!(count_of(&env, repository, "unlock").await, 1);
-    assert_eq!(marks(&env, repository).await, 0);
+    assert_eq!(
+        marks(&env, repository).await,
+        1,
+        "the mark stays until an unlock succeeds"
+    );
 
     // The running backup ends. The unlock is newer than both queued backups and still goes first.
     agent.finish(&env, &running).await;
@@ -109,6 +113,11 @@ async fn ac_sc_06_a_repository_with_three_busy_plans_gets_the_unlock_before_the_
     agent.start(&env, &unlock).await;
     agent.finish(&env, &unlock).await;
     env.pass().await;
+    assert_eq!(
+        marks(&env, repository).await,
+        0,
+        "a successful unlock clears the mark"
+    );
     let mut started = agent.jobs_within(Duration::from_secs(2)).await;
     started.sort();
     let mut expected = vec![retry.clone(), queued.to_string()];
@@ -137,7 +146,10 @@ async fn ac_sc_06_no_unlock_while_an_exclusive_job_of_the_repository_runs() {
     let repository = env.create_repository(agent.id, "pw").await;
     let profile = env.create_profile(json!({})).await;
     let plan = env.create_plan(profile, agent.id, repository).await;
+    let other = env.create_repository(agent.id, "pw").await;
+    let other_plan = env.create_plan(profile, agent.id, other).await;
     killed_backup(&env, repository, &mut agent, plan).await;
+    killed_backup(&env, other, &mut agent, other_plan).await;
 
     let check = env
         .enqueue(JobKind::Check, agent.id, repository, None)
@@ -154,6 +166,12 @@ async fn ac_sc_06_no_unlock_while_an_exclusive_job_of_the_repository_runs() {
         count_of(&env, repository, "unlock").await,
         0,
         "no unlock next to a running check"
+    );
+    expect_unlock(&env, &mut agent).await;
+    assert_eq!(
+        count_of(&env, other, "unlock").await,
+        1,
+        "the other repository of the tenant gets its unlock in the same pass"
     );
     assert_eq!(marks(&env, repository).await, 1, "the mark stays");
 
@@ -179,7 +197,10 @@ async fn ac_sc_06_a_queued_or_running_unlock_gets_no_duplicate() {
     let profile = env.create_profile(json!({})).await;
     let first = env.create_plan(profile, agent.id, repository).await;
     let second = env.create_plan(profile, agent.id, repository).await;
+    let other = env.create_repository(agent.id, "pw").await;
+    let other_plan = env.create_plan(profile, agent.id, other).await;
     let killed = killed_backup(&env, repository, &mut agent, first).await;
+    killed_backup(&env, other, &mut agent, other_plan).await;
 
     env.run_plan(second).await;
     env.pass().await;
@@ -188,6 +209,12 @@ async fn ac_sc_06_a_queued_or_running_unlock_gets_no_duplicate() {
     env.clock.advance(PAST_THE_WAIT);
     env.pass().await;
     assert_eq!(count_of(&env, repository, "unlock").await, 1, "queued");
+    expect_unlock(&env, &mut agent).await;
+    assert_eq!(
+        count_of(&env, other, "unlock").await,
+        1,
+        "the other repository of the tenant gets its unlock in the same pass"
+    );
 
     // Another job marks the lock while the unlock waits, and the passes run again.
     mark_stale(&env, killed, PAST_THE_WAIT).await;
@@ -206,5 +233,139 @@ async fn ac_sc_06_a_queued_or_running_unlock_gets_no_duplicate() {
     mark_stale(&env, killed, PAST_THE_WAIT).await;
     env.pass().await;
     assert_eq!(count_of(&env, repository, "unlock").await, 1, "running");
+    env.db.cleanup().await;
+}
+
+#[tokio::test]
+async fn ac_sc_06_a_failed_unlock_is_repeated_after_the_wait_not_at_every_pass() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let mut agent = env.connect_agent("failing-host").await;
+    let repository = env.create_repository(agent.id, "pw").await;
+    let profile = env.create_profile(json!({})).await;
+    let plan = env.create_plan(profile, agent.id, repository).await;
+    killed_backup(&env, repository, &mut agent, plan).await;
+
+    env.clock.advance(PAST_THE_WAIT);
+    env.pass().await;
+    let first = expect_unlock(&env, &mut agent).await;
+    agent.start(&env, &first).await;
+    agent
+        .result(&first, JobStatus::Failed, StepStatus::Failed)
+        .await;
+    let first_id = Uuid::parse_str(&first).expect("job id");
+    eventually(|| async { env.job_status(first_id).await == "failed" }).await;
+
+    env.pass().await;
+    assert!(
+        agent.try_job(QUIET).await.is_none(),
+        "no new unlock right after the failure"
+    );
+    env.clock.advance(29 * 60);
+    env.pass().await;
+    assert_eq!(count_of(&env, repository, "unlock").await, 1);
+    assert_eq!(marks(&env, repository).await, 1, "the mark stays");
+
+    env.clock.advance(2 * 60);
+    env.pass().await;
+    let second = expect_unlock(&env, &mut agent).await;
+    assert_ne!(first, second);
+    assert_eq!(count_of(&env, repository, "unlock").await, 2);
+
+    agent.start(&env, &second).await;
+    agent.finish(&env, &second).await;
+    env.pass().await;
+    assert_eq!(marks(&env, repository).await, 0);
+    env.db.cleanup().await;
+}
+
+#[tokio::test]
+async fn ac_sc_06_an_expired_unlock_is_repeated_after_the_wait() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let mut agent = env.connect_agent("expiring-host").await;
+    let repository = env.create_repository(agent.id, "pw").await;
+    let profile = env.create_profile(json!({})).await;
+    let first = env.create_plan(profile, agent.id, repository).await;
+    let second = env.create_plan(profile, agent.id, repository).await;
+    killed_backup(&env, repository, &mut agent, first).await;
+
+    // A long backup keeps the unlock in the queue until it expires.
+    env.run_plan(second).await;
+    env.pass().await;
+    let running = decode_job_id(&agent.job().await);
+    agent.start(&env, &running).await;
+    env.clock.advance(PAST_THE_WAIT);
+    env.pass().await;
+    assert_eq!(count_of(&env, repository, "unlock").await, 1);
+
+    env.clock.advance(24 * 60 * 60);
+    restichub_cp::maintenance::expire_jobs(env.db.database(), env.now())
+        .await
+        .expect("the expiry sweep");
+    env.pass().await;
+    assert_eq!(
+        count_of(&env, repository, "unlock").await,
+        1,
+        "no new unlock right after the expiry"
+    );
+
+    env.clock.advance(31 * 60);
+    env.pass().await;
+    assert_eq!(count_of(&env, repository, "unlock").await, 2);
+    env.db.cleanup().await;
+}
+
+/// The dispatcher reads a bounded batch for each host and repository. The unlock is the newest job
+/// of the pair, so only its place in the order keeps it inside the batch.
+#[tokio::test]
+async fn ac_sc_06_the_unlock_is_dispatched_first_behind_a_hundred_queued_backups() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let mut agent = env.connect_agent("crowded-host").await;
+    let repository = env.create_repository(agent.id, "pw").await;
+    let profile = env.create_profile(json!({})).await;
+    let plan = env.create_plan(profile, agent.id, repository).await;
+    killed_backup(&env, repository, &mut agent, plan).await;
+
+    let mut tx = env
+        .db
+        .database()
+        .begin_tenant(env.tenant)
+        .await
+        .expect("cannot begin the transaction");
+    for offset in 0..101 {
+        restichub_db::jobs::create(
+            &mut tx,
+            &restichub_db::jobs::NewJob {
+                id: restichub_db::JobId::new(),
+                kind: JobKind::Backup,
+                agent_id: agent.id,
+                repository_id: Some(restichub_db::RepositoryId::from_uuid(repository)),
+                plan_id: Some(restichub_db::PlanId::from_uuid(plan)),
+                fire_time: Some(env.now() + time::Duration::seconds(offset)),
+                expires_at: Some(env.now() + time::Duration::days(2)),
+                location_fingerprint: None,
+                created_by: None,
+            },
+        )
+        .await
+        .expect("cannot create the backup");
+    }
+    tx.commit().await.expect("cannot commit the backups");
+
+    env.clock.advance(PAST_THE_WAIT);
+    env.pass().await;
+    expect_unlock(&env, &mut agent).await;
+    assert!(
+        agent.try_job(QUIET).await.is_none(),
+        "no backup starts next to the unlock"
+    );
     env.db.cleanup().await;
 }

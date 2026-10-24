@@ -749,6 +749,25 @@ pub async fn has_success_since(
     Ok(found)
 }
 
+/// True when an `unlock` of the repository ended without success after `since`: it failed (a
+/// cancel included), expired in the queue or ran out of retries (FR-SC-06).
+pub async fn has_unlock_ended_since(
+    tx: &mut TenantTx<'_>,
+    repository_id: RepositoryId,
+    since: OffsetDateTime,
+) -> Result<bool, DbError> {
+    let (found,): (bool,) = sqlx::query_as(
+        "SELECT EXISTS (SELECT 1 FROM jobs WHERE repository_id = $1 AND kind = 'unlock' \
+                        AND status IN ('failed', 'expired', 'dead_letter') AND finished_at > $2)",
+    )
+    .bind(repository_id)
+    .bind(since)
+    .fetch_one(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(found)
+}
+
 /// True when the plan holds a queued manual run: a backup without a fire time, a retry included.
 pub async fn has_queued_manual_run(
     tx: &mut TenantTx<'_>,

@@ -85,7 +85,7 @@ async fn ac_sc_06_an_unlock_runs_on_another_agent_after_the_revoke_of_the_lock_o
     };
     let env = Env::start(db, test_queue()).await;
     let mut owner = env.connect_agent("lock-owner").await;
-    let other = env.connect_agent("lock-successor").await;
+    let mut other = env.connect_agent("lock-successor").await;
     let repository = s3_repository(&env).await;
 
     revoke_during_backup(&env, repository, &mut owner).await;
@@ -96,6 +96,15 @@ async fn ac_sc_06_an_unlock_runs_on_another_agent_after_the_revoke_of_the_lock_o
         .find(|job| job["kind"] == "unlock")
         .unwrap_or_else(|| panic!("no unlock job: {jobs:?}"));
     assert_eq!(unlock["agent_id"], other.id.to_string());
+    assert_eq!(
+        marks(&env, repository).await,
+        1,
+        "the mark stays until the unlock succeeds"
+    );
+    let id = decode_job_id(&other.job().await);
+    other.start(&env, &id).await;
+    other.finish(&env, &id).await;
+    env.pass().await;
     assert_eq!(
         marks(&env, repository).await,
         0,

@@ -73,7 +73,9 @@ pub fn select<'a>(waiting: &'a [Job], in_flight: &[InFlight], limits: &Limits) -
             continue;
         }
         if let Some(repository) = repository {
-            if blocked.contains(&repository) {
+            // A browse job answers a person who waits and only reads, so a waiting exclusive job
+            // does not hold it back; a running exclusive job still does (FR-RS-02).
+            if blocked.contains(&repository) && !job.kind.is_interactive() {
                 continue;
             }
             let load = per_repository.entry(repository).or_default();
@@ -221,6 +223,37 @@ mod tests {
         let chosen = select(&waiting, &[], &WIDE);
         assert_eq!(chosen.len(), 1);
         assert_eq!(chosen[0].kind, JobKind::Backup);
+    }
+
+    #[test]
+    fn ac_sc_06_a_browse_job_passes_a_waiting_unlock_and_a_backup_does_not() {
+        let (agent, repository) = (AgentId::new(), RepositoryId::new());
+        let flights = vec![running(JobKind::Backup, agent, repository)];
+        let waiting = vec![
+            job(JobKind::Unlock, agent, repository, JobStatus::Queued),
+            job(JobKind::Backup, agent, repository, JobStatus::Queued),
+            job(JobKind::Snapshots, agent, repository, JobStatus::Queued),
+            job(JobKind::Ls, agent, repository, JobStatus::Queued),
+            job(JobKind::Restore, agent, repository, JobStatus::Queued),
+        ];
+        let kinds: Vec<_> = select(&waiting, &flights, &WIDE)
+            .iter()
+            .map(|job| job.kind)
+            .collect();
+        assert_eq!(kinds, vec![JobKind::Snapshots, JobKind::Ls]);
+    }
+
+    #[test]
+    fn ac_sc_06_a_browse_job_waits_for_a_running_unlock() {
+        let (agent, repository) = (AgentId::new(), RepositoryId::new());
+        let flights = vec![running(JobKind::Unlock, agent, repository)];
+        let waiting = vec![job(
+            JobKind::Snapshots,
+            agent,
+            repository,
+            JobStatus::Queued,
+        )];
+        assert!(select(&waiting, &flights, &WIDE).is_empty());
     }
 
     #[test]

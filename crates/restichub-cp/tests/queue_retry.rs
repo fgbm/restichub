@@ -194,6 +194,15 @@ async fn ac_sc_06_a_later_backup_success_keeps_the_stale_mark() {
     let unlock = env.verify(&signed, &agent).await;
     assert_eq!(unlock.steps.len(), 1);
     assert!(matches!(unlock.steps[0].kind, Some(step::Kind::Unlock(_))));
+    assert_eq!(
+        marks(&env, repository).await,
+        1,
+        "the mark stays until an unlock succeeds"
+    );
+    let id = queue_support::decode_job_id(&signed);
+    agent.start(&env, &id).await;
+    agent.finish(&env, &id).await;
+    env.pass().await;
     assert_eq!(marks(&env, repository).await, 0);
     env.db.cleanup().await;
 }
@@ -267,6 +276,15 @@ async fn ac_sc_06_a_later_test_access_success_keeps_the_stale_mark() {
     let unlock = env.verify(&signed, &agent).await;
     assert_eq!(unlock.steps.len(), 1);
     assert!(matches!(unlock.steps[0].kind, Some(step::Kind::Unlock(_))));
+    assert_eq!(
+        marks(&env, repository).await,
+        1,
+        "the mark stays until an unlock succeeds"
+    );
+    let id = queue_support::decode_job_id(&signed);
+    agent.start(&env, &id).await;
+    agent.finish(&env, &id).await;
+    env.pass().await;
     assert_eq!(marks(&env, repository).await, 0);
     env.db.cleanup().await;
 }
