@@ -2,9 +2,11 @@
 //!
 //! A hard kill of restic, or the loss of an agent in the middle of a job, can leave a repository
 //! lock behind. The control plane marks the job (`stale_lock_since`). Once the mark is at least
-//! [`STALE_LOCK_WAIT`] old and no job waits or runs on the repository, the control plane enqueues an
-//! `unlock` job. The step never removes locks of a running operation: `unlock_all` stays an Admin
-//! action with a confirmation.
+//! [`STALE_LOCK_WAIT`] old and no exclusive job is active on the repository, the control plane
+//! enqueues an `unlock` job. Queued backups do not hold it back: the unlock is an exclusive job, so
+//! the dispatcher starts it before them, after the running jobs of the repository ended. The step
+//! never removes locks of a running operation: `unlock_all` stays an Admin action with a
+//! confirmation.
 
 use restichub_db::audit::{AuditAction, AuditEvent, diff};
 use restichub_db::jobs::{self as job_repo, NewJob};
@@ -98,8 +100,11 @@ pub async fn recover_tenant(
             queue_repo::clear_stale_locks(&mut tx, stale.repository_id).await?;
             continue;
         }
-        // An operation may still run on the repository. The mark stays and the next pass tries again.
-        if queue_repo::has_any_active_for_repository(&mut tx, stale.repository_id).await? {
+        // Waiting and running shared jobs do not stop the unlock: the dispatcher starts it as soon
+        // as the running ones end, and sends it before the queued ones. An exclusive job on the
+        // repository stops it (one active exclusive job for each repository, FR-SC-04); the mark
+        // stays and the next pass tries again.
+        if queue_repo::has_active_exclusive_for_repository(&mut tx, stale.repository_id).await? {
             continue;
         }
         let preferred = repository.maintenance_agent_id.unwrap_or(stale.agent_id);

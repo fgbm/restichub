@@ -75,12 +75,16 @@ pub async fn try_lock_tenant(tx: &mut TenantTx<'_>) -> Result<bool, DbError> {
 /// back to `jobs`: a window function and `FOR UPDATE` cannot share one query level. The estimates
 /// of the plan come from the tenant that plans it, because Row-Level Security hides the rows of the
 /// others, so the caller forces a custom plan for each pass (see [`TenantTx::force_custom_plan`]).
+///
+/// An `unlock` of the stale lock recovery ranks and sorts before the other rows, so a queue full of
+/// backups neither hides it nor delays it (FR-SC-06).
 pub(crate) const DISPATCHABLE_SQL: &str = concat!(
     "SELECT ",
     job_columns!("j."),
     " FROM ( \
           SELECT id FROM ( \
-            SELECT id, row_number() OVER (PARTITION BY agent_id, repository_id ORDER BY created_at, id) AS rank \
+            SELECT id, row_number() OVER (PARTITION BY agent_id, repository_id \
+                                          ORDER BY (kind <> 'unlock'), created_at, id) AS rank \
             FROM jobs \
             WHERE status IN ('queued', 'sent') \
               AND ((status = 'queued' AND (attempt = 0 OR run_at <= $1)) \
@@ -92,11 +96,12 @@ pub(crate) const DISPATCHABLE_SQL: &str = concat!(
               AND agent_id = ANY($2)) ranked \
           WHERE rank <= $3) chosen \
       JOIN jobs j ON j.id = chosen.id \
-      ORDER BY j.created_at, j.id \
+      ORDER BY (j.kind <> 'unlock'), j.created_at, j.id \
       FOR UPDATE OF j SKIP LOCKED"
 );
 
-/// Selects the jobs that the dispatcher may send now, oldest first, and locks them.
+/// Selects the jobs that the dispatcher may send now, an `unlock` first and then the oldest, and
+/// locks them.
 ///
 /// Only the kinds that the queue builds qualify: an on-demand `init` or `test_access` job is never
 /// a queue job (FR-RP-02).

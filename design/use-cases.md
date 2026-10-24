@@ -496,7 +496,7 @@ The sign-in screen asks for the username and the password only. The account is i
   - The repository has no maintenance host, or its host is revoked. The control plane creates no maintenance job. The schedule moves to the next fire time. The page shows the warning "No maintenance host".
   - Another exclusive job holds the repository. The schedule stays due. The control plane creates the job after that job ends.
   - No profile of the plans of the repository has a retention: the task `retention` creates no job.
-  - After a stale lock, the control plane runs `unlock` when the repository is idle.
+  - After a stale lock, the control plane runs `unlock` when no exclusive job waits or runs on the repository. Waiting backups do not delay it.
 - **Requirements:** FR-RP-08, FR-SC-04, FR-SC-06.
 - **Acceptance criteria:** AC-RP-04, AC-RP-13, AC-SC-03, AC-SC-06.
 - **Note:** the retention rules are in the profiles. The schedule of the repository runs `forget` with these rules, and it does not run the plans (ADR-0034). A profile with a retention and without a plan in the repository gives no `forget` step.
