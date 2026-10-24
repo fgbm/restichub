@@ -4,13 +4,15 @@
 //! The function is pure. The dispatcher passes the waiting jobs in the order of creation and the
 //! jobs that already hold a slot; the function returns the jobs that may start. The order is the
 //! fairness rule: a waiting exclusive job (a prune, for example) blocks the later jobs of its
-//! repository, so a stream of new backups cannot starve it.
+//! repository, so a stream of new backups cannot starve it. A browse job passes a waiting
+//! `unlock` only: it answers a person who waits (FR-RS-02), and an `unlock` can wait a long time
+//! for a running backup. A waiting prune, forget, check or `unlock_all` holds browse jobs back.
 
 use std::collections::{HashMap, HashSet};
 
 use restichub_db::jobs::Job;
 use restichub_db::queue::InFlight;
-use restichub_db::{AgentId, JobStatus, RepositoryId};
+use restichub_db::{AgentId, JobKind, JobStatus, RepositoryId};
 
 /// Caps on concurrent jobs in one tenant (FR-SC-08): per agent, per repository (the shared kinds
 /// only) and in total.
@@ -25,6 +27,32 @@ pub struct Limits {
 struct RepositoryLoad {
     shared: usize,
     exclusive: bool,
+}
+
+/// The repositories with a waiting exclusive job, and which of them hold browse jobs back.
+#[derive(Default)]
+struct Barriers {
+    all: HashSet<RepositoryId>,
+    against_browse: HashSet<RepositoryId>,
+}
+
+impl Barriers {
+    fn insert(&mut self, repository: RepositoryId, kind: JobKind) {
+        self.all.insert(repository);
+        if kind != JobKind::Unlock {
+            self.against_browse.insert(repository);
+        }
+    }
+
+    /// A browse job only reads, so a waiting `unlock` does not hold it back. A running exclusive
+    /// job still does (FR-RS-02).
+    fn holds_back(&self, repository: RepositoryId, kind: JobKind) -> bool {
+        if kind.is_interactive() {
+            self.against_browse.contains(&repository)
+        } else {
+            self.all.contains(&repository)
+        }
+    }
 }
 
 /// Returns the jobs that may be sent now, in the order of the input.
@@ -52,7 +80,7 @@ pub fn select<'a>(waiting: &'a [Job], in_flight: &[InFlight], limits: &Limits) -
 
     // A repository with an exclusive job that waits blocks every later job. A repository with a
     // skipped job holds back a later exclusive job, so the order of the queue holds.
-    let mut blocked: HashSet<RepositoryId> = HashSet::new();
+    let mut blocked = Barriers::default();
     let mut skipped: HashSet<RepositoryId> = HashSet::new();
     let mut selected = Vec::new();
 
@@ -67,15 +95,16 @@ pub fn select<'a>(waiting: &'a [Job], in_flight: &[InFlight], limits: &Limits) -
             if let Some(repository) = repository {
                 skipped.insert(repository);
                 if exclusive {
-                    blocked.insert(repository);
+                    blocked.insert(repository, job.kind);
                 }
             }
             continue;
         }
         if let Some(repository) = repository {
-            // A browse job answers a person who waits and only reads, so a waiting exclusive job
-            // does not hold it back; a running exclusive job still does (FR-RS-02).
-            if blocked.contains(&repository) && !job.kind.is_interactive() {
+            if blocked.holds_back(repository, job.kind) {
+                if exclusive {
+                    blocked.insert(repository, job.kind);
+                }
                 continue;
             }
             let load = per_repository.entry(repository).or_default();
@@ -89,7 +118,7 @@ pub fn select<'a>(waiting: &'a [Job], in_flight: &[InFlight], limits: &Limits) -
             if !repository_ready {
                 skipped.insert(repository);
                 if exclusive {
-                    blocked.insert(repository);
+                    blocked.insert(repository, job.kind);
                 }
                 continue;
             }
@@ -99,7 +128,7 @@ pub fn select<'a>(waiting: &'a [Job], in_flight: &[InFlight], limits: &Limits) -
             if let Some(repository) = repository {
                 skipped.insert(repository);
                 if exclusive {
-                    blocked.insert(repository);
+                    blocked.insert(repository, job.kind);
                 }
             }
             continue;
@@ -241,6 +270,29 @@ mod tests {
             .map(|job| job.kind)
             .collect();
         assert_eq!(kinds, vec![JobKind::Snapshots, JobKind::Ls]);
+    }
+
+    #[test]
+    fn ac_sc_03_a_browse_job_waits_behind_a_waiting_prune() {
+        let (agent, repository) = (AgentId::new(), RepositoryId::new());
+        let flights = vec![running(JobKind::Backup, agent, repository)];
+        let waiting = vec![
+            job(JobKind::Prune, agent, repository, JobStatus::Queued),
+            job(JobKind::Snapshots, agent, repository, JobStatus::Queued),
+        ];
+        assert!(select(&waiting, &flights, &WIDE).is_empty());
+    }
+
+    #[test]
+    fn ac_sc_03_a_browse_job_waits_behind_a_prune_that_waits_behind_an_unlock() {
+        let (agent, repository) = (AgentId::new(), RepositoryId::new());
+        let flights = vec![running(JobKind::Backup, agent, repository)];
+        let waiting = vec![
+            job(JobKind::Unlock, agent, repository, JobStatus::Queued),
+            job(JobKind::Prune, agent, repository, JobStatus::Queued),
+            job(JobKind::Snapshots, agent, repository, JobStatus::Queued),
+        ];
+        assert!(select(&waiting, &flights, &WIDE).is_empty());
     }
 
     #[test]

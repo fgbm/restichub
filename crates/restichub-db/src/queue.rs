@@ -730,19 +730,26 @@ pub async fn clear_stale_locks(
 /// True when a job of the repository succeeded after `since`, and the kind of that job proves that
 /// no lock blocks the repository (FR-SC-04, FR-SC-06). A success of a kind that shares the
 /// repository proves nothing: it runs next to the stale lock.
+///
+/// An `unlock` removes only the locks that restic itself treats as stale, so it counts only when
+/// it started at `unlock_not_before` or later. An earlier `unlock` can succeed and leave a fresh
+/// lock of another host in place.
 pub async fn has_success_since(
     tx: &mut TenantTx<'_>,
     repository_id: RepositoryId,
     since: OffsetDateTime,
+    unlock_not_before: OffsetDateTime,
 ) -> Result<bool, DbError> {
     let (found,): (bool,) = sqlx::query_as(concat!(
         "SELECT EXISTS (SELECT 1 FROM jobs WHERE repository_id = $1 AND status = 'succeeded' \
                         AND kind IN (",
         exclusive_lock_kinds!(),
-        ") AND finished_at > $2)"
+        ") AND finished_at > $2 \
+                        AND (kind <> 'unlock' OR COALESCE(started_at, sent_at) >= $3))"
     ))
     .bind(repository_id)
     .bind(since)
+    .bind(unlock_not_before)
     .fetch_one(tx.as_conn())
     .await
     .map_err(DbError::Query)?;

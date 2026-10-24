@@ -320,6 +320,116 @@ async fn ac_sc_06_an_expired_unlock_is_repeated_after_the_wait() {
     env.db.cleanup().await;
 }
 
+/// Restic removes the lock of another host only 30 minutes after its last refresh, so an unlock
+/// that starts right after a new abort succeeds and leaves the fresh lock in place.
+#[tokio::test]
+async fn ac_sc_06_an_unlock_that_starts_before_the_newest_mark_is_old_keeps_the_mark() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let mut agent = env.connect_agent("early-unlock-host").await;
+    let repository = env.create_repository(agent.id, "pw").await;
+    let profile = env.create_profile(json!({})).await;
+    let first = env.create_plan(profile, agent.id, repository).await;
+    let second = env.create_plan(profile, agent.id, repository).await;
+    killed_backup(&env, repository, &mut agent, first).await;
+
+    env.run_plan(second).await;
+    env.pass().await;
+    let running = decode_job_id(&agent.job().await);
+    agent.start(&env, &running).await;
+    env.clock.advance(PAST_THE_WAIT);
+    env.pass().await;
+    assert_eq!(count_of(&env, repository, "unlock").await, 1, "queued");
+
+    // The running backup is killed: its lock is fresh, and the unlock starts right behind it.
+    agent.stale_lock_step(&running).await;
+    agent
+        .result(&running, JobStatus::Failed, StepStatus::Failed)
+        .await;
+    let running_id = Uuid::parse_str(&running).expect("job id");
+    eventually(|| async { env.job_status(running_id).await == "failed" }).await;
+    env.pass().await;
+    let early = expect_unlock(&env, &mut agent).await;
+    agent.start(&env, &early).await;
+    env.clock.advance(5 * 60);
+    agent.finish(&env, &early).await;
+    env.pass().await;
+    assert_eq!(marks(&env, repository).await, 2);
+
+    // The newest mark is 31 minutes old. The early unlock proved nothing, so another one comes.
+    env.clock.advance(PAST_THE_WAIT);
+    env.pass().await;
+    assert_eq!(
+        marks(&env, repository).await,
+        2,
+        "the early unlock does not clear the mark"
+    );
+    let late = expect_unlock(&env, &mut agent).await;
+    assert_ne!(early, late);
+    assert_eq!(count_of(&env, repository, "unlock").await, 2);
+
+    agent.start(&env, &late).await;
+    agent.finish(&env, &late).await;
+    env.pass().await;
+    assert_eq!(
+        marks(&env, repository).await,
+        0,
+        "an unlock that started after the wait clears the marks"
+    );
+    env.db.cleanup().await;
+}
+
+/// The maintenance scheduler can win the unique index for the repository. The pass then skips that
+/// repository only, and the other repositories keep their unlock.
+#[tokio::test]
+async fn ac_sc_06_a_unique_violation_on_the_unlock_skips_only_that_repository() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let mut agent = env.connect_agent("raced-host").await;
+    let contested = env.create_repository(agent.id, "pw").await;
+    let other = env.create_repository(agent.id, "pw").await;
+    let profile = env.create_profile(json!({})).await;
+    let contested_plan = env.create_plan(profile, agent.id, contested).await;
+    let other_plan = env.create_plan(profile, agent.id, other).await;
+    killed_backup(&env, contested, &mut agent, contested_plan).await;
+    killed_backup(&env, other, &mut agent, other_plan).await;
+
+    let owner = env.db.owner_pool();
+    sqlx::query(
+        "CREATE FUNCTION refuse_unlock() RETURNS trigger LANGUAGE plpgsql AS \
+         $$ BEGIN RAISE EXCEPTION 'raced' USING ERRCODE = '23505'; END $$",
+    )
+    .execute(owner)
+    .await
+    .expect("cannot create the function");
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "CREATE TRIGGER refuse_unlock BEFORE INSERT ON jobs FOR EACH ROW \
+         WHEN (NEW.kind = 'unlock' AND NEW.repository_id = '{contested}') \
+         EXECUTE FUNCTION refuse_unlock()"
+    )))
+    .execute(owner)
+    .await
+    .expect("cannot create the trigger");
+
+    env.clock.advance(PAST_THE_WAIT);
+    env.pass().await;
+    assert_eq!(count_of(&env, contested, "unlock").await, 0);
+    assert_eq!(count_of(&env, other, "unlock").await, 1);
+    assert_eq!(marks(&env, contested).await, 1, "the mark stays");
+
+    sqlx::query("DROP TRIGGER refuse_unlock ON jobs")
+        .execute(owner)
+        .await
+        .expect("cannot drop the trigger");
+    env.pass().await;
+    assert_eq!(count_of(&env, contested, "unlock").await, 1);
+    env.db.cleanup().await;
+}
+
 /// The dispatcher reads a bounded batch for each host and repository. The unlock is the newest job
 /// of the pair, so only its place in the order keeps it inside the batch.
 #[tokio::test]
