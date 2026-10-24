@@ -13,7 +13,7 @@ use serde_json::json;
 use time::format_description::well_known::Rfc3339;
 use uuid::Uuid;
 
-use queue_support::{Env, eventually, test_queue};
+use queue_support::{Env, eventually, killed_backup, marks, repository_jobs, test_queue};
 
 const QUIET: Duration = Duration::from_millis(300);
 
@@ -30,35 +30,6 @@ async fn audit_actions(env: &Env, action: &str) -> Vec<String> {
     rows
 }
 
-async fn repository_jobs(env: &Env, repository: Uuid) -> Vec<serde_json::Value> {
-    let (status, _, body) = common::send(
-        &env.app,
-        common::bearer_request(
-            "GET",
-            &format!("/api/v1/jobs?repository_id={repository}"),
-            &env.admin,
-            None,
-        ),
-    )
-    .await;
-    assert_eq!(status, axum::http::StatusCode::OK, "{body}");
-    body["items"].as_array().cloned().unwrap_or_default()
-}
-
-/// The number of jobs of the repository that carry a possible stale lock.
-async fn marks(env: &Env, repository: Uuid) -> i64 {
-    let mut tx = env.scoped().await;
-    let count = sqlx::query_scalar::<_, i64>(
-        "SELECT count(*) FROM jobs WHERE repository_id = $1 AND stale_lock_since IS NOT NULL",
-    )
-    .bind(repository)
-    .fetch_one(&mut *tx)
-    .await
-    .expect("cannot read the marks");
-    tx.commit().await.expect("cannot end the read");
-    count
-}
-
 /// Marks a job as succeeded at the current time of the test clock.
 async fn succeeded(env: &Env, job: Uuid) {
     let mut tx = env.scoped().await;
@@ -72,26 +43,6 @@ async fn succeeded(env: &Env, job: Uuid) {
     .await
     .expect("cannot finish the job");
     tx.commit().await.expect("cannot end the write");
-}
-
-/// Runs a backup that restic abandons, so its lock becomes a suspect (FR-AG-10).
-async fn killed_backup(
-    env: &Env,
-    repository: Uuid,
-    agent: &mut queue_support::FakeAgent,
-    plan: Uuid,
-) -> Uuid {
-    let job = env.run_plan(plan).await;
-    env.pass().await;
-    let id = queue_support::decode_job_id(&agent.job().await);
-    agent.start(env, &id).await;
-    agent.stale_lock_step(&id).await;
-    agent
-        .result(&id, JobStatus::Failed, StepStatus::Failed)
-        .await;
-    eventually(|| async { env.job_status(job).await == "failed" }).await;
-    assert_eq!(marks(env, repository).await, 1, "the job marks its lock");
-    job
 }
 
 #[tokio::test]
@@ -211,48 +162,6 @@ async fn ac_sc_06_an_idle_repository_gets_an_unlock_after_thirty_minutes() {
 }
 
 #[tokio::test]
-async fn ac_sc_06_a_busy_repository_gets_no_unlock() {
-    let Some(db) = common::test_db().await else {
-        return;
-    };
-    let env = Env::start(db, test_queue()).await;
-    let mut agent = env.connect_agent("busy-host").await;
-    let repository = env.create_repository(agent.id, "pw").await;
-    let profile = env.create_profile(json!({})).await;
-    let plan = env.create_plan(profile, agent.id, repository).await;
-
-    let first = env.run_plan(plan).await;
-    env.pass().await;
-    let id = queue_support::decode_job_id(&agent.job().await);
-    agent.start(&env, &id).await;
-    agent.stale_lock_step(&id).await;
-    agent
-        .result(&id, JobStatus::Failed, StepStatus::Failed)
-        .await;
-    eventually(|| async { env.job_status(first).await == "failed" }).await;
-
-    // Another backup runs on the repository when the wait ends, so the mark waits for an idle
-    // repository.
-    env.clock.advance(31 * 60);
-    let second = env.run_plan(plan).await;
-    env.pass().await;
-    let next = queue_support::decode_job_id(&agent.job().await);
-    assert_eq!(next, second.to_string(), "the backup runs, not an unlock");
-    agent.start(&env, &next).await;
-    env.pass().await;
-    assert!(
-        agent.try_job(QUIET).await.is_none(),
-        "no unlock while the repository is busy"
-    );
-    let jobs = repository_jobs(&env, repository).await;
-    assert!(
-        jobs.iter().all(|job| job["kind"] != "unlock"),
-        "no unlock while the backup runs: {jobs:?}"
-    );
-    env.db.cleanup().await;
-}
-
-#[tokio::test]
 async fn ac_sc_06_a_later_backup_success_keeps_the_stale_mark() {
     let Some(db) = common::test_db().await else {
         return;
@@ -266,7 +175,6 @@ async fn ac_sc_06_a_later_backup_success_keeps_the_stale_mark() {
 
     // A backup shares the repository with the orphaned lock, so its success says nothing about the
     // lock (FR-SC-04).
-    env.clock.advance(31 * 60);
     let second = env.run_plan(plan).await;
     env.pass().await;
     let next = queue_support::decode_job_id(&agent.job().await);
@@ -279,12 +187,22 @@ async fn ac_sc_06_a_later_backup_success_keeps_the_stale_mark() {
         "the backup keeps the mark"
     );
 
-    // The mark stays, so the idle repository gets the unlock that no backup can replace.
+    // The mark stays, so the repository gets the unlock that no backup can replace.
+    env.clock.advance(31 * 60);
     env.pass().await;
     let signed = agent.job().await;
     let unlock = env.verify(&signed, &agent).await;
     assert_eq!(unlock.steps.len(), 1);
     assert!(matches!(unlock.steps[0].kind, Some(step::Kind::Unlock(_))));
+    assert_eq!(
+        marks(&env, repository).await,
+        1,
+        "the mark stays until an unlock succeeds"
+    );
+    let id = queue_support::decode_job_id(&signed);
+    agent.start(&env, &id).await;
+    agent.finish(&env, &id).await;
+    env.pass().await;
     assert_eq!(marks(&env, repository).await, 0);
     env.db.cleanup().await;
 }
@@ -358,6 +276,15 @@ async fn ac_sc_06_a_later_test_access_success_keeps_the_stale_mark() {
     let unlock = env.verify(&signed, &agent).await;
     assert_eq!(unlock.steps.len(), 1);
     assert!(matches!(unlock.steps[0].kind, Some(step::Kind::Unlock(_))));
+    assert_eq!(
+        marks(&env, repository).await,
+        1,
+        "the mark stays until an unlock succeeds"
+    );
+    let id = queue_support::decode_job_id(&signed);
+    agent.start(&env, &id).await;
+    agent.finish(&env, &id).await;
+    env.pass().await;
     assert_eq!(marks(&env, repository).await, 0);
     env.db.cleanup().await;
 }

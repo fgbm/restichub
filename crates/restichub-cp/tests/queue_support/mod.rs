@@ -1066,6 +1066,50 @@ impl FakeAgent {
     }
 }
 
+pub async fn repository_jobs(env: &Env, repository: Uuid) -> Vec<Value> {
+    let (status, _, body) = send(
+        &env.app,
+        bearer_request(
+            "GET",
+            &format!("/api/v1/jobs?repository_id={repository}"),
+            &env.admin,
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    body["items"].as_array().cloned().unwrap_or_default()
+}
+
+/// The number of jobs of the repository that carry a possible stale lock.
+pub async fn marks(env: &Env, repository: Uuid) -> i64 {
+    let mut tx = env.scoped().await;
+    let count = sqlx::query_scalar::<_, i64>(
+        "SELECT count(*) FROM jobs WHERE repository_id = $1 AND stale_lock_since IS NOT NULL",
+    )
+    .bind(repository)
+    .fetch_one(&mut *tx)
+    .await
+    .expect("cannot read the marks");
+    tx.commit().await.expect("cannot end the read");
+    count
+}
+
+/// Runs a backup that restic abandons, so its lock becomes a suspect (FR-AG-10).
+pub async fn killed_backup(env: &Env, repository: Uuid, agent: &mut FakeAgent, plan: Uuid) -> Uuid {
+    let job = env.run_plan(plan).await;
+    env.pass().await;
+    let id = decode_job_id(&agent.job().await);
+    agent.start(env, &id).await;
+    agent.stale_lock_step(&id).await;
+    agent
+        .result(&id, JobStatus::Failed, StepStatus::Failed)
+        .await;
+    eventually(|| async { env.job_status(job).await == "failed" }).await;
+    assert_eq!(marks(env, repository).await, 1, "the job marks its lock");
+    job
+}
+
 pub fn decode_job_id(signed: &SignedJob) -> String {
     use prost::Message as _;
     Job::decode(signed.job.as_slice())

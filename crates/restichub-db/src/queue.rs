@@ -75,12 +75,16 @@ pub async fn try_lock_tenant(tx: &mut TenantTx<'_>) -> Result<bool, DbError> {
 /// back to `jobs`: a window function and `FOR UPDATE` cannot share one query level. The estimates
 /// of the plan come from the tenant that plans it, because Row-Level Security hides the rows of the
 /// others, so the caller forces a custom plan for each pass (see [`TenantTx::force_custom_plan`]).
+///
+/// An `unlock` of the stale lock recovery ranks and sorts before the other rows, so a queue full of
+/// backups neither hides it nor delays it (FR-SC-06).
 pub(crate) const DISPATCHABLE_SQL: &str = concat!(
     "SELECT ",
     job_columns!("j."),
     " FROM ( \
           SELECT id FROM ( \
-            SELECT id, row_number() OVER (PARTITION BY agent_id, repository_id ORDER BY created_at, id) AS rank \
+            SELECT id, row_number() OVER (PARTITION BY agent_id, repository_id \
+                                          ORDER BY (kind <> 'unlock'), created_at, id) AS rank \
             FROM jobs \
             WHERE status IN ('queued', 'sent') \
               AND ((status = 'queued' AND (attempt = 0 OR run_at <= $1)) \
@@ -92,11 +96,12 @@ pub(crate) const DISPATCHABLE_SQL: &str = concat!(
               AND agent_id = ANY($2)) ranked \
           WHERE rank <= $3) chosen \
       JOIN jobs j ON j.id = chosen.id \
-      ORDER BY j.created_at, j.id \
+      ORDER BY (j.kind <> 'unlock'), j.created_at, j.id \
       FOR UPDATE OF j SKIP LOCKED"
 );
 
-/// Selects the jobs that the dispatcher may send now, oldest first, and locks them.
+/// Selects the jobs that the dispatcher may send now, an `unlock` first and then the oldest, and
+/// locks them.
 ///
 /// Only the kinds that the queue builds qualify: an on-demand `init` or `test_access` job is never
 /// a queue job (FR-RP-02).
@@ -725,17 +730,43 @@ pub async fn clear_stale_locks(
 /// True when a job of the repository succeeded after `since`, and the kind of that job proves that
 /// no lock blocks the repository (FR-SC-04, FR-SC-06). A success of a kind that shares the
 /// repository proves nothing: it runs next to the stale lock.
+///
+/// An `unlock` removes only the locks that restic itself treats as stale, so it counts only when
+/// it started at `unlock_not_before` or later. An earlier `unlock` can succeed and leave a fresh
+/// lock of another host in place.
 pub async fn has_success_since(
     tx: &mut TenantTx<'_>,
     repository_id: RepositoryId,
     since: OffsetDateTime,
+    unlock_not_before: OffsetDateTime,
 ) -> Result<bool, DbError> {
     let (found,): (bool,) = sqlx::query_as(concat!(
         "SELECT EXISTS (SELECT 1 FROM jobs WHERE repository_id = $1 AND status = 'succeeded' \
                         AND kind IN (",
         exclusive_lock_kinds!(),
-        ") AND finished_at > $2)"
+        ") AND finished_at > $2 \
+                        AND (kind <> 'unlock' OR COALESCE(started_at, sent_at) >= $3))"
     ))
+    .bind(repository_id)
+    .bind(since)
+    .bind(unlock_not_before)
+    .fetch_one(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(found)
+}
+
+/// True when an `unlock` of the repository ended without success after `since`: it failed (a
+/// cancel included), expired in the queue or ran out of retries (FR-SC-06).
+pub async fn has_unlock_ended_since(
+    tx: &mut TenantTx<'_>,
+    repository_id: RepositoryId,
+    since: OffsetDateTime,
+) -> Result<bool, DbError> {
+    let (found,): (bool,) = sqlx::query_as(
+        "SELECT EXISTS (SELECT 1 FROM jobs WHERE repository_id = $1 AND kind = 'unlock' \
+                        AND status IN ('failed', 'expired', 'dead_letter') AND finished_at > $2)",
+    )
     .bind(repository_id)
     .bind(since)
     .fetch_one(tx.as_conn())

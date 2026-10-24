@@ -2,9 +2,12 @@
 //!
 //! A hard kill of restic, or the loss of an agent in the middle of a job, can leave a repository
 //! lock behind. The control plane marks the job (`stale_lock_since`). Once the mark is at least
-//! [`STALE_LOCK_WAIT`] old and no job waits or runs on the repository, the control plane enqueues an
-//! `unlock` job. The step never removes locks of a running operation: `unlock_all` stays an Admin
-//! action with a confirmation.
+//! [`STALE_LOCK_WAIT`] old and no exclusive job is active on the repository, the control plane
+//! enqueues an `unlock` job. Queued backups do not hold it back: the unlock is an exclusive job, so
+//! the dispatcher starts it before them, after the running jobs of the repository ended. The mark
+//! stays until an unlock succeeds; after a failed or expired unlock the next one waits for
+//! [`STALE_LOCK_WAIT`] again. The step never removes locks of a running operation: `unlock_all`
+//! stays an Admin action with a confirmation.
 
 use restichub_db::audit::{AuditAction, AuditEvent, diff};
 use restichub_db::jobs::{self as job_repo, NewJob};
@@ -52,6 +55,8 @@ pub const TIMEOUT_GRACE: time::Duration = time::Duration::minutes(10);
 /// How long an unlock job stays valid in the queue.
 const UNLOCK_JOB_LIFETIME: time::Duration = time::Duration::hours(24);
 
+const UNLOCK_SAVEPOINT: &str = "stale_unlock";
+
 /// Runs one recovery pass for a tenant.
 pub async fn recover_tenant(
     state: &AppState,
@@ -93,13 +98,29 @@ pub async fn recover_tenant(
         };
         // A success of a kind that takes the exclusive lock of restic, or that removes the locks,
         // proves that no lock blocks the repository. A backup runs next to the orphaned lock
-        // (FR-SC-04).
-        if queue_repo::has_success_since(&mut tx, stale.repository_id, stale.stale_since).await? {
+        // (FR-SC-04). An unlock counts only when it started after the lock had time to go stale:
+        // restic keeps the lock of another host for the same wait (FR-SC-06).
+        if queue_repo::has_success_since(
+            &mut tx,
+            stale.repository_id,
+            stale.stale_since,
+            stale.stale_since + STALE_LOCK_WAIT,
+        )
+        .await?
+        {
             queue_repo::clear_stale_locks(&mut tx, stale.repository_id).await?;
             continue;
         }
-        // An operation may still run on the repository. The mark stays and the next pass tries again.
-        if queue_repo::has_any_active_for_repository(&mut tx, stale.repository_id).await? {
+        // Waiting and running shared jobs do not stop the unlock: the dispatcher starts it as soon
+        // as the running ones end, and sends it before the queued ones. An exclusive job on the
+        // repository stops it (one active exclusive job for each repository, FR-SC-04); the mark
+        // stays and the next pass tries again.
+        if queue_repo::has_active_exclusive_for_repository(&mut tx, stale.repository_id).await? {
+            continue;
+        }
+        // The mark outlives the unlock until an unlock succeeds. A failed or expired unlock gets
+        // a new one after the wait, not at every pass.
+        if queue_repo::has_unlock_ended_since(&mut tx, stale.repository_id, cutoff).await? {
             continue;
         }
         let preferred = repository.maintenance_agent_id.unwrap_or(stale.agent_id);
@@ -119,7 +140,11 @@ pub async fn recover_tenant(
             continue;
         };
         let job_id = JobId::new();
-        job_repo::create(
+        // The maintenance scheduler checks and inserts without the row lock of the repository. Its
+        // exclusive job may win the race for the unique index; this repository waits for the next
+        // pass and the other repositories of the tenant keep their unlock.
+        tx.savepoint(UNLOCK_SAVEPOINT).await?;
+        let created = job_repo::create(
             &mut tx,
             &NewJob {
                 id: job_id,
@@ -133,8 +158,15 @@ pub async fn recover_tenant(
                 created_by: None,
             },
         )
-        .await?;
-        queue_repo::clear_stale_locks(&mut tx, stale.repository_id).await?;
+        .await;
+        match created {
+            Ok(_) => tx.release_savepoint(UNLOCK_SAVEPOINT).await?,
+            Err(error) if error.is_unique_violation() => {
+                tx.rollback_to_savepoint(UNLOCK_SAVEPOINT).await?;
+                continue;
+            }
+            Err(error) => return Err(error),
+        }
 
         let mut event = AuditEvent::new(AuditAction::JobRun, "job");
         event.object_id = Some(job_id.as_uuid());
