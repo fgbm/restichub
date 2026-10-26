@@ -358,3 +358,130 @@ fn adr_0040_an_old_allow_list_file_is_reported_by_path_only() {
     std::fs::write(&file, "secret = \"x\"").expect("cannot write the file");
     assert_eq!(super::removed_allow_list_file(&config), Some(file));
 }
+
+#[cfg(target_os = "linux")]
+mod transient_unit {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    use super::{CANARY, TempDir, enabled_store, step};
+    use crate::scripts::{ScriptRunner, ScriptStore};
+    use restichub_proto::agent::v1::{ScriptEnv, script_env};
+
+    fn systemd_store(dir: &std::path::Path) -> ScriptStore {
+        enabled_store(dir).with_runner(ScriptRunner::Systemd)
+    }
+
+    /// A value with every byte that a shell could mangle.
+    const AWKWARD: &str = "a'b\"c$d\\e\nf\tg h";
+
+    #[test]
+    fn adr_0053_a_value_reaches_the_interpreter_unchanged() {
+        let dir = TempDir::new();
+        let store = systemd_store(dir.path());
+        let script = restichub_proto::agent::v1::ScriptStep {
+            env: vec![ScriptEnv {
+                name: "SECRET".to_owned(),
+                value: Some(script_env::Value::SecretValue(AWKWARD.to_owned())),
+            }],
+            ..step("echo hello")
+        };
+        let prepared = store.prepare(&script, 30).expect("prepared");
+        let unit = prepared.invocation.unit.as_ref().expect("a transient unit");
+        let output = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(crate::scripts::transient::SHELL_WRAPPER)
+            .arg("restichub-script")
+            .arg(&unit.env_file)
+            .arg("/bin/sh")
+            .arg("-c")
+            .arg("printf %s \"$SECRET\"")
+            .output()
+            .expect("cannot run the wrapper");
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8_lossy(&output.stdout), AWKWARD);
+        assert!(
+            !prepared
+                .invocation
+                .args
+                .iter()
+                .any(|argument| argument.contains(AWKWARD))
+        );
+    }
+
+    #[test]
+    fn adr_0053_the_environment_file_is_private_and_goes_away_with_the_run() {
+        let dir = TempDir::new();
+        let store = systemd_store(dir.path());
+        let script = restichub_proto::agent::v1::ScriptStep {
+            env: vec![ScriptEnv {
+                name: "PGPASSWORD".to_owned(),
+                value: Some(script_env::Value::SecretValue(CANARY.to_owned())),
+            }],
+            ..step("echo hello")
+        };
+        let prepared = store.prepare(&script, 30).expect("prepared");
+        let unit = prepared.invocation.unit.clone().expect("a transient unit");
+        assert!(unit.env_file.is_file());
+        let mode = std::fs::metadata(&unit.env_file)
+            .expect("metadata")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o077, 0, "the environment file is private");
+        let text = std::fs::read_to_string(&unit.env_file).expect("the environment file");
+        assert!(text.contains(CANARY));
+        assert_eq!(unit.runtime.as_secs(), 30 + 60);
+        drop(prepared);
+        assert!(!unit.env_file.exists());
+    }
+
+    #[test]
+    fn adr_0053_the_unit_name_holds_the_random_part_of_the_run() {
+        let dir = TempDir::new();
+        let store = systemd_store(dir.path());
+        let prepared = store.prepare(&step("echo"), 0).expect("prepared");
+        let unit = prepared.invocation.unit.as_ref().expect("a transient unit");
+        let random = prepared
+            .invocation
+            .working_dir
+            .file_name()
+            .and_then(std::ffi::OsStr::to_str)
+            .expect("the run directory");
+        assert_eq!(
+            unit.name,
+            format!("restichub-script-{random}.service"),
+            "the unit name follows the run directory"
+        );
+    }
+
+    #[test]
+    fn adr_0053_the_direct_runner_writes_no_environment_file() {
+        let dir = TempDir::new();
+        let store = enabled_store(dir.path()).with_runner(ScriptRunner::Direct);
+        let prepared = store.prepare(&step("echo"), 0).expect("prepared");
+        assert!(prepared.invocation.unit.is_none());
+        let entries: Vec<_> = std::fs::read_dir(&prepared.invocation.working_dir)
+            .expect("the run directory")
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name())
+            .collect();
+        assert!(!entries.iter().any(|name| name == "environment.sh"));
+    }
+
+    #[test]
+    fn adr_0053_a_value_with_a_nul_byte_is_refused() {
+        let dir = TempDir::new();
+        let store = systemd_store(dir.path());
+        let script = restichub_proto::agent::v1::ScriptStep {
+            env: vec![ScriptEnv {
+                name: "SECRET".to_owned(),
+                value: Some(script_env::Value::StringValue("a\0b".to_owned())),
+            }],
+            ..step("echo")
+        };
+        let refusal = store.check(&script).expect_err("a NUL byte is invalid");
+        assert_eq!(
+            refusal.reject_reason(),
+            restichub_proto::agent::v1::RejectReason::InvalidScript
+        );
+    }
+}

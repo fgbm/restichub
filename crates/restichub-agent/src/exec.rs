@@ -90,7 +90,7 @@ fn restic_command_with(
 /// On Unix the child becomes the leader of a new group; the agent signals the group with a negative
 /// pid. On Linux the kernel also kills the child when the agent dies. On Windows the child becomes a
 /// new process group and the agent sends it `CTRL_BREAK`.
-fn apply_process_group(command: &mut Command) {
+pub(crate) fn apply_process_group(command: &mut Command) {
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt as _;
@@ -258,6 +258,8 @@ pub struct Invocation {
     pub secrets: Vec<Zeroizing<String>>,
     /// The value of `PATH`. `None` keeps the value of the agent.
     pub search_path: Option<std::ffi::OsString>,
+    /// The transient unit that runs the script outside the sandbox of the agent (ADR-0047).
+    pub unit: Option<crate::scripts::TransientUnit>,
 }
 
 impl std::fmt::Debug for Invocation {
@@ -278,15 +280,20 @@ impl std::fmt::Debug for Invocation {
 
 /// Starts one server script child with piped output (FR-HK-09, ADR-0037).
 ///
-/// The child has no shell and no standard input. The host trusts the script, so it keeps the
-/// environment of the agent without the restic and ResticHub variables. It runs in its own
-/// process group, so the agent stops its whole tree (FR-AG-10). The invocation can replace
-/// `PATH`, and on Windows the child gets its working directory as `TEMP` and `TMP`.
+/// On Linux with the local trust mode the script runs in a transient systemd unit without the
+/// sandbox of the agent (ADR-0047). The other hosts start it as a child: it has no shell and no
+/// standard input, keeps the environment of the agent without the restic and ResticHub variables,
+/// and runs in its own process group, so the agent stops its whole tree (FR-AG-10). The invocation
+/// can replace `PATH`, and on Windows the child gets its working directory as `TEMP` and `TMP`.
 ///
 /// # Errors
 ///
 /// Returns an error when the operating system refuses to start the process.
 pub(crate) fn spawn_job_script(invocation: &Invocation) -> Result<JobChild> {
+    #[cfg(target_os = "linux")]
+    if let Some(unit) = &invocation.unit {
+        return crate::scripts::transient::spawn(invocation, unit);
+    }
     let mut command = Command::new(&invocation.program);
     for (name, _) in std::env::vars_os() {
         let upper = name.to_string_lossy().to_ascii_uppercase();
@@ -403,6 +410,9 @@ pub(crate) struct JobChild {
     /// Holds the tree on Windows, so closing it kills the tree (FR-AG-10).
     #[cfg(windows)]
     job: Option<windows_job::JobObject>,
+    /// The transient unit that runs a script outside the sandbox of the agent (ADR-0047).
+    #[cfg(target_os = "linux")]
+    unit: Option<String>,
 }
 
 impl JobChild {
@@ -424,7 +434,18 @@ impl JobChild {
             child,
             #[cfg(windows)]
             job,
+            #[cfg(target_os = "linux")]
+            unit: None,
         })
+    }
+
+    /// Wraps the `systemd-run` process of a transient script unit (ADR-0047).
+    #[cfg(target_os = "linux")]
+    pub(crate) fn for_unit(child: Child, unit: String) -> Self {
+        Self {
+            child,
+            unit: Some(unit),
+        }
     }
 
     /// Takes the output pipes of the child. A second call gives `None` for both.
@@ -440,9 +461,14 @@ impl JobChild {
     /// Sends the graceful stop signal to the whole process group (FR-AG-10).
     ///
     /// It is `SIGINT` on Unix and `CTRL_BREAK` on Windows. A child that ignores it keeps running
-    /// until [`Self::kill_tree`].
+    /// until [`Self::kill_tree`]. A transient script unit gets the signal from the service manager,
+    /// which reaches every process of the unit (ADR-0047).
     #[allow(unsafe_code)]
     pub(crate) fn interrupt(&self) -> std::io::Result<()> {
+        #[cfg(target_os = "linux")]
+        if let Some(unit) = &self.unit {
+            return systemctl(unit, "SIGINT");
+        }
         #[cfg(unix)]
         {
             let group = i32::try_from(self.child.id()).unwrap_or(i32::MAX);
@@ -467,6 +493,17 @@ impl JobChild {
     /// (FR-AG-10).
     #[allow(unsafe_code)]
     pub(crate) fn kill_tree(&mut self) -> std::io::Result<()> {
+        #[cfg(target_os = "linux")]
+        if let Some(unit) = &self.unit {
+            return match systemctl(unit, "SIGKILL") {
+                Ok(()) => Ok(()),
+                Err(error) => {
+                    // The unit keeps its own runtime backstop, but the agent must stop waiting.
+                    let _ = self.child.kill();
+                    Err(error)
+                }
+            };
+        }
         #[cfg(unix)]
         {
             let group = i32::try_from(self.child.id()).unwrap_or(i32::MAX);
@@ -487,6 +524,25 @@ impl JobChild {
             self.child.kill()
         }
     }
+}
+
+/// Sends a signal to every process of a transient unit through the service manager (ADR-0047).
+#[cfg(target_os = "linux")]
+fn systemctl(unit: &str, signal: &str) -> std::io::Result<()> {
+    let output = Command::new("systemctl")
+        .args(crate::scripts::transient::kill_arguments(unit, signal))
+        .output()?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let mut text = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+    if text.is_empty() {
+        text = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    }
+    if text.is_empty() {
+        text = format!("systemctl failed with {}", output.status);
+    }
+    Err(std::io::Error::other(text))
 }
 
 /// The Windows job object that holds the restic tree of one job (FR-AG-10).

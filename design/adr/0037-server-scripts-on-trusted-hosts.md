@@ -4,7 +4,7 @@
 - Date: 2026-10-15
 - Requirements: FR-HK-01 to FR-HK-12, NFR-SEC-03
 - Supersedes: [ADR-0004](0004-hook-allow-list.md) for hosts with the local trust mode
-- Amended by: [ADR-0040](0040-remove-allow-list-hooks.md), which removes decision 6
+- Amended by: [ADR-0040](0040-remove-allow-list-hooks.md), which removes decision 6; [ADR-0053](0053-server-scripts-outside-the-agent-sandbox.md), which replaces the sandbox of decision 4 on Linux
 
 ## Context
 
@@ -27,6 +27,10 @@ A script that comes from the control plane (CP) is code that runs as SYSTEM or r
 ### Note (2026-10-15)
 
 [ADR-0040](0040-remove-allow-list-hooks.md) removes the allow-list file. In decision 1, the owner and permission rule of the setting file no longer refers to that file. The rule is as follows. Only root or Administrators own the trust mode file and each directory above it. No other account can write them. The wire error code `hook_failed` and the secret purpose `hook_secret` keep their names for compatibility. They now belong to the script step.
+
+### Note (2026-10-26)
+
+[ADR-0053](0053-server-scripts-outside-the-agent-sandbox.md) replaces the sandbox of decision 4 on Linux. A script runs in a transient systemd unit without the sandbox of the agent, because that sandbox breaks ordinary tools. Its environment is the environment of the service manager, the search path that the agent checked and the step parameters. On Windows and macOS, and on a Linux host without systemd, the child process and the environment of decision 4 stay.
 
 ## Consequences
 

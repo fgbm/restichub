@@ -133,27 +133,30 @@ For each script, the agent does these steps:
 
 1. It checks the trust mode and the script again.
 2. It writes the script to a new file in a protected directory of its cache. Only the agent account can use the directory.
-3. It starts the interpreter with the fixed flags. The environment is the environment of the agent, plus the parameters of the script. It has no variable that starts with `RESTIC`. The search path (`PATH`) holds only directories that root or Administrators own. No other account can write in them or in the directories above them. The agent drops each other directory and names it once for each job in the log of the first script. On Windows, `TEMP` and `TMP` point to the protected directory. The working directory is the protected directory.
+3. It starts the interpreter with the fixed flags. The search path (`PATH`) holds only directories that root or Administrators own. No other account can write in them or in the directories above them. The agent drops each other directory and names it once for each job in the log of the first script. On Windows, `TEMP` and `TMP` point to the protected directory. The working directory is the protected directory. The section [Where the script runs](#where-the-script-runs) tells what the environment holds.
 4. It reads the output. It masks secret values and keeps at most 256 KiB for each script.
 5. It deletes the file and the directory.
 
-On a timeout or a cancel, the agent asks the script to stop. It kills the whole process tree after a short grace period. A second cancel kills the tree at once.
+### Where the script runs
 
-The scripts of the phases After, On success, On error and Finally have a time limit past the end of the job. They run for the time left plus at most 10 minutes, or for their own limit if that is shorter.
+On Linux, a script runs as a transient systemd service unit, not as a child of the agent. The unit has no sandbox: the script has the rights of root and can write anywhere on the host. Ordinary tools need what the sandbox of the agent forbids. `chpst` needs a capability to change the account. Ruby with `ffi` needs a writable and executable memory page. A dump into `/var/backups` needs a write outside the writable roots. The trust mode already says that the control plane may run any command as root on this host ([ADR-0037](https://github.com/fgbm/restichub/blob/main/design/adr/0037-server-scripts-on-trusted-hosts.md), [ADR-0053](https://github.com/fgbm/restichub/blob/main/design/adr/0053-server-scripts-outside-the-agent-sandbox.md)).
 
-A process that leaves the process group, for example with `setsid` or `nohup`, is outside the tree that the agent kills. On Linux, the service setting `KillMode=control-group` of the agent kills such a process when the service stops. Do not start a long-lived process from a script.
+The unit has `KillMode=control-group` and `RuntimeMaxSec` equal to the limit of the script plus one minute. The script gets the environment of the service manager. It also gets the search path that the agent checked and the parameters of the step. The agent writes the parameters to a protected file next to the script and removes the file after the run. A value keeps every byte, also a quote or a newline. A unit that a crash left behind runs until its `RuntimeMaxSec` ends, and the next start of the agent stops it.
 
-If the agent restarts, the control plane can deliver a backup with a script again, because it did not get the acknowledgement. The agent does not run the backup again. It answers with the final result `interrupted`, because a script may not run twice. The control plane ends such a backup as cancelled and raises no job alert. The RPO alert catches the missed backup. If the agent restarts without a clean stop after it confirmed the job, the control plane loses the job. The job ends as failed with the reason `agent_lost` and raises the alert. A job that already finished returns its stored result, also after you turned the mode off.
-
-On Linux, the service of the agent runs with `ProtectSystem=strict`. A script can write only to the cache directory, the configuration directory and the restore directories. To allow another path, add a drop-in file:
+On Windows and macOS, and on a Linux host without systemd, the script runs as a child of the agent. On such a Linux host the sandbox of the unit applies. `ProtectSystem=strict` lets the script write only to the cache directory, the configuration directory and the restore directories. The system call filter blocks a call outside its list with `EPERM`. Thus a debug tool such as `strace` or `perf` does not work in such a script. To allow another path, add a drop-in file:
 
 ```ini
 # systemctl edit restichub-agent
 [Service]
 ReadWritePaths=/var/backups
 ```
+On a timeout or a cancel, the agent asks the script to stop. It kills the whole process tree after a short grace period. A second cancel kills the tree at once. On Linux the signalled tree is the control group of the transient unit.
 
-The unit also has a system call filter (`SystemCallFilter=@system-service`). A system call outside the filter fails with the error `EPERM`. Thus a debug tool such as `strace` or `perf` does not work in a script.
+The scripts of the phases After, On success, On error and Finally have a time limit past the end of the job. They run for the time left plus at most 10 minutes, or for their own limit if that is shorter.
+
+A process that leaves the process group, for example with `setsid` or `nohup`, is outside the tree that the agent kills. On Linux the transient unit holds the whole control group, so systemd kills such a process. A process that leaves the unit itself, for example one that starts its own service with `systemd-run`, is outside it. Do not start a long-lived process from a script.
+
+If the agent restarts, the control plane can deliver a backup with a script again, because it did not get the acknowledgement. The agent does not run the backup again. It answers with the final result `interrupted`, because a script may not run twice. The control plane ends such a backup as cancelled and raises no job alert. The RPO alert catches the missed backup. If the agent restarts without a clean stop after it confirmed the job, the control plane loses the job. The job ends as failed with the reason `agent_lost` and raises the alert. A job that already finished returns its stored result, also after you turned the mode off.
 
 ## Job detail
 
