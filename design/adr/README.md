@@ -58,3 +58,4 @@ To write a new record, copy [0000-template.md](0000-template.md) and use the nex
 | [0050](0050-closing-of-a-one-time-job-alert.md) | The closing of a one-time job alert | accepted |
 | [0051](0051-a-restic-retry-is-not-progress.md) | A retry of restic is not progress | accepted |
 | [0052](0052-reconnect-grace-of-the-absence-tests.md) | The reconnect grace of the absence tests | accepted |
+| [0053](0053-server-scripts-outside-the-agent-sandbox.md) | A server script runs in a transient systemd unit | accepted |

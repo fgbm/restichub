@@ -18,6 +18,8 @@ mod search_path;
 mod setting;
 #[cfg(test)]
 mod tests;
+#[cfg(target_os = "linux")]
+pub(crate) mod transient;
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -61,6 +63,37 @@ impl ScriptRefusal {
     }
 }
 
+/// How the agent runs a script step (ADR-0053).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScriptRunner {
+    /// A child of the agent, inside the sandbox of its unit. Windows, macOS and a Linux host
+    /// without systemd use it.
+    Direct,
+    /// A transient systemd unit without the sandbox of the agent unit.
+    Systemd,
+}
+
+impl ScriptRunner {
+    /// The runner of this host: systemd on Linux where the launcher exists.
+    #[must_use]
+    pub fn for_host() -> Self {
+        #[cfg(target_os = "linux")]
+        if transient::available() {
+            return Self::Systemd;
+        }
+        Self::Direct
+    }
+}
+
+/// The transient unit of one script step (ADR-0053).
+#[derive(Debug, Clone)]
+pub struct TransientUnit {
+    pub name: String,
+    pub env_file: PathBuf,
+    /// The backstop after the timeout of the step, so a unit that no cancel reaches ends.
+    pub runtime: Duration,
+}
+
 /// The place of the setting file, the trust rule that applies to it and the directory for the
 /// script files.
 #[derive(Debug, Clone)]
@@ -69,6 +102,7 @@ pub struct ScriptStore {
     trust: Trust,
     scratch_root: PathBuf,
     search_path: Option<std::ffi::OsString>,
+    runner: ScriptRunner,
 }
 
 impl ScriptStore {
@@ -80,6 +114,7 @@ impl ScriptStore {
             trust: Trust::Host,
             scratch_root: cache.join("scripts"),
             search_path: None,
+            runner: ScriptRunner::for_host(),
         }
     }
 
@@ -92,12 +127,25 @@ impl ScriptStore {
             trust,
             scratch_root: cache.join("scripts"),
             search_path: None,
+            runner: ScriptRunner::Direct,
         }
+    }
+
+    /// Chooses the runner of a script step, for a test.
+    #[cfg(any(test, feature = "test-util"))]
+    #[must_use]
+    pub fn with_runner(mut self, runner: ScriptRunner) -> Self {
+        self.runner = runner;
+        self
     }
 
     /// Removes the script directories that a crash left behind. A new agent has no running job, so
     /// every directory under the root is a leftover (AC-HK-09).
     pub fn clean_leftovers(&self) {
+        if self.runner == ScriptRunner::Systemd {
+            #[cfg(target_os = "linux")]
+            transient::stop_leftovers();
+        }
         match std::fs::remove_dir_all(&self.scratch_root) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -192,6 +240,7 @@ impl ScriptStore {
         } else {
             Duration::from_secs(timeout_seconds.into()).min(MAX_TIMEOUT)
         };
+        let unit = self.transient_unit(&scratch, &env, timeout)?;
         let service_path = self
             .search_path
             .clone()
@@ -209,9 +258,41 @@ impl ScriptStore {
                 timeout,
                 secrets,
                 search_path: Some(search.value),
+                unit,
             },
             scratch: ScratchGuard { _scratch: scratch },
         })
+    }
+
+    /// Writes the parameter file for a transient unit; the direct runner has none (ADR-0053).
+    fn transient_unit(
+        &self,
+        scratch: &Scratch,
+        env: &[(String, Zeroizing<String>)],
+        timeout: Duration,
+    ) -> Result<Option<TransientUnit>, ScriptRefusal> {
+        if self.runner != ScriptRunner::Systemd {
+            return Ok(None);
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let env_file = scratch.path().join("environment.sh");
+            crate::paths::create_protected_file(
+                &env_file,
+                transient::environment_file(env).as_bytes(),
+            )
+            .map_err(|error| ScriptRefusal::Unavailable(format!("{error:#}")))?;
+            Ok(Some(TransientUnit {
+                name: transient::unit_name(scratch.random()),
+                env_file,
+                runtime: transient::runtime_backstop(timeout),
+            }))
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = (scratch, env, timeout);
+            Ok(None)
+        }
     }
 }
 
@@ -249,6 +330,17 @@ fn validate(step: &ScriptStep) -> Result<(), ScriptRefusal> {
         if !is_script_env_name(&variable.name) {
             return invalid("a variable name is not allowed");
         }
+        // An environment variable is a NUL-terminated string, and the shell cannot hold the byte.
+        if matches!(
+            &variable.value,
+            Some(
+                script_env::Value::StringValue(value)
+                    | script_env::Value::SecretValue(value)
+                    | script_env::Value::MaskedValue(value)
+            ) if value.contains('\0')
+        ) {
+            return invalid("a variable value contains a NUL byte");
+        }
     }
     Ok(())
 }
@@ -272,6 +364,14 @@ impl Scratch {
 
     fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// The random part of the directory name, which also names the transient unit (ADR-0053).
+    fn random(&self) -> &str {
+        self.path
+            .file_name()
+            .and_then(std::ffi::OsStr::to_str)
+            .unwrap_or("script")
     }
 }
 
