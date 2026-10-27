@@ -3,23 +3,35 @@
 	import { Page } from '#lib/components/layout/index.ts';
 	import { Alert, Badge, Button, CopyField, KeyValue, Panel } from '#lib/components/ui/index.ts';
 	import type { KeyValueItem } from '#lib/components/ui/index.ts';
-	import { t } from '#lib/i18n/index.ts';
-	import { getAbout, loadAbout } from '#lib/stores/about.svelte.ts';
-
-	let failed = $state(false);
-
-	async function read(): Promise<void> {
-		failed = false;
-		await loadAbout();
-		failed = getAbout() === null;
-	}
+	import { getLocale, t } from '#lib/i18n/index.ts';
+	import { getAbout, isAboutFailed, loadAbout, retryAbout } from '#lib/stores/about.svelte.ts';
+	import { getSession } from '#lib/stores/session.svelte.ts';
+	import { getTenancyMode } from '#lib/stores/instance.svelte.ts';
 
 	onMount(() => {
-		void read();
+		void loadAbout();
 	});
 
 	const about = $derived(getAbout());
-	const failedToLoad = $derived(failed && about === null);
+	const failed = $derived(isAboutFailed() && about === null);
+	const session = $derived(getSession());
+	const locale = $derived(getLocale());
+
+	// The tenancy mode is public on `/api/v1/instance`; the schema level is the Platform Admin's
+	// (ADR-0054).
+	const platformAdmin = $derived(session?.platform_admin ?? false);
+	const docsRoot = $derived(
+		locale === 'ru' ? 'https://fgbm.github.io/restichub/ru/' : 'https://fgbm.github.io/restichub/'
+	);
+
+	const agents = $derived(
+		about
+			? t('about.agents.value', {
+					major: about.agent_protocol.major,
+					minor: about.agent_protocol.minimum_minor
+				})
+			: ''
+	);
 
 	const facts = $derived<KeyValueItem[]>(
 		about
@@ -32,34 +44,28 @@
 						value: `${about.protocol.major}.${about.protocol.minor}`,
 						mono: true
 					},
-					{
-						key: 'agents',
-						label: t('about.agents'),
-						value: t('about.agents.value', {
-							major: about.agent_protocol.major,
-							minor: about.agent_protocol.minimum_minor
-						}),
-						mono: true
-					}
+					{ key: 'agents', label: t('about.agents'), value: agents, mono: true }
 				]
 			: []
 	);
 
-	// The tenancy mode and the database schema level are the Platform Admin's (ADR-0029).
 	const installation = $derived<KeyValueItem[]>(
-		about?.tenancy_mode && about.schema_level !== null && about.schema_level !== undefined
+		about && platformAdmin
 			? [
 					{
 						key: 'tenancy',
 						label: t('about.tenancyMode'),
 						value:
-							about.tenancy_mode === 'single' ? t('about.tenancy.single') : t('about.tenancy.multi')
+							getTenancyMode() === 'single' ? t('about.tenancy.single') : t('about.tenancy.multi')
 					},
 					{
 						key: 'schema',
 						label: t('about.schemaLevel'),
-						value: String(about.schema_level),
-						mono: true
+						value:
+							about.schema_level === null || about.schema_level === undefined
+								? t('common.notSet')
+								: String(about.schema_level),
+						mono: about.schema_level !== null && about.schema_level !== undefined
 					}
 				]
 			: []
@@ -71,7 +77,7 @@
 					version: about.version,
 					revision: about.revision,
 					protocol: `${about.protocol.major}.${about.protocol.minor}`,
-					agents: `${about.agent_protocol.major}.${about.agent_protocol.minimum_minor}`
+					agents
 				})
 			: ''
 	);
@@ -80,7 +86,7 @@
 <Page
 	title={t('about.title')}
 	description={t('about.description')}
-	loading={about === null && !failedToLoad}
+	loading={about === null && !failed}
 >
 	{#snippet status()}
 		{#if about?.prerelease}
@@ -88,10 +94,10 @@
 		{/if}
 	{/snippet}
 
-	{#if failedToLoad}
+	{#if failed}
 		<Alert tone="danger" title={t('about.loadFailed')}>
 			{#snippet actions()}
-				<Button onclick={() => void read()}>{t('common.retry')}</Button>
+				<Button onclick={() => void retryAbout()}>{t('common.retry')}</Button>
 			{/snippet}
 			<p>{t('about.loadFailedHint')}</p>
 		</Alert>
@@ -112,6 +118,8 @@
 			{/if}
 
 			<Panel title={t('about.links.title')}>
+				<!-- The documentation site is outside the application, so the addresses are no routes. -->
+				<!-- eslint-disable svelte/no-navigation-without-resolve -->
 				<ul class="about__links">
 					<li>
 						<a
@@ -121,13 +129,13 @@
 						>
 					</li>
 					<li>
-						<a href="https://fgbm.github.io/restichub/" target="_blank" rel="noopener noreferrer"
+						<a href={docsRoot} target="_blank" rel="noopener noreferrer"
 							>{t('about.links.documentation')}</a
 						>
 					</li>
 					<li>
 						<a
-							href="https://fgbm.github.io/restichub/reference/agent-version-compatibility/"
+							href={`${docsRoot}reference/agent-version-compatibility/`}
 							target="_blank"
 							rel="noopener noreferrer">{t('about.links.compatibility')}</a
 						>
@@ -140,6 +148,7 @@
 						>
 					</li>
 				</ul>
+				<!-- eslint-enable svelte/no-navigation-without-resolve -->
 			</Panel>
 		</div>
 	{/if}

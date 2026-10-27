@@ -1190,12 +1190,11 @@ export class MockApiService {
 
 	async about(): Promise<About> {
 		return {
-			version: '0.1.0',
+			version: '0.1.0-rc.1',
 			prerelease: true,
 			revision: 'dev',
 			protocol: { major: 1, minor: 1 },
 			agent_protocol: { major: 1, minimum_minor: 0 },
-			tenancy_mode: 'multi',
 			schema_level: 60
 		};
 	}

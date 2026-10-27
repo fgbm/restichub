@@ -139,7 +139,7 @@
 		{
 			label: t('account.about'),
 			icon: 'info',
-			title: about?.version,
+			hint: about?.version,
 			onSelect: () => void goto(resolve('/(app)/about'))
 		},
 		{

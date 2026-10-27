@@ -1,33 +1,47 @@
 /*
  * The About data of the control plane: the version, the revision, the protocol versions and, for
- * the Platform Admin, the tenancy mode and the database schema level.
+ * the Platform Admin, the database schema level (ADR-0054).
  *
- * The account menu shows the version in its tooltip, so the application reads `/api/v1/about`
- * once per session; the About page waits for the same read.
+ * The account menu shows the version below its label, so the application reads `/api/v1/about`
+ * once per session without a block of the navigation. The About page waits for the same read. A
+ * failed read stays failed until the page asks again.
  */
 import { service } from '#lib/api/index.ts';
 import type { About } from '#lib/api/index.ts';
 
 let about = $state<About | null>(null);
-let loaded = $state(false);
+let failed = $state(false);
 let pending: Promise<void> | null = null;
 
 export function getAbout(): About | null {
 	return about;
 }
 
-/** Reads the About data once. A call during a read returns the same promise. */
+export function isAboutFailed(): boolean {
+	return failed;
+}
+
+/** Reads the data once. A call during a read returns the same promise. */
 export function loadAbout(): Promise<void> {
-	if (loaded) return Promise.resolve();
+	if (about || failed) return Promise.resolve();
+	return read();
+}
+
+/** Reads the data again, after the person asked for it on the About page. */
+export function retryAbout(): Promise<void> {
+	failed = false;
+	return read();
+}
+
+function read(): Promise<void> {
 	pending ??= service
 		.about()
 		.then((value) => {
 			about = value;
-			loaded = true;
 		})
 		.catch(() => {
-			// The menu shows no version and the page shows its error while the read fails.
 			about = null;
+			failed = true;
 		})
 		.finally(() => {
 			pending = null;
@@ -38,6 +52,6 @@ export function loadAbout(): Promise<void> {
 /** Drops the data of the ended session, so the next account reads its own. */
 export function forgetAbout(): void {
 	about = null;
-	loaded = false;
+	failed = false;
 	pending = null;
 }

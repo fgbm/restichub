@@ -15,7 +15,8 @@ export const load: LayoutLoad = async ({ url }) => {
 	if (!isLoaded()) await loadSession();
 	const session = getSession();
 	if (!session) redirect(307, resolve('/(auth)/sign-in'));
-	await loadAbout();
+	// The About data fills the account menu; a page never waits for it.
+	void loadAbout();
 	const target = platformRedirectFor(session, isSingleTenant(), url.pathname);
 	if (target) redirect(307, resolve(target));
 };
