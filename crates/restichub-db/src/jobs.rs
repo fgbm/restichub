@@ -502,7 +502,7 @@ pub async fn mark_expired(
     Ok(end_overdue(tx, now, Some(id)).await? == 1)
 }
 
-/// The end that the expiry gives a job.
+/// What the sweep does to the lifecycle of a job that outlived its queue time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Expiry {
     /// The queue lifetime passed before the control plane sent the job (FR-SC-07).
