@@ -10,7 +10,7 @@
 //! rows stay. A later retention task removes the rows of a deleted tenant.
 
 use axum::Json;
-use axum::extract::{Query, State};
+use axum::extract::State;
 use axum::http::StatusCode;
 use restichub_db::audit::{AuditAction, AuditEvent};
 use restichub_db::tenants as repo;
@@ -26,6 +26,7 @@ use crate::api_path::ApiPath;
 use crate::context::{Operation, RequestContext};
 use crate::error::{ApiError, ErrorCode, map_write_error};
 use crate::json::ApiJson;
+use crate::list_query::ApiQuery;
 use crate::server::AppState;
 use crate::validation;
 use crate::views::PlatformTenantView;
@@ -68,7 +69,7 @@ pub struct TenantListResponse {
 pub async fn list_tenants(
     State(state): State<AppState>,
     context: RequestContext,
-    Query(query): Query<TenantListQuery>,
+    ApiQuery(query): ApiQuery<TenantListQuery>,
 ) -> Result<Json<TenantListResponse>, ApiError> {
     context.authorize(Operation::PlatformTenantsRead)?;
     let filter = filter(&query)?;

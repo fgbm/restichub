@@ -13,7 +13,7 @@
 //! and starts no job (AC-RS-02). A repository of another tenant gives HTTP 404 (AC-TN-01).
 
 use axum::Json;
-use axum::extract::{Query, State};
+use axum::extract::State;
 use axum::http::StatusCode;
 use restichub_db::agents as agents_repo;
 use restichub_db::audit::{AuditAction, diff};
@@ -41,6 +41,7 @@ use crate::context::{Operation, RequestContext};
 use crate::error::{ApiError, map_write_error};
 use crate::jobs::{JobView, ensure_agent_active, format_time, parse_job_id, resolve_agent};
 use crate::json::ApiJson;
+use crate::list_query::ApiQuery;
 use crate::repositories::parse_repository_id;
 use crate::server::AppState;
 use crate::validation::Reason;
@@ -708,7 +709,7 @@ pub async fn get_snapshots(
     State(state): State<AppState>,
     context: RequestContext,
     ApiPath(id): ApiPath<String>,
-    Query(params): Query<SnapshotsParams>,
+    ApiQuery(params): ApiQuery<SnapshotsParams>,
 ) -> Result<Json<SnapshotsView>, ApiError> {
     context.authorize(Operation::JobsRead)?;
     let repository_id = parse_repository_id(&id)?;
@@ -838,7 +839,7 @@ pub async fn get_ls(
     State(state): State<AppState>,
     context: RequestContext,
     ApiPath(id): ApiPath<String>,
-    Query(params): Query<LsParams>,
+    ApiQuery(params): ApiQuery<LsParams>,
 ) -> Result<Json<LsView>, ApiError> {
     context.authorize(Operation::JobsWrite)?;
     let repository_id = parse_repository_id(&id)?;

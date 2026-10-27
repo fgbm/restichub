@@ -22,7 +22,7 @@ mod settings;
 use std::collections::BTreeMap;
 
 use axum::Json;
-use axum::extract::{Query, State};
+use axum::extract::State;
 use axum::http::StatusCode;
 use restichub_compiler::{
     Architecture, CompileError, OperatingSystem, Plan, ResticVersion, TargetFacts, compile,
@@ -44,6 +44,7 @@ use crate::context::{Operation, RequestContext};
 use crate::delete_check;
 use crate::error::{ApiError, map_write_error};
 use crate::json::ApiJson;
+use crate::list_query::ApiQuery;
 use crate::secrets::actor_user;
 use crate::server::AppState;
 use crate::validation::Reason;
@@ -84,7 +85,7 @@ pub struct ProfileListQuery {
 pub async fn list_profiles(
     State(state): State<AppState>,
     context: RequestContext,
-    Query(query): Query<ProfileListQuery>,
+    ApiQuery(query): ApiQuery<ProfileListQuery>,
 ) -> Result<Json<ProfileListResponse>, ApiError> {
     context.authorize(Operation::ProfilesRead)?;
     let page = ProfilePage {

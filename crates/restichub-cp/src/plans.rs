@@ -13,7 +13,7 @@
 //! returns the next fire times in UTC, for the user interface preview in the plan time zone.
 
 use axum::Json;
-use axum::extract::{Query, State};
+use axum::extract::State;
 use axum::http::StatusCode;
 use restichub_db::agents::{self as agents_repo};
 use restichub_db::audit::{AuditAction, diff};
@@ -30,6 +30,7 @@ use crate::api_path::ApiPath;
 use crate::context::{Operation, RequestContext};
 use crate::error::{ApiError, map_write_error};
 use crate::json::ApiJson;
+use crate::list_query::ApiQuery;
 use crate::parameters::{self, ParameterValueDef, PlanParameterValueView};
 use crate::schedule::{Schedule, ScheduleError};
 use crate::server::AppState;
@@ -249,7 +250,7 @@ pub struct NextRunsResponse {
 pub async fn list_plans(
     State(state): State<AppState>,
     context: RequestContext,
-    Query(query): Query<PlanListQuery>,
+    ApiQuery(query): ApiQuery<PlanListQuery>,
 ) -> Result<Json<PlanListResponse>, ApiError> {
     context.authorize(Operation::PlansRead)?;
     let page = PlanPage {
@@ -675,7 +676,7 @@ pub async fn next_runs(
     State(state): State<AppState>,
     context: RequestContext,
     ApiPath(id): ApiPath<String>,
-    Query(query): Query<NextRunsQuery>,
+    ApiQuery(query): ApiQuery<NextRunsQuery>,
 ) -> Result<Json<NextRunsResponse>, ApiError> {
     context.authorize(Operation::PlansRead)?;
     let plan_id = parse_plan_id(&id)?;
