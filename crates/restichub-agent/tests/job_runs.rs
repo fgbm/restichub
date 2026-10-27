@@ -519,10 +519,11 @@ async fn ac_sc_06_an_unknown_exit_code_marks_a_stale_lock_on_windows_only() {
     );
 }
 
-/// AC-PR-07, FR-AG-09: the job result repeats the step results, so a step result that the stream
-/// lost still has its row after the job ends (FR-MN-02).
+/// FR-PR-07, FR-MN-02: the job result repeats the rows of the steps, so a live step result that
+/// the stream lost still has its row after the job ends. Only the row travels: the control plane
+/// writes it with `job_steps::upsert`, so a dropped output and a step side effect do not come back.
 #[tokio::test(flavor = "multi_thread")]
-async fn ac_pr_07_the_job_result_repeats_the_step_results() {
+async fn fr_pr_07_the_job_result_repeats_the_step_rows() {
     let dir = config_dir("job-runs-repeat");
     let path = repository("job-runs-repeat-repo");
     common::script_exit_codes(&path, 0, 0);
@@ -544,7 +545,11 @@ async fn ac_pr_07_the_job_result_repeats_the_step_results() {
     assert_eq!(
         result.steps.len(),
         1,
-        "the job result repeats the step results"
+        "the job result repeats the step rows"
+    );
+    assert!(
+        result.log_tail.is_empty(),
+        "the log tail stays out of the live result, because the spool keeps its order (FR-LG-07)"
     );
     assert_eq!(result.steps[0].step_id, steps[0].step_id);
     assert_eq!(result.steps[0].status, steps[0].status);

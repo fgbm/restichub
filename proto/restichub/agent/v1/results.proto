@@ -338,6 +338,7 @@ message JobResult {
   // Results of the steps that ran. The agent keeps them in its journal and
   // sends them again after a reconnect (AC-PR-07). The journal copy holds the
   // small summaries only: it drops the snapshot list and the forget result.
+  // The live final result of a job also carries the steps, in compact form.
   repeated StepResult steps = 8;
   // Bounded tail of the job log. The agent keeps it in its journal and sends
   // it again after a reconnect (AC-PR-07).

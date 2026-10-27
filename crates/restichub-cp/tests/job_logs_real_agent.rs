@@ -69,6 +69,17 @@ async fn run_backup(env: &Env, agent: &mut queue_support::FakeAgent) -> Uuid {
 
 /// Like [`run_backup`], and returns the profile that the job ran.
 async fn run_backup_of_profile(env: &Env, agent: &mut queue_support::FakeAgent) -> (Uuid, Uuid) {
+    run_job_of_profile(env, agent, json!({}), &[]).await
+}
+
+/// Runs the queued backup of a profile on the real runner and sends every message to the control
+/// plane, except the live step results whose step identifiers are in `lost`.
+async fn run_job_of_profile(
+    env: &Env,
+    agent: &mut queue_support::FakeAgent,
+    profile: Value,
+    lost: &[&str],
+) -> (Uuid, Uuid) {
     let ring = Env::key_ring(&agent.identity);
     let work = std::env::temp_dir().join(format!("restichub-logs-agent-{}", Uuid::now_v7()));
     std::fs::create_dir_all(&work).expect("cannot create the work directory");
@@ -99,7 +110,7 @@ async fn run_backup_of_profile(env: &Env, agent: &mut queue_support::FakeAgent) 
             location.to_str().expect("the path is UTF-8"),
         )
         .await;
-    let profile = env.create_profile(json!({})).await;
+    let profile = env.create_profile(profile).await;
     let plan = env.create_plan(profile, agent.id, repository).await;
     let backup = env.run_plan(plan).await;
     env.pass().await;
@@ -116,6 +127,11 @@ async fn run_backup_of_profile(env: &Env, agent: &mut queue_support::FakeAgent) 
             .expect("the real agent must report")
             .expect("the channel stays open");
         finished = matches!(message.payload, Some(agent_message::Payload::JobResult(_)));
+        if let Some(agent_message::Payload::StepResult(result)) = &message.payload
+            && lost.contains(&result.step_id.as_str())
+        {
+            continue;
+        }
         agent
             .tx
             .send(AgentMessage {
@@ -277,5 +293,30 @@ async fn ac_pf_01_the_step_log_holds_the_masked_command_line_of_the_preview() {
         !logged[0].contains(CANARY),
         "the command line holds no secret"
     );
+    env.db.cleanup().await;
+}
+
+/// A live step result that the stream lost still leaves its row after the job ends, because the
+/// real runner repeats the step results in the job result (FR-PR-07, FR-MN-02).
+#[tokio::test]
+async fn fr_pr_07_a_lost_live_step_result_leaves_its_row_from_the_job_result() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let mut agent = env.connect_agent("real-lost-step-agent").await;
+
+    // The live result of the backup step is lost on the wire.
+    let (backup, _profile) = run_job_of_profile(&env, &mut agent, json!({}), &["backup"]).await;
+    eventually(|| async { env.job_status(backup).await == "succeeded" }).await;
+
+    let detail = env.job(backup).await;
+    let steps = detail["steps"].as_array().expect("steps");
+    let row = steps
+        .iter()
+        .find(|step| step["step_id"] == "backup")
+        .unwrap_or_else(|| panic!("the row of the lost step must come back: {detail}"));
+    assert_eq!(row["status"], "success", "{detail}");
+    assert_eq!(row["output"]["kind"], "backup", "{detail}");
     env.db.cleanup().await;
 }

@@ -1059,9 +1059,9 @@ impl Jobs {
         // the stream task, so a cancel and the pings do not wait for it.
         self.wait_log_sent(&job_id).await;
         // The log lines went out while the job ran, and the spool keeps their order, so the tail
-        // would only repeat them out of order (FR-LG-07). The step results travel again with this
-        // message: a live result that the stream lost would otherwise leave a step that ran with
-        // no row, because a running job has no stored result to repeat (FR-AG-09, AC-PR-07).
+        // would only repeat them out of order (FR-LG-07). The step rows travel again with this
+        // message, so a live result that the stream lost still leaves its row when the job ends:
+        // a running job has no stored result to repeat (FR-PR-07, FR-MN-02).
         let _ = self
             .send(job_result_message(JobResult {
                 log_tail: Vec::new(),
