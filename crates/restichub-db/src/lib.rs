@@ -417,32 +417,29 @@ impl Database {
             .map(|migration| migration.version)
             .max()
             .unwrap_or(0);
-        match self.schema_level().await? {
-            version if version < expected => Err(DbError::MigrationsBehind {
-                applied: version,
-                expected,
-            }),
-            version if version > expected => Err(DbError::MigrationsAhead {
-                applied: version,
-                expected,
-            }),
-            _ => Ok(()),
+        let applied = self.schema_level().await?.unwrap_or(0);
+        if applied < expected {
+            Err(DbError::MigrationsBehind { applied, expected })
+        } else if applied > expected {
+            Err(DbError::MigrationsAhead { applied, expected })
+        } else {
+            Ok(())
         }
     }
 
-    /// The version of the last successful migration, or 0 while no migration ran.
+    /// The version of the last successful migration. `None` while the table or the row is absent.
     ///
     /// The runtime role reads `_sqlx_migrations` (migration 0007). Only the About screen of the
-    /// Platform Admin shows the value (ADR-0029).
-    pub async fn schema_level(&self) -> Result<i64, DbError> {
+    /// Platform Admin shows the value (ADR-0054).
+    pub async fn schema_level(&self) -> Result<Option<i64>, DbError> {
         let applied: Result<Option<(i64,)>, sqlx::Error> =
             sqlx::query_as::<_, (i64,)>("SELECT max(version) FROM _sqlx_migrations WHERE success")
                 .fetch_optional(&self.pool)
                 .await;
         match applied {
-            Ok(Some((version,))) => Ok(version),
-            Ok(None) => Ok(0),
-            Err(error) if is_undefined_table(&error) => Ok(0),
+            Ok(Some((version,))) => Ok(Some(version)),
+            Ok(None) => Ok(None),
+            Err(error) if is_undefined_table(&error) => Ok(None),
             Err(error) => Err(DbError::Query(error)),
         }
     }

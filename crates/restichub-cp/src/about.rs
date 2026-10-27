@@ -1,9 +1,9 @@
-//! The About ResticHub data (`GET /api/v1/about`).
+//! The About ResticHub data (`GET /api/v1/about`, ADR-0054).
 //!
 //! Every authenticated role reads the version, the revision and the protocol versions of the
 //! control plane, also in the platform mode and in a session without an organization. A person
-//! gives these facts to the support team. The tenancy mode and the database schema level go to
-//! the Platform Admin only (ADR-0029). The body holds no secret, no environment value and no path.
+//! gives these facts to the support team. The database schema level goes to the Platform Admin
+//! only. The body holds no secret, no environment value and no path.
 
 use axum::Json;
 use axum::extract::State;
@@ -11,7 +11,6 @@ use restichub_proto::version::Version;
 use serde::Serialize;
 use utoipa::ToSchema;
 
-use crate::config::TenancyMode;
 use crate::context::{Operation, RequestContext};
 use crate::error::ApiError;
 use crate::server::AppState;
@@ -47,24 +46,20 @@ pub struct AboutResponse {
     pub revision: String,
     pub protocol: ProtocolView,
     pub agent_protocol: AgentProtocolView,
-    /// Absent for a role below the Platform Admin (ADR-0029).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tenancy_mode: Option<TenancyMode>,
-    /// The version of the last applied migration. Absent for a role below the Platform Admin.
+    /// Absent for a role below the Platform Admin, and while the database holds no migration row.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub schema_level: Option<i64>,
 }
 
-/// Splits the stamped version into the package version, the pre-release part and the revision.
+/// Splits the stamped version into the package version, the pre-release flag and the revision.
 ///
-/// The build script stamps `<package version>+<revision>` and the package version may hold a
-/// pre-release part (`0.2.0-rc.2+3b21922`).
+/// The build script stamps `<package version>+<revision>` and the package version keeps its
+/// pre-release part (`0.2.0-rc.2+3b21922`). The version stays exact, so support reads the same
+/// string as the release notes.
 fn split_build_version(value: &str) -> (String, bool, String) {
     let (package, revision) = value.split_once('+').unwrap_or((value, ""));
-    match package.split_once('-') {
-        Some((version, _)) => (version.to_owned(), true, revision.to_owned()),
-        None => (package.to_owned(), false, revision.to_owned()),
-    }
+    let prerelease = package.contains('-');
+    (package.to_owned(), prerelease, revision.to_owned())
 }
 
 /// Answers the About ResticHub screen with the version of this build.
@@ -84,13 +79,10 @@ pub async fn about(
     context.authorize(Operation::AboutRead)?;
     let (version, prerelease, revision) = split_build_version(restichub_common::BUILD_VERSION);
     let protocol = Version::CURRENT;
-    let (tenancy_mode, schema_level) = if context.platform_admin {
-        (
-            Some(state.tenancy().mode),
-            Some(state.db().schema_level().await?),
-        )
+    let schema_level = if context.platform_admin {
+        state.db().schema_level().await?
     } else {
-        (None, None)
+        None
     };
     Ok(Json(AboutResponse {
         version,
@@ -104,7 +96,6 @@ pub async fn about(
             major: protocol.major,
             minimum_minor: protocol.minimum_minor(),
         },
-        tenancy_mode,
         schema_level,
     }))
 }
@@ -124,7 +115,7 @@ mod tests {
     #[test]
     fn a_pre_release_keeps_its_package_version() {
         let (version, prerelease, revision) = split_build_version("0.2.0-rc.2+3b21922");
-        assert_eq!(version, "0.2.0");
+        assert_eq!(version, "0.2.0-rc.2");
         assert!(prerelease);
         assert_eq!(revision, "3b21922");
     }

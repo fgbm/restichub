@@ -245,13 +245,13 @@ async fn ac_au_02_role_operation_matrix() {
     db.cleanup().await;
 }
 
-/// The About ResticHub data is for every role, and the platform facts are for the Platform Admin
-/// only (AC-AU-02).
+/// The About ResticHub data is for every role, and the schema level is for the Platform Admin only
+/// (AC-AU-02, ADR-0054).
 ///
 /// The version goes to support, so a Viewer reads it. The body holds no secret, no environment
 /// value and no path, so the field set is exactly the visible one.
 #[tokio::test]
-async fn ac_au_02_about_is_readable_by_a_viewer_and_hides_the_schema_level() {
+async fn adr_0054_about_is_readable_by_a_viewer_and_hides_the_schema_level() {
     let Some(db) = common::test_db().await else {
         return;
     };
@@ -297,7 +297,6 @@ async fn ac_au_02_about_is_readable_by_a_viewer_and_hides_the_schema_level() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert!(body.get("version").is_some(), "{body}");
     assert!(body.get("schema_level").is_none(), "{body}");
-    assert!(body.get("tenancy_mode").is_none(), "{body}");
 
     db.cleanup().await;
 }

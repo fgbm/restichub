@@ -128,12 +128,12 @@ async fn a_path_parameter_is_in_its_route_template() -> Result<(), Box<dyn std::
 }
 
 /// The About ResticHub data answers a session without an organization, and the document names the
-/// fields (AC-AU-06).
+/// fields (AC-AU-06, ADR-0054).
 ///
-/// The version is the one fact that every role and every mode reads. The platform facts are the
+/// The version is the one fact that every role and every mode reads. The schema level is the
 /// Platform Admin's only.
 #[tokio::test]
-async fn ac_au_06_about_answers_in_a_session_without_a_tenant() {
+async fn adr_0054_about_answers_in_a_session_without_a_tenant() {
     let Some(db) = common::test_db().await else {
         return;
     };
@@ -155,16 +155,12 @@ async fn ac_au_06_about_answers_in_a_session_without_a_tenant() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert!(body.get("version").is_some(), "{body}");
     assert!(body.get("revision").is_some(), "{body}");
-    assert_eq!(
-        body.get("tenancy_mode").and_then(Value::as_str),
-        Some("multi")
-    );
     assert!(
         body.get("schema_level").and_then(Value::as_u64).is_some(),
         "{body}"
     );
 
-    // An account with no membership and no right reads the version and no platform fact.
+    // An account with no membership and no right reads the version and no schema level.
     let plain = common::seed_memberless_account(&db, "about-plain", "phc").await;
     let cookie = common::session_cookie(db.database(), PLATFORM_TENANT_ID, plain).await;
     let (status, _, body) = common::send(
@@ -175,7 +171,6 @@ async fn ac_au_06_about_answers_in_a_session_without_a_tenant() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert!(body.get("version").is_some(), "{body}");
     assert!(body.get("schema_level").is_none(), "{body}");
-    assert!(body.get("tenancy_mode").is_none(), "{body}");
 
     // The document names the route, its security and its fields.
     let response = app
@@ -201,7 +196,6 @@ async fn ac_au_06_about_answers_in_a_session_without_a_tenant() {
         "revision",
         "protocol",
         "agent_protocol",
-        "tenancy_mode",
         "schema_level",
     ] {
         assert!(schema.get(field).is_some(), "the schema has no {field}");

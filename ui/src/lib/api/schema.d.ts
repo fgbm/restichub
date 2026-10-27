@@ -1589,10 +1589,9 @@ export interface components {
             revision: string;
             /**
              * Format: int64
-             * @description The version of the last applied migration. Absent for a role below the Platform Admin.
+             * @description Absent for a role below the Platform Admin, and while the database holds no migration row.
              */
             schema_level?: number | null;
-            tenancy_mode?: components["schemas"]["TenancyMode"] | null;
             /** @description The package version with the pre-release part, without the build revision. */
             version: string;
         };
