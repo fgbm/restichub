@@ -3,6 +3,7 @@
  */
 import { service } from '#lib/api/index.ts';
 import type { Me, Role } from '#lib/api/index.ts';
+import { forgetAbout } from '#lib/stores/about.svelte.ts';
 
 let current = $state<Me | null>(null);
 let loading = $state(false);
@@ -28,6 +29,7 @@ export function setSession(value: Me | null): void {
 export function clearSession(): void {
 	current = null;
 	loaded = true;
+	forgetAbout();
 }
 
 export async function loadSession(): Promise<Me | null> {

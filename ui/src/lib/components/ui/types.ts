@@ -50,6 +50,8 @@ export interface MenuItem {
 	 * menu item shows it below the label.
 	 */
 	hint?: string;
+	/** Native tooltip of the item, for example the version of the build. */
+	title?: string;
 	icon?: IconName;
 	/** A menu item without an action is a heading, not a command. */
 	onSelect?: () => void;

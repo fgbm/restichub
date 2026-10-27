@@ -1,6 +1,7 @@
 import { redirect } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
 import { platformRedirectFor } from '#lib/navigation.ts';
+import { loadAbout } from '#lib/stores/about.svelte.ts';
 import { isInstanceLoaded, isSingleTenant, loadInstance } from '#lib/stores/instance.svelte.ts';
 import { getSession, isLoaded, loadSession } from '#lib/stores/session.svelte.ts';
 import type { LayoutLoad } from './$types';
@@ -14,6 +15,7 @@ export const load: LayoutLoad = async ({ url }) => {
 	if (!isLoaded()) await loadSession();
 	const session = getSession();
 	if (!session) redirect(307, resolve('/(auth)/sign-in'));
+	await loadAbout();
 	const target = platformRedirectFor(session, isSingleTenant(), url.pathname);
 	if (target) redirect(307, resolve(target));
 };

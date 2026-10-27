@@ -80,6 +80,7 @@
 								class="rh-menu__item"
 								value={item.label}
 								disabled={item.disabled}
+								title={item.title}
 								onSelect={item.onSelect}
 							>
 								{#if item.icon}<Icon name={item.icon} />{/if}
@@ -100,6 +101,7 @@
 								? ' rh-menu__item--danger'
 								: ''}{item.disabled && item.hint ? ' rh-menu__item--hint' : ''}"
 							disabled={item.disabled}
+							title={item.title}
 							onSelect={item.onSelect}
 						>
 							{#if item.icon}<Icon name={item.icon} />{/if}

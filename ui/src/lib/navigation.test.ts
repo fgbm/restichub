@@ -109,6 +109,11 @@ describe('navigation', () => {
 		}
 	});
 
+	it('keeps the About screen for a Platform Admin without an organization', () => {
+		// The version goes to support in every mode, so the screen is not an organization route.
+		expect(platformRedirectFor({ tenant: null, platform_admin: true }, false, '/about')).toBeNull();
+	});
+
 	it('keeps a platform route for a Platform Admin without an organization', () => {
 		const me = { tenant: null, platform_admin: true };
 		expect(platformRedirectFor(me, false, '/platform/tenants')).toBeNull();

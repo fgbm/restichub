@@ -19,6 +19,7 @@
 		getPageMeta,
 		rememberListQuery
 	} from '#lib/stores/page-meta.svelte.ts';
+	import { getAbout } from '#lib/stores/about.svelte.ts';
 	import { clearSession, getSession } from '#lib/stores/session.svelte.ts';
 	import { getTheme, setTheme } from '#lib/stores/theme.svelte.ts';
 	import { Badge, DropdownMenu, Icon, ToastRegion } from './ui/index.ts';
@@ -57,6 +58,8 @@
 	};
 
 	const displayName = $derived(session?.user?.display_name ?? t('topbar.account'));
+	// The version is the fact that support asks for, so the menu shows it without the page.
+	const about = $derived(getAbout());
 	const accountSub = $derived(
 		session?.tenant && session.role
 			? `${t(roleKeys[session.role])} · ${session.tenant.name}`
@@ -132,6 +135,12 @@
 			label: t('account.password.title'),
 			icon: 'lock',
 			onSelect: () => (passwordOpen = true)
+		},
+		{
+			label: t('account.about'),
+			icon: 'info',
+			title: about?.version,
+			onSelect: () => void goto(resolve('/(app)/about'))
 		},
 		{
 			label: t('topbar.theme.light'),
