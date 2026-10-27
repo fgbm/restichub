@@ -5,7 +5,7 @@
 //! either.
 
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::http::StatusCode;
 use restichub_db::audit::{Actor, AuditAction, diff};
 use restichub_db::{ApiTokenId, Role, api_tokens};
@@ -15,6 +15,7 @@ use time::format_description::well_known::Rfc3339;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
+use crate::api_path::ApiPath;
 use crate::context::{Operation, RequestContext, allowed_role};
 use crate::error::{ApiError, map_write_error};
 use crate::json::ApiJson;
@@ -197,7 +198,7 @@ pub async fn create_token(
 pub async fn revoke_token(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
 ) -> Result<StatusCode, ApiError> {
     context.authorize(Operation::ApiTokensWrite)?;
     let token_id = Uuid::parse_str(&id)

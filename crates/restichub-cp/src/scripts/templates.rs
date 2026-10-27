@@ -9,7 +9,7 @@
 //! template for display, so a later change of the template does not change a profile.
 
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::http::StatusCode;
 use restichub_db::audit::{AuditAction, diff};
 use restichub_db::script_templates::{
@@ -27,6 +27,7 @@ use super::{
     EnvKind, FailurePolicy, Interpreter, ScriptDef, audit_value, body_hash, builtin, parse_phase,
     phase_name, validate_scripts,
 };
+use crate::api_path::ApiPath;
 use crate::context::{Operation, RequestContext};
 use crate::error::{ApiError, map_write_error};
 use crate::json::ApiJson;
@@ -379,7 +380,7 @@ pub async fn list_script_templates(
 pub async fn get_script_template(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
 ) -> Result<Json<ScriptTemplateView>, ApiError> {
     context.authorize(Operation::ScriptsRead)?;
     match parse_ref(&id)? {
@@ -484,7 +485,7 @@ pub async fn create_script_template(
 pub async fn update_script_template(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
     ApiJson(body): ApiJson<UpdateScriptTemplateRequest>,
 ) -> Result<Json<ScriptTemplateView>, ApiError> {
     context.authorize(Operation::ScriptsWrite)?;
@@ -567,7 +568,7 @@ pub async fn update_script_template(
 pub async fn delete_script_template(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
 ) -> Result<StatusCode, ApiError> {
     context.authorize(Operation::ScriptsWrite)?;
     let TemplateRef::Stored(uuid) = parse_ref(&id)? else {
@@ -660,7 +661,7 @@ pub async fn list_job_templates(
 pub async fn get_job_template(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
 ) -> Result<Json<JobTemplateView>, ApiError> {
     context.authorize(Operation::ScriptsRead)?;
     match parse_ref(&id)? {
@@ -756,7 +757,7 @@ pub async fn create_job_template(
 pub async fn update_job_template(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
     ApiJson(body): ApiJson<UpdateJobTemplateRequest>,
 ) -> Result<Json<JobTemplateView>, ApiError> {
     context.authorize(Operation::ScriptsWrite)?;
@@ -823,7 +824,7 @@ pub async fn update_job_template(
 pub async fn delete_job_template(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
 ) -> Result<StatusCode, ApiError> {
     context.authorize(Operation::ScriptsWrite)?;
     let TemplateRef::Stored(uuid) = parse_ref(&id)? else {

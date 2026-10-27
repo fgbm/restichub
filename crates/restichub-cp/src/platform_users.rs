@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::http::StatusCode;
 use restichub_db::audit::{Actor, AuditAction, diff};
 use restichub_db::tenants as tenant_repo;
@@ -21,6 +21,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
+use crate::api_path::ApiPath;
 use crate::context::{Operation, RequestContext};
 use crate::error::ApiError;
 use crate::json::ApiJson;
@@ -295,7 +296,7 @@ pub async fn create_account(
 pub async fn add_membership(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
     ApiJson(body): ApiJson<AddMembershipRequest>,
 ) -> Result<(StatusCode, Json<MembershipView>), ApiError> {
     context.authorize(Operation::PlatformUsersWrite)?;
@@ -384,7 +385,7 @@ pub async fn add_membership(
 pub async fn set_membership_role(
     State(state): State<AppState>,
     context: RequestContext,
-    Path((id, tenant_id)): Path<(String, String)>,
+    ApiPath((id, tenant_id)): ApiPath<(String, String)>,
     ApiJson(body): ApiJson<SetRoleRequest>,
 ) -> Result<StatusCode, ApiError> {
     context.authorize(Operation::PlatformUsersWrite)?;
@@ -446,7 +447,7 @@ pub async fn set_membership_role(
 pub async fn remove_membership(
     State(state): State<AppState>,
     context: RequestContext,
-    Path((id, tenant_id)): Path<(String, String)>,
+    ApiPath((id, tenant_id)): ApiPath<(String, String)>,
 ) -> Result<StatusCode, ApiError> {
     context.authorize(Operation::PlatformUsersWrite)?;
     let user_id = parse_uuid(&id)?;
@@ -505,7 +506,7 @@ pub async fn remove_membership(
 pub async fn update_account(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
     ApiJson(body): ApiJson<UpdateAccountRequest>,
 ) -> Result<StatusCode, ApiError> {
     context.authorize(Operation::PlatformUsersWrite)?;

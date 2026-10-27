@@ -17,7 +17,7 @@ pub(crate) mod location;
 mod settings;
 
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::http::StatusCode;
 use restichub_db::audit::{AuditAction, diff};
 use restichub_db::repositories::{
@@ -27,6 +27,7 @@ use restichub_db::repository_health as health_repo;
 use restichub_db::{BackendKind, RepositoryId};
 use restichub_secrets::SecretPurpose;
 
+use crate::api_path::ApiPath;
 use crate::context::{Operation, RequestContext};
 use crate::delete_check;
 use crate::error::{ApiError, map_write_error};
@@ -99,7 +100,7 @@ pub async fn list_repositories(
 pub async fn get_repository(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
 ) -> Result<Json<RepositoryView>, ApiError> {
     context.authorize(Operation::RepositoriesRead)?;
     let repository_id = parse_repository_id(&id)?;
@@ -254,7 +255,7 @@ pub async fn create_repository(
 pub async fn update_repository(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
     ApiJson(body): ApiJson<UpdateRepositoryRequest>,
 ) -> Result<Json<RepositoryView>, ApiError> {
     context.authorize(Operation::RepositoriesWrite)?;
@@ -449,7 +450,7 @@ pub async fn update_repository(
 pub async fn repository_usage(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
 ) -> Result<Json<delete_check::UsageView>, ApiError> {
     context.authorize(Operation::RepositoriesRead)?;
     let repository_id = parse_repository_id(&id)?;
@@ -478,7 +479,7 @@ pub async fn repository_usage(
 pub async fn delete_repository(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
 ) -> Result<StatusCode, ApiError> {
     context.authorize(Operation::RepositoriesWrite)?;
     let repository_id = parse_repository_id(&id)?;

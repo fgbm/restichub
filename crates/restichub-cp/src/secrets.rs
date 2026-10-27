@@ -17,7 +17,7 @@
 //! (AC-RP-03).
 
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::http::StatusCode;
 use restichub_db::audit::{Actor, AuditAction, REDACTED, diff};
 use restichub_db::secrets::{self as repo, NewSecret};
@@ -31,6 +31,7 @@ use serde_json::json;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
+use crate::api_path::ApiPath;
 use crate::context::{Operation, RequestContext};
 use crate::error::{ApiError, map_write_error};
 use crate::json::ApiJson;
@@ -256,7 +257,7 @@ pub async fn create_secret(
 pub async fn get_secret(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
 ) -> Result<Json<SecretDetailView>, ApiError> {
     context.authorize(Operation::SecretsRead)?;
     let secret_id = parse_secret_id(&id)?;
@@ -286,7 +287,7 @@ pub async fn get_secret(
 pub async fn replace_secret_value(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
     ApiJson(body): ApiJson<ReplaceSecretRequest>,
 ) -> Result<StatusCode, ApiError> {
     context.authorize(Operation::SecretsWrite)?;
@@ -349,7 +350,7 @@ pub async fn replace_secret_value(
 pub async fn delete_secret(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
 ) -> Result<StatusCode, ApiError> {
     context.authorize(Operation::SecretsWrite)?;
     let secret_id = parse_secret_id(&id)?;

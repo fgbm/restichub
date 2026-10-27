@@ -6,7 +6,7 @@
 //! the job (ADR-0010). A job of another tenant gives HTTP 404 (AC-TN-01).
 
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::http::StatusCode;
 use restichub_db::audit::{AuditAction, diff};
 use restichub_db::job_search::{
@@ -26,6 +26,7 @@ use serde_json::json;
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
+use crate::api_path::ApiPath;
 use crate::context::{Operation, RequestContext};
 use crate::error::{ApiError, map_write_error};
 use crate::jobs::{JobView, ensure_agent_active, parse_job_id, resolve_agent};
@@ -290,7 +291,7 @@ pub async fn list_jobs(
 pub async fn cancel_job(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
 ) -> Result<(StatusCode, Json<JobView>), ApiError> {
     context.authorize(Operation::JobsWrite)?;
     let job_id = parse_job_id(&id)?;
@@ -377,7 +378,7 @@ pub async fn cancel_job(
 pub async fn run_plan(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
 ) -> Result<(StatusCode, Json<JobView>), ApiError> {
     context.authorize(Operation::PlansWrite)?;
     let plan_id = crate::plans::parse_plan_id(&id)?;
@@ -486,7 +487,7 @@ pub async fn run_plan(
 pub async fn unlock_all_repository(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
     ApiJson(body): ApiJson<UnlockAllRequest>,
 ) -> Result<(StatusCode, Json<JobView>), ApiError> {
     context.authorize(Operation::RepositoriesWrite)?;

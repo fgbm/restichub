@@ -9,7 +9,7 @@
 //! the revocation sweep (AC-ID-04).
 
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::http::StatusCode;
 use restichub_db::agents as repo;
 use restichub_db::audit::{AuditAction, diff};
@@ -20,6 +20,7 @@ use time::format_description::well_known::Rfc3339;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
+use crate::api_path::ApiPath;
 use crate::context::{Operation, RequestContext};
 use crate::error::ApiError;
 use crate::json::ApiJson;
@@ -209,7 +210,7 @@ pub struct RenameAgentRequest {
 pub async fn get_agent(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
 ) -> Result<Json<AgentView>, ApiError> {
     context.authorize(Operation::AgentsRead)?;
     let agent_id = parse_agent_id(&id)?;
@@ -239,7 +240,7 @@ pub async fn get_agent(
 pub async fn rename_agent(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
     ApiJson(body): ApiJson<RenameAgentRequest>,
 ) -> Result<Json<AgentView>, ApiError> {
     context.authorize(Operation::AgentsWrite)?;
@@ -288,7 +289,7 @@ pub async fn rename_agent(
 pub async fn revoke_agent(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
 ) -> Result<StatusCode, ApiError> {
     context.authorize(Operation::AgentsWrite)?;
     let agent_id = parse_agent_id(&id)?;
@@ -347,7 +348,7 @@ pub struct ReenrollAgentRequest {
 pub async fn reenroll_agent(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
     ApiJson(body): ApiJson<ReenrollAgentRequest>,
 ) -> Result<
     (
@@ -411,7 +412,7 @@ pub struct ReplaceAgentResponse {
 pub async fn replace_agent(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
     ApiJson(body): ApiJson<ReplaceAgentRequest>,
 ) -> Result<Json<ReplaceAgentResponse>, ApiError> {
     context.authorize(Operation::AgentsWrite)?;

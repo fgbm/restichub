@@ -10,7 +10,7 @@
 //! rows stay. A later retention task removes the rows of a deleted tenant.
 
 use axum::Json;
-use axum::extract::{Path, Query, State};
+use axum::extract::State;
 use axum::http::StatusCode;
 use restichub_db::audit::{AuditAction, AuditEvent};
 use restichub_db::tenants as repo;
@@ -22,9 +22,11 @@ use time::OffsetDateTime;
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
+use crate::api_path::ApiPath;
 use crate::context::{Operation, RequestContext};
 use crate::error::{ApiError, ErrorCode, map_write_error};
 use crate::json::ApiJson;
+use crate::list_query::ApiQuery;
 use crate::server::AppState;
 use crate::validation;
 use crate::views::PlatformTenantView;
@@ -67,7 +69,7 @@ pub struct TenantListResponse {
 pub async fn list_tenants(
     State(state): State<AppState>,
     context: RequestContext,
-    Query(query): Query<TenantListQuery>,
+    ApiQuery(query): ApiQuery<TenantListQuery>,
 ) -> Result<Json<TenantListResponse>, ApiError> {
     context.authorize(Operation::PlatformTenantsRead)?;
     let filter = filter(&query)?;
@@ -158,7 +160,7 @@ pub async fn create_tenant(
 pub async fn get_tenant(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
 ) -> Result<Json<PlatformTenantView>, ApiError> {
     context.authorize(Operation::PlatformTenantsRead)?;
     let tenant_id = parse_tenant_id(&id)?;
@@ -194,7 +196,7 @@ pub async fn get_tenant(
 pub async fn suspend_tenant(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
 ) -> Result<StatusCode, ApiError> {
     context.authorize(Operation::PlatformTenantsWrite)?;
     let tenant_id = parse_tenant_id(&id)?;
@@ -232,7 +234,7 @@ pub async fn suspend_tenant(
 pub async fn resume_tenant(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
 ) -> Result<StatusCode, ApiError> {
     context.authorize(Operation::PlatformTenantsWrite)?;
     let tenant_id = parse_tenant_id(&id)?;
@@ -268,7 +270,7 @@ pub async fn resume_tenant(
 pub async fn delete_tenant(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
 ) -> Result<StatusCode, ApiError> {
     context.authorize(Operation::PlatformTenantsWrite)?;
     let tenant_id = parse_tenant_id(&id)?;

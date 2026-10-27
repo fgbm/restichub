@@ -11,6 +11,7 @@ pub mod agent_version;
 pub mod agents;
 pub mod alerts;
 pub mod alerts_api;
+pub mod api_path;
 pub mod api_tokens;
 pub mod audit;
 pub mod audit_limit;

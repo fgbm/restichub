@@ -22,7 +22,7 @@ mod settings;
 use std::collections::BTreeMap;
 
 use axum::Json;
-use axum::extract::{Path, Query, State};
+use axum::extract::State;
 use axum::http::StatusCode;
 use restichub_compiler::{
     Architecture, CompileError, OperatingSystem, Plan, ResticVersion, TargetFacts, compile,
@@ -39,10 +39,12 @@ use restichub_proto::agent::v1::{
 use serde::Deserialize;
 use utoipa::IntoParams;
 
+use crate::api_path::ApiPath;
 use crate::context::{Operation, RequestContext};
 use crate::delete_check;
 use crate::error::{ApiError, map_write_error};
 use crate::json::ApiJson;
+use crate::list_query::ApiQuery;
 use crate::secrets::actor_user;
 use crate::server::AppState;
 use crate::validation::Reason;
@@ -83,7 +85,7 @@ pub struct ProfileListQuery {
 pub async fn list_profiles(
     State(state): State<AppState>,
     context: RequestContext,
-    Query(query): Query<ProfileListQuery>,
+    ApiQuery(query): ApiQuery<ProfileListQuery>,
 ) -> Result<Json<ProfileListResponse>, ApiError> {
     context.authorize(Operation::ProfilesRead)?;
     let page = ProfilePage {
@@ -153,7 +155,7 @@ pub async fn job_limit_defaults(
 pub async fn get_profile(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
 ) -> Result<Json<ProfileView>, ApiError> {
     context.authorize(Operation::ProfilesRead)?;
     let profile_id = parse_profile_id(&id)?;
@@ -249,7 +251,7 @@ pub async fn create_profile(
 pub async fn update_profile(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
     ApiJson(body): ApiJson<UpdateProfileRequest>,
 ) -> Result<Json<ProfileResponse>, ApiError> {
     context.authorize(Operation::ProfilesWrite)?;
@@ -378,7 +380,7 @@ pub async fn update_profile(
 pub async fn profile_usage(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
 ) -> Result<Json<delete_check::UsageView>, ApiError> {
     context.authorize(Operation::ProfilesRead)?;
     let profile_id = parse_profile_id(&id)?;
@@ -407,7 +409,7 @@ pub async fn profile_usage(
 pub async fn delete_profile(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
 ) -> Result<StatusCode, ApiError> {
     context.authorize(Operation::ProfilesWrite)?;
     let profile_id = parse_profile_id(&id)?;

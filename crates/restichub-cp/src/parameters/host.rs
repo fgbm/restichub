@@ -12,7 +12,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use restichub_db::agents as agents_repo;
 use restichub_db::audit::{AuditAction, diff};
 use restichub_db::parameters as repo;
@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use utoipa::ToSchema;
 
+use crate::api_path::ApiPath;
 use crate::context::{Operation, RequestContext};
 use crate::error::ApiError;
 use crate::json::ApiJson;
@@ -97,7 +98,7 @@ pub struct ReplaceParametersRequest {
 pub async fn get_parameters(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
 ) -> Result<Json<HostParametersResponse>, ApiError> {
     context.authorize(Operation::AgentsRead)?;
     let agent_id = parse_agent_id(&id)?;
@@ -139,7 +140,7 @@ pub async fn get_parameters(
 pub async fn replace_parameters(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
     ApiJson(body): ApiJson<ReplaceParametersRequest>,
 ) -> Result<Json<HostParametersResponse>, ApiError> {
     context.authorize(Operation::AgentParametersWrite)?;

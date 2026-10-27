@@ -266,3 +266,76 @@ async fn a_missing_request_id_is_generated_as_uuid_v7() -> Result<(), Box<dyn st
     assert_eq!(version, 7, "the request ID {request_id} is not UUIDv7");
     Ok(())
 }
+
+/// A path parameter that is not valid UTF-8 gives the problem response of ADR-0023, not the text
+/// of the extractor.
+#[tokio::test]
+async fn a_bad_path_parameter_answers_a_problem_json() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = common::test_db().await else {
+        return Ok(());
+    };
+    let tenant = common::create_tenant_with_key(db.database(), "path-problem").await;
+    let cookie = common::seed_session(db.database(), tenant, "path-viewer", "viewer").await;
+    let response = common::app_with_kek(db.database())
+        .oneshot(common::request(
+            "GET",
+            "/api/v1/jobs/%FF/logs",
+            Some(&cookie),
+            None,
+        ))
+        .await?;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let content_type = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
+    assert_eq!(content_type.as_deref(), Some("application/problem+json"));
+    let problem = body_json(response).await?;
+    assert_eq!(
+        problem.get("code").and_then(Value::as_str),
+        Some("invalid_argument")
+    );
+    assert_eq!(problem.get("field").and_then(Value::as_str), Some("id"));
+    assert!(
+        problem
+            .get("request_id")
+            .and_then(Value::as_str)
+            .is_some_and(|value| !value.is_empty()),
+        "the problem body must hold the request ID"
+    );
+    Ok(())
+}
+
+/// A query value that does not parse gives the problem response of ADR-0023, not the text of the
+/// extractor.
+#[tokio::test]
+async fn a_bad_query_value_answers_a_problem_json() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(db) = common::test_db().await else {
+        return Ok(());
+    };
+    let tenant = common::create_tenant_with_key(db.database(), "query-problem").await;
+    let cookie = common::seed_session(db.database(), tenant, "query-viewer", "viewer").await;
+    let response = common::app_with_kek(db.database())
+        .oneshot(common::request(
+            "GET",
+            "/api/v1/jobs/0190d3f0-0000-7000-8000-000000000000/logs?limit=abc",
+            Some(&cookie),
+            None,
+        ))
+        .await?;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let content_type = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
+    assert_eq!(content_type.as_deref(), Some("application/problem+json"));
+    let problem = body_json(response).await?;
+    assert_eq!(
+        problem.get("code").and_then(Value::as_str),
+        Some("invalid_argument")
+    );
+    assert_eq!(problem.get("field").and_then(Value::as_str), Some("limit"));
+    Ok(())
+}

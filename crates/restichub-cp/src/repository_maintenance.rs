@@ -6,7 +6,7 @@
 //! and the view says so. A repository of another tenant gives HTTP 404 (AC-TN-01).
 
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::http::StatusCode;
 use restichub_db::audit::{AuditAction, diff};
 use restichub_db::jobs::{self as job_repo, NewJob};
@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use utoipa::ToSchema;
 
+use crate::api_path::ApiPath;
 use crate::context::{Operation, RequestContext};
 use crate::error::{ApiError, map_write_error};
 use crate::jobs::{JobView, ensure_agent_active, format_time};
@@ -145,7 +146,7 @@ async fn read_view(
 pub async fn get_maintenance(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
 ) -> Result<Json<MaintenanceView>, ApiError> {
     context.authorize(Operation::RepositoriesRead)?;
     let repository_id = parse_repository_id(&id)?;
@@ -179,7 +180,7 @@ pub async fn get_maintenance(
 pub async fn update_maintenance(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
     ApiJson(body): ApiJson<UpdateMaintenanceRequest>,
 ) -> Result<Json<MaintenanceView>, ApiError> {
     context.authorize(Operation::RepositoriesWrite)?;
@@ -296,7 +297,7 @@ fn parse_task_schedule(
 pub async fn run_maintenance(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
     ApiJson(body): ApiJson<RunMaintenanceRequest>,
 ) -> Result<(StatusCode, Json<JobView>), ApiError> {
     context.authorize(Operation::JobsWrite)?;

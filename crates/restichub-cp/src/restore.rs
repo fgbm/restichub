@@ -13,7 +13,7 @@
 //! and starts no job (AC-RS-02). A repository of another tenant gives HTTP 404 (AC-TN-01).
 
 use axum::Json;
-use axum::extract::{Path, Query, State};
+use axum::extract::State;
 use axum::http::StatusCode;
 use restichub_db::agents as agents_repo;
 use restichub_db::audit::{AuditAction, diff};
@@ -33,6 +33,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use utoipa::{IntoParams, ToSchema};
 
+use crate::api_path::ApiPath;
 use crate::browse::{
     BrowseState, NodeItem, SnapshotItem, StoredPage, StoredSnapshots, error_code_of, state_of,
 };
@@ -40,6 +41,7 @@ use crate::context::{Operation, RequestContext};
 use crate::error::{ApiError, map_write_error};
 use crate::jobs::{JobView, ensure_agent_active, format_time, parse_job_id, resolve_agent};
 use crate::json::ApiJson;
+use crate::list_query::ApiQuery;
 use crate::repositories::parse_repository_id;
 use crate::server::AppState;
 use crate::validation::Reason;
@@ -654,7 +656,7 @@ fn ls_view(
 pub async fn start_snapshots(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
     ApiJson(body): ApiJson<SnapshotsQuery>,
 ) -> Result<(StatusCode, Json<SnapshotsView>), ApiError> {
     context.authorize(Operation::JobsWrite)?;
@@ -706,8 +708,8 @@ pub async fn start_snapshots(
 pub async fn get_snapshots(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
-    Query(params): Query<SnapshotsParams>,
+    ApiPath(id): ApiPath<String>,
+    ApiQuery(params): ApiQuery<SnapshotsParams>,
 ) -> Result<Json<SnapshotsView>, ApiError> {
     context.authorize(Operation::JobsRead)?;
     let repository_id = parse_repository_id(&id)?;
@@ -789,7 +791,7 @@ pub async fn get_snapshots(
 pub async fn start_ls(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
     ApiJson(body): ApiJson<LsQueryRequest>,
 ) -> Result<(StatusCode, Json<LsView>), ApiError> {
     context.authorize(Operation::JobsWrite)?;
@@ -836,8 +838,8 @@ pub async fn start_ls(
 pub async fn get_ls(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
-    Query(params): Query<LsParams>,
+    ApiPath(id): ApiPath<String>,
+    ApiQuery(params): ApiQuery<LsParams>,
 ) -> Result<Json<LsView>, ApiError> {
     context.authorize(Operation::JobsWrite)?;
     let repository_id = parse_repository_id(&id)?;
@@ -889,7 +891,7 @@ pub async fn get_ls(
 pub async fn start_restore(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
     ApiJson(body): ApiJson<RestoreBody>,
 ) -> Result<(StatusCode, Json<JobView>), ApiError> {
     context.authorize(Operation::JobsWrite)?;
