@@ -9,6 +9,7 @@ import { render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '#lib/api/index.ts';
+import { bodyUnlocked } from '#lib/test/bodyLock.ts';
 import Hosts from './+page.svelte';
 
 const mocks = vi.hoisted(() => ({
@@ -516,6 +517,8 @@ describe('the Hosts screen', () => {
 		await screen.findByText('Re-register');
 		expect(screen.queryByText('Replace the old record')).not.toBeInTheDocument();
 		await user.keyboard('{Escape}');
+		await waitFor(() => expect(screen.queryByText('Re-register')).not.toBeInTheDocument());
+		await bodyUnlocked();
 
 		await user.click(screen.getByRole('button', { name: 'More actions for new-host' }));
 		await user.click(await screen.findByText('Replace the old record'));
