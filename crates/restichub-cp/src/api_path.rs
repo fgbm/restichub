@@ -54,11 +54,11 @@ fn map_rejection(rejection: PathRejection, template: Option<&str>) -> ApiError {
         return ApiError::internal("the route holds no path parameter");
     };
     match error.into_kind() {
-        ErrorKind::InvalidUtf8InPathParam { key } => ApiError::invalid_field_cause(
-            key,
-            Reason::InvalidFormat,
-            "a path parameter is not valid UTF-8",
-        ),
+        // The bytes are not text at all, so no `Reason` is true: every reason names a value that
+        // the client can correct.
+        ErrorKind::InvalidUtf8InPathParam { key } => {
+            ApiError::invalid_argument_cause(key, "a path parameter is not valid UTF-8")
+        }
         ErrorKind::ParseErrorAtKey {
             key, expected_type, ..
         } => parse_error(key, expected_type),
@@ -75,9 +75,15 @@ fn map_rejection(rejection: PathRejection, template: Option<&str>) -> ApiError {
             name_at(template, index).unwrap_or_else(|| UNNAMED.to_owned()),
             expected_type,
         ),
-        other => ApiError::internal(format!(
-            "a path parameter of the route was rejected: {other}"
+        // The message of a rejection can hold the value from the URL, so the log holds a fixed
+        // phrase and the numbers of the template only.
+        ErrorKind::WrongNumberOfParameters { got, expected } => ApiError::internal(format!(
+            "the handler reads {expected} path parameters and the route holds {got}"
         )),
+        ErrorKind::UnsupportedType { name } => ApiError::internal(format!(
+            "the handler reads a path parameter into the unsupported type `{name}`"
+        )),
+        _ => ApiError::internal("a path parameter of the route was rejected"),
     }
 }
 
@@ -88,12 +94,14 @@ fn parse_error(name: String, expected_type: &str) -> ApiError {
 
 /// Reads the name of the parameter at `index` from the route template.
 ///
-/// A tuple of path parameters takes the names of the template in order. The template is a route of
-/// the control plane, so the name is not client input.
+/// A tuple of path parameters takes the names of the template in order. The name of a tail
+/// parameter drops the `*`, which is the key of the capture in `axum::extract::Path`. The template
+/// is a route of the control plane, so the name is not client input.
 fn name_at(template: Option<&str>, index: usize) -> Option<String> {
     template?
         .split('/')
         .filter_map(|segment| segment.strip_prefix('{')?.strip_suffix('}'))
+        .map(|name| name.strip_prefix('*').unwrap_or(name))
         .nth(index)
         .map(str::to_owned)
 }
@@ -108,7 +116,7 @@ mod tests {
     use http_body_util::BodyExt;
     use tower::ServiceExt;
 
-    use super::ApiPath;
+    use super::{ApiPath, name_at};
 
     async fn id(ApiPath(id): ApiPath<String>) -> Json<String> {
         Json(id)
@@ -118,14 +126,55 @@ mod tests {
         Json(format!("{agent}/{plan}"))
     }
 
+    async fn numbers(ApiPath((agent, plan)): ApiPath<(u32, u32)>) -> Json<String> {
+        Json(format!("{agent}/{plan}"))
+    }
+
+    async fn single(ApiPath(value): ApiPath<String>) -> Json<String> {
+        Json(value)
+    }
+
+    async fn tail(ApiPath(rest): ApiPath<String>) -> Json<String> {
+        Json(rest)
+    }
+
+    async fn named(
+        ApiPath(params): ApiPath<std::collections::BTreeMap<String, String>>,
+    ) -> Json<String> {
+        let pairs: Vec<String> = params
+            .into_iter()
+            .map(|(key, value)| format!("{key}={value}"))
+            .collect();
+        Json(pairs.join(","))
+    }
+
     fn app() -> Router {
         Router::new()
             .route("/jobs/{id}", get(id))
             .route("/agents/{agent_id}/plans/{plan_id}", get(pair))
+            .route("/counts/{agent_id}/plans/{plan_id}", get(numbers))
+            .route("/single/{agent_id}/plans/{plan_id}", get(single))
+            .route("/files/{*rest}", get(tail))
+            .route("/tail/{agent_id}/{*rest}", get(numbers))
+            .route("/named/{agent_id}/{*rest}", get(named))
     }
 
-    /// Sends a request and returns the status, the content type and the body.
-    async fn call(uri: &str) -> (StatusCode, String, serde_json::Value) {
+    struct Reply {
+        status: StatusCode,
+        content_type: String,
+        text: String,
+        /// The cause that the response mapper logs, empty when the error carries none.
+        log: String,
+    }
+
+    impl Reply {
+        fn problem(&self) -> serde_json::Value {
+            serde_json::from_str(&self.text).unwrap_or(serde_json::Value::Null)
+        }
+    }
+
+    /// Sends a request and keeps the parts of the answer that a test reads.
+    async fn call(uri: &str) -> Reply {
         let response = app()
             .oneshot(
                 Request::builder()
@@ -142,36 +191,139 @@ mod tests {
             .and_then(|value| value.to_str().ok())
             .unwrap_or_default()
             .to_owned();
-        let body = response
+        let log = response
+            .extensions()
+            .get::<crate::error::InternalCause>()
+            .map(|cause| cause.0.clone())
+            .unwrap_or_default();
+        let text = response
             .into_body()
             .collect()
             .await
             .expect("the body")
             .to_bytes();
-        let value = serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
-        (status, content_type, value)
+        Reply {
+            status,
+            content_type,
+            text: String::from_utf8_lossy(&text).into_owned(),
+            log,
+        }
     }
 
     #[tokio::test]
     async fn a_path_parameter_that_is_not_utf8_is_a_problem() {
-        let (status, content_type, problem) = call("/jobs/%FF").await;
-        assert_eq!(status, StatusCode::BAD_REQUEST);
-        assert_eq!(content_type, "application/problem+json");
+        let reply = call("/jobs/%FF").await;
+        assert_eq!(reply.status, StatusCode::BAD_REQUEST);
+        assert_eq!(reply.content_type, "application/problem+json");
+        let problem = reply.problem();
         assert_eq!(problem["code"], "invalid_argument");
         assert_eq!(problem["field"], "id");
+        assert!(
+            problem.get("reason").is_none(),
+            "no reason is true for a value that is not text"
+        );
     }
 
     #[tokio::test]
     async fn a_second_path_parameter_that_is_not_utf8_is_a_problem() {
-        let (status, _, problem) = call("/agents/1/plans/%FF").await;
-        assert_eq!(status, StatusCode::BAD_REQUEST);
-        assert_eq!(problem["field"], "plan_id");
+        let reply = call("/agents/1/plans/%FF").await;
+        assert_eq!(reply.status, StatusCode::BAD_REQUEST);
+        assert_eq!(reply.problem()["field"], "plan_id");
     }
 
     #[tokio::test]
     async fn a_good_path_parameter_reaches_the_handler() {
-        let (status, _, body) = call("/agents/1/plans/2").await;
-        assert_eq!(status, StatusCode::OK);
-        assert_eq!(body, "1/2");
+        let reply = call("/agents/1/plans/2").await;
+        assert_eq!(reply.status, StatusCode::OK);
+        assert_eq!(reply.text, "\"1/2\"");
+    }
+
+    /// The index of a tuple is the position of the parameter in the route template.
+    #[tokio::test]
+    async fn a_number_that_does_not_parse_names_its_parameter() {
+        let reply = call("/counts/1/plans/secret").await;
+        assert_eq!(reply.status, StatusCode::BAD_REQUEST);
+        let problem = reply.problem();
+        assert_eq!(problem["code"], "invalid_argument");
+        assert_eq!(problem["field"], "plan_id");
+        assert!(
+            !reply.text.contains("secret"),
+            "the problem echoes the value: {}",
+            reply.text
+        );
+        assert!(
+            !reply.log.contains("secret"),
+            "the log echoes the value: {}",
+            reply.log
+        );
+    }
+
+    /// A handler that takes fewer parameters than the route holds is a bug of the control plane.
+    #[tokio::test]
+    async fn a_wrong_number_of_parameters_is_internal() {
+        let reply = call("/single/VALUE-1/plans/VALUE-2").await;
+        assert_eq!(reply.status, StatusCode::INTERNAL_SERVER_ERROR);
+        let problem = reply.problem();
+        assert_eq!(problem["code"], "internal_error");
+        assert!(
+            problem.get("field").is_none(),
+            "the problem names no parameter for a bug of the handler"
+        );
+        assert!(
+            !reply.text.contains("VALUE-1") && !reply.text.contains("VALUE-2"),
+            "the problem echoes the value: {}",
+            reply.text
+        );
+        assert!(
+            !reply.log.contains("VALUE-1") && !reply.log.contains("VALUE-2"),
+            "the log echoes the value: {}",
+            reply.log
+        );
+    }
+
+    /// A tail parameter is one capture of the whole rest of the path, as in `axum::extract::Path`.
+    #[tokio::test]
+    async fn a_tail_parameter_holds_the_rest_of_the_path() {
+        let reply = call("/files/a/b/c").await;
+        assert_eq!(reply.status, StatusCode::OK);
+        assert_eq!(reply.text, "\"a/b/c\"");
+    }
+
+    /// The name of a tail parameter drops the `*` of the template, as the key of the capture does.
+    #[tokio::test]
+    async fn a_tail_parameter_is_not_named_with_its_marker() {
+        let reply = call("/tail/1/secret").await;
+        assert_eq!(reply.status, StatusCode::BAD_REQUEST);
+        let problem = reply.problem();
+        assert_eq!(problem["field"], "rest");
+        assert!(
+            problem["field"].as_str() != Some("*rest"),
+            "the marker of the tail is not part of the name"
+        );
+        assert!(
+            !reply.text.contains("secret"),
+            "the problem echoes the value"
+        );
+    }
+
+    /// The keys of the captures of the router: the marker of the tail is not part of its key.
+    #[tokio::test]
+    async fn the_key_of_a_tail_parameter_drops_the_marker() {
+        let reply = call("/named/1/secret").await;
+        assert_eq!(reply.status, StatusCode::OK);
+        assert_eq!(reply.text, "\"agent_id=1,rest=secret\"");
+    }
+
+    #[test]
+    fn the_names_of_the_template_are_read_in_order() {
+        let template = Some("/agents/{agent_id}/plans/{plan_id}");
+        assert_eq!(name_at(template, 0).as_deref(), Some("agent_id"));
+        assert_eq!(name_at(template, 1).as_deref(), Some("plan_id"));
+        assert_eq!(name_at(template, 2), None);
+        assert_eq!(name_at(None, 0), None);
+        assert_eq!(
+            name_at(Some("/files/{id}/{*rest}"), 1).as_deref(),
+            Some("rest")
+        );
     }
 }

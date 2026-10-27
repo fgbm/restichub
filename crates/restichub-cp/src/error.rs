@@ -228,6 +228,17 @@ impl ApiError {
         error
     }
 
+    /// Creates a `400 invalid_argument` error for a field, with the cause of the failure and no
+    /// reason.
+    ///
+    /// The reason is absent when no [`Reason`] is true for the value, for example a path parameter
+    /// that is not text at all and that the client cannot correct as a format.
+    pub fn invalid_argument_cause(field: impl Into<String>, cause: impl Into<String>) -> Self {
+        let mut error = Self::invalid_argument(field);
+        error.cause = Some(cause.into());
+        error
+    }
+
     /// Creates a `400 invalid_argument` error for a field, with the cause of the failure.
     ///
     /// The cause is the message of a parse failure. The response mapper logs it with the request
