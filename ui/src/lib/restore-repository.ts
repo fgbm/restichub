@@ -38,3 +38,33 @@ export function pickRepository(
 	if (isKnown(available, kept)) return { id: kept, fromAddress: false };
 	return { id: available[0]?.id ?? '', fromAddress: false };
 }
+
+/** One address write. A write may finish after a newer one started or after the page went away. */
+export interface AddressTokens {
+	/** Starts a newer write. Each earlier token is stale from now on. */
+	begin(): number;
+	isCurrent(token: number): boolean;
+	/** The page is gone: no token is current any more. */
+	close(): void;
+}
+
+/**
+ * Keeps a late completion of a repository change off the address of the page the person is on now
+ * (AC-UI-09, FR-UI-05).
+ */
+export function addressTokens(): AddressTokens {
+	let current = 0;
+	let closed = false;
+	return {
+		begin() {
+			current += 1;
+			return current;
+		},
+		isCurrent(token) {
+			return !closed && token === current;
+		},
+		close() {
+			closed = true;
+		}
+	};
+}

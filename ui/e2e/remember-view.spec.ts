@@ -103,7 +103,7 @@ test('ac_ui_09 the Restore page keeps the repository', async ({ page }) => {
 	);
 	await picker.click();
 	await page.getByRole('listbox').getByRole('option', { name: 'nas-local', exact: true }).click();
-	await expect(page).toHaveURL(/repository=r_2/);
+	// The address write of the change may still run here: it must not pull the person back.
 	await open(page, 'Jobs');
 	await open(page, 'Restore');
 	await expect(picker).toContainText('nas-local');
