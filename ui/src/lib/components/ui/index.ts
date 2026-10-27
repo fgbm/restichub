@@ -54,6 +54,7 @@ export type {
 	ListIcon,
 	ListMeta,
 	ListPill,
+	ListTag,
 	ListTone,
 	MenuItem,
 	RecordDot,

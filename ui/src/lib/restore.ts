@@ -3,7 +3,7 @@
  * overwrite modes (FR-RS-02, FR-RS-04).
  */
 import type { OverwriteMode } from '#lib/api/index.ts';
-import type { IconName } from '#lib/components/ui/index.ts';
+import type { IconName, ListTag } from '#lib/components/ui/index.ts';
 
 export const OVERWRITE_MODES: OverwriteMode[] = ['always', 'if-changed', 'if-newer', 'never'];
 
@@ -122,6 +122,32 @@ const PROFILE_TAG = /^restichub-profile-([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]
 /** The profile identifier inside an automatic `restichub-profile-<id>` tag, or null for any other tag. */
 export function profileOfTag(tag: string): string | null {
 	return PROFILE_TAG.exec(tag)?.[1] ?? null;
+}
+
+/**
+ * The tag chips of a snapshot row (FR-RS-01). The chip of a profile comes first, so a cut line
+ * keeps it; the other tags follow in the order of the snapshot. A profile that the screen does not
+ * know stays a plain tag, so that a chip never leads nowhere.
+ */
+export function snapshotTagChips(
+	tags: readonly string[],
+	profiles: ReadonlyMap<string, string>,
+	options: { href: (id: string) => string; title: (name: string) => string }
+): ListTag[] {
+	const chips = tags.map((tag): ListTag => {
+		const profile = profileOfTag(tag);
+		const name = profile === null ? undefined : profiles.get(profile);
+		if (profile === null || name === undefined) return { label: tag };
+		return {
+			label: name,
+			tone: 'running',
+			href: options.href(profile),
+			title: options.title(name)
+		};
+	});
+	const known = chips.findIndex((chip) => chip.tone === 'running');
+	if (known > 0) chips.unshift(...chips.splice(known, 1));
+	return chips;
 }
 
 const EXTENSIONS: [IconName, string[]][] = [

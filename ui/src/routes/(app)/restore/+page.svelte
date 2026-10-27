@@ -26,6 +26,7 @@
 		TARGET_PARAM,
 		filtersFromQuery,
 		filtersToQuery,
+		snapshotTagChips,
 		targetExtra
 	} from '#lib/restore.ts';
 	import type { RestoreFilters } from '#lib/restore.ts';
@@ -82,13 +83,14 @@
 
 	function meta(snapshot: SnapshotItem): ListMeta[] {
 		const [first, ...rest] = snapshot.paths;
+		const tags = snapshotTagChips(snapshot.tags, profiles, {
+			href: (id) => resolve('/(app)/profiles/[id]', { id }),
+			title: (name) => t('restore.openProfile', { name })
+		});
 		return [
 			snapshot.hostname,
 			first ? { text: rest.length > 0 ? `${first} +${rest.length}` : first, mono: true } : null,
-			{
-				text: snapshot.tags.map((tag) => tagLabel(tag, profiles)).join(', '),
-				title: snapshot.tags.join(', ')
-			},
+			tags.length > 0 ? { tags } : null,
 			{ text: snapshot.short_id, mono: true }
 		];
 	}

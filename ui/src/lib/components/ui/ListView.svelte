@@ -8,6 +8,7 @@
 	import Icon from './Icon.svelte';
 	import type { IconName } from './icons';
 	import ListFooter from './ListFooter.svelte';
+	import Popover from './Popover.svelte';
 	import RowActions from './RowActions.svelte';
 	import Skeleton from './Skeleton.svelte';
 	import StatusPill from './StatusPill.svelte';
@@ -16,6 +17,7 @@
 		ListIcon,
 		ListMeta,
 		ListPill,
+		ListTag,
 		ListTone,
 		MenuItem,
 		RowAction,
@@ -143,6 +145,10 @@
 
 	const SEPARATOR = ' · ';
 
+	// Line 2 keeps two chips of a tag set; the rest fold into one chip. A caller puts the chip that
+	// must stay first, because a cut line drops the end of the line (ui-principles 2.2).
+	const TAG_CHIPS = 2;
+
 	const PILL_TONES: Record<ListTone, StatusTone> = {
 		danger: 'failed',
 		warning: 'warning',
@@ -155,7 +161,7 @@
 		return (meta?.(item) ?? [])
 			.filter((field): field is ListField | string => Boolean(field))
 			.map((field) => (typeof field === 'string' ? { text: field } : field))
-			.filter((field) => field.text !== '');
+			.filter((field) => Boolean(field.text) || Boolean(field.tags?.length));
 	}
 
 	function menuItems(item: T): MenuItem[] {
@@ -182,6 +188,22 @@
 		onPageSizeChange?.(next);
 	}
 </script>
+
+{#snippet tagChip(tag: ListTag)}
+	{#if tag.href}
+		<!-- eslint-disable svelte/no-navigation-without-resolve -- href is a resolved path -->
+		<a
+			class="item__tag"
+			class:item__tag--running={tag.tone === 'running'}
+			href={tag.href}
+			title={tag.title}
+			aria-label={tag.title ?? tag.label}>{tag.label}</a
+		>
+		<!-- eslint-enable svelte/no-navigation-without-resolve -->
+	{:else}
+		<span class="item__tag" class:item__tag--running={tag.tone === 'running'}>{tag.label}</span>
+	{/if}
+{/snippet}
 
 <div class="list-view" class:list-view--flush={flush}>
 	{@render toolbar?.()}
@@ -288,20 +310,50 @@
 								{#if fields.length > 0 || number}
 									<span class="item__meta">
 										{#each fields as field, index (index)}
-											<span class="item__field" class:item__field--extra={index >= 2}>
+											{@const tags = Boolean(field.tags?.length)}
+											<span
+												class="item__field"
+												class:item__field--extra={index >= 2}
+												class:item__field--tags={tags}
+												class:item__field--text={!tags}
+											>
 												{#if index > 0}<span class="item__sep" aria-hidden="true">{SEPARATOR}</span
 													>{/if}
 												{#if field.time}
-													<time datetime={field.time} title={field.title ?? fullTime(field.time)}
-														>{field.text}</time
+													<time
+														class="item__text"
+														datetime={field.time}
+														title={field.title ?? fullTime(field.time)}>{field.text}</time
 													>
 												{:else if field.icon}
 													<span class="item__chip" title={field.title}>
 														<Icon name={field.icon} size="xs" />
 														{field.text}
 													</span>
+												{:else if field.tags?.length}
+													<span class="item__tags">
+														{#each field.tags.slice(0, TAG_CHIPS) as tag, tagIndex (tagIndex)}
+															{@render tagChip(tag)}
+														{/each}
+														{#if field.tags.length > TAG_CHIPS}
+															{@const count = field.tags.length}
+															<Popover label={t('list.allTags', { count })}>
+																{#snippet trigger()}
+																	<span class="item__tag" title={t('list.moreTags', { count })}
+																		>+{count - TAG_CHIPS}</span
+																	>
+																{/snippet}
+																<span class="item__tags item__tags--all">
+																	{#each field.tags as tag, tagIndex (tagIndex)}
+																		{@render tagChip(tag)}
+																	{/each}
+																</span>
+															</Popover>
+														{/if}
+													</span>
 												{:else}
-													<span class:item__mono={field.mono} title={field.title}>{field.text}</span
+													<span class="item__text" class:item__mono={field.mono} title={field.title}
+														>{field.text}</span
 													>
 												{/if}
 											</span>
@@ -481,16 +533,45 @@
 		font-size: var(--rh-font-size-sm);
 	}
 
+	/*
+	 * Line 2 is one row: a text field gives way with an ellipsis, and the chips of a tag set keep
+	 * their place so that the "+N" chip stays reachable (ui-principles 2.2).
+	 */
 	.item__meta {
+		display: flex;
+		align-items: center;
+		min-width: 0;
 		overflow: hidden;
 		color: var(--rh-color-text-muted);
 		font-size: var(--rh-font-size-sm);
 		line-height: 18px;
-		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
 
+	.item__field {
+		display: flex;
+		align-items: center;
+		min-width: 0;
+	}
+
+	.item__field--text {
+		overflow: hidden;
+	}
+
+	.item__field--text > .item__text {
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.item__field--tags,
+	.item__field--aside {
+		flex: none;
+	}
+
 	.item__sep {
+		flex: none;
+		/* A flex item drops the spaces of the separator text; "pre" keeps them. */
+		white-space: pre;
 		color: var(--rh-color-text-subtle);
 	}
 
@@ -520,6 +601,60 @@
 	.item__number {
 		font-variant-numeric: tabular-nums;
 		white-space: nowrap;
+	}
+
+	.item__tags {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		vertical-align: middle;
+	}
+
+	/* The popover holds the whole set, so it wraps instead of one long line. */
+	.item__tags--all {
+		display: flex;
+		flex-wrap: wrap;
+	}
+
+	.item__tag {
+		display: inline-flex;
+		align-items: center;
+		height: 18px;
+		padding: 0 var(--rh-space-1);
+		border: var(--rh-border-width) solid var(--rh-color-neutral-border);
+		border-radius: var(--rh-radius-pill);
+		background-color: var(--rh-color-neutral-bg);
+		color: var(--rh-color-neutral-text);
+		font-size: var(--rh-font-size-xs);
+		/* The border belongs to the 18 px of the chip, so the text holds the 16 px inside it. */
+		line-height: 16px;
+		text-decoration: none;
+		white-space: nowrap;
+	}
+
+	.item__tag--running {
+		border-color: var(--rh-color-running-subtle-border);
+		background-color: var(--rh-color-running-subtle);
+		color: var(--rh-color-running-subtle-text);
+	}
+
+	a.item__tag:hover {
+		text-decoration: underline;
+	}
+
+	a.item__tag:focus-visible {
+		outline: 2px solid var(--rh-color-focus);
+		outline-offset: 1px;
+	}
+
+	/*
+	 * The trigger of the popover is the "+N" chip, so the ring goes on the button, and not on the
+	 * browser default box of the trigger.
+	 */
+	.item__tags :global(.rh-popover__trigger:focus-visible) {
+		border-radius: var(--rh-radius-pill);
+		outline: 2px solid var(--rh-color-focus);
+		outline-offset: 1px;
 	}
 
 	.item__field--aside {
@@ -584,8 +719,21 @@
 			display: none;
 		}
 
+		/*
+		 * The tag field is field 3, but its first chip is the chip of the profile, and that chip
+		 * stays on a narrow screen (ui-principles 2.2).
+		 */
+		.item__field--tags {
+			display: flex;
+		}
+
+		.item__field--tags .item__tag:not(.item__tag--running, :first-child),
+		.item__field--tags :global(.rh-popover__trigger) {
+			display: none;
+		}
+
 		.item__field--aside {
-			display: inline;
+			display: flex;
 		}
 	}
 </style>

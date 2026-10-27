@@ -26,6 +26,24 @@ test('the snapshot list takes filters and the tree loads a large directory by pa
 
 	// The first visit reads the snapshots at once.
 	await expect(page.getByRole('link', { name: /^Open snapshot / })).toHaveCount(8);
+
+	// The mock has no profile for the automatic tag, so that tag stays a plain chip.
+	await expect(
+		page.getByText('restichub-profile-0b9f4a2c-3e1d-4c55-8a21-9d7e6f5a4b3c')
+	).toBeVisible();
+	await expect(page.getByRole('link', { name: /^Open profile/ })).toHaveCount(0);
+
+	// The other tags fold, and the visible "+7" is the name of the chip that opens them.
+	await page.getByRole('button', { name: /\+7/ }).click();
+	await expect(page.locator('.item__tags--all .item__tag')).toHaveCount(9);
+	await page.keyboard.press('Escape');
+
+	// The chip keeps the height of the text of line 2, so a row with chips is not taller.
+	const metaHeights = await page
+		.locator('li.item .item__meta')
+		.evaluateAll((lines) => lines.map((line) => line.getBoundingClientRect().height));
+	expect(metaHeights.every((height) => height === 18)).toBe(true);
+
 	await page.getByRole('button', { name: 'Host', exact: true }).click();
 	await page.getByLabel('ws-anna').check();
 	await page.keyboard.press('Escape');
@@ -110,4 +128,22 @@ test('a restore asks for the target, warns about a system path and opens the job
 	await expect(page.getByText('Restore parameters')).toBeVisible();
 	await expect(page.getByText('/var/lib/restichub-restore/job-1')).toBeVisible();
 	await expect(page.getByText('Replace a file that differs')).toBeVisible();
+});
+
+test('a narrow list keeps the profile tag chip of a snapshot row and folds the rest away', async ({
+	page
+}) => {
+	await openRestore(page);
+	await page.setViewportSize({ width: 360, height: 720 });
+	const row = page.locator('li.item').first();
+	// The tag field is field 3, which a narrow list hides; the chip of the profile stays.
+	await expect(
+		row.getByText('restichub-profile-0b9f4a2c-3e1d-4c55-8a21-9d7e6f5a4b3c')
+	).toBeVisible();
+	await expect(row.locator('.item__tag', { hasText: 'daily' })).toBeHidden();
+	await expect(row.locator('.item__field--tags .rh-popover__trigger')).toBeHidden();
+	const height = await row
+		.locator('.item__meta')
+		.evaluate((line) => line.getBoundingClientRect().height);
+	expect(height).toBe(18);
 });

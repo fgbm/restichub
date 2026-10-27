@@ -138,8 +138,20 @@ export interface ListPill {
 	full?: string;
 }
 
+/** A tag chip of line 2. The profile tag of a snapshot is the one chip that links out (ui-principles 2.6). */
+export interface ListTag {
+	label: string;
+	/** The resolved address of the record of the tag; the chip becomes a link. */
+	href?: string;
+	/** `running` marks the automatic profile tag. The usual tag is neutral. */
+	tone?: 'neutral' | 'running';
+	/** The tooltip of the chip; a link also takes it as the accessible name. */
+	title?: string;
+}
+
 export interface ListField {
-	text: string;
+	/** The text of the field. A field with `tags` has none. */
+	text?: string;
 	mono?: boolean;
 	/** A Lucide icon before the text; the field shows as a neutral chip, for example the count of parameters. */
 	icon?: IconName;
@@ -147,6 +159,8 @@ export interface ListField {
 	time?: string;
 	/** The tooltip of the field, for example the cron expression of a schedule. */
 	title?: string;
+	/** Tags as chips. Line 2 keeps two chips; the rest fold into one chip that opens the whole set. */
+	tags?: readonly ListTag[];
 }
 
 /** An empty field is left out, so the order of the other fields stays. */
