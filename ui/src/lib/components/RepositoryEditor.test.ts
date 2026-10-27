@@ -6,6 +6,7 @@ import { render, screen, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import RepositoryEditor from './RepositoryEditor.svelte';
+import { jobState } from '#lib/vocabulary.ts';
 
 const HOST = {
 	status: 'active',
@@ -350,6 +351,25 @@ describe('the repository page', () => {
 		expect(prefix).not.toHaveAttribute('placeholder');
 		expect(prefix).toHaveAccessibleDescription('Not set');
 		expect(screen.getByLabelText(/Bucket/)).toHaveValue('backups');
+	});
+
+	it('the_last_run_pill_shows_the_label_of_job_state', async () => {
+		mocks.getMaintenance.mockResolvedValue({
+			...maintenance(),
+			last_check: {
+				id: 'j_1',
+				kind: 'check',
+				status: 'dead_letter',
+				result_code: null,
+				created_at: '2026-10-20T04:00:00Z',
+				finished_at: null
+			}
+		});
+		render(RepositoryEditor, { repositoryId: 'r_1' });
+
+		const state = jobState({ status: 'dead_letter' });
+		const pill = await screen.findByText(state.label, { selector: '.status' });
+		expect(pill).toHaveClass('status--failed');
 	});
 
 	it('fr_rp_01 reports a repository that does not exist', async () => {

@@ -7,7 +7,6 @@
 		Agent,
 		Job,
 		JobResultCode,
-		JobStatus,
 		MaintenanceTask,
 		Repository,
 		RepositoryBackendKind
@@ -23,13 +22,13 @@
 		StatusPill,
 		TextField
 	} from '#lib/components/ui/index.ts';
-	import type { FilterFacet, ListMeta, RowAction, StatusTone } from '#lib/components/ui/index.ts';
+	import type { FilterFacet, ListMeta, RowAction } from '#lib/components/ui/index.ts';
 	import { facetCounts, matchesSearch, splitList } from '#lib/filters.ts';
 	import { focusFirstInvalid } from '#lib/form.ts';
 	import { withHosts } from '#lib/host-picker.ts';
 	import HostPicker from '#lib/components/HostPicker.svelte';
 	import { ago, plural } from '#lib/list-format.ts';
-	import { iconOf, pillOf, repositoryState } from '#lib/vocabulary.ts';
+	import { iconOf, jobState, pillOf, repositoryState, statusToneOf } from '#lib/vocabulary.ts';
 	import { queryFilters } from '#lib/stores/query-filters.svelte.ts';
 	import { t, tErrorCode, tOr, type MessageKey } from '#lib/i18n/index.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
@@ -78,16 +77,6 @@
 	);
 	// The dialog holds the poll of one job. A newer run of the poll makes the older loop stop.
 	let jobPoll = 0;
-
-	const jobStatusLabels: Record<JobStatus, MessageKey> = {
-		queued: 'repositories.job.queued',
-		sent: 'repositories.job.sent',
-		running: 'repositories.job.running',
-		succeeded: 'repositories.job.succeeded',
-		failed: 'repositories.job.failed',
-		expired: 'repositories.job.expired',
-		dead_letter: 'repositories.job.failed'
-	};
 
 	const jobResultLabels: Record<JobResultCode, MessageKey> = {
 		succeeded: 'repositories.result.succeeded',
@@ -473,17 +462,6 @@
 		stopJobTimer();
 		jobOpen = false;
 	}
-
-	function jobTone(): StatusTone {
-		if (!job) return 'neutral';
-		if (job.status === 'succeeded') {
-			return job.result_code === 'succeeded_with_warnings' ? 'warning' : 'success';
-		}
-		if (job.status === 'failed' || job.status === 'expired') return 'failed';
-		if (job.status === 'running') return 'running';
-		if (job.status === 'sent' || job.status === 'queued') return 'queued';
-		return 'neutral';
-	}
 </script>
 
 <Page
@@ -605,10 +583,11 @@
 			</Alert>
 		{/if}
 		{#if job}
+			{@const run = jobState(job)}
 			<div class="job">
 				<div class="job__row">
 					<span class="job__label">{t('repositories.jobStatus')}</span>
-					<StatusPill tone={jobTone()}>{t(jobStatusLabels[job.status])}</StatusPill>
+					<StatusPill tone={statusToneOf(run)} title={run.full}>{run.label}</StatusPill>
 				</div>
 				<p class="job__result">
 					{#if jobExpired}

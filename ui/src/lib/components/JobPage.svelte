@@ -11,7 +11,6 @@
 	import StepLog from '#lib/components/StepLog.svelte';
 	import { RecordPage } from '#lib/components/layout/index.ts';
 	import { Alert, Button, ConfirmDialog, Panel, StatusPill } from '#lib/components/ui/index.ts';
-	import type { StatusTone } from '#lib/components/ui/index.ts';
 	import { formatCount, formatLocalTime } from '#lib/format.ts';
 	import {
 		isLive,
@@ -28,6 +27,7 @@
 	import type { MessageKey } from '#lib/i18n/index.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
+	import { isCancelled, jobState, statusToneOf } from '#lib/vocabulary.ts';
 	import { sameData } from '#lib/unchanged.ts';
 
 	const POLL_MS = 2000;
@@ -61,10 +61,8 @@
 
 	const canWrite = $derived(['admin', 'operator'].includes(getSession()?.role ?? ''));
 	const live = $derived(job ? isLive(job.status) : false);
-	const cancelled = $derived(job?.status === 'failed' && job.result_code === 'cancelled');
-	const warnings = $derived(
-		job?.status === 'succeeded' && job.result_code === 'succeeded_with_warnings'
-	);
+	const cancelled = $derived(job ? isCancelled(job) : false);
+	const jobStatus = $derived(job ? jobState(job) : null);
 	const stats = $derived(statsOf(job?.summary));
 	const capped = $derived(lines.length >= MAX_LINES);
 	const rows = $derived(job ? stepRows(job) : []);
@@ -81,32 +79,6 @@
 			? job.progress
 			: null
 	);
-
-	const statusLabel = $derived.by(() => {
-		if (!job) return '';
-		if (warnings) return t('jobs.status.succeeded_with_warnings');
-		return t(`jobs.status.${cancelled ? 'cancelled' : job.status}` as MessageKey);
-	});
-
-	const tone = $derived.by((): StatusTone => {
-		if (!job) return 'neutral';
-		if (cancelled) return 'cancelled';
-		if (warnings) return 'warning';
-		switch (job.status) {
-			case 'queued':
-				return 'queued';
-			case 'sent':
-				return 'info';
-			case 'running':
-				return 'running';
-			case 'succeeded':
-				return 'success';
-			case 'expired':
-				return 'warning';
-			default:
-				return 'failed';
-		}
-	});
 
 	const title = $derived(
 		job ? (job.plan_name ?? t(`jobs.kind.${job.kind}` as MessageKey)) : t('jobs.title')
@@ -298,12 +270,9 @@
 	error={notFound ? t('jobDetail.notFound') : error && !job ? error : null}
 >
 	{#snippet status()}
-		{#if job}
-			<StatusPill
-				{tone}
-				title={warnings ? t('jobs.statusFull.succeeded_with_warnings') : undefined}
-			>
-				{statusLabel}
+		{#if jobStatus}
+			<StatusPill tone={statusToneOf(jobStatus)} title={jobStatus.full}>
+				{jobStatus.label}
 			</StatusPill>
 		{/if}
 	{/snippet}

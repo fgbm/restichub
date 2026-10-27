@@ -11,7 +11,6 @@
 		BackendSettings,
 		CreateRepositoryRequest,
 		Job,
-		JobStatus,
 		Maintenance,
 		Repository,
 		RepositoryBackendKind,
@@ -21,7 +20,7 @@
 	import ProfileSection from './ProfileSection.svelte';
 	import { RecordPage, SummaryPanel } from './layout/index.ts';
 	import { Alert, Button, PasswordField, Select, StatusPill, TextField } from './ui/index.ts';
-	import type { KeyValueItem, SelectOption, StatusTone } from './ui/index.ts';
+	import type { KeyValueItem, SelectOption } from './ui/index.ts';
 	import { formatLocalTime, formatTimeInZone } from '#lib/format.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
@@ -30,6 +29,7 @@
 	import { rememberSections } from '#lib/section-state.svelte.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
+	import { jobState, statusToneOf } from '#lib/vocabulary.ts';
 
 	let { repositoryId = null }: { repositoryId?: string | null } = $props();
 
@@ -203,30 +203,9 @@
 				: 'repositories.maintenanceHostHint'
 	);
 
-	const jobStatusLabels: Record<JobStatus, MessageKey> = {
-		queued: 'repositories.job.queued',
-		sent: 'repositories.job.sent',
-		running: 'repositories.job.running',
-		succeeded: 'repositories.job.succeeded',
-		failed: 'repositories.job.failed',
-		expired: 'repositories.job.expired',
-		dead_letter: 'repositories.job.failed'
-	};
-
 	function messageOf(problem: unknown): string {
 		if (problem instanceof ApiError) return tErrorCode(problem.code) ?? problem.title;
 		return t('table.error');
-	}
-
-	function lastTone(entry: Job): StatusTone {
-		if (entry.status === 'succeeded') {
-			return entry.result_code === 'succeeded_with_warnings' ? 'warning' : 'success';
-		}
-		if (entry.status === 'failed' || entry.status === 'expired' || entry.status === 'dead_letter') {
-			return 'failed';
-		}
-		if (entry.status === 'running') return 'running';
-		return 'queued';
 	}
 
 	function utcTitle(value: string): string {
@@ -459,8 +438,9 @@
 
 {#snippet lastRun(job: Job | null | undefined)}
 	{#if job}
+		{@const run = jobState(job)}
 		<span class="last">
-			<StatusPill tone={lastTone(job)}>{t(jobStatusLabels[job.status])}</StatusPill>
+			<StatusPill tone={statusToneOf(run)} title={run.full}>{run.label}</StatusPill>
 			<span class="muted" title={utcTitle(job.finished_at ?? job.created_at)}>
 				{formatLocalTime(job.finished_at ?? job.created_at)}
 			</span>

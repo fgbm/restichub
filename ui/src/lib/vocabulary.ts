@@ -21,7 +21,13 @@ import type {
 	Tenant,
 	User
 } from '#lib/api/index.ts';
-import type { IconName, ListIcon, ListPill, ListTone } from '#lib/components/ui/index.ts';
+import type {
+	IconName,
+	ListIcon,
+	ListPill,
+	ListTone,
+	StatusTone
+} from '#lib/components/ui/index.ts';
 import { t } from '#lib/i18n/index.ts';
 import type { MessageKey } from '#lib/i18n/index.ts';
 
@@ -59,6 +65,19 @@ export function iconOf(entity: EntityState): ListIcon {
 export function pillOf(entity: EntityState): ListPill | null {
 	if (entity.tone === 'normal' || entity.tone === 'success') return null;
 	return { tone: entity.tone, label: entity.label, full: entity.full };
+}
+
+const STATUS_TONE: Record<ListTone, StatusTone> = {
+	danger: 'failed',
+	warning: 'warning',
+	running: 'running',
+	success: 'success',
+	neutral: 'neutral'
+};
+
+/** The tone of a pill in a record header, where the state shows as a pill and never as an icon. */
+export function statusToneOf(entity: EntityState): StatusTone {
+	return entity.tone === 'normal' ? 'neutral' : STATUS_TONE[entity.tone];
 }
 
 export const ENTITY_ICONS = {
