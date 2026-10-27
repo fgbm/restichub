@@ -33,6 +33,7 @@
 	} from '#lib/vocabulary.ts';
 	import { isSingleTenant } from '#lib/stores/instance.svelte.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
+	import { showSkeleton } from '#lib/skeleton.svelte.ts';
 
 	interface Step {
 		title: string;
@@ -98,6 +99,7 @@
 	let dashboard = $state<Dashboard | null>(null);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
+	const skeleton = showSkeleton(() => loading && !dashboard);
 
 	// An organization with no host, no plan and no repository still shows the first steps.
 	const firstRun = $derived(
@@ -207,11 +209,13 @@
 
 	{#if hasTenant}
 		{#if loading && !dashboard}
-			<div class="overview" aria-busy="true">
-				<Skeleton variant="row" />
-				<Skeleton variant="row" />
-				<Skeleton variant="row" />
-			</div>
+			{#if skeleton()}
+				<div class="overview" aria-busy="true">
+					<Skeleton variant="row" />
+					<Skeleton variant="row" />
+					<Skeleton variant="row" />
+				</div>
+			{/if}
 		{:else if error && !dashboard}
 			<Alert tone="danger" title={error}>
 				<Button size="sm" onclick={() => load()}>{t('common.retry')}</Button>

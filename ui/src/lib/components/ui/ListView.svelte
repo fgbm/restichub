@@ -2,6 +2,7 @@
 	import { setContext, type Snippet } from 'svelte';
 	import { fullTime } from '#lib/list-format.ts';
 	import { t } from '#lib/i18n/index.ts';
+	import { showSkeleton } from '#lib/skeleton.svelte.ts';
 	import Button from './Button.svelte';
 	import EmptyState from './EmptyState.svelte';
 	import Icon from './Icon.svelte';
@@ -118,6 +119,7 @@
 	const server = $derived(mode === 'server');
 	const totalItems = $derived(server ? (total ?? items.length) : items.length);
 	const pageCount = $derived(Math.max(1, Math.ceil(totalItems / pageSize)));
+	const skeleton = showSkeleton(() => loading);
 	const currentPage = $derived(Math.min(Math.max(page, 1), pageCount));
 	const shown = $derived(
 		server || !paginated ? items : items.slice((currentPage - 1) * pageSize, currentPage * pageSize)
@@ -184,166 +186,169 @@
 <div class="list-view" class:list-view--flush={flush}>
 	{@render toolbar?.()}
 
-	<div class="list-view__box" class:list-view__box--toolbar={Boolean(toolbar)}>
-		{#if loading}
-			<ul class="list" aria-label={t('table.loading')} aria-busy="true">
-				{#each Array(Math.min(pageSize, 8)) as _, index (index)}
-					<li class="item item--skeleton">
-						<span class="item__lead"><Skeleton variant="avatar" /></span>
-						<span class="item__body">
-							<Skeleton />
-							<Skeleton />
-						</span>
-					</li>
-				{/each}
-			</ul>
-		{:else if error}
-			<p class="list-view__error" role="alert">{error}</p>
-		{:else if items.length === 0 && filtered}
-			<EmptyState
-				icon="search"
-				title={t('list.noMatches')}
-				description={t('list.noMatchesDescription')}
-			>
-				{#if onReset}
-					<Button onclick={onReset}>{t('list.resetFilters')}</Button>
-				{/if}
-			</EmptyState>
-		{:else if items.length === 0}
-			<EmptyState
-				icon={emptyIcon}
-				title={emptyTitle ?? t('table.empty.title')}
-				description={emptyDescription}
-			>
-				{#if emptyActions}{@render emptyActions()}{/if}
-			</EmptyState>
-		{:else}
-			<ul class="list" aria-label={label}>
-				{#each rows as row (row.key)}
-					{@const item = row.item}
-					{@const lead = icon(item)}
-					{@const state = pill?.(item) ?? null}
-					{@const fields = fieldsOf(item)}
-					{@const number = aside?.(item) ?? ''}
-					{@const name = title(item)}
-					{@const link = href?.(item)}
-					{@const current = selected?.(item) ?? false}
-					{#if row.group !== null}
-						<li class="group">{row.group}</li>
-					{/if}
-					<li
-						class="item"
-						class:item--aside={Boolean(aside)}
-						class:item--single={fields.length === 0 && !number}
-						class:item--selected={current}
-					>
-						<span
-							class="item__lead"
-							class:tone--danger={lead.tone === 'danger'}
-							class:tone--warning={lead.tone === 'warning'}
-							class:tone--running={lead.tone === 'running'}
-							class:tone--success={lead.tone === 'success'}
-							title={lead.label}
-						>
-							<Icon name={lead.name} spin={lead.spin} label={state ? undefined : lead.label} />
-						</span>
-						<span class="item__body">
-							<span class="item__line">
-								{#if link}
-									<!-- eslint-disable svelte/no-navigation-without-resolve -- href returns a resolved path -->
-									<a
-										class="item__title"
-										class:item__title--mono={titleMono}
-										href={link}
-										title={name}
-										aria-current={current ? 'true' : undefined}
-										aria-label={titleLabel?.(item)}>{name}</a
-									>
-									<!-- eslint-enable svelte/no-navigation-without-resolve -->
-								{:else if onOpen}
-									<button
-										type="button"
-										class="item__title"
-										class:item__title--mono={titleMono}
-										title={name}
-										aria-label={titleLabel?.(item)}
-										onclick={() => onOpen?.(item)}>{name}</button
-									>
-								{:else}
-									<span
-										class="item__title item__title--text"
-										class:item__title--mono={titleMono}
-										title={name}>{name}</span
-									>
-								{/if}
-								{#if state}
-									<StatusPill tone={PILL_TONES[state.tone]} title={state.full}>
-										{state.label}
-									</StatusPill>
-								{/if}
+	{#if !loading || skeleton()}
+		<div class="list-view__box" class:list-view__box--toolbar={Boolean(toolbar)}>
+			{#if loading}
+				<ul class="list" aria-label={t('table.loading')} aria-busy="true">
+					{#each Array(Math.min(pageSize, 8)) as _, index (index)}
+						<li class="item item--skeleton">
+							<span class="item__lead"><Skeleton variant="avatar" /></span>
+							<span class="item__body">
+								<Skeleton />
+								<Skeleton />
 							</span>
-							{#if fields.length > 0 || number}
-								<span class="item__meta">
-									{#each fields as field, index (index)}
-										<span class="item__field" class:item__field--extra={index >= 2}>
-											{#if index > 0}<span class="item__sep" aria-hidden="true">{SEPARATOR}</span
-												>{/if}
-											{#if field.time}
-												<time datetime={field.time} title={field.title ?? fullTime(field.time)}
-													>{field.text}</time
-												>
-											{:else if field.icon}
-												<span class="item__chip" title={field.title}>
-													<Icon name={field.icon} size="xs" />
-													{field.text}
-												</span>
-											{:else}
-												<span class:item__mono={field.mono} title={field.title}>{field.text}</span>
-											{/if}
-										</span>
-									{/each}
-									{#if number}
-										<span class="item__field item__field--aside">
-											{#if fields.length > 0}<span class="item__sep" aria-hidden="true"
-													>{SEPARATOR}</span
-												>{/if}
-											<span class="item__number">{number}</span>
-										</span>
+						</li>
+					{/each}
+				</ul>
+			{:else if error}
+				<p class="list-view__error" role="alert">{error}</p>
+			{:else if items.length === 0 && filtered}
+				<EmptyState
+					icon="search"
+					title={t('list.noMatches')}
+					description={t('list.noMatchesDescription')}
+				>
+					{#if onReset}
+						<Button onclick={onReset}>{t('list.resetFilters')}</Button>
+					{/if}
+				</EmptyState>
+			{:else if items.length === 0}
+				<EmptyState
+					icon={emptyIcon}
+					title={emptyTitle ?? t('table.empty.title')}
+					description={emptyDescription}
+				>
+					{#if emptyActions}{@render emptyActions()}{/if}
+				</EmptyState>
+			{:else}
+				<ul class="list" aria-label={label}>
+					{#each rows as row (row.key)}
+						{@const item = row.item}
+						{@const lead = icon(item)}
+						{@const state = pill?.(item) ?? null}
+						{@const fields = fieldsOf(item)}
+						{@const number = aside?.(item) ?? ''}
+						{@const name = title(item)}
+						{@const link = href?.(item)}
+						{@const current = selected?.(item) ?? false}
+						{#if row.group !== null}
+							<li class="group">{row.group}</li>
+						{/if}
+						<li
+							class="item"
+							class:item--aside={Boolean(aside)}
+							class:item--single={fields.length === 0 && !number}
+							class:item--selected={current}
+						>
+							<span
+								class="item__lead"
+								class:tone--danger={lead.tone === 'danger'}
+								class:tone--warning={lead.tone === 'warning'}
+								class:tone--running={lead.tone === 'running'}
+								class:tone--success={lead.tone === 'success'}
+								title={lead.label}
+							>
+								<Icon name={lead.name} spin={lead.spin} label={state ? undefined : lead.label} />
+							</span>
+							<span class="item__body">
+								<span class="item__line">
+									{#if link}
+										<!-- eslint-disable svelte/no-navigation-without-resolve -- href returns a resolved path -->
+										<a
+											class="item__title"
+											class:item__title--mono={titleMono}
+											href={link}
+											title={name}
+											aria-current={current ? 'true' : undefined}
+											aria-label={titleLabel?.(item)}>{name}</a
+										>
+										<!-- eslint-enable svelte/no-navigation-without-resolve -->
+									{:else if onOpen}
+										<button
+											type="button"
+											class="item__title"
+											class:item__title--mono={titleMono}
+											title={name}
+											aria-label={titleLabel?.(item)}
+											onclick={() => onOpen?.(item)}>{name}</button
+										>
+									{:else}
+										<span
+											class="item__title item__title--text"
+											class:item__title--mono={titleMono}
+											title={name}>{name}</span
+										>
+									{/if}
+									{#if state}
+										<StatusPill tone={PILL_TONES[state.tone]} title={state.full}>
+											{state.label}
+										</StatusPill>
 									{/if}
 								</span>
+								{#if fields.length > 0 || number}
+									<span class="item__meta">
+										{#each fields as field, index (index)}
+											<span class="item__field" class:item__field--extra={index >= 2}>
+												{#if index > 0}<span class="item__sep" aria-hidden="true">{SEPARATOR}</span
+													>{/if}
+												{#if field.time}
+													<time datetime={field.time} title={field.title ?? fullTime(field.time)}
+														>{field.text}</time
+													>
+												{:else if field.icon}
+													<span class="item__chip" title={field.title}>
+														<Icon name={field.icon} size="xs" />
+														{field.text}
+													</span>
+												{:else}
+													<span class:item__mono={field.mono} title={field.title}>{field.text}</span
+													>
+												{/if}
+											</span>
+										{/each}
+										{#if number}
+											<span class="item__field item__field--aside">
+												{#if fields.length > 0}<span class="item__sep" aria-hidden="true"
+														>{SEPARATOR}</span
+													>{/if}
+												<span class="item__number">{number}</span>
+											</span>
+										{/if}
+									</span>
+								{/if}
+							</span>
+							{#if aside}
+								<span class="item__aside" aria-hidden="true">{number}</span>
 							{/if}
-						</span>
-						{#if aside}
-							<span class="item__aside" aria-hidden="true">{number}</span>
-						{/if}
-						<span class="item__actions">
-							{#if actions}
-								<RowActions
-									variant="ghost"
-									items={menuItems(item)}
-									moreLabel={moreLabel?.(item) ?? t('table.moreActions')}
-								/>
-							{/if}
-						</span>
-					</li>
-				{/each}
-			</ul>
-		{/if}
+							<span class="item__actions">
+								{#if actions}
+									<RowActions
+										variant="ghost"
+										items={menuItems(item)}
+										moreLabel={moreLabel?.(item) ?? t('table.moreActions')}
+									/>
+								{/if}
+							</span>
+						</li>
+					{/each}
+				</ul>
+			{/if}
 
-		{#if (server || paginated) && !loading && !error && totalItems > 0}
-			<ListFooter
-				page={currentPage}
-				{pageCount}
-				{pageSize}
-				{pageSizes}
-				total={totalItems}
-				{totalCapped}
-				sizes={!server || Boolean(onPageSizeChange)}
-				onPage={goTo}
-				onPageSize={setPageSize}
-			/>
-		{/if}
-	</div>
+			{#if (server || paginated) && !loading && !error && totalItems > 0}
+				<ListFooter
+					page={currentPage}
+					{pageCount}
+					{pageSize}
+					{pageSizes}
+					total={totalItems}
+					{totalCapped}
+					sizes={!server || Boolean(onPageSizeChange)}
+					onPage={goTo}
+					onPageSize={setPageSize}
+				/>
+			{/if}
+		</div>
+	{/if}
 </div>
 
 <style>

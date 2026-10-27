@@ -2,6 +2,7 @@
 	import type { Snippet } from 'svelte';
 	import { formatLocalTime, formatTime, relativeTime } from '#lib/format.ts';
 	import { t } from '#lib/i18n/index.ts';
+	import { showSkeleton } from '#lib/skeleton.svelte.ts';
 	import Badge from './Badge.svelte';
 	import EmptyState from './EmptyState.svelte';
 	import Icon from './Icon.svelte';
@@ -96,6 +97,7 @@
 	} = $props();
 
 	const server = $derived(mode === 'server');
+	const skeleton = showSkeleton(() => loading);
 	const primaryKey = $derived((columns.find((column) => column.primary) ?? columns[0])?.key);
 	let detailRow = $state<T | null>(null);
 	let detailOpen = $state(false);
@@ -277,13 +279,15 @@
 			</thead>
 			<tbody>
 				{#if loading}
-					{#each Array(Math.min(pageSize, 10)) as _, index (index)}
-						<tr>
-							{#each Array(columnCount) as _cell, cellIndex (cellIndex)}
-								<td><Skeleton /></td>
-							{/each}
-						</tr>
-					{/each}
+					{#if skeleton()}
+						{#each Array(Math.min(pageSize, 10)) as _, index (index)}
+							<tr>
+								{#each Array(columnCount) as _cell, cellIndex (cellIndex)}
+									<td><Skeleton /></td>
+								{/each}
+							</tr>
+						{/each}
+					{/if}
 				{:else if error}
 					<tr>
 						<td colspan={columnCount}>

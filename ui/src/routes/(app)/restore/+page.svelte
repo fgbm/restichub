@@ -33,6 +33,7 @@
 	import { applyFilters, facetCounts, tagLabel } from '#lib/snapshot-filter.ts';
 	import { loadRepository, pickRepository, saveRepository } from '#lib/restore-repository.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
+	import { showSkeleton } from '#lib/skeleton.svelte.ts';
 
 	const PAGE_SIZE = 25;
 	const ADDRESS_DELAY = 300;
@@ -58,6 +59,7 @@
 
 	const canRestore = $derived(['admin', 'operator'].includes(getSession()?.role ?? ''));
 	const snapshots = $derived(view?.state === 'done' ? view.snapshots : []);
+	const skeleton = showSkeleton(() => loading || (pending && !view));
 	const matching = $derived(
 		[...applyFilters(snapshots, filters, Date.now())].sort(
 			(left, right) => timeOf(right) - timeOf(left)
@@ -324,10 +326,12 @@
 		{/if}
 
 		{#if loading || (pending && !view)}
-			<div class="list__state">
-				<p class="muted">{t('restore.listLoading')}</p>
-				<Skeleton variant="row" />
-			</div>
+			{#if skeleton()}
+				<div class="list__state">
+					<p class="muted">{t('restore.listLoading')}</p>
+					<Skeleton variant="row" />
+				</div>
+			{/if}
 		{:else if view?.state === 'done' && snapshots.length === 0}
 			<EmptyState
 				icon="restore"

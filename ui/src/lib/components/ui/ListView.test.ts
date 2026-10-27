@@ -1,5 +1,6 @@
 import { render, screen, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
+import { tick } from 'svelte';
 import { describe, expect, it, vi } from 'vitest';
 import type { Agent } from '#lib/api/index.ts';
 import { hostState, iconOf, pillOf } from '#lib/vocabulary.ts';
@@ -174,10 +175,39 @@ describe('ListView', () => {
 		expect(onReset).toHaveBeenCalledOnce();
 	});
 
-	it('shows placeholder items while it loads', () => {
-		const { container } = render(ListView<Item>, { props: { ...base, items: [], loading: true } });
-		expect(container.querySelector('ul.list')).toHaveAttribute('aria-busy', 'true');
-		expect(container.querySelectorAll('.item--skeleton').length).toBeGreaterThan(0);
+	it('shows placeholder items only when the load lasts longer than the delay', async () => {
+		vi.useFakeTimers();
+		try {
+			const { container } = render(ListView<Item>, {
+				props: { ...base, items: [], loading: true }
+			});
+			expect(container.querySelector('.item--skeleton')).toBeNull();
+
+			await vi.advanceTimersByTimeAsync(200);
+			await tick();
+
+			expect(container.querySelector('ul.list')).toHaveAttribute('aria-busy', 'true');
+			expect(container.querySelectorAll('.item--skeleton').length).toBeGreaterThan(0);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it('shows no placeholder when the load ends at once', async () => {
+		vi.useFakeTimers();
+		try {
+			const { container, rerender } = render(ListView<Item>, {
+				props: { ...base, items: [], loading: true }
+			});
+			await rerender({ ...base, items: items(2), loading: false });
+
+			await vi.advanceTimersByTimeAsync(300);
+
+			expect(container.querySelector('.item--skeleton')).toBeNull();
+			expect(screen.getByText('item-0')).toBeInTheDocument();
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it('pages a client list with the standard footer', async () => {

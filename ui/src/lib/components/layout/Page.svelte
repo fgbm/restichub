@@ -2,6 +2,7 @@
 	import type { Snippet } from 'svelte';
 	import type { Crumb } from '#lib/stores/page-meta.svelte.ts';
 	import { Alert, PageHeader, Skeleton } from '../ui/index.ts';
+	import { showSkeleton } from '#lib/skeleton.svelte.ts';
 	import PageMeta from './PageMeta.svelte';
 
 	let {
@@ -38,15 +39,19 @@
 		actions?: Snippet;
 		children: Snippet;
 	} = $props();
+
+	const skeleton = showSkeleton(() => loading);
 </script>
 
 <PageMeta title={documentTitle ?? title} {crumbs} {listQuery} />
 
 {#if loading}
-	<div class="page-loading" aria-busy="true">
-		<Skeleton />
-		<Skeleton variant="row" />
-	</div>
+	{#if skeleton()}
+		<div class="page-loading" aria-busy="true">
+			<Skeleton />
+			<Skeleton variant="row" />
+		</div>
+	{/if}
 {:else if error}
 	<Alert tone="danger" title={error} />
 {:else}
