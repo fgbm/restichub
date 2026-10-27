@@ -8,6 +8,7 @@
 	import type { MessageKey } from '#lib/i18n/index.ts';
 	import { hasRole } from '#lib/stores/session.svelte.ts';
 	import { pushToast } from '#lib/stores/toasts.svelte.ts';
+	import { showSkeleton } from '#lib/skeleton.svelte.ts';
 
 	interface Row {
 		kind: AlertKind;
@@ -25,6 +26,7 @@
 	let saving = $state(false);
 	let error = $state<string | null>(null);
 	let problem = $state<ApiProblem | null>(null);
+	const skeleton = showSkeleton(() => loading);
 
 	function messageOf(cause: unknown): string {
 		if (cause instanceof ApiError) return tErrorCode(cause.code) ?? cause.title;
@@ -97,40 +99,42 @@
 		<Alert tone="danger" title={error} />
 	{/if}
 
-	<Panel flush>
-		{#if loading}
-			<div class="rules__loading"><Skeleton variant="row" /></div>
-		{:else}
-			<ul class="rules">
-				{#each rows as row (row.kind)}
-					<li class="rule">
-						<div class="rule__main">
-							<p class="rule__title">{t(`rules.kind.${row.kind}.title` as MessageKey)}</p>
-							<p class="rule__body">{t(`rules.kind.${row.kind}.body` as MessageKey)}</p>
-						</div>
-						{#if row.hasThreshold}
-							<div class="rule__threshold">
-								<TextField
-									id={`rule-${row.kind}-minutes`}
-									label={t('rules.threshold')}
-									inputmode="numeric"
-									disabled={!canWrite || !row.enabled}
-									error={fieldError(problem, 'threshold_minutes')}
-									bind:value={row.minutes}
-								/>
+	{#if !loading || skeleton()}
+		<Panel flush>
+			{#if loading}
+				<div class="rules__loading"><Skeleton variant="row" /></div>
+			{:else}
+				<ul class="rules">
+					{#each rows as row (row.kind)}
+						<li class="rule">
+							<div class="rule__main">
+								<p class="rule__title">{t(`rules.kind.${row.kind}.title` as MessageKey)}</p>
+								<p class="rule__body">{t(`rules.kind.${row.kind}.body` as MessageKey)}</p>
 							</div>
-						{/if}
-						<Switch
-							id={`rule-${row.kind}`}
-							label={t('rules.send')}
-							disabled={!canWrite}
-							bind:checked={row.enabled}
-						/>
-					</li>
-				{/each}
-			</ul>
-		{/if}
-	</Panel>
+							{#if row.hasThreshold}
+								<div class="rule__threshold">
+									<TextField
+										id={`rule-${row.kind}-minutes`}
+										label={t('rules.threshold')}
+										inputmode="numeric"
+										disabled={!canWrite || !row.enabled}
+										error={fieldError(problem, 'threshold_minutes')}
+										bind:value={row.minutes}
+									/>
+								</div>
+							{/if}
+							<Switch
+								id={`rule-${row.kind}`}
+								label={t('rules.send')}
+								disabled={!canWrite}
+								bind:checked={row.enabled}
+							/>
+						</li>
+					{/each}
+				</ul>
+			{/if}
+		</Panel>
+	{/if}
 </SettingsLayout>
 
 <style>

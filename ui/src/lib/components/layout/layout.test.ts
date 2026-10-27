@@ -71,6 +71,23 @@ describe('Page', () => {
 		expect(screen.queryByText('Body')).toBeNull();
 		expect(screen.queryByRole('link')).toBeNull();
 	});
+
+	it('shows no placeholder when the record loads at once', async () => {
+		vi.useFakeTimers();
+		try {
+			const props = { title: 'db-01', crumbs: [{ label: 'db-01' }], children: html('<p>Body</p>') };
+			const { container, rerender } = render(Page, { props: { ...props, loading: true } });
+			expect(container.querySelector('.page-loading')).toBeNull();
+
+			await rerender({ ...props, loading: false });
+			await vi.advanceTimersByTimeAsync(300);
+
+			expect(container.querySelector('.page-loading')).toBeNull();
+			expect(screen.getByRole('heading', { level: 1, name: 'db-01' })).toBeInTheDocument();
+		} finally {
+			vi.useRealTimers();
+		}
+	});
 });
 
 describe('RecordPage', () => {
