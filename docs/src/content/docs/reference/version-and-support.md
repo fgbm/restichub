@@ -10,14 +10,14 @@ The About ResticHub screen shows the version of the control plane and the versio
 1. Select your account menu in the top bar.
 2. Select "About ResticHub".
 
-The item in the account menu shows the short version in its hint. The screen shows these facts:
+The item in the account menu shows the short version below its label. The screen shows these facts:
 
 | Fact     | Meaning                                                                                                  |
 | -------- | -------------------------------------------------------------------------------------------------------- |
-| Version  | The version of the control plane. A pre-release build shows the badge "Pre-release".                    |
+| Version  | The version of the control plane, with the pre-release part of a pre-release build. That build shows the badge "Pre-release". |
 | Revision | The commit of the build. A build from the source code shows `dev`.                                       |
 | Protocol | The version of the protocol between the control plane and the agents.                                   |
-| Agents   | The oldest agent version that the control plane accepts. A newer minor version works too.               |
+| Agents   | The oldest agent version that the control plane accepts, and its major version. An agent of another major version is refused. |
 
 ## Send the facts to support
 
