@@ -850,24 +850,26 @@ pub async fn get_ls(
     context.authorize(Operation::JobsWrite)?;
     let repository_id = parse_repository_id(&id)?;
     let now = state.auth().clock.now();
-    let job = params
-        .job
-        .as_deref()
-        .ok_or_else(|| ApiError::invalid_field("job", Reason::Empty))?;
-    let job_id = parse_job_id(job)?;
-    let persisted = crate::job_expiry::end_overdue(&state, context.tenant_id, job_id, now).await;
+    let job_id = params.job.as_deref().map(parse_job_id).transpose()?;
+    let persisted = match job_id {
+        Some(job_id) => {
+            Some(crate::job_expiry::end_overdue(&state, context.tenant_id, job_id, now).await)
+        }
+        None => None,
+    };
     let view = context
         .tenant_tx(&state, async |tx| {
             if repo::get(tx, repository_id).await?.is_none() {
                 return Err(ApiError::not_found());
             }
+            let job_id = job_id.ok_or_else(|| ApiError::invalid_field("job", Reason::Empty))?;
             let Some(mut job) = job_repo::get(tx, job_id).await? else {
                 return Err(ApiError::not_found());
             };
             if job.repository_id != Some(repository_id) || job.kind != JobKind::Ls {
                 return Err(ApiError::not_found());
             }
-            if !persisted {
+            if persisted == Some(false) {
                 job_repo::project_expiry(&mut job, now);
             }
             let Some(JobRequest::Ls(request)) = restore_repo::get_request(tx, job_id).await? else {
