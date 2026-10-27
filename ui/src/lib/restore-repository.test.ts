@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Me } from '#lib/api/index.ts';
 import { clearSession, setSession } from '#lib/stores/session.svelte.ts';
-import { loadRepository, pickRepository, saveRepository } from './restore-repository';
+import {
+	addressTokens,
+	loadRepository,
+	pickRepository,
+	saveRepository
+} from './restore-repository';
 
 function session(tenant: string, user = 'u-1'): Me {
 	return {
@@ -63,5 +68,31 @@ describe('ac_ui_09_restore_repository', () => {
 		localStorage.setItem('restichub.v1.t-1.u-1.restore.repository', '{"x":1}');
 		expect(loadRepository()).toBeNull();
 		expect(localStorage.length).toBe(0);
+	});
+});
+
+// AC-UI-09: a late completion of a repository change must not change the address of the page the
+// person is on now.
+describe('ac_ui_09_a_late_address_update_stays_off_the_restore_page', () => {
+	it('a newer request makes the answer of an older one stale', () => {
+		const tokens = addressTokens();
+		const first = tokens.begin();
+		const second = tokens.begin();
+		expect(tokens.isCurrent(first)).toBe(false);
+		expect(tokens.isCurrent(second)).toBe(true);
+	});
+
+	it('leaving the page makes the pending answer stale', () => {
+		const tokens = addressTokens();
+		const token = tokens.begin();
+		tokens.close();
+		expect(tokens.isCurrent(token)).toBe(false);
+	});
+
+	it('the answer of the latest request stays current', () => {
+		const tokens = addressTokens();
+		const token = tokens.begin();
+		expect(tokens.isCurrent(token)).toBe(true);
+		expect(tokens.isCurrent(token + 1)).toBe(false);
 	});
 });

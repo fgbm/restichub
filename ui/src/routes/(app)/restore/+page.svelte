@@ -31,7 +31,12 @@
 	import type { RestoreFilters } from '#lib/restore.ts';
 	import { BrowseTimeout, settle } from '#lib/restore-poll.ts';
 	import { applyFilters, facetCounts, tagLabel } from '#lib/snapshot-filter.ts';
-	import { loadRepository, pickRepository, saveRepository } from '#lib/restore-repository.ts';
+	import {
+		addressTokens,
+		loadRepository,
+		pickRepository,
+		saveRepository
+	} from '#lib/restore-repository.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { showSkeleton } from '#lib/skeleton.svelte.ts';
 
@@ -56,6 +61,7 @@
 	// A newer request makes the answer of an older one obsolete.
 	let generation = 0;
 	let addressTimer: ReturnType<typeof setTimeout> | undefined;
+	const addressGuard = addressTokens();
 
 	const canRestore = $derived(['admin', 'operator'].includes(getSession()?.role ?? ''));
 	const snapshots = $derived(view?.state === 'done' ? view.snapshots : []);
@@ -135,7 +141,8 @@
 		return stored.hosts.length === 0 && stored.tags.length === 0 && stored.paths.length === 0;
 	}
 
-	function remember(): void {
+	function remember(token: number): void {
+		if (!addressGuard.isCurrent(token)) return;
 		const address = `${resolve('/(app)/restore')}?${filtersToQuery(filters, { repository: repositoryId, ...targetExtra(query) })}`;
 		// eslint-disable-next-line svelte/no-navigation-without-resolve -- the address starts with a resolved path
 		void goto(address, { replace: true, reset: false });
@@ -143,7 +150,8 @@
 
 	function rememberSoon(): void {
 		clearTimeout(addressTimer);
-		addressTimer = setTimeout(remember, ADDRESS_DELAY);
+		const token = addressGuard.begin();
+		addressTimer = setTimeout(() => remember(token), ADDRESS_DELAY);
 	}
 
 	/** Reads the stored list of the repository. A repository without a whole one gets a request. */
@@ -209,7 +217,8 @@
 
 	function changeRepository(): void {
 		saveRepository(repositoryId);
-		void open().then(remember);
+		const token = addressGuard.begin();
+		void open().then(() => remember(token));
 	}
 
 	// The address starts with a resolved path; only the query string follows it.
@@ -244,7 +253,10 @@
 			}
 			await open();
 		})();
-		return () => clearTimeout(addressTimer);
+		return () => {
+			clearTimeout(addressTimer);
+			addressGuard.close();
+		};
 	});
 </script>
 
