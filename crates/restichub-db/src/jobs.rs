@@ -514,9 +514,9 @@ pub enum Expiry {
 /// The rule of the expiry of one job: the end that [`expire_overdue`] writes at `now`, or `None`
 /// while the job keeps its lifecycle.
 ///
-/// A read of a job may not write, so it shows this end from memory by [`project_expiry`]. A
-/// `running` job never expires here: the agent may still run it, and only the timeout and the
-/// stale lock recovery end it.
+/// A read whose auxiliary expiry write reached no write shows this end from memory by
+/// [`project_expiry`]. A `running` job never expires here: the agent may still run it, and only
+/// the timeout and the stale lock recovery end it.
 pub fn expiry_at(job: &Job, now: OffsetDateTime) -> Option<Expiry> {
     if job.expires_at? > now {
         return None;
@@ -534,10 +534,11 @@ pub fn expiry_at(job: &Job, now: OffsetDateTime) -> Option<Expiry> {
 /// The expiry writes the same value in its statement.
 pub const UNACKNOWLEDGED_EXPIRED: &str = "unacknowledged_expired";
 
-/// Sets the lifecycle of `job` to the state that [`expire_overdue`] would write for it at `now`.
+/// Sets the fields that a response shows of `job` to the state that [`expire_overdue`] would write
+/// for it at `now`.
 ///
-/// The control plane reads a job on a database that it may only read, where the expiry cannot
-/// write, and a poll of the job must still show the status of the end of the queue lifetime.
+/// The control plane answers a read on a database that the application role may only read, where
+/// the expiry cannot write, and the answer must still hold the end of the queue lifetime.
 pub fn project_expiry(job: &mut Job, now: OffsetDateTime) -> Option<Expiry> {
     let expiry = expiry_at(job, now)?;
     match expiry {
@@ -549,9 +550,7 @@ pub fn project_expiry(job: &mut Job, now: OffsetDateTime) -> Option<Expiry> {
             job.status = JobStatus::Failed;
             job.result_code = Some(JobResultCode::Failed);
             job.result_message = Some(UNACKNOWLEDGED_EXPIRED.to_owned());
-            job.stale_lock_since = Some(now);
             job.finished_at = Some(now);
-            job.lease_until = None;
         }
     }
     Some(expiry)

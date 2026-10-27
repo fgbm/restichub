@@ -238,14 +238,16 @@ pub async fn get_job(
     context.authorize(Operation::JobsRead)?;
     let job_id = parse_job_id(&id)?;
     let now = state.auth().clock.now();
+    // Every reader of the job must agree on its end, so the expiry is written before the read.
+    let persisted = crate::job_expiry::end_overdue(&state, context.tenant_id, job_id, now).await;
     let found = context
         .tenant_tx(&state, async |tx| {
             let Some(mut detail) = restichub_db::queue::get_detail(tx, job_id).await? else {
                 return Ok(None);
             };
-            // The read never writes, so it shows the end of the queue lifetime from the rule
-            // that the expiry sweep persists.
-            job_repo::project_expiry(&mut detail.job, now);
+            if !persisted {
+                job_repo::project_expiry(&mut detail.job, now);
+            }
             let steps = job_steps::list(tx, job_id).await?;
             let planned = job_steps::list_planned_described(tx, job_id).await?;
             let progress = job_steps::get_progress(tx, job_id).await?;
