@@ -6,6 +6,7 @@
 import { render, screen } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import JobPage from './JobPage.svelte';
+import { jobState } from '#lib/vocabulary.ts';
 
 const mocks = vi.hoisted(() => ({
 	getJob: vi.fn(),
@@ -125,4 +126,46 @@ describe('the job page of a cancelled job', () => {
 
 		expect(await screen.findByText(/The host went offline during the job/)).toBeVisible();
 	});
+});
+
+/*
+ * UI principle 3.6: each job state has one label, one tone and one icon, and they come from
+ * `jobState`. The header pill of the job page reads the same state as the lists.
+ */
+describe('the header pill of the job page', () => {
+	const CASES = [
+		[{ status: 'queued', result_code: null }, 'status--neutral'],
+		[{ status: 'sent', result_code: null }, 'status--neutral'],
+		[{ status: 'running', result_code: null }, 'status--running'],
+		[{ status: 'succeeded', result_code: 'succeeded' }, 'status--success'],
+		[{ status: 'succeeded', result_code: 'succeeded_with_warnings' }, 'status--warning'],
+		[{ status: 'failed', result_code: 'failed' }, 'status--failed'],
+		[{ status: 'failed', result_code: 'cancelled' }, 'status--neutral'],
+		[{ status: 'expired', result_code: null }, 'status--warning'],
+		[{ status: 'dead_letter', result_code: null }, 'status--failed']
+	] as const;
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		mocks.getJobLogs.mockResolvedValue({
+			items: [],
+			has_more: false,
+			purged: false,
+			truncated: false
+		});
+	});
+
+	it('the_job_page_shows_the_label_of_job_state_for_every_status', async () => {
+		for (const [patch, tone] of CASES) {
+			mocks.getJob.mockResolvedValue(job(patch));
+			const state = jobState(patch);
+			const { unmount } = render(JobPage, { jobId: 'j_01' });
+
+			const pill = await screen.findByText(state.label, { selector: '.status' });
+			expect(pill).toHaveClass(tone);
+			if (state.full) expect(pill).toHaveAttribute('title', state.full);
+			else expect(pill).not.toHaveAttribute('title');
+			unmount();
+		}
+	}, 30_000);
 });

@@ -1,3 +1,5 @@
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Agent } from '#lib/api/index.ts';
 import { setLocale } from '#lib/i18n/index.ts';
@@ -162,5 +164,32 @@ describe('other entity states', () => {
 	it('puts Suspended of an organization above No administrator', () => {
 		expect(tenantState({ status: 'suspended', admin_state: 'none' }).key).toBe('suspended');
 		expect(tenantState({ status: 'active', admin_state: 'none' }).tone).toBe('warning');
+	});
+});
+
+function sources(directory: string): string[] {
+	const files: string[] = [];
+	for (const name of readdirSync(directory)) {
+		const path = join(directory, name);
+		if (statSync(path).isDirectory()) files.push(...sources(path));
+		else if (/\.(svelte|ts)$/.test(name) && !/\.test\.ts$/.test(name)) files.push(path);
+	}
+	return files;
+}
+
+/*
+ * UI principle 3.6: a screen does not keep its own table of job labels or tones. The job status is
+ * read only through `jobState`, and the catalog holds the labels of that one table.
+ */
+describe('the one table of job states', () => {
+	it('no screen keeps its own table of job labels or tones', () => {
+		const own: string[] = [];
+		for (const file of sources(join(process.cwd(), 'src'))) {
+			if (file.endsWith(join('lib', 'vocabulary.ts'))) continue;
+			if (file.includes(join('lib', 'i18n'))) continue;
+			const text = readFileSync(file, 'utf8');
+			if (/repositories\.job\.|jobs\.statusFull?\.|jobs\.status\./.test(text)) own.push(file);
+		}
+		expect(own).toEqual([]);
 	});
 });

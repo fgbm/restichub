@@ -9,6 +9,7 @@ import { render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Repositories from './+page.svelte';
+import { jobState } from '#lib/vocabulary.ts';
 
 const HOST = {
 	status: 'active',
@@ -370,6 +371,26 @@ describe('the host of an init and an access test', () => {
 
 		await waitFor(() => expect(mocks.deleteRepository).toHaveBeenCalledWith('r_1'));
 	});
+
+	it('the_job_dialog_shows_the_label_of_job_state_for_every_status', async () => {
+		mocks.listRepositories.mockResolvedValue([repository({ initialized: false })]);
+		mocks.initRepository.mockResolvedValue({ id: 'j_1', status: 'queued' });
+		const dialog = await openAction('Initialize');
+		await userEvent.click(within(dialog).getByRole('button', { name: 'Start' }));
+
+		// A dead-letter job keeps the poll running; an expired job ends it.
+		const cases = [
+			[{ status: 'dead_letter' }, 'status--failed'],
+			[{ status: 'expired' }, 'status--warning']
+		] as const;
+		for (const [patch, tone] of cases) {
+			mocks.getJob.mockResolvedValue({ id: 'j_1', result_code: null, expires_at: null, ...patch });
+			const pill = await within(dialog).findByText(jobState(patch).label, {
+				selector: '.status'
+			});
+			expect(pill).toHaveClass(tone);
+		}
+	}, 20_000);
 
 	it('fr_rp_08 lets an access test of an S3 repository choose another host', async () => {
 		mocks.listRepositories.mockResolvedValue([
