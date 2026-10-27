@@ -240,11 +240,12 @@ pub async fn get_job(
     let now = state.auth().clock.now();
     let found = context
         .tenant_tx(&state, async |tx| {
-            // An overdue job moves to `expired` on read, so a poll sees a terminal status.
-            job_repo::mark_expired(tx, job_id, now).await?;
-            let Some(detail) = restichub_db::queue::get_detail(tx, job_id).await? else {
+            let Some(mut detail) = restichub_db::queue::get_detail(tx, job_id).await? else {
                 return Ok(None);
             };
+            // The read never writes, so it shows the end of the queue lifetime from the rule
+            // that the expiry sweep persists.
+            job_repo::project_expiry(&mut detail.job, now);
             let steps = job_steps::list(tx, job_id).await?;
             let planned = job_steps::list_planned_described(tx, job_id).await?;
             let progress = job_steps::get_progress(tx, job_id).await?;
