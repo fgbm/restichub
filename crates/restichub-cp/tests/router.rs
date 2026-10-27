@@ -1,5 +1,7 @@
 //! Router tests for the control plane HTTP server.
 
+mod common;
+
 use std::time::Duration;
 
 use axum::Router;
@@ -7,7 +9,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use http_body_util::BodyExt;
 use restichub_cp::server::{AppState, router};
-use restichub_db::{Database, DatabaseConfig};
+use restichub_db::{Database, DatabaseConfig, PLATFORM_TENANT_ID};
 use serde_json::Value;
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -123,6 +125,83 @@ async fn a_path_parameter_is_in_its_route_template() -> Result<(), Box<dyn std::
         "the tenant route ignores tenant_id: {names:?}"
     );
     Ok(())
+}
+
+/// The About ResticHub data answers a session without an organization, and the document names the
+/// fields (AC-AU-06, ADR-0054).
+///
+/// The version is the one fact that every role and every mode reads. The schema level is the
+/// Platform Admin's only.
+#[tokio::test]
+async fn adr_0054_about_answers_in_a_session_without_a_tenant() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let app = common::app(db.database());
+
+    // A Platform Admin with no organization: the session tenant is the internal platform tenant.
+    let admin = common::seed_session(
+        db.database(),
+        PLATFORM_TENANT_ID,
+        "about-root",
+        "platform_admin",
+    )
+    .await;
+    let (status, _, body) = common::send(
+        &app,
+        common::request("GET", "/api/v1/about", Some(&admin), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body.get("version").is_some(), "{body}");
+    assert!(body.get("revision").is_some(), "{body}");
+    assert!(
+        body.get("schema_level").and_then(Value::as_u64).is_some(),
+        "{body}"
+    );
+
+    // An account with no membership and no right reads the version and no schema level.
+    let plain = common::seed_memberless_account(&db, "about-plain", "phc").await;
+    let cookie = common::session_cookie(db.database(), PLATFORM_TENANT_ID, plain).await;
+    let (status, _, body) = common::send(
+        &app,
+        common::request("GET", "/api/v1/about", Some(&cookie), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body.get("version").is_some(), "{body}");
+    assert!(body.get("schema_level").is_none(), "{body}");
+
+    // The document names the route, its security and its fields.
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/openapi.json")
+                .body(Body::empty())
+                .expect("cannot build the request"),
+        )
+        .await
+        .expect("the request failed");
+    let document = body_json(response).await.expect("cannot read the document");
+    let operation = &document["paths"]["/api/v1/about"]["get"];
+    assert!(
+        operation.get("security").is_some(),
+        "the route needs the session schemes"
+    );
+    let schema = &document["components"]["schemas"]["AboutResponse"]["properties"];
+    for field in [
+        "version",
+        "prerelease",
+        "revision",
+        "protocol",
+        "agent_protocol",
+        "schema_level",
+    ] {
+        assert!(schema.get(field).is_some(), "the schema has no {field}");
+    }
+
+    db.cleanup().await;
 }
 
 #[tokio::test]

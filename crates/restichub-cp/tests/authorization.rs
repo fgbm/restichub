@@ -245,6 +245,62 @@ async fn ac_au_02_role_operation_matrix() {
     db.cleanup().await;
 }
 
+/// The About ResticHub data is for every role, and the schema level is for the Platform Admin only
+/// (AC-AU-02, ADR-0054).
+///
+/// The version goes to support, so a Viewer reads it. The body holds no secret, no environment
+/// value and no path, so the field set is exactly the visible one.
+#[tokio::test]
+async fn adr_0054_about_is_readable_by_a_viewer_and_hides_the_schema_level() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant_with_key(db.database(), "about").await;
+    let app = app(db.database());
+
+    let viewer = seed_session(db.database(), tenant, "about-viewer", "viewer").await;
+    let (status, _, body) = send(&app, request("GET", "/api/v1/about", Some(&viewer), None)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let mut fields: Vec<&str> = body
+        .as_object()
+        .unwrap_or_else(|| panic!("the body is no object: {body}"))
+        .keys()
+        .map(String::as_str)
+        .collect();
+    fields.sort_unstable();
+    assert_eq!(
+        fields,
+        [
+            "agent_protocol",
+            "prerelease",
+            "protocol",
+            "revision",
+            "version"
+        ],
+        "{body}"
+    );
+    assert_ne!(body["version"].as_str(), Some(""));
+    assert_eq!(
+        body["protocol"]["minor"].as_u64(),
+        Some(u64::from(restichub_proto::PROTOCOL_VERSION_MINOR))
+    );
+    assert_eq!(
+        body["agent_protocol"]["minimum_minor"].as_u64(),
+        Some(u64::from(
+            restichub_proto::version::Version::CURRENT.minimum_minor()
+        ))
+    );
+
+    let operator = seed_session(db.database(), tenant, "about-operator", "operator").await;
+    let (status, _, body) =
+        send(&app, request("GET", "/api/v1/about", Some(&operator), None)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body.get("version").is_some(), "{body}");
+    assert!(body.get("schema_level").is_none(), "{body}");
+
+    db.cleanup().await;
+}
+
 #[tokio::test]
 async fn ac_au_02_platform_tenant_refuses_a_lower_role() {
     let Some(db) = common::test_db().await else {

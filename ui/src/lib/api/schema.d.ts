@@ -26,6 +26,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/about": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Answers the About ResticHub screen with the version of this build. */
+        get: operations["about"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/agents": {
         parameters: {
             query?: never;
@@ -1562,6 +1579,22 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description The version of the control plane and the compatibility facts of the installation. */
+        AboutResponse: {
+            agent_protocol: components["schemas"]["AgentProtocolView"];
+            /** @description True when the version carries a pre-release part, for example `-rc.2`. */
+            prerelease: boolean;
+            protocol: components["schemas"]["ProtocolView"];
+            /** @description The commit of the build, or `dev` for a local build. */
+            revision: string;
+            /**
+             * Format: int64
+             * @description Absent for a role below the Platform Admin, and while the database holds no migration row.
+             */
+            schema_level?: number | null;
+            /** @description The package version with the pre-release part, without the build revision. */
+            version: string;
+        };
         AddMembershipRequest: {
             role: components["schemas"]["Role"];
             tenant_id: string;
@@ -1594,6 +1627,25 @@ export interface components {
             total: number;
             /** @description More agents match than `total` counts. */
             total_capped: boolean;
+        };
+        /**
+         * @description The agent protocol versions that the control plane accepts.
+         *
+         *     The accepted range follows the N-1 rule: the same major version and the minor versions N-1 and N
+         *     work. A newer minor version works too, because the control plane ignores the fields that it does
+         *     not know (FR-PR-09).
+         */
+        AgentProtocolView: {
+            /**
+             * Format: int32
+             * @description The major version of an agent that the control plane accepts.
+             */
+            major: number;
+            /**
+             * Format: int32
+             * @description The oldest accepted agent minor version, N-1.
+             */
+            minimum_minor: number;
         };
         AgentStateCounts: {
             /** Format: int64 */
@@ -3238,6 +3290,13 @@ export interface components {
             /** @description In RFC 3339. */
             updated_at: string;
         };
+        /** @description The wire protocol version that the control plane speaks (FR-PR-09). */
+        ProtocolView: {
+            /** Format: int32 */
+            major: number;
+            /** Format: int32 */
+            minor: number;
+        };
         ReenrollAgentRequest: {
             /**
              * Format: int64
@@ -3968,6 +4027,35 @@ export interface operations {
             };
             /** @description The rate limit is reached. */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    about: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The version and the protocol versions of the control plane. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AboutResponse"];
+                };
+            };
+            /** @description The request is not authenticated. */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };

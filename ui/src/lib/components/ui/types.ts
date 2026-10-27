@@ -46,8 +46,8 @@ export interface TabItem {
 export interface MenuItem {
 	label: string;
 	/**
-	 * Tooltip of the icon button in a row with one or two actions, instead of the label. A disabled
-	 * menu item shows it below the label.
+	 * A short fact below the label, for example the version of the build. A disabled menu item puts
+	 * its reason here.
 	 */
 	hint?: string;
 	icon?: IconName;

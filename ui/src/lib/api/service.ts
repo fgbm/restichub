@@ -42,6 +42,7 @@ import type {
 	ReplaceAgentResponse,
 	EnrollmentTokenCreated,
 	EnrollmentTokenQuery,
+	About,
 	Instance,
 	Job,
 	JobActionRequest,
@@ -120,6 +121,7 @@ export interface ApiService {
 	setup(request: SetupRequest): Promise<Me>;
 
 	instance(): Promise<Instance>;
+	about(): Promise<About>;
 
 	listUsers(): Promise<User[]>;
 	getUser(id: string): Promise<User>;
@@ -321,6 +323,7 @@ const httpService: ApiService = {
 	setup: (request) => api.post<Me>(endpoints.setup.create, request),
 
 	instance: () => api.get<Instance>(endpoints.instance),
+	about: () => api.get<About>(endpoints.about),
 
 	listUsers: () =>
 		api.get<UserListResponse>(endpoints.users.list).then((response) => response.items),

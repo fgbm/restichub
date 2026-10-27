@@ -19,6 +19,7 @@ export const endpoints = {
 		create: '/setup'
 	},
 	instance: '/instance',
+	about: '/about',
 	users: {
 		list: '/users',
 		create: '/users',

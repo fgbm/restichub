@@ -138,6 +138,12 @@ pub const ROUTES: &[Route] = &[
     },
     Route {
         method: "get",
+        path: "/api/v1/about",
+        access: Access::Protected(Operation::AboutRead),
+        handler: || routes!(crate::about::about),
+    },
+    Route {
+        method: "get",
         path: "/api/v1/audit",
         access: Access::Protected(Operation::AuditRead),
         handler: || routes!(crate::audit::list_tenant_audit),

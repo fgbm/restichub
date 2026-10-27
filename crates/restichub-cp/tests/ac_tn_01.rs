@@ -97,6 +97,7 @@ const FIXTURES: &[(&str, Fixture)] = &[
     ("/api/v1/setup", Fixture::Exempt),
     ("/api/v1/setup/status", Fixture::Exempt),
     ("/api/v1/instance", Fixture::Exempt),
+    ("/api/v1/about", Fixture::Exempt),
     ("/agent/v1/enroll", Fixture::Exempt),
     ("/api/v1/audit", Fixture::Collection),
     ("/api/v1/platform/audit", Fixture::Platform),

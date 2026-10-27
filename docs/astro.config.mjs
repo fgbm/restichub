@@ -137,6 +137,7 @@ export default defineConfig({
 					'reference/status-codes',
 					'reference/agent-version-compatibility',
 					'reference/ui-tour',
+					'reference/version-and-support',
 					'reference/glossary',
 				]),
 				{

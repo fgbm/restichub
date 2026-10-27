@@ -28,4 +28,16 @@ describe('DropdownMenu', () => {
 		await user.click(item);
 		expect(onSelect).toHaveBeenCalledOnce();
 	});
+
+	it('shows a hint below the label and keeps the name of the item', async () => {
+		const user = userEvent.setup();
+		const items: MenuItem[] = [
+			{ label: 'About ResticHub', hint: '0.2.0-rc.2', onSelect: () => {} }
+		];
+		render(DropdownMenu, { props: { items, children: trigger('Account') } });
+
+		await user.click(screen.getByRole('button', { name: 'Account' }));
+		const hint = await screen.findByText('0.2.0-rc.2');
+		expect(hint.closest('[role="menuitem"]')).toHaveTextContent('About ResticHub');
+	});
 });

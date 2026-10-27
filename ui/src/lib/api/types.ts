@@ -15,6 +15,8 @@ export type TenancyMode = components['schemas']['TenancyMode'];
 
 export type Instance = components['schemas']['InstanceResponse'];
 
+export type About = components['schemas']['AboutResponse'];
+
 /**
  * The roles that a new user or API token may hold.
  *

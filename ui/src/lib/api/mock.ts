@@ -21,6 +21,7 @@ import {
 	docsTenants
 } from './mock-docs';
 import type {
+	About,
 	Agent,
 	AgentListResponse,
 	AgentQuery,
@@ -1185,6 +1186,17 @@ export class MockApiService {
 
 	async instance(): Promise<Instance> {
 		return { tenancy_mode: 'multi', setup_required: !this.setupDone };
+	}
+
+	async about(): Promise<About> {
+		return {
+			version: '0.1.0-rc.1',
+			prerelease: true,
+			revision: 'dev',
+			protocol: { major: 1, minor: 1 },
+			agent_protocol: { major: 1, minimum_minor: 0 },
+			schema_level: 60
+		};
 	}
 
 	async setup(_request: SetupRequest): Promise<Me> {

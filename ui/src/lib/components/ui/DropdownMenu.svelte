@@ -96,14 +96,14 @@
 							<Primitive.Separator class="rh-menu__separator" />
 						{/if}
 						<Primitive.Item
-							class="rh-menu__item{item.tone === 'danger'
-								? ' rh-menu__item--danger'
-								: ''}{item.disabled && item.hint ? ' rh-menu__item--hint' : ''}"
+							class="rh-menu__item{item.tone === 'danger' ? ' rh-menu__item--danger' : ''}{item.hint
+								? ' rh-menu__item--hint'
+								: ''}"
 							disabled={item.disabled}
 							onSelect={item.onSelect}
 						>
 							{#if item.icon}<Icon name={item.icon} />{/if}
-							{#if item.disabled && item.hint}
+							{#if item.hint}
 								<span class="rh-menu__text">
 									{item.label}
 									<small class="rh-menu__hint">{item.hint}</small>
@@ -199,7 +199,7 @@
 		opacity: 0.5;
 	}
 
-	/* A disabled item says why below its label, since a disabled item gets no tooltip. */
+	/* An item with a hint takes two lines: the label and the short fact below it. */
 	:global(.rh-menu__item--hint) {
 		align-items: flex-start;
 		height: auto;

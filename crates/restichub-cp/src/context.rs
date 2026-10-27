@@ -39,6 +39,7 @@ pub enum Operation {
     PlatformUsersWrite,
     PlatformSigningKeysWrite,
     AuthMe,
+    AboutRead,
     AuthSignOut,
     AuthPasswordChange,
     AuthTenants,
@@ -125,14 +126,15 @@ impl Operation {
         )
     }
 
-    /// Returns true for the account operations of an authenticated session.
+    /// Returns true for the operations of an account, without the data of an organization.
     ///
-    /// A session with no organization runs in the internal platform tenant. Only these operations
-    /// pass there (ADR-0029).
+    /// A session with no organization runs in the internal platform tenant. Only the account
+    /// operations and the About data pass there (ADR-0029).
     pub fn is_auth(self) -> bool {
         matches!(
             self,
             Self::AuthMe
+                | Self::AboutRead
                 | Self::AuthSignOut
                 | Self::AuthPasswordChange
                 | Self::AuthTenants
@@ -142,7 +144,7 @@ impl Operation {
 
     /// Every operation. A new variant stops the build in `the_platform_tenant_allow_list` and in
     /// [`crate::context::Operation::classify`].
-    pub const ALL: [Operation; 41] = [
+    pub const ALL: [Operation; 42] = [
         Operation::AuditRead,
         Operation::PlatformAuditRead,
         Operation::PlatformTenantsRead,
@@ -151,6 +153,7 @@ impl Operation {
         Operation::PlatformUsersWrite,
         Operation::PlatformSigningKeysWrite,
         Operation::AuthMe,
+        Operation::AboutRead,
         Operation::AuthSignOut,
         Operation::AuthPasswordChange,
         Operation::AuthTenants,
@@ -191,6 +194,7 @@ impl Operation {
     pub fn classify(self) -> OperationClass {
         match self {
             Operation::AuthMe
+            | Operation::AboutRead
             | Operation::AuthSignOut
             | Operation::AuthPasswordChange
             | Operation::AuthTenants
@@ -257,6 +261,7 @@ pub fn minimum_role(operation: Operation) -> Role {
         Operation::PlatformUsersWrite => Role::PlatformAdmin,
         Operation::PlatformSigningKeysWrite => Role::PlatformAdmin,
         Operation::AuthMe => Role::Viewer,
+        Operation::AboutRead => Role::Viewer,
         Operation::AuthSignOut => Role::Viewer,
         Operation::AuthPasswordChange => Role::Viewer,
         Operation::AuthTenants => Role::Viewer,
