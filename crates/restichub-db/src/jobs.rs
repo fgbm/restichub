@@ -502,15 +502,69 @@ pub async fn mark_expired(
     Ok(end_overdue(tx, now, Some(id)).await? == 1)
 }
 
+/// What the sweep does to the lifecycle of a job that outlived its queue time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Expiry {
+    /// The queue lifetime passed before the control plane sent the job (FR-SC-07).
+    Expired,
+    /// The control plane sent the job, the lease passed and the agent never acknowledged it.
+    Unacknowledged,
+}
+
+/// The rule of the expiry of one job: the end that [`expire_overdue`] writes at `now`, or `None`
+/// while the job keeps its lifecycle.
+///
+/// A read whose auxiliary expiry write reached no write shows this end from memory by
+/// [`project_expiry`]. A `running` job never expires here: the agent may still run it, and only
+/// the timeout and the stale lock recovery end it.
+pub fn expiry_at(job: &Job, now: OffsetDateTime) -> Option<Expiry> {
+    if job.expires_at? > now {
+        return None;
+    }
+    match job.status {
+        JobStatus::Queued => Some(Expiry::Expired),
+        JobStatus::Sent if job.lease_until.is_none_or(|lease_until| lease_until <= now) => {
+            Some(Expiry::Unacknowledged)
+        }
+        _ => None,
+    }
+}
+
+/// The result message of a job that the control plane sent and that the agent never acknowledged.
+/// The expiry writes the same value in its statement.
+pub const UNACKNOWLEDGED_EXPIRED: &str = "unacknowledged_expired";
+
+/// Sets the fields that a response shows of `job` to the state that [`expire_overdue`] would write
+/// for it at `now`.
+///
+/// The control plane answers a read on a database that the application role may only read, where
+/// the expiry cannot write, and the answer must still hold the end of the queue lifetime.
+pub fn project_expiry(job: &mut Job, now: OffsetDateTime) -> Option<Expiry> {
+    let expiry = expiry_at(job, now)?;
+    match expiry {
+        Expiry::Expired => {
+            job.status = JobStatus::Expired;
+            job.finished_at = Some(now);
+        }
+        Expiry::Unacknowledged => {
+            job.status = JobStatus::Failed;
+            job.result_code = Some(JobResultCode::Failed);
+            job.result_message = Some(UNACKNOWLEDGED_EXPIRED.to_owned());
+            job.finished_at = Some(now);
+        }
+    }
+    Some(expiry)
+}
+
 /// Ends every overdue job of the tenant.
 ///
-/// The expiry is the queue lifetime. It moves a `queued` job to `expired`. A `sent` job whose lease
-/// passed too is different: the agent may have run it, and the job that the agent already finished
-/// never reaches the control plane. It fails with the reason `unacknowledged_expired` and marks a
-/// possible stale lock, so the repository stays blocked until the stale lock recovery clears it
-/// (FR-SC-06). A `running` job never expires here: the agent may still run it, and only the
-/// timeout and the stale lock recovery end it. The periodic sweep calls it. The update is
-/// idempotent, so two control plane instances both run it without a conflict.
+/// The expiry is the queue lifetime, as [`expiry_at`] states it. It moves a `queued` job to
+/// `expired`. A `sent` job whose lease passed too is different: the agent may have run it, and
+/// the job that the agent already finished never reaches the control plane. It fails with the
+/// reason `unacknowledged_expired` and marks a possible stale lock, so the repository stays
+/// blocked until the stale lock recovery clears it (FR-SC-06). A `running` job never expires
+/// here. The periodic sweep calls it. The update is idempotent, so two control plane instances
+/// both run it without a conflict.
 pub async fn expire_overdue(tx: &mut TenantTx<'_>, now: OffsetDateTime) -> Result<u64, DbError> {
     end_overdue(tx, now, None).await
 }
