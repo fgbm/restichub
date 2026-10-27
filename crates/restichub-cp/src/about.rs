@@ -1,9 +1,9 @@
 //! The About ResticHub data (`GET /api/v1/about`).
 //!
 //! Every authenticated role reads the version, the revision and the protocol versions of the
-//! control plane, also in the platform mode and in a session without an organization. An operator
-//! gives these facts to support. The tenancy mode and the database schema level go to the Platform
-//! Admin only (ADR-0029). The body holds no secret, no environment value and no path.
+//! control plane, also in the platform mode and in a session without an organization. A person
+//! gives these facts to the support team. The tenancy mode and the database schema level go to
+//! the Platform Admin only (ADR-0029). The body holds no secret, no environment value and no path.
 
 use axum::Json;
 use axum::extract::State;

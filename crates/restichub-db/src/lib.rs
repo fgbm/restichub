@@ -432,8 +432,8 @@ impl Database {
 
     /// The version of the last successful migration, or 0 while no migration ran.
     ///
-    /// The runtime role reads `_sqlx_migrations` (migration 0007). The About screen shows the
-    /// value to support (FR-AU-01).
+    /// The runtime role reads `_sqlx_migrations` (migration 0007). Only the About screen of the
+    /// Platform Admin shows the value (ADR-0029).
     pub async fn schema_level(&self) -> Result<i64, DbError> {
         let applied: Result<Option<(i64,)>, sqlx::Error> =
             sqlx::query_as::<_, (i64,)>("SELECT max(version) FROM _sqlx_migrations WHERE success")
