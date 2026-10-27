@@ -13,7 +13,7 @@
 //! returns the next fire times in UTC, for the user interface preview in the plan time zone.
 
 use axum::Json;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use restichub_db::agents::{self as agents_repo};
 use restichub_db::audit::{AuditAction, diff};
@@ -26,6 +26,7 @@ use time::Duration;
 use utoipa::{IntoParams, ToSchema};
 
 use crate::alerts::rpo::{self, RpoState};
+use crate::api_path::ApiPath;
 use crate::context::{Operation, RequestContext};
 use crate::error::{ApiError, map_write_error};
 use crate::json::ApiJson;
@@ -307,7 +308,7 @@ pub async fn list_plans(
 pub async fn get_plan(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
 ) -> Result<Json<PlanView>, ApiError> {
     context.authorize(Operation::PlansRead)?;
     let plan_id = parse_plan_id(&id)?;
@@ -487,7 +488,7 @@ pub async fn create_plan(
 pub async fn update_plan(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
     ApiJson(body): ApiJson<UpdatePlanRequest>,
 ) -> Result<Json<PlanResponse>, ApiError> {
     context.authorize(Operation::PlansWrite)?;
@@ -624,7 +625,7 @@ pub async fn update_plan(
 pub async fn delete_plan(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
 ) -> Result<StatusCode, ApiError> {
     context.authorize(Operation::PlansWrite)?;
     let plan_id = parse_plan_id(&id)?;
@@ -673,7 +674,7 @@ pub async fn delete_plan(
 pub async fn next_runs(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
     Query(query): Query<NextRunsQuery>,
 ) -> Result<Json<NextRunsResponse>, ApiError> {
     context.authorize(Operation::PlansRead)?;

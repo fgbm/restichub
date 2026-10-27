@@ -9,7 +9,7 @@
 //! tenant. A Platform Admin manages the account itself through the platform routes.
 
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::http::StatusCode;
 use restichub_db::audit::{Actor, AuditAction, AuditEvent, diff};
 use restichub_db::users::{AccountField, WriteStatus};
@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
+use crate::api_path::ApiPath;
 use crate::context::{Operation, RequestContext, allowed_role, ensure_target_not_above_actor};
 use crate::error::{ApiError, ErrorCode};
 use crate::jobs::format_time;
@@ -189,7 +190,7 @@ pub async fn create_user(
 pub async fn get_user(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
 ) -> Result<Json<UserView>, ApiError> {
     context.authorize(Operation::UsersRead)?;
     let user_id = parse_uuid(&id)?;
@@ -230,7 +231,7 @@ pub async fn get_user(
 pub async fn update_user(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
     ApiJson(body): ApiJson<UpdateUserRequest>,
 ) -> Result<Json<UserView>, ApiError> {
     context.authorize(Operation::UsersWrite)?;
@@ -338,7 +339,7 @@ pub async fn update_user(
 pub async fn delete_user(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
 ) -> Result<StatusCode, ApiError> {
     context.authorize(Operation::UsersWrite)?;
     let user_id = parse_uuid(&id)?;
@@ -397,7 +398,7 @@ pub async fn delete_user(
 pub async fn reset_password(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
     ApiJson(body): ApiJson<ResetPasswordRequest>,
 ) -> Result<StatusCode, ApiError> {
     context.authorize(Operation::UsersWrite)?;

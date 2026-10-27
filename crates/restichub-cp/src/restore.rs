@@ -13,7 +13,7 @@
 //! and starts no job (AC-RS-02). A repository of another tenant gives HTTP 404 (AC-TN-01).
 
 use axum::Json;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use restichub_db::agents as agents_repo;
 use restichub_db::audit::{AuditAction, diff};
@@ -33,6 +33,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use utoipa::{IntoParams, ToSchema};
 
+use crate::api_path::ApiPath;
 use crate::browse::{
     BrowseState, NodeItem, SnapshotItem, StoredPage, StoredSnapshots, error_code_of, state_of,
 };
@@ -654,7 +655,7 @@ fn ls_view(
 pub async fn start_snapshots(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
     ApiJson(body): ApiJson<SnapshotsQuery>,
 ) -> Result<(StatusCode, Json<SnapshotsView>), ApiError> {
     context.authorize(Operation::JobsWrite)?;
@@ -706,7 +707,7 @@ pub async fn start_snapshots(
 pub async fn get_snapshots(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
     Query(params): Query<SnapshotsParams>,
 ) -> Result<Json<SnapshotsView>, ApiError> {
     context.authorize(Operation::JobsRead)?;
@@ -789,7 +790,7 @@ pub async fn get_snapshots(
 pub async fn start_ls(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
     ApiJson(body): ApiJson<LsQueryRequest>,
 ) -> Result<(StatusCode, Json<LsView>), ApiError> {
     context.authorize(Operation::JobsWrite)?;
@@ -836,7 +837,7 @@ pub async fn start_ls(
 pub async fn get_ls(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
     Query(params): Query<LsParams>,
 ) -> Result<Json<LsView>, ApiError> {
     context.authorize(Operation::JobsWrite)?;
@@ -889,7 +890,7 @@ pub async fn get_ls(
 pub async fn start_restore(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
     ApiJson(body): ApiJson<RestoreBody>,
 ) -> Result<(StatusCode, Json<JobView>), ApiError> {
     context.authorize(Operation::JobsWrite)?;

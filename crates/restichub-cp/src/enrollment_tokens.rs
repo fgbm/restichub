@@ -8,7 +8,7 @@
 //! API tokens of ADR-0023. The value appears once, at the create. The token is never logged.
 
 use axum::Json;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use restichub_db::audit::{AuditAction, diff};
 use restichub_db::enrollment_tokens as repo;
@@ -19,6 +19,7 @@ use time::format_description::well_known::Rfc3339;
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
+use crate::api_path::ApiPath;
 use crate::context::{Operation, RequestContext};
 use crate::error::ApiError;
 use crate::json::ApiJson;
@@ -282,7 +283,7 @@ pub async fn list_enrollment_tokens(
 pub async fn get_enrollment_token(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
 ) -> Result<Json<EnrollmentTokenView>, ApiError> {
     context.authorize(Operation::EnrollmentTokensRead)?;
     let token_id = parse_token_id(&id)?;
@@ -314,7 +315,7 @@ pub async fn get_enrollment_token(
 pub async fn revoke_enrollment_token(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
 ) -> Result<StatusCode, ApiError> {
     context.authorize(Operation::EnrollmentTokensWrite)?;
     let token_id = parse_token_id(&id)?;

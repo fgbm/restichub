@@ -10,7 +10,7 @@
 //! rows stay. A later retention task removes the rows of a deleted tenant.
 
 use axum::Json;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use restichub_db::audit::{AuditAction, AuditEvent};
 use restichub_db::tenants as repo;
@@ -22,6 +22,7 @@ use time::OffsetDateTime;
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
+use crate::api_path::ApiPath;
 use crate::context::{Operation, RequestContext};
 use crate::error::{ApiError, ErrorCode, map_write_error};
 use crate::json::ApiJson;
@@ -158,7 +159,7 @@ pub async fn create_tenant(
 pub async fn get_tenant(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
 ) -> Result<Json<PlatformTenantView>, ApiError> {
     context.authorize(Operation::PlatformTenantsRead)?;
     let tenant_id = parse_tenant_id(&id)?;
@@ -194,7 +195,7 @@ pub async fn get_tenant(
 pub async fn suspend_tenant(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
 ) -> Result<StatusCode, ApiError> {
     context.authorize(Operation::PlatformTenantsWrite)?;
     let tenant_id = parse_tenant_id(&id)?;
@@ -232,7 +233,7 @@ pub async fn suspend_tenant(
 pub async fn resume_tenant(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
 ) -> Result<StatusCode, ApiError> {
     context.authorize(Operation::PlatformTenantsWrite)?;
     let tenant_id = parse_tenant_id(&id)?;
@@ -268,7 +269,7 @@ pub async fn resume_tenant(
 pub async fn delete_tenant(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
 ) -> Result<StatusCode, ApiError> {
     context.authorize(Operation::PlatformTenantsWrite)?;
     let tenant_id = parse_tenant_id(&id)?;

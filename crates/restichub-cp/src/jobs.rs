@@ -30,7 +30,7 @@
 //! gives HTTP 409. An overdue job moves to `expired` on read and in a periodic sweep.
 
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::http::StatusCode;
 use restichub_compiler::ValidatedJob;
 use restichub_db::audit::{AuditAction, diff};
@@ -54,6 +54,7 @@ use time::OffsetDateTime;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
+use crate::api_path::ApiPath;
 use crate::context::{Operation, RequestContext};
 use crate::delivery::{DeliveryError, SecretReader};
 use crate::error::{ApiError, map_write_error};
@@ -207,7 +208,7 @@ impl From<&Job> for JobView {
 pub async fn init_repository(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
     ApiJson(body): ApiJson<JobActionRequest>,
 ) -> Result<(StatusCode, Json<JobView>), ApiError> {
     context.authorize(Operation::RepositoriesWrite)?;
@@ -241,7 +242,7 @@ pub async fn init_repository(
 pub async fn test_access_repository(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
     ApiJson(body): ApiJson<JobActionRequest>,
 ) -> Result<(StatusCode, Json<JobView>), ApiError> {
     context.authorize(Operation::RepositoriesWrite)?;

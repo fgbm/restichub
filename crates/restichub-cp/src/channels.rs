@@ -9,7 +9,7 @@
 //! operation with HTTP 403.
 
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::http::StatusCode;
 use restichub_db::audit::{AuditAction, REDACTED, diff};
 use restichub_db::channels::{self as repo, Channel, ChannelKind, MAX_CHANNELS};
@@ -24,6 +24,7 @@ use crate::alerts::deliver::send_message;
 use crate::alerts::message::{Message, MessageEvent};
 use crate::alerts::secret;
 use crate::alerts::ssrf::{UrlError, parse_target};
+use crate::api_path::ApiPath;
 use crate::context::{Operation, RequestContext};
 use crate::error::{ApiError, map_write_error};
 use crate::json::ApiJson;
@@ -174,7 +175,7 @@ pub async fn list_channels(
 pub async fn get_channel(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
 ) -> Result<Json<ChannelView>, ApiError> {
     context.authorize(Operation::ChannelsRead)?;
     let channel_id = parse_channel_id(&id)?;
@@ -311,7 +312,7 @@ pub async fn create_channel(
 pub async fn update_channel(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
     ApiJson(body): ApiJson<UpdateChannelRequest>,
 ) -> Result<Json<ChannelResponse>, ApiError> {
     context.authorize(Operation::ChannelsWrite)?;
@@ -443,7 +444,7 @@ pub async fn update_channel(
 pub async fn delete_channel(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
 ) -> Result<StatusCode, ApiError> {
     context.authorize(Operation::ChannelsWrite)?;
     let channel_id = parse_channel_id(&id)?;
@@ -494,7 +495,7 @@ pub async fn delete_channel(
 pub async fn test_channel(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
 ) -> Result<Json<TestResponse>, ApiError> {
     context.authorize(Operation::ChannelsWrite)?;
     let channel_id = parse_channel_id(&id)?;

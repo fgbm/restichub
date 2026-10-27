@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 
 use axum::Json;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Query, State};
 use restichub_db::job_logs;
 use restichub_db::job_steps::{self, JobProgress, JobStep, StepOutput};
 use restichub_db::jobs as job_repo;
@@ -18,6 +18,7 @@ use restichub_db::{
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
+use crate::api_path::ApiPath;
 use crate::context::{Operation, RequestContext};
 use crate::error::ApiError;
 use crate::jobs::{JobView, format_time, parse_job_id};
@@ -233,7 +234,7 @@ pub struct LimitsView {
 pub async fn get_job(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
 ) -> Result<Json<JobDetailView>, ApiError> {
     context.authorize(Operation::JobsRead)?;
     let job_id = parse_job_id(&id)?;
@@ -383,7 +384,7 @@ pub struct LogPageView {
 pub async fn get_job_logs(
     State(state): State<AppState>,
     context: RequestContext,
-    Path(id): Path<String>,
+    ApiPath(id): ApiPath<String>,
     Query(query): Query<LogQuery>,
 ) -> Result<Json<LogPageView>, ApiError> {
     context.authorize(Operation::JobsRead)?;
