@@ -499,3 +499,169 @@ async fn ac_au_02_the_job_endpoints_need_a_credential_and_the_viewer_role() {
     }
     env.db.cleanup().await;
 }
+
+/// The job that runs a `before` script and ends, with the step results that the control plane
+/// stores. The script writes no line of its own.
+async fn job_with_a_silent_script(env: &Env, agent: &mut FakeAgent) -> (Uuid, String) {
+    let repository = env.create_repository(agent.id, "pw").await;
+    let profile = env
+        .create_profile(serde_json::json!({
+            "scripts": [{
+                "name": "dump",
+                "interpreter": "bash",
+                "phase": "before",
+                "body": "true",
+                "failure_policy": "abort_backup",
+                "env": [],
+            }],
+        }))
+        .await;
+    let plan = env.create_plan(profile, agent.id, repository).await;
+    let job = env.run_plan(plan).await;
+    env.pass().await;
+    let id = decode_job_id(&agent.job().await);
+    agent.start(env, &id).await;
+    let detail = env.job(job).await;
+    assert_eq!(
+        detail["planned_steps"],
+        serde_json::json!(["script-0", "backup"]),
+        "{detail}"
+    );
+    (job, id)
+}
+
+/// The result of the script step, with the timing that the host reported.
+fn script_result(job_id: &str, env: &Env) -> StepResult {
+    let started = env.now();
+    let stamp = |at: time::OffsetDateTime| prost_types::Timestamp {
+        seconds: at.unix_timestamp(),
+        nanos: 0,
+    };
+    StepResult {
+        job_id: job_id.to_owned(),
+        step_id: "script-0".to_owned(),
+        status: StepStatus::Success as i32,
+        exit_code: 0,
+        started_at: Some(stamp(started)),
+        finished_at: Some(stamp(started + time::Duration::seconds(2))),
+        ..StepResult::default()
+    }
+}
+
+/// A `before` script that writes no line keeps its own result row after the job ends: the status,
+/// the start, the end and the exit code (FR-PR-07, AC-PR-07, FR-MN-02, FR-AG-09).
+#[tokio::test]
+async fn fr_pr_07_a_step_result_with_no_log_line_is_stored_after_the_job_ends() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let mut agent = env
+        .connect_agent_trusting(
+            "silent-script-agent",
+            true,
+            vec![restichub_proto::agent::v1::ScriptInterpreter::Bash],
+        )
+        .await;
+    let (job, id) = job_with_a_silent_script(&env, &mut agent).await;
+
+    // The script writes no line, so only its result reaches the control plane.
+    agent
+        .tx
+        .send(message(agent_message::Payload::StepResult(script_result(
+            &id, &env,
+        ))))
+        .await
+        .expect("cannot send the step result");
+    let uri = format!("/api/v1/jobs/{job}");
+    eventually(|| async {
+        get(&env, &env.viewer, &uri).await.1["steps"]
+            .as_array()
+            .map(|steps| steps.iter().any(|step| step["step_id"] == "script-0"))
+            == Some(true)
+    })
+    .await;
+
+    agent.finish(&env, &id).await;
+    let detail = env.job(job).await;
+    let script = detail["steps"]
+        .as_array()
+        .expect("steps")
+        .iter()
+        .find(|step| step["step_id"] == "script-0")
+        .expect("the result of the script must be stored");
+    assert_eq!(script["status"], "success");
+    assert_eq!(script["exit_code"], 0);
+    assert!(script["started_at"].is_string(), "the start must be kept");
+    assert!(script["finished_at"].is_string(), "the end must be kept");
+    env.db.cleanup().await;
+}
+
+/// A step result that the stream lost still has its row after the job ends, because the job result
+/// repeats the step results (FR-PR-07, AC-PR-07, FR-MN-02, FR-AG-09).
+#[tokio::test]
+async fn fr_pr_07_a_lost_step_result_comes_back_in_the_job_result() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let mut agent = env
+        .connect_agent_trusting(
+            "lost-result-agent",
+            true,
+            vec![restichub_proto::agent::v1::ScriptInterpreter::Bash],
+        )
+        .await;
+    let (job, id) = job_with_a_silent_script(&env, &mut agent).await;
+    let script = script_result(&id, &env);
+
+    // The result of the script never arrives on its own; only the backup reports.
+    agent
+        .tx
+        .send(message(agent_message::Payload::StepResult(StepResult {
+            job_id: id.clone(),
+            step_id: "backup".to_owned(),
+            status: StepStatus::Success as i32,
+            exit_code: 0,
+            output: Some(step_result::Output::BackupSummary(backup_summary())),
+            ..StepResult::default()
+        })))
+        .await
+        .expect("cannot send the step result");
+    let uri = format!("/api/v1/jobs/{job}");
+    eventually(|| async {
+        get(&env, &env.viewer, &uri).await.1["steps"]
+            .as_array()
+            .map(Vec::len)
+            == Some(1)
+    })
+    .await;
+
+    // The agent ends the job and repeats its step results in the job result.
+    agent
+        .tx
+        .send(message(agent_message::Payload::JobResult(JobResult {
+            job_id: id.clone(),
+            status: StepStatus::Success as i32,
+            steps_total: 2,
+            steps_succeeded: 2,
+            outcome: JobStatus::Succeeded as i32,
+            steps: vec![script],
+            ..JobResult::default()
+        })))
+        .await
+        .expect("cannot send the result");
+    eventually(|| async { env.job_status(job).await == "succeeded" }).await;
+
+    let detail = env.job(job).await;
+    let steps = detail["steps"].as_array().expect("steps");
+    assert_eq!(steps.len(), 2, "{detail}");
+    let script = steps
+        .iter()
+        .find(|step| step["step_id"] == "script-0")
+        .expect("the job result must bring the result of the script");
+    assert_eq!(script["status"], "success");
+    assert_eq!(script["exit_code"], 0);
+    assert!(script["finished_at"].is_string(), "the end must be kept");
+    env.db.cleanup().await;
+}
