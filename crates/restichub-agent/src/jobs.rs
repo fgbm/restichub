@@ -1058,11 +1058,12 @@ impl Jobs {
         // The result follows the last lines of the log. The wait is bounded and holds no lock of
         // the stream task, so a cancel and the pings do not wait for it.
         self.wait_log_sent(&job_id).await;
-        // The step results and the log went out while the job ran. The stored copy goes out at
-        // every connection until the entry expires (ADR-0020, FR-AG-12).
+        // The log lines went out while the job ran, and the spool keeps their order, so the tail
+        // would only repeat them out of order (FR-LG-07). The step rows travel again with this
+        // message, so a live result that the stream lost still leaves its row when the job ends:
+        // a running job has no stored result to repeat (FR-PR-07, FR-MN-02).
         let _ = self
             .send(job_result_message(JobResult {
-                steps: Vec::new(),
                 log_tail: Vec::new(),
                 ..result
             }))

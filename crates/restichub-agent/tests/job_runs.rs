@@ -519,6 +519,47 @@ async fn ac_sc_06_an_unknown_exit_code_marks_a_stale_lock_on_windows_only() {
     );
 }
 
+/// FR-PR-07, FR-MN-02: the job result repeats the rows of the steps, so a live step result that
+/// the stream lost still has its row after the job ends. Only the row travels: the control plane
+/// writes it with `job_steps::upsert`, so a dropped output and a step side effect do not come back.
+#[tokio::test(flavor = "multi_thread")]
+async fn fr_pr_07_the_job_result_repeats_the_step_rows() {
+    let dir = config_dir("job-runs-repeat");
+    let path = repository("job-runs-repeat-repo");
+    common::script_exit_codes(&path, 0, 0);
+
+    let jobs = common::program_jobs(&dir);
+    let (tx, mut rx) = mpsc::channel(32);
+    jobs.attach(&tx);
+    jobs.greeted(false);
+    let job = job(
+        "job-repeat",
+        vec![access("repo-1", &path)],
+        vec![test_access_step("repo-1")],
+    );
+
+    jobs.handle(signed(&job), &ring(), AGENT, TENANT).await;
+    let (steps, result) = collect_job(&mut rx).await;
+    assert_eq!(result.outcome, JobStatus::Succeeded as i32);
+    assert_eq!(steps.len(), 1, "the live step result goes out on its own");
+    assert_eq!(
+        result.steps.len(),
+        1,
+        "the job result repeats the step rows"
+    );
+    assert!(
+        result.log_tail.is_empty(),
+        "the log tail stays out of the live result, because the spool keeps its order (FR-LG-07)"
+    );
+    assert_eq!(result.steps[0].step_id, steps[0].step_id);
+    assert_eq!(result.steps[0].status, steps[0].status);
+    assert_eq!(result.steps[0].exit_code, steps[0].exit_code);
+    assert_eq!(result.steps[0].started_at, steps[0].started_at);
+    assert_eq!(result.steps[0].finished_at, steps[0].finished_at);
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&path);
+}
+
 /// Reads the messages until the job result arrives and returns the step results before it.
 async fn collect_job(rx: &mut mpsc::Receiver<AgentMessage>) -> (Vec<StepResult>, JobResult) {
     let mut steps = Vec::new();

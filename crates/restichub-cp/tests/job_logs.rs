@@ -9,8 +9,9 @@ mod queue_support;
 use axum::http::StatusCode;
 use restichub_cp::log_store::{DatabaseLogStore, sweep};
 use restichub_proto::agent::v1::{
-    AgentMessage, BackupSummary, ErrorDetail, JobResult, JobStatus, LogChunk, LogStream,
-    StepProgress, StepResult, StepStatus, agent_message, step_result,
+    AgentMessage, BackupSummary, ErrorDetail, ForgetGroup, ForgetResult, ForgetSnapshot, JobResult,
+    JobStatus, LogChunk, LogStream, StepProgress, StepResult, StepStatus, agent_message,
+    step_result,
 };
 use serde_json::Value;
 use uuid::Uuid;
@@ -497,5 +498,272 @@ async fn ac_au_02_the_job_endpoints_need_a_credential_and_the_viewer_role() {
             assert_eq!(status, StatusCode::OK, "{uri}");
         }
     }
+    env.db.cleanup().await;
+}
+
+/// The job that runs a `before` script and ends, with the step results that the control plane
+/// stores. The script writes no line of its own.
+async fn job_with_a_silent_script(env: &Env, agent: &mut FakeAgent) -> (Uuid, String) {
+    let repository = env.create_repository(agent.id, "pw").await;
+    let profile = env
+        .create_profile(serde_json::json!({
+            "scripts": [{
+                "name": "dump",
+                "interpreter": "bash",
+                "phase": "before",
+                "body": "true",
+                "failure_policy": "abort_backup",
+                "env": [],
+            }],
+        }))
+        .await;
+    let plan = env.create_plan(profile, agent.id, repository).await;
+    let job = env.run_plan(plan).await;
+    env.pass().await;
+    let id = decode_job_id(&agent.job().await);
+    agent.start(env, &id).await;
+    let detail = env.job(job).await;
+    assert_eq!(
+        detail["planned_steps"],
+        serde_json::json!(["script-0", "backup"]),
+        "{detail}"
+    );
+    (job, id)
+}
+
+/// The result of the script step, with the timing that the host reported.
+fn script_result(job_id: &str, env: &Env) -> StepResult {
+    let started = env.now();
+    let stamp = |at: time::OffsetDateTime| prost_types::Timestamp {
+        seconds: at.unix_timestamp(),
+        nanos: 0,
+    };
+    StepResult {
+        job_id: job_id.to_owned(),
+        step_id: "script-0".to_owned(),
+        status: StepStatus::Success as i32,
+        exit_code: 0,
+        started_at: Some(stamp(started)),
+        finished_at: Some(stamp(started + time::Duration::seconds(2))),
+        ..StepResult::default()
+    }
+}
+
+/// A `before` script that writes no line keeps its own result row after the job ends: the status,
+/// the start, the end and the exit code. The agent ends the job with the step result again in the
+/// job result, and the row stays one (FR-PR-07, FR-MN-02).
+#[tokio::test]
+async fn fr_pr_07_a_step_result_with_no_log_line_is_stored_after_the_job_ends() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let mut agent = env
+        .connect_agent_trusting(
+            "silent-script-agent",
+            true,
+            vec![restichub_proto::agent::v1::ScriptInterpreter::Bash],
+        )
+        .await;
+    let (job, id) = job_with_a_silent_script(&env, &mut agent).await;
+
+    // The script writes no line, so only its result reaches the control plane.
+    agent
+        .tx
+        .send(message(agent_message::Payload::StepResult(script_result(
+            &id, &env,
+        ))))
+        .await
+        .expect("cannot send the step result");
+    let uri = format!("/api/v1/jobs/{job}");
+    eventually(|| async {
+        get(&env, &env.viewer, &uri).await.1["steps"]
+            .as_array()
+            .map(|steps| steps.iter().any(|step| step["step_id"] == "script-0"))
+            == Some(true)
+    })
+    .await;
+
+    // The agent ends the job with the step results again, as it does since the row of a lost live
+    // result comes back this way (FR-PR-07).
+    agent
+        .tx
+        .send(message(agent_message::Payload::JobResult(JobResult {
+            job_id: id.clone(),
+            status: StepStatus::Success as i32,
+            steps_total: 2,
+            steps_succeeded: 2,
+            outcome: JobStatus::Succeeded as i32,
+            steps: vec![script_result(&id, &env)],
+            ..JobResult::default()
+        })))
+        .await
+        .expect("cannot send the result");
+    eventually(|| async { env.job_status(job).await == "succeeded" }).await;
+
+    let detail = env.job(job).await;
+    let script = detail["steps"]
+        .as_array()
+        .expect("steps")
+        .iter()
+        .find(|step| step["step_id"] == "script-0")
+        .expect("the result of the script must be stored");
+    assert_eq!(script["status"], "success");
+    assert_eq!(script["exit_code"], 0);
+    assert!(script["started_at"].is_string(), "the start must be kept");
+    assert!(script["finished_at"].is_string(), "the end must be kept");
+    env.db.cleanup().await;
+}
+
+/// A step result that never arrives on its own still has its row after the job ends, because the
+/// job result repeats the step results (FR-PR-07, FR-MN-02).
+#[tokio::test]
+async fn fr_pr_07_a_lost_step_result_comes_back_in_the_job_result() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let mut agent = env
+        .connect_agent_trusting(
+            "lost-result-agent",
+            true,
+            vec![restichub_proto::agent::v1::ScriptInterpreter::Bash],
+        )
+        .await;
+    let (job, id) = job_with_a_silent_script(&env, &mut agent).await;
+    let script = script_result(&id, &env);
+
+    // The result of the script never arrives on its own; only the backup reports.
+    agent
+        .tx
+        .send(message(agent_message::Payload::StepResult(StepResult {
+            job_id: id.clone(),
+            step_id: "backup".to_owned(),
+            status: StepStatus::Success as i32,
+            exit_code: 0,
+            output: Some(step_result::Output::BackupSummary(backup_summary())),
+            ..StepResult::default()
+        })))
+        .await
+        .expect("cannot send the step result");
+    let uri = format!("/api/v1/jobs/{job}");
+    eventually(|| async {
+        get(&env, &env.viewer, &uri).await.1["steps"]
+            .as_array()
+            .map(Vec::len)
+            == Some(1)
+    })
+    .await;
+
+    // The agent ends the job and repeats its step results in the job result.
+    agent
+        .tx
+        .send(message(agent_message::Payload::JobResult(JobResult {
+            job_id: id.clone(),
+            status: StepStatus::Success as i32,
+            steps_total: 2,
+            steps_succeeded: 2,
+            outcome: JobStatus::Succeeded as i32,
+            steps: vec![script],
+            ..JobResult::default()
+        })))
+        .await
+        .expect("cannot send the result");
+    eventually(|| async { env.job_status(job).await == "succeeded" }).await;
+
+    let detail = env.job(job).await;
+    let steps = detail["steps"].as_array().expect("steps");
+    assert_eq!(steps.len(), 2, "{detail}");
+    let script = steps
+        .iter()
+        .find(|step| step["step_id"] == "script-0")
+        .expect("the job result must bring the result of the script");
+    assert_eq!(script["status"], "success");
+    assert_eq!(script["exit_code"], 0);
+    assert!(script["finished_at"].is_string(), "the end must be kept");
+    env.db.cleanup().await;
+}
+
+/// The copy of a step result in the job result changes no stored row: the row keeps the output and
+/// the status of the live result, also when the copy is the compact one without the output
+/// (FR-PR-07, FR-MN-02).
+#[tokio::test]
+async fn fr_mn_02_the_job_result_copy_keeps_the_output_of_the_live_step() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let env = Env::start(db, test_queue()).await;
+    let mut agent = env.connect_agent("repeated-step-agent").await;
+    let repository = env.create_repository(agent.id, "pw").await;
+    let profile = env.create_profile(serde_json::json!({})).await;
+    let plan = env.create_plan(profile, agent.id, repository).await;
+    let job = env.run_plan(plan).await;
+    env.pass().await;
+    let id = decode_job_id(&agent.job().await);
+    agent.start(&env, &id).await;
+
+    // The live result of the retention step carries the typed summary.
+    let live = StepResult {
+        job_id: id.clone(),
+        step_id: "forget".to_owned(),
+        status: StepStatus::Success as i32,
+        exit_code: 0,
+        output: Some(step_result::Output::ForgetResult(ForgetResult {
+            groups: vec![ForgetGroup {
+                removed: vec![ForgetSnapshot::default()],
+                ..ForgetGroup::default()
+            }],
+            truncated: false,
+        })),
+        ..StepResult::default()
+    };
+    agent
+        .tx
+        .send(message(agent_message::Payload::StepResult(live.clone())))
+        .await
+        .expect("cannot send the step result");
+    let uri = format!("/api/v1/jobs/{job}");
+    eventually(|| async {
+        get(&env, &env.viewer, &uri).await.1["steps"]
+            .as_array()
+            .is_some_and(|steps| {
+                steps
+                    .iter()
+                    .any(|step| step["step_id"] == "forget" && step["output"]["kind"] == "forget")
+            })
+    })
+    .await;
+
+    // The agent keeps the small summaries only, so the copy in the job result has no output.
+    agent
+        .tx
+        .send(message(agent_message::Payload::JobResult(JobResult {
+            job_id: id.clone(),
+            status: StepStatus::Success as i32,
+            steps_total: 1,
+            steps_succeeded: 1,
+            outcome: JobStatus::Succeeded as i32,
+            steps: vec![StepResult {
+                output: None,
+                ..live
+            }],
+            ..JobResult::default()
+        })))
+        .await
+        .expect("cannot send the result");
+    eventually(|| async { env.job_status(job).await == "succeeded" }).await;
+
+    let detail = env.job(job).await;
+    let forget = detail["steps"]
+        .as_array()
+        .expect("steps")
+        .iter()
+        .find(|step| step["step_id"] == "forget")
+        .expect("the row of the step must be stored");
+    assert_eq!(forget["status"], "success", "{detail}");
+    assert_eq!(forget["exit_code"], 0, "{detail}");
+    assert_eq!(forget["output"]["kind"], "forget", "{detail}");
+    assert_eq!(forget["output"]["removed"], 1, "{detail}");
+    assert_eq!(forget["output"]["groups"], 1, "{detail}");
     env.db.cleanup().await;
 }
