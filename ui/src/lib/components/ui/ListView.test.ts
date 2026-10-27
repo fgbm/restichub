@@ -170,7 +170,10 @@ describe('ListView', () => {
 			'/profiles/p_1'
 		);
 
-		screen.getByRole('button', { name: 'All tags (4)' }).focus();
+		// The visible "+2" is the accessible name of the chip, as WCAG 2.5.3 requires.
+		const more = screen.getByRole('button', { name: /\+2/ });
+		expect(more.querySelector('.item__tag')).toHaveAttribute('title', 'Show all tags (4)');
+		more.focus();
 		await user.keyboard('{Enter}');
 
 		const all = [...document.querySelectorAll('.item__tags--all .item__tag')];
@@ -181,6 +184,16 @@ describe('ListView', () => {
 			'offsite'
 		]);
 		expect(all[0]).toHaveAttribute('href', '/profiles/p_1');
+	});
+
+	it('keeps the text of a field without tags', () => {
+		const meta = (): ListMeta[] => [{ text: 'daily', tags: [] }, 'a1b2c3d4'];
+		const { container } = render(ListView<Item>, { props: { ...base, items: items(1), meta } });
+		const fields = [...container.querySelectorAll('.item__field')];
+		expect(fields.map((field) => field.textContent?.replace(/\s+/g, ' ').trim())).toEqual([
+			'daily',
+			'· a1b2c3d4'
+		]);
 	});
 
 	it('puts a heading before the first item of each group', () => {

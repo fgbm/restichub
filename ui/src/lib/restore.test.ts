@@ -154,26 +154,51 @@ describe('restore page helpers (FR-RS-01, FR-RS-02)', () => {
 		const id = '0b9f4a2c-3e1d-4c55-8a21-9d7e6f5a4b3c';
 		const other = '7c1e5d90-2a44-4f1b-9b0e-3d6a8c2f1e55';
 		const profiles = new Map([[id, 'Office files']]);
+		const options = {
+			href: (profile: string) => `/profiles/${profile}`,
+			title: (name: string) => `open ${name}`
+		};
 		const chips = snapshotTagChips(
 			['daily', `restichub-profile-${id}`, `restichub-profile-${other}`],
 			profiles,
-			(profile) => `/profiles/${profile}`
+			options
 		);
-		expect(chips.map((chip) => chip.label)).toEqual(['Office files', 'daily', '7c1e5d90']);
+		expect(chips.map((chip) => chip.label)).toEqual([
+			'Office files',
+			'daily',
+			`restichub-profile-${other}`
+		]);
 		expect(chips[0]).toEqual({
 			label: 'Office files',
 			tone: 'running',
 			href: `/profiles/${id}`,
-			title: 'Open profile «Office files»'
+			title: 'open Office files'
 		});
 		expect(chips[1]).toEqual({ label: 'daily' });
-		expect(chips[2]).toEqual({
-			label: '7c1e5d90',
-			tone: 'running',
-			href: `/profiles/${other}`,
-			title: 'Open profile «7c1e5d90»'
-		});
-		expect(snapshotTagChips([], profiles, () => '')).toEqual([]);
+		expect(snapshotTagChips([], profiles, options)).toEqual([]);
+	});
+
+	it('fr_rs_01_keeps_an_unknown_profile_tag_as_a_plain_tag', () => {
+		const known = '0b9f4a2c-3e1d-4c55-8a21-9d7e6f5a4b3c';
+		const unknown = '7c1e5d90-2a44-4f1b-9b0e-3d6a8c2f1e55';
+		const options = {
+			href: (profile: string) => `/profiles/${profile}`,
+			title: (name: string) => `open ${name}`
+		};
+		const chips = snapshotTagChips(
+			[`restichub-profile-${unknown}`, `restichub-profile-${known}`],
+			new Map([[known, 'Office files']]),
+			options
+		);
+		expect(chips).toEqual([
+			{
+				label: 'Office files',
+				tone: 'running',
+				href: `/profiles/${known}`,
+				title: 'open Office files'
+			},
+			{ label: `restichub-profile-${unknown}` }
+		]);
 	});
 
 	it('fr_rs_01_keeps_the_filters_in_the_query_string', () => {

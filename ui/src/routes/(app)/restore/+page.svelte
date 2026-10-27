@@ -83,9 +83,10 @@
 
 	function meta(snapshot: SnapshotItem): ListMeta[] {
 		const [first, ...rest] = snapshot.paths;
-		const tags = snapshotTagChips(snapshot.tags, profiles, (id) =>
-			resolve('/(app)/profiles/[id]', { id })
-		);
+		const tags = snapshotTagChips(snapshot.tags, profiles, {
+			href: (id) => resolve('/(app)/profiles/[id]', { id }),
+			title: (name) => t('restore.openProfile', { name })
+		});
 		return [
 			snapshot.hostname,
 			first ? { text: rest.length > 0 ? `${first} +${rest.length}` : first, mono: true } : null,

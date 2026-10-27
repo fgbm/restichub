@@ -4,7 +4,6 @@
  */
 import type { OverwriteMode } from '#lib/api/index.ts';
 import type { IconName, ListTag } from '#lib/components/ui/index.ts';
-import { t } from '#lib/i18n/index.ts';
 
 export const OVERWRITE_MODES: OverwriteMode[] = ['always', 'if-changed', 'if-newer', 'never'];
 
@@ -126,28 +125,28 @@ export function profileOfTag(tag: string): string | null {
 }
 
 /**
- * The tag chips of a snapshot row (FR-RS-01). The automatic profile tag shows the name of its
- * profile and comes first, so a cut line keeps it; the other tags follow in the order of the
- * snapshot. `profileHref` gives the address of the record of a profile.
+ * The tag chips of a snapshot row (FR-RS-01). The chip of a profile comes first, so a cut line
+ * keeps it; the other tags follow in the order of the snapshot. A profile that the screen does not
+ * know stays a plain tag, so that a chip never leads nowhere.
  */
 export function snapshotTagChips(
 	tags: readonly string[],
 	profiles: ReadonlyMap<string, string>,
-	profileHref: (id: string) => string
+	options: { href: (id: string) => string; title: (name: string) => string }
 ): ListTag[] {
 	const chips = tags.map((tag): ListTag => {
 		const profile = profileOfTag(tag);
-		if (!profile) return { label: tag };
-		const name = profiles.get(profile) ?? profile.slice(0, 8);
+		const name = profile === null ? undefined : profiles.get(profile);
+		if (profile === null || name === undefined) return { label: tag };
 		return {
 			label: name,
 			tone: 'running',
-			href: profileHref(profile),
-			title: t('restore.openProfile', { name })
+			href: options.href(profile),
+			title: options.title(name)
 		};
 	});
-	const profile = chips.findIndex((chip) => chip.tone === 'running');
-	if (profile > 0) chips.unshift(...chips.splice(profile, 1));
+	const known = chips.findIndex((chip) => chip.tone === 'running');
+	if (known > 0) chips.unshift(...chips.splice(known, 1));
 	return chips;
 }
 

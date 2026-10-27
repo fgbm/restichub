@@ -310,31 +310,36 @@
 								{#if fields.length > 0 || number}
 									<span class="item__meta">
 										{#each fields as field, index (index)}
-											<span class="item__field" class:item__field--extra={index >= 2}>
+											{@const tags = Boolean(field.tags?.length)}
+											<span
+												class="item__field"
+												class:item__field--extra={index >= 2}
+												class:item__field--tags={tags}
+												class:item__field--text={!tags}
+											>
 												{#if index > 0}<span class="item__sep" aria-hidden="true">{SEPARATOR}</span
 													>{/if}
 												{#if field.time}
-													<time datetime={field.time} title={field.title ?? fullTime(field.time)}
-														>{field.text}</time
+													<time
+														class="item__text"
+														datetime={field.time}
+														title={field.title ?? fullTime(field.time)}>{field.text}</time
 													>
 												{:else if field.icon}
 													<span class="item__chip" title={field.title}>
 														<Icon name={field.icon} size="xs" />
 														{field.text}
 													</span>
-												{:else if field.tags}
+												{:else if field.tags?.length}
 													<span class="item__tags">
 														{#each field.tags.slice(0, TAG_CHIPS) as tag, tagIndex (tagIndex)}
 															{@render tagChip(tag)}
 														{/each}
 														{#if field.tags.length > TAG_CHIPS}
 															{@const count = field.tags.length}
-															<Popover
-																label={t('list.moreTags', { count })}
-																triggerLabel={t('list.moreTags', { count })}
-															>
+															<Popover label={t('list.allTags', { count })}>
 																{#snippet trigger()}
-																	<span class="item__tag" aria-hidden="true"
+																	<span class="item__tag" title={t('list.moreTags', { count })}
 																		>+{count - TAG_CHIPS}</span
 																	>
 																{/snippet}
@@ -347,7 +352,8 @@
 														{/if}
 													</span>
 												{:else}
-													<span class:item__mono={field.mono} title={field.title}>{field.text}</span
+													<span class="item__text" class:item__mono={field.mono} title={field.title}
+														>{field.text}</span
 													>
 												{/if}
 											</span>
@@ -527,16 +533,45 @@
 		font-size: var(--rh-font-size-sm);
 	}
 
+	/*
+	 * Line 2 is one row: a text field gives way with an ellipsis, and the chips of a tag set keep
+	 * their place so that the "+N" chip stays reachable (ui-principles 2.2).
+	 */
 	.item__meta {
+		display: flex;
+		align-items: center;
+		min-width: 0;
 		overflow: hidden;
 		color: var(--rh-color-text-muted);
 		font-size: var(--rh-font-size-sm);
 		line-height: 18px;
-		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
 
+	.item__field {
+		display: flex;
+		align-items: center;
+		min-width: 0;
+	}
+
+	.item__field--text {
+		overflow: hidden;
+	}
+
+	.item__field--text > .item__text {
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.item__field--tags,
+	.item__field--aside {
+		flex: none;
+	}
+
 	.item__sep {
+		flex: none;
+		/* A flex item drops the spaces of the separator text; "pre" keeps them. */
+		white-space: pre;
 		color: var(--rh-color-text-subtle);
 	}
 
@@ -591,7 +626,8 @@
 		background-color: var(--rh-color-neutral-bg);
 		color: var(--rh-color-neutral-text);
 		font-size: var(--rh-font-size-xs);
-		line-height: 18px;
+		/* The border belongs to the 18 px of the chip, so the text holds the 16 px inside it. */
+		line-height: 16px;
 		text-decoration: none;
 		white-space: nowrap;
 	}
@@ -683,8 +719,21 @@
 			display: none;
 		}
 
+		/*
+		 * The tag field is field 3, but its first chip is the chip of the profile, and that chip
+		 * stays on a narrow screen (ui-principles 2.2).
+		 */
+		.item__field--tags {
+			display: flex;
+		}
+
+		.item__field--tags .item__tag:not(.item__tag--running, :first-child),
+		.item__field--tags :global(.rh-popover__trigger) {
+			display: none;
+		}
+
 		.item__field--aside {
-			display: inline;
+			display: flex;
 		}
 	}
 </style>

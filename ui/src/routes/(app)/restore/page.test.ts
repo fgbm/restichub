@@ -255,6 +255,10 @@ describe('Restore page', () => {
 				{
 					...snapshot('a1b2c3d4', 'nas-backup'),
 					tags: ['daily', `restichub-profile-${id}`, `restichub-profile-${other}`]
+				},
+				{
+					...snapshot('b2c3d4e5', 'ws-anna'),
+					tags: [`restichub-profile-${other}`]
 				}
 			])
 		);
@@ -268,10 +272,21 @@ describe('Restore page', () => {
 		// The title stays the only navigation to the snapshot; the profile chip is the exception.
 		expect(document.querySelectorAll('.item__meta a.item__tag')).toHaveLength(1);
 
+		// A profile that the screen does not know stays a plain tag, and it leads nowhere.
+		const unknown = screen.getByText(`restichub-profile-${other}`);
+		expect(unknown.tagName).toBe('SPAN');
+		expect(unknown).not.toHaveClass('item__tag--running');
+
 		const user = userEvent.setup();
-		await user.click(screen.getByRole('button', { name: 'All tags (3)' }));
+		const more = screen.getByRole('button', { name: /\+1/ });
+		expect(more.querySelector('.item__tag')).toHaveAttribute('title', 'Show all tags (3)');
+		await user.click(more);
 		const all = [...document.querySelectorAll('.item__tags--all .item__tag')];
-		expect(all.map((chip) => chip.textContent)).toEqual(['Office files', 'daily', '7c1e5d90']);
+		expect(all.map((chip) => chip.textContent)).toEqual([
+			'Office files',
+			'daily',
+			`restichub-profile-${other}`
+		]);
 		expect(all[1]).not.toHaveAttribute('href');
 	});
 

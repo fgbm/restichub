@@ -5,7 +5,6 @@
 	let {
 		open = $bindable(false),
 		label,
-		triggerLabel,
 		trigger,
 		children,
 		align = 'start',
@@ -14,8 +13,6 @@
 		open?: boolean;
 		/** Accessible name of the popover panel. */
 		label: string;
-		/** Accessible name of the trigger, when its content is too terse. */
-		triggerLabel?: string;
 		trigger: Snippet;
 		children: Snippet;
 		align?: 'start' | 'center' | 'end';
@@ -24,7 +21,7 @@
 </script>
 
 <Primitive.Root bind:open {onOpenChange}>
-	<Primitive.Trigger class="rh-popover__trigger" aria-label={triggerLabel}>
+	<Primitive.Trigger class="rh-popover__trigger">
 		{@render trigger()}
 	</Primitive.Trigger>
 	<Primitive.Portal>
