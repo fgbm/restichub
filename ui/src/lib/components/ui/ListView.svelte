@@ -611,12 +611,12 @@
 		outline-offset: 1px;
 	}
 
-	/* The trigger of the popover is the chip itself, so the ring goes on the chip. */
+	/*
+	 * The trigger of the popover is the "+N" chip, so the ring goes on the button, and not on the
+	 * browser default box of the trigger.
+	 */
 	.item__tags :global(.rh-popover__trigger:focus-visible) {
-		outline: none;
-	}
-
-	.item__tags :global(.rh-popover__trigger:focus-visible) .item__tag {
+		border-radius: var(--rh-radius-pill);
 		outline: 2px solid var(--rh-color-focus);
 		outline-offset: 1px;
 	}
