@@ -417,34 +417,32 @@ impl Database {
             .map(|migration| migration.version)
             .max()
             .unwrap_or(0);
+        match self.schema_level().await? {
+            version if version < expected => Err(DbError::MigrationsBehind {
+                applied: version,
+                expected,
+            }),
+            version if version > expected => Err(DbError::MigrationsAhead {
+                applied: version,
+                expected,
+            }),
+            _ => Ok(()),
+        }
+    }
+
+    /// The version of the last successful migration, or 0 while no migration ran.
+    ///
+    /// The runtime role reads `_sqlx_migrations` (migration 0007). The About screen shows the
+    /// value to support (FR-AU-01).
+    pub async fn schema_level(&self) -> Result<i64, DbError> {
         let applied: Result<Option<(i64,)>, sqlx::Error> =
             sqlx::query_as::<_, (i64,)>("SELECT max(version) FROM _sqlx_migrations WHERE success")
                 .fetch_optional(&self.pool)
                 .await;
         match applied {
-            Ok(Some((version,))) => {
-                if version < expected {
-                    Err(DbError::MigrationsBehind {
-                        applied: version,
-                        expected,
-                    })
-                } else if version > expected {
-                    Err(DbError::MigrationsAhead {
-                        applied: version,
-                        expected,
-                    })
-                } else {
-                    Ok(())
-                }
-            }
-            Ok(None) => Err(DbError::MigrationsBehind {
-                applied: 0,
-                expected,
-            }),
-            Err(error) if is_undefined_table(&error) => Err(DbError::MigrationsBehind {
-                applied: 0,
-                expected,
-            }),
+            Ok(Some((version,))) => Ok(version),
+            Ok(None) => Ok(0),
+            Err(error) if is_undefined_table(&error) => Ok(0),
             Err(error) => Err(DbError::Query(error)),
         }
     }
