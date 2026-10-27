@@ -26,6 +26,16 @@ test('the snapshot list takes filters and the tree loads a large directory by pa
 
 	// The first visit reads the snapshots at once.
 	await expect(page.getByRole('link', { name: /^Open snapshot / })).toHaveCount(8);
+
+	// The automatic profile tag is a chip that links to the profile, and the other tags fold.
+	await expect(page.getByRole('link', { name: 'Open profile «0b9f4a2c»' })).toHaveAttribute(
+		'href',
+		'/profiles/0b9f4a2c-3e1d-4c55-8a21-9d7e6f5a4b3c'
+	);
+	await page.getByRole('button', { name: 'All tags (9)' }).click();
+	await expect(page.locator('.item__tags--all .item__tag')).toHaveCount(9);
+	await page.keyboard.press('Escape');
+
 	await page.getByRole('button', { name: 'Host', exact: true }).click();
 	await page.getByLabel('ws-anna').check();
 	await page.keyboard.press('Escape');

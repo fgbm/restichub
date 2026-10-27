@@ -246,7 +246,7 @@ describe('Restore page', () => {
 		);
 	});
 
-	it('fr_rs_01_shortens_an_automatic_profile_tag_and_keeps_the_full_value_in_the_title', async () => {
+	it('a_snapshot_row_shows_a_profile_tag_as_a_link_to_the_profile', async () => {
 		const id = '0b9f4a2c-3e1d-4c55-8a21-9d7e6f5a4b3c';
 		const other = '7c1e5d90-2a44-4f1b-9b0e-3d6a8c2f1e55';
 		mocks.listProfiles.mockResolvedValue([{ id, name: 'Office files' }]);
@@ -254,16 +254,25 @@ describe('Restore page', () => {
 			listing('done', [
 				{
 					...snapshot('a1b2c3d4', 'nas-backup'),
-					tags: [`restichub-profile-${id}`, `restichub-profile-${other}`, 'daily']
+					tags: ['daily', `restichub-profile-${id}`, `restichub-profile-${other}`]
 				}
 			])
 		);
 		render(Restore);
-		const tags = await screen.findByText('Profile Office files, Profile 7c1e5d90, daily');
-		expect(tags).toHaveAttribute(
-			'title',
-			`restichub-profile-${id}, restichub-profile-${other}, daily`
-		);
+		const link = await screen.findByRole('link', { name: 'Open profile «Office files»' });
+		expect(link).toHaveAttribute('href', `/(app)/profiles/${id}`);
+		expect(link).toHaveAttribute('title', 'Open profile «Office files»');
+		expect(link).toHaveClass('item__tag--running');
+		expect(link).toHaveTextContent('Office files');
+
+		// The title stays the only navigation to the snapshot; the profile chip is the exception.
+		expect(document.querySelectorAll('.item__meta a.item__tag')).toHaveLength(1);
+
+		const user = userEvent.setup();
+		await user.click(screen.getByRole('button', { name: 'All tags (3)' }));
+		const all = [...document.querySelectorAll('.item__tags--all .item__tag')];
+		expect(all.map((chip) => chip.textContent)).toEqual(['Office files', 'daily', '7c1e5d90']);
+		expect(all[1]).not.toHaveAttribute('href');
 	});
 
 	it('fr_rs_01_pages_the_snapshots', async () => {

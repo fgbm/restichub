@@ -144,6 +144,45 @@ describe('ListView', () => {
 		expect(container.querySelector('.item__field--aside')).toHaveTextContent('4 min 12 s');
 	});
 
+	it('a_snapshot_row_folds_the_tags_that_do_not_fit', async () => {
+		const user = userEvent.setup();
+		const meta = (): ListMeta[] => [
+			{
+				tags: [
+					{
+						label: 'Office files',
+						tone: 'running' as const,
+						href: '/profiles/p_1',
+						title: 'Open profile «Office files»'
+					},
+					{ label: 'daily' },
+					{ label: 'monthly' },
+					{ label: 'offsite' }
+				]
+			}
+		];
+		const { container } = render(ListView<Item>, { props: { ...base, items: items(1), meta } });
+
+		const line = [...container.querySelectorAll('.item__meta .item__tag')];
+		expect(line.map((chip) => chip.textContent)).toEqual(['Office files', 'daily', '+2']);
+		expect(container.querySelector('.item__meta a.item__tag')).toHaveAttribute(
+			'href',
+			'/profiles/p_1'
+		);
+
+		screen.getByRole('button', { name: 'All tags (4)' }).focus();
+		await user.keyboard('{Enter}');
+
+		const all = [...document.querySelectorAll('.item__tags--all .item__tag')];
+		expect(all.map((chip) => chip.textContent)).toEqual([
+			'Office files',
+			'daily',
+			'monthly',
+			'offsite'
+		]);
+		expect(all[0]).toHaveAttribute('href', '/profiles/p_1');
+	});
+
 	it('puts a heading before the first item of each group', () => {
 		const list: Item[] = [
 			{ id: 'a', name: '09:43', at: 'Today' },

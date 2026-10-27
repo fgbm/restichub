@@ -15,6 +15,7 @@ import {
 	landingPath,
 	parsePatterns,
 	profileOfTag,
+	snapshotTagChips,
 	suggestTarget,
 	treePath,
 	warnsSystemPath
@@ -147,6 +148,32 @@ describe('restore page helpers (FR-RS-01, FR-RS-02)', () => {
 		expect(profileOfTag(`restichub-profile-${id}`)).toBe(id);
 		expect(profileOfTag('restichub-profile-nothing')).toBeNull();
 		expect(profileOfTag('daily')).toBeNull();
+	});
+
+	it('fr_rs_01_builds_the_tag_chips_of_a_snapshot_row_with_the_profile_first', () => {
+		const id = '0b9f4a2c-3e1d-4c55-8a21-9d7e6f5a4b3c';
+		const other = '7c1e5d90-2a44-4f1b-9b0e-3d6a8c2f1e55';
+		const profiles = new Map([[id, 'Office files']]);
+		const chips = snapshotTagChips(
+			['daily', `restichub-profile-${id}`, `restichub-profile-${other}`],
+			profiles,
+			(profile) => `/profiles/${profile}`
+		);
+		expect(chips.map((chip) => chip.label)).toEqual(['Office files', 'daily', '7c1e5d90']);
+		expect(chips[0]).toEqual({
+			label: 'Office files',
+			tone: 'running',
+			href: `/profiles/${id}`,
+			title: 'Open profile «Office files»'
+		});
+		expect(chips[1]).toEqual({ label: 'daily' });
+		expect(chips[2]).toEqual({
+			label: '7c1e5d90',
+			tone: 'running',
+			href: `/profiles/${other}`,
+			title: 'Open profile «7c1e5d90»'
+		});
+		expect(snapshotTagChips([], profiles, () => '')).toEqual([]);
 	});
 
 	it('fr_rs_01_keeps_the_filters_in_the_query_string', () => {
