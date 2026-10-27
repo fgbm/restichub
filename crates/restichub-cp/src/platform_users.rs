@@ -50,10 +50,10 @@ pub struct CreateAccountRequest {
     pub display_name: String,
     /// At least 12 characters.
     pub password: String,
-    /// Unique in the installation when it is set (ADR-0028). An empty value means no email.
+    /// Unique in the installation when it is set. An empty value means no email.
     #[serde(default)]
     pub email: Option<String>,
-    /// Grants the installation-wide right at the create (ADR-0029).
+    /// Grants the installation-wide right at the create.
     #[serde(default)]
     pub platform_admin: bool,
     /// The organizations of the account with the role in each one.
@@ -70,9 +70,10 @@ pub struct SetRoleRequest {
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct UpdateAccountRequest {
     pub disabled: Option<bool>,
-    /// Written by the update; the MVP treats it as unverified. An empty value removes the email.
+    /// Written by the update; the control plane treats it as unverified. An empty value removes
+    /// the email.
     pub email: Option<String>,
-    /// True when the account holds the installation-wide right (ADR-0029).
+    /// True when the account holds the installation-wide right.
     pub platform_admin: Option<bool>,
     /// The new secret of a grant. It is required when `platform_admin` is true and it is not used
     /// otherwise.
@@ -94,6 +95,7 @@ pub struct PlatformUserListResponse {
 #[utoipa::path(
     get,
     path = "/api/v1/platform/users",
+    tags = ["platform"],
     security(("cookie" = []), ("bearer" = [])),
     responses(
         (status = 200, description = "Every account of the installation.", body = PlatformUserListResponse),
@@ -136,15 +138,16 @@ pub async fn list_accounts(
 #[utoipa::path(
     post,
     path = "/api/v1/platform/users",
+    tags = ["platform"],
     security(("cookie" = []), ("bearer" = [])),
     request_body = CreateAccountRequest,
     responses(
         (status = 201, description = "The account is created.", body = PlatformUserView),
-        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
-        (status = 404, description = "A membership names an unknown organization.", body = crate::error::ProblemBody),
-        (status = 409, description = "The username or the email exists.", body = crate::error::ProblemBody),
-        (status = 503, description = "The password work is busy.", body = crate::error::ProblemBody)
+        (status = 404, description = "A membership names an unknown organization.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 409, description = "The username or the email exists.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 503, description = "The password work is busy.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn create_account(
@@ -282,14 +285,15 @@ pub async fn create_account(
 #[utoipa::path(
     post,
     path = "/api/v1/platform/users/{id}/memberships",
+    tags = ["platform"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the account.")),
     request_body = AddMembershipRequest,
     responses(
         (status = 201, description = "The membership is added.", body = MembershipView),
-        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The account or the tenant is not found.", body = crate::error::ProblemBody)
+        (status = 404, description = "The account or the tenant is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn add_membership(
@@ -368,6 +372,7 @@ pub async fn add_membership(
 #[utoipa::path(
     patch,
     path = "/api/v1/platform/users/{id}/memberships/{tenant_id}",
+    tags = ["platform"],
     security(("cookie" = []), ("bearer" = [])),
     params(
         ("id" = String, Path, description = "The identifier of the account."),
@@ -376,9 +381,9 @@ pub async fn add_membership(
     request_body = SetRoleRequest,
     responses(
         (status = 204, description = "The role is changed."),
-        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The membership is not found.", body = crate::error::ProblemBody)
+        (status = 404, description = "The membership is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn set_membership_role(
@@ -431,6 +436,7 @@ pub async fn set_membership_role(
 #[utoipa::path(
     delete,
     path = "/api/v1/platform/users/{id}/memberships/{tenant_id}",
+    tags = ["platform"],
     security(("cookie" = []), ("bearer" = [])),
     params(
         ("id" = String, Path, description = "The identifier of the account."),
@@ -439,8 +445,8 @@ pub async fn set_membership_role(
     responses(
         (status = 204, description = "The membership is removed."),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The membership is not found.", body = crate::error::ProblemBody),
-        (status = 409, description = "The membership is the caller's own membership.", body = crate::error::ProblemBody)
+        (status = 404, description = "The membership is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 409, description = "The membership is the caller's own membership.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn remove_membership(
@@ -487,19 +493,20 @@ pub async fn remove_membership(
 /// Changes an account itself (Platform Admin only).
 ///
 /// The endpoint refuses the caller's own account and the last active Platform Admin. A grant of the
-/// right requires a new password and ends every session of the account (ADR-0029).
+/// right requires a new password and ends every session of the account.
 #[utoipa::path(
     patch,
     path = "/api/v1/platform/users/{id}",
+    tags = ["platform"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the account.")),
     request_body = UpdateAccountRequest,
     responses(
         (status = 204, description = "The account is changed."),
-        (status = 400, description = "A field is not valid, or a grant holds no password.", body = crate::error::ProblemBody),
+        (status = 400, description = "A field is not valid, or a grant holds no password.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The account is not found.", body = crate::error::ProblemBody),
-        (status = 409, description = "The account is the last active Platform Admin or the email exists.", body = crate::error::ProblemBody)
+        (status = 404, description = "The account is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 409, description = "The account is the last active Platform Admin or the email exists.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn update_account(

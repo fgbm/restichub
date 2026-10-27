@@ -39,8 +39,9 @@ use crate::validation;
 use crate::validation::Reason;
 use crate::views::{SecretDetailView, SecretView};
 
-/// The type does not derive `Debug`, so a log line cannot print the value by accident. The value is
-/// a [`SecretString`], so the buffer is zeroized on drop.
+/// Write-only: the API never returns the value.
+// The type does not derive `Debug`, so a log line cannot print the value by accident. The value is
+// a `SecretString`, so the buffer is zeroized on drop.
 #[derive(Deserialize, ToSchema)]
 pub struct CreateSecretRequest {
     /// Holds 1 to 64 characters from `a-z`, `0-9`, `.`, `_` and `-`.
@@ -51,8 +52,9 @@ pub struct CreateSecretRequest {
     pub value: SecretString,
 }
 
-/// The type does not derive `Debug`, so a log line cannot print the value by accident. The value is
-/// a [`SecretString`], so the buffer is zeroized on drop.
+/// Write-only: the API never returns the value.
+// The type does not derive `Debug`, so a log line cannot print the value by accident. The value is
+// a `SecretString`, so the buffer is zeroized on drop.
 #[derive(Deserialize, ToSchema)]
 pub struct ReplaceSecretRequest {
     /// Holds 1 to 64 KiB bytes.
@@ -127,6 +129,7 @@ pub(crate) async fn replace_bound_secret(
 #[utoipa::path(
     get,
     path = "/api/v1/secrets",
+    tags = ["secrets"],
     security(("cookie" = []), ("bearer" = [])),
     responses(
         (status = 200, description = "The metadata of the secrets of the tenant.", body = SecretListResponse),
@@ -167,15 +170,16 @@ pub async fn list_secrets(
 #[utoipa::path(
     post,
     path = "/api/v1/secrets",
+    tags = ["secrets"],
     summary = "Creates a secret in the tenant.",
-    description = "The response holds the metadata only. The control plane never returns the value (AC-RP-02).",
+    description = "The response holds the metadata only. The control plane never returns the value.",
     security(("cookie" = []), ("bearer" = [])),
     request_body = CreateSecretRequest,
     responses(
         (status = 201, description = "The secret is created.", body = SecretView),
-        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
-        (status = 409, description = "The name exists.", body = crate::error::ProblemBody)
+        (status = 409, description = "The name exists.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn create_secret(
@@ -239,18 +243,17 @@ pub async fn create_secret(
 
 /// Reads the metadata of one secret of the tenant.
 ///
-/// Reads the metadata of one secret of the tenant.
-///
-/// The response holds the metadata and the marker `set`. It never holds the value (AC-RP-02).
+/// The response holds the metadata and the marker `set`. It never holds the value.
 #[utoipa::path(
     get,
     path = "/api/v1/secrets/{id}",
+    tags = ["secrets"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the secret.")),
     responses(
         (status = 200, description = "The metadata of the secret and the marker `set`.", body = SecretDetailView),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The secret is not found.", body = crate::error::ProblemBody)
+        (status = 404, description = "The secret is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn get_secret(
@@ -273,14 +276,15 @@ pub async fn get_secret(
 #[utoipa::path(
     put,
     path = "/api/v1/secrets/{id}/value",
+    tags = ["secrets"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the secret.")),
     request_body = ReplaceSecretRequest,
     responses(
         (status = 204, description = "The value is replaced."),
-        (status = 400, description = "The value is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "The value is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The secret is not found.", body = crate::error::ProblemBody)
+        (status = 404, description = "The secret is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn replace_secret_value(
@@ -337,13 +341,14 @@ pub async fn replace_secret_value(
 #[utoipa::path(
     delete,
     path = "/api/v1/secrets/{id}",
+    tags = ["secrets"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the secret.")),
     responses(
         (status = 204, description = "The secret is removed."),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The secret is not found.", body = crate::error::ProblemBody),
-        (status = 409, description = "An object uses the secret (`secret_in_use`). The body lists the objects.", body = crate::error::ProblemBody)
+        (status = 404, description = "The secret is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 409, description = "An object uses the secret (`secret_in_use`). The body lists the objects.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn delete_secret(

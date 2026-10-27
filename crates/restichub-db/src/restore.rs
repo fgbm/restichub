@@ -14,7 +14,7 @@ use crate::DbError;
 use crate::ids::{AgentId, JobId, RepositoryId};
 use crate::tx::TenantTx;
 
-/// The policy for a file that exists in the restore target (FR-RS-04).
+/// The policy for a file that exists in the restore target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum OverwriteMode {

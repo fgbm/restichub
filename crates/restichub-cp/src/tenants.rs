@@ -10,7 +10,7 @@
 //! rows stay. A later retention task removes the rows of a deleted tenant.
 
 use axum::Json;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use restichub_db::audit::{AuditAction, AuditEvent};
 use restichub_db::tenants as repo;
@@ -25,6 +25,7 @@ use uuid::Uuid;
 use crate::context::{Operation, RequestContext};
 use crate::error::{ApiError, ErrorCode, map_write_error};
 use crate::json::ApiJson;
+use crate::list_query::ApiQuery;
 use crate::server::AppState;
 use crate::validation;
 use crate::views::PlatformTenantView;
@@ -56,18 +57,19 @@ pub struct TenantListResponse {
 #[utoipa::path(
     get,
     path = "/api/v1/platform/tenants",
+    tags = ["platform"],
     security(("cookie" = []), ("bearer" = [])),
     params(TenantListQuery),
     responses(
         (status = 200, description = "The tenants of the platform.", body = TenantListResponse),
-        (status = 400, description = "A query parameter is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "A query parameter is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
     )
 )]
 pub async fn list_tenants(
     State(state): State<AppState>,
     context: RequestContext,
-    Query(query): Query<TenantListQuery>,
+    ApiQuery(query): ApiQuery<TenantListQuery>,
 ) -> Result<Json<TenantListResponse>, ApiError> {
     context.authorize(Operation::PlatformTenantsRead)?;
     let filter = filter(&query)?;
@@ -84,14 +86,15 @@ pub async fn list_tenants(
 #[utoipa::path(
     post,
     path = "/api/v1/platform/tenants",
+    tags = ["platform"],
     summary = "Creates a tenant by name only.",
     security(("cookie" = []), ("bearer" = [])),
     request_body = CreateTenantRequest,
     responses(
         (status = 201, description = "The tenant is created.", body = PlatformTenantView),
-        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
-        (status = 409, description = "The name exists.", body = crate::error::ProblemBody)
+        (status = 409, description = "The name exists.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn create_tenant(
@@ -147,12 +150,13 @@ pub async fn create_tenant(
 #[utoipa::path(
     get,
     path = "/api/v1/platform/tenants/{id}",
+    tags = ["platform"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the tenant.")),
     responses(
         (status = 200, description = "The tenant.", body = PlatformTenantView),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The tenant is not found.", body = crate::error::ProblemBody)
+        (status = 404, description = "The tenant is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn get_tenant(
@@ -182,13 +186,14 @@ pub async fn get_tenant(
 #[utoipa::path(
     post,
     path = "/api/v1/platform/tenants/{id}/suspend",
+    tags = ["platform"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the tenant.")),
     responses(
         (status = 204, description = "The tenant is suspended."),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The tenant is not found.", body = crate::error::ProblemBody),
-        (status = 409, description = "The tenant is the platform tenant or it is deleted.", body = crate::error::ProblemBody)
+        (status = 404, description = "The tenant is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 409, description = "The tenant is the platform tenant or it is deleted.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn suspend_tenant(
@@ -220,13 +225,14 @@ pub async fn suspend_tenant(
 #[utoipa::path(
     post,
     path = "/api/v1/platform/tenants/{id}/resume",
+    tags = ["platform"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the tenant.")),
     responses(
         (status = 204, description = "The tenant is active."),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The tenant is not found.", body = crate::error::ProblemBody),
-        (status = 409, description = "The tenant is deleted.", body = crate::error::ProblemBody)
+        (status = 404, description = "The tenant is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 409, description = "The tenant is deleted.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn resume_tenant(
@@ -256,13 +262,14 @@ pub async fn resume_tenant(
 #[utoipa::path(
     delete,
     path = "/api/v1/platform/tenants/{id}",
+    tags = ["platform"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the tenant.")),
     responses(
         (status = 204, description = "The tenant is deleted."),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The tenant is not found.", body = crate::error::ProblemBody),
-        (status = 409, description = "The tenant is the platform tenant or it is not suspended.", body = crate::error::ProblemBody)
+        (status = 404, description = "The tenant is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 409, description = "The tenant is the platform tenant or it is not suspended.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn delete_tenant(

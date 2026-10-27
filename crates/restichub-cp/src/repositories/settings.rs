@@ -21,14 +21,13 @@ use crate::secrets::{create_bound_secret, replace_bound_secret};
 use crate::validation;
 use crate::validation::Reason;
 
-/// The backend settings of a repository (FR-RP-01).
-///
 /// The type is internally tagged on `kind`. Each variant carries the typed settings of its backend
 /// only, so a client cannot send a setting of another backend.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum BackendSettings {
     /// An S3-compatible object store. The prefix is optional.
+    #[schema(title = "S3")]
     S3 {
         endpoint: String,
         bucket: String,
@@ -38,6 +37,7 @@ pub enum BackendSettings {
         region: Option<String>,
     },
     /// A rest-server. The user name and the password are optional; the user name is not a secret.
+    #[schema(title = "REST server")]
     Rest {
         endpoint: String,
         /// In an update, an absent field keeps the stored user name; `null` or an empty string
@@ -51,6 +51,7 @@ pub enum BackendSettings {
         username: Option<Option<String>>,
     },
     /// A path on the host of the agent that runs the job.
+    #[schema(title = "Local path")]
     Local { path: String },
 }
 
@@ -63,9 +64,8 @@ where
 }
 
 /// The write-only secret fields of a repository create.
-///
-/// The type does not derive `Debug`, so a log line cannot print a value by accident. Each value is
-/// a [`SecretString`], so the buffer is zeroized on drop.
+// The type does not derive `Debug`, so a log line cannot print a value by accident. Each value is
+// a `SecretString`, so the buffer is zeroized on drop.
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CreateRepositoryRequest {
@@ -87,16 +87,17 @@ pub struct CreateRepositoryRequest {
     #[serde(default)]
     #[schema(value_type = Option<String>)]
     pub rest_password: Option<SecretString>,
-    /// The identifier of the maintenance agent (FR-RP-08). Required for a local repository: the
-    /// path is on the disk of this host, and every job of the repository runs there.
+    /// The identifier of the maintenance agent. Required for a local repository: the path is on the
+    /// disk of this host, and every job of the repository runs there.
     #[serde(default)]
     pub maintenance_agent_id: Option<String>,
 }
 
 /// The write-only secret fields of a repository update.
 ///
-/// An absent field keeps the current value. A present value replaces it. The type does not derive
-/// `Debug`, so a log line cannot print a value by accident.
+/// An absent field keeps the current value. A present value replaces it.
+// The type does not derive `Debug`, so a log line cannot print a value by accident. Each value is
+// a `SecretString`, so the buffer is zeroized on drop.
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UpdateRepositoryRequest {
@@ -124,7 +125,7 @@ pub struct UpdateRepositoryRequest {
     pub maintenance_agent_id: Option<String>,
 }
 
-/// The presence of the bound secrets. The view never holds a value (AC-RP-02).
+/// The presence of the bound secrets. The view never holds a value.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct CredentialsView {
     /// True when the value is set. A repository always holds one.
@@ -140,24 +141,24 @@ pub struct RepositoryView {
     pub name: String,
     pub backend: BackendSettings,
     pub credentials: CredentialsView,
-    /// False until an agent runs the init step. The MVP control plane never sets it true.
+    /// True after a successful init or access test of the current repository location.
     pub initialized: bool,
     pub maintenance_agent_id: Option<String>,
-    /// In RFC 3339.
+    #[schema(format = DateTime)]
     pub created_at: String,
-    /// In RFC 3339.
+    #[schema(format = DateTime)]
     pub updated_at: String,
     /// Null for an API token actor.
     pub created_by: Option<String>,
-    /// Uses the same lock marks as the dashboard (FR-SC-06).
+    /// Uses the same lock marks as the dashboard.
     pub lock_state: LockState,
     /// The newest check that ran to its end. A cancelled check does not count.
     pub last_check: Option<LastCheckView>,
     /// From the newest snapshot listing of the Restore screen, kept for 7 days. Null without a
     /// listing or when the listing was cut.
     pub snapshot_count: Option<i64>,
-    /// The names of the other repositories that hold the same location (FR-RP-11). Only the list
-    /// fills it; a duplicate came from before the rule.
+    /// The names of the other repositories that hold the same location. Only the list fills it; a
+    /// duplicate came from before the rule.
     pub shares_location_with: Vec<String>,
 }
 
@@ -170,7 +171,7 @@ pub enum CheckResult {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct LastCheckView {
-    /// In RFC 3339.
+    #[schema(format = DateTime)]
     pub finished_at: String,
     pub result: CheckResult,
 }

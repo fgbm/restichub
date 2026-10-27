@@ -25,12 +25,13 @@ use crate::views::{PlatformMembershipView, PlatformUserRecordView, PlatformUserV
 #[utoipa::path(
     get,
     path = "/api/v1/platform/users/{id}",
+    tags = ["platform"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the account.")),
     responses(
         (status = 200, description = "The account.", body = PlatformUserRecordView),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The account is not found.", body = crate::error::ProblemBody)
+        (status = 404, description = "The account is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn get_account(
@@ -63,20 +64,21 @@ pub async fn get_account(
 ///
 /// The caller's own account is refused with HTTP 403: the caller changes its own password with the
 /// current password. A shared account and another Platform Admin are no obstacle in the platform
-/// scope (ADR-0025, ADR-0029). The reset is recorded in the platform audit and in the audit of each
+/// scope. The reset is recorded in the platform audit and in the audit of each
 /// organization of the account.
 #[utoipa::path(
     post,
     path = "/api/v1/platform/users/{id}/password",
+    tags = ["platform"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the account.")),
     request_body = ResetPasswordRequest,
     responses(
         (status = 204, description = "The password is changed."),
-        (status = 400, description = "The new password is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "The new password is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The account is not found.", body = crate::error::ProblemBody),
-        (status = 503, description = "The password work is busy.", body = crate::error::ProblemBody)
+        (status = 404, description = "The account is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 503, description = "The password work is busy.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn reset_password(

@@ -66,6 +66,7 @@ pub struct UserListResponse {
 #[utoipa::path(
     get,
     path = "/api/v1/users",
+    tags = ["users"],
     security(("cookie" = []), ("bearer" = [])),
     responses(
         (status = 200, description = "The members of the tenant.", body = UserListResponse),
@@ -101,15 +102,16 @@ pub async fn list_users(
 #[utoipa::path(
     post,
     path = "/api/v1/users",
+    tags = ["users"],
     summary = "Creates an account with a membership in the tenant.",
     security(("cookie" = []), ("bearer" = [])),
     request_body = CreateUserRequest,
     responses(
         (status = 201, description = "The account is created.", body = UserView),
-        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
-        (status = 409, description = "The username exists in the installation.", body = crate::error::ProblemBody),
-        (status = 503, description = "The password work is busy.", body = crate::error::ProblemBody)
+        (status = 409, description = "The username exists in the installation.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 503, description = "The password work is busy.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn create_user(
@@ -178,12 +180,13 @@ pub async fn create_user(
 #[utoipa::path(
     get,
     path = "/api/v1/users/{id}",
+    tags = ["users"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the account.")),
     responses(
         (status = 200, description = "The member.", body = UserView),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The account is not a member of the tenant.", body = crate::error::ProblemBody)
+        (status = 404, description = "The account is not a member of the tenant.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn get_user(
@@ -215,16 +218,17 @@ pub async fn get_user(
 #[utoipa::path(
     patch,
     path = "/api/v1/users/{id}",
+    tags = ["users"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the account.")),
     request_body = UpdateUserRequest,
     responses(
         (status = 200, description = "The changed member.", body = UserView),
-        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
-        (status = 403, description = "The account is shared.", body = crate::error::ProblemBody),
-        (status = 404, description = "The account is not a member of the tenant.", body = crate::error::ProblemBody),
-        (status = 409, description = "The change removes the last Admin.", body = crate::error::ProblemBody)
+        (status = 403, description = "The account is shared.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 404, description = "The account is not a member of the tenant.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 409, description = "The change removes the last Admin.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn update_user(
@@ -326,13 +330,14 @@ pub async fn update_user(
 #[utoipa::path(
     delete,
     path = "/api/v1/users/{id}",
+    tags = ["users"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the account.")),
     responses(
         (status = 204, description = "The membership is disabled."),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The account is not a member of the tenant.", body = crate::error::ProblemBody),
-        (status = 409, description = "The account is the last Admin.", body = crate::error::ProblemBody)
+        (status = 404, description = "The account is not a member of the tenant.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 409, description = "The account is the last Admin.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn delete_user(
@@ -382,16 +387,17 @@ pub async fn delete_user(
 #[utoipa::path(
     post,
     path = "/api/v1/users/{id}/password",
+    tags = ["users"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the account.")),
     request_body = ResetPasswordRequest,
     responses(
         (status = 204, description = "The password is changed."),
-        (status = 400, description = "The new password is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "The new password is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
-        (status = 403, description = "The account is shared or is the account of the caller.", body = crate::error::ProblemBody),
-        (status = 404, description = "The account is not a member of the tenant.", body = crate::error::ProblemBody),
-        (status = 503, description = "The password work is busy.", body = crate::error::ProblemBody)
+        (status = 403, description = "The account is shared or is the account of the caller.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 404, description = "The account is not a member of the tenant.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 503, description = "The password work is busy.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn reset_password(

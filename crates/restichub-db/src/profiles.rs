@@ -26,8 +26,8 @@ pub const DEFAULT_PAGE_LIMIT: i64 = 50;
 
 pub const MAX_PAGE_LIMIT: i64 = 200;
 
-/// The process and I/O priority of the restic steps of a profile (FR-AG-15). The string value of
-/// each variant is stored: do not change a string.
+/// The process and I/O priority of the restic steps of a profile.
+// The string value of each variant is stored: do not change a string.
 #[derive(
     Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type,
 )]

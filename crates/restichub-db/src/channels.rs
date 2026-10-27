@@ -16,7 +16,8 @@ use crate::tx::TenantTx;
 /// Per-tenant cap that keeps the settings page and the fan-out small.
 pub const MAX_CHANNELS: i64 = 50;
 
-/// The kind of a channel. The string value of each variant is stored: do not change a string.
+/// Tells how a notification reaches a person.
+// The string value of each variant is stored: do not change a string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
 #[sqlx(type_name = "text", rename_all = "snake_case")]

@@ -575,6 +575,57 @@ pub fn openapi_document() -> OpenApiDocument {
         .clone()
 }
 
+/// The tags of the document, in the order in which the API reference shows them.
+const TAGS: &[(&str, &str)] = &[
+    (
+        "hosts",
+        "Agents of the tenant, their parameters and their enrollment.",
+    ),
+    ("plans", "Plans and their schedules."),
+    (
+        "profiles",
+        "Profiles, their settings, their previews and the script templates.",
+    ),
+    (
+        "repositories",
+        "Repositories, their maintenance and their snapshots.",
+    ),
+    (
+        "secrets",
+        "Secrets of the tenant: repository credentials, channel endpoints and the values that scripts and parameters use.",
+    ),
+    ("jobs", "Jobs, their logs and the job templates."),
+    ("restore", "Restore requests."),
+    ("alerts", "Alert rules and the alerts that they raise."),
+    ("channels", "Notification channels."),
+    ("users", "Members of the tenant."),
+    ("tokens", "API tokens and enrollment tokens."),
+    ("audit", "Audit records of the tenant and of the platform."),
+    (
+        "platform",
+        "Tenants and accounts of the installation. Only a Platform Admin can use these operations.",
+    ),
+    (
+        "auth",
+        "Sessions, the current user and the setup of the first administrator.",
+    ),
+    (
+        "system",
+        "The process and the instance: the probes, the metrics, the OpenAPI document, the mode and the setup state of the instance, the event stream and the dashboard.",
+    ),
+];
+
+fn openapi_tags() -> Vec<utoipa::openapi::tag::Tag> {
+    TAGS.iter()
+        .map(|(name, description)| {
+            utoipa::openapi::tag::TagBuilder::new()
+                .name(*name)
+                .description(Some(*description))
+                .build()
+        })
+        .collect()
+}
+
 fn base_openapi() -> OpenApiDocument {
     let mut document = utoipa::openapi::OpenApiBuilder::new()
         .info(
@@ -590,6 +641,9 @@ fn base_openapi() -> OpenApiDocument {
                 ))
                 .build(),
         )
+        // A relative server keeps the examples of a viewer on the host of the control plane.
+        .servers(Some(vec![utoipa::openapi::server::Server::new("/")]))
+        .tags(Some(openapi_tags()))
         .build();
     SecurityAddon.modify(&mut document);
     document
@@ -672,6 +726,7 @@ async fn inject_request_id(response: Response, request_id: &str) -> Response {
 #[utoipa::path(
     get,
     path = "/healthz",
+    tags = ["system"],
     responses((status = 200, description = "The process is alive."))
 )]
 pub(crate) async fn healthz() -> &'static str {
@@ -682,9 +737,10 @@ pub(crate) async fn healthz() -> &'static str {
 #[utoipa::path(
     get,
     path = "/readyz",
+    tags = ["system"],
     responses(
         (status = 200, description = "The database is ready and no background task is failing."),
-        (status = 503, description = "The database is not ready, or a background task stopped and has not run for a stable period since its restart.")
+        (status = 503, description = "The database is not ready, or a background task stopped and has not run for a stable period since its restart.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub(crate) async fn readyz(State(state): State<AppState>) -> Response {
@@ -698,6 +754,7 @@ pub(crate) async fn readyz(State(state): State<AppState>) -> Response {
 #[utoipa::path(
     get,
     path = "/api/v1/openapi.json",
+    tags = ["system"],
     summary = "The OpenAPI document.",
     responses((status = 200, description = "The OpenAPI document."))
 )]

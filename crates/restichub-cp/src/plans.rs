@@ -13,7 +13,7 @@
 //! returns the next fire times in UTC, for the user interface preview in the plan time zone.
 
 use axum::Json;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use restichub_db::agents::{self as agents_repo};
 use restichub_db::audit::{AuditAction, diff};
@@ -29,6 +29,7 @@ use crate::alerts::rpo::{self, RpoState};
 use crate::context::{Operation, RequestContext};
 use crate::error::{ApiError, map_write_error};
 use crate::json::ApiJson;
+use crate::list_query::ApiQuery;
 use crate::parameters::{self, ParameterValueDef, PlanParameterValueView};
 use crate::schedule::{Schedule, ScheduleError};
 use crate::server::AppState;
@@ -57,7 +58,6 @@ pub struct NextRunsQuery {
     pub count: Option<usize>,
 }
 
-/// The request body of a plan create (FR-SC-01, FR-SC-07, FR-SC-11).
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CreatePlanRequest {
@@ -66,7 +66,7 @@ pub struct CreatePlanRequest {
     pub name: String,
     pub profile_id: String,
     pub agent_id: String,
-    /// The repository that the plan backs up into (ADR-0047).
+    /// Repository that the plan backs up into.
     #[schema(required)]
     #[serde(default)]
     pub repository_id: String,
@@ -77,10 +77,10 @@ pub struct CreatePlanRequest {
     #[serde(default = "default_enabled")]
     pub enabled: bool,
     /// The recovery point objective in seconds, from 900 to 34560000. Absent or null uses the
-    /// default of the schedule (ADR-0036).
+    /// default of the schedule.
     #[serde(default)]
     pub rpo_seconds: Option<i32>,
-    /// The values that the plan sets instead of the values of the host (FR-PF-10). At most 64.
+    /// The values that the plan sets instead of the values of the host. At most 64.
     #[serde(default)]
     #[schema(max_items = 64)]
     pub parameter_values: Vec<ParameterValueDef>,
@@ -96,7 +96,7 @@ pub struct UpdatePlanRequest {
     pub name: Option<String>,
     pub profile_id: String,
     pub agent_id: String,
-    /// The repository that the plan backs up into (ADR-0047). An absent value is refused.
+    /// The repository that the plan backs up into. An absent value is refused.
     #[schema(required)]
     #[serde(default)]
     pub repository_id: String,
@@ -108,7 +108,7 @@ pub struct UpdatePlanRequest {
     /// The recovery point objective in seconds. Null restores the default of the schedule.
     #[serde(default)]
     pub rpo_seconds: Option<i32>,
-    /// Replaces the whole list of the values of the plan (FR-PF-10).
+    /// Replaces the whole list of the values of the plan.
     #[serde(default)]
     #[schema(max_items = 64)]
     pub parameter_values: Vec<ParameterValueDef>,
@@ -118,7 +118,7 @@ fn default_enabled() -> bool {
     true
 }
 
-/// One plan with its display values (FR-SC-01).
+/// One plan with its display values.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct PlanView {
     pub id: String,
@@ -134,21 +134,25 @@ pub struct PlanView {
     pub enabled: bool,
     /// The stored recovery point objective in seconds. Null means the default of the schedule.
     pub rpo_seconds: Option<i32>,
-    /// The objective that the control plane applies, in seconds (ADR-0036).
+    /// The objective that the control plane applies, in seconds.
     pub effective_rpo_seconds: i64,
-    /// In UTC, in RFC 3339. Null when the plan is disabled.
+    /// In UTC. Null when the plan is disabled.
+    #[schema(format = DateTime)]
     pub next_run_at: Option<String>,
-    /// The last fire time that the scheduler processed, in RFC 3339.
+    /// Holds the last fire time that the scheduler processed, in UTC.
+    #[schema(format = DateTime)]
     pub last_fire_time: Option<String>,
-    /// The finish time of the last succeeded backup, in RFC 3339. Null when the plan never
-    /// succeeded.
+    /// The finish time of the last succeeded backup. Null when the plan never succeeded.
+    #[schema(format = DateTime)]
     pub last_success_at: Option<String>,
-    /// The state of the dashboard (ADR-0036). `unknown` when the host of the plan is revoked.
+    /// The state of the dashboard. `unknown` when the host of the plan is revoked.
     pub rpo_state: PlanRpoState,
-    /// The values that the plan sets instead of the values of the host (FR-PF-10). For a Viewer, a
-    /// text value is empty with the flag `hidden` (FR-PF-12).
+    /// The values that the plan sets instead of the values of the host. For a Viewer, a text value
+    /// is empty with the flag `hidden`.
     pub parameter_values: Vec<PlanParameterValueView>,
+    #[schema(format = DateTime)]
     pub created_at: String,
+    #[schema(format = DateTime)]
     pub updated_at: String,
 }
 
@@ -223,13 +227,14 @@ pub struct PlanResponse {
     pub plan: PlanView,
 }
 
-/// The next fire times of a plan, in UTC (FR-SC-01).
+/// Answers with the next fire times of the plan, in UTC.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct NextRunsResponse {
     pub plan_id: String,
     /// The time zone of the plan; the user interface renders each run in it.
     pub time_zone: String,
-    /// The fire times in UTC, formatted as RFC 3339.
+    /// Fire times after the current time, in UTC, oldest first.
+    #[schema(format = DateTime)]
     pub runs: Vec<String>,
 }
 
@@ -237,18 +242,19 @@ pub struct NextRunsResponse {
 #[utoipa::path(
     get,
     path = "/api/v1/plans",
+    tags = ["plans"],
     security(("cookie" = []), ("bearer" = [])),
     params(PlanListQuery),
     responses(
         (status = 200, description = "The plans of the tenant.", body = PlanListResponse),
-        (status = 400, description = "A query parameter is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "A query parameter is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
     )
 )]
 pub async fn list_plans(
     State(state): State<AppState>,
     context: RequestContext,
-    Query(query): Query<PlanListQuery>,
+    ApiQuery(query): ApiQuery<PlanListQuery>,
 ) -> Result<Json<PlanListResponse>, ApiError> {
     context.authorize(Operation::PlansRead)?;
     let page = PlanPage {
@@ -296,12 +302,13 @@ pub async fn list_plans(
 #[utoipa::path(
     get,
     path = "/api/v1/plans/{id}",
+    tags = ["plans"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the plan.")),
     responses(
         (status = 200, description = "The plan.", body = PlanView),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The plan is not found.", body = crate::error::ProblemBody)
+        (status = 404, description = "The plan is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn get_plan(
@@ -362,15 +369,16 @@ fn views_of(
 #[utoipa::path(
     post,
     path = "/api/v1/plans",
+    tags = ["plans"],
     summary = "Creates a plan in the tenant.",
-    description = "The control plane validates the cron expression, the time zone and the stored profile against the agent before the write (FR-PF-05).",
+    description = "The control plane validates the cron expression, the time zone and the stored profile against the agent before the write.",
     security(("cookie" = []), ("bearer" = [])),
     request_body = CreatePlanRequest,
     responses(
         (status = 201, description = "The plan is created.", body = PlanResponse),
-        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
-        (status = 409, description = "The name exists.", body = crate::error::ProblemBody)
+        (status = 409, description = "The name exists.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn create_plan(
@@ -474,14 +482,15 @@ pub async fn create_plan(
 #[utoipa::path(
     patch,
     path = "/api/v1/plans/{id}",
+    tags = ["plans"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the plan.")),
     request_body = UpdatePlanRequest,
     responses(
         (status = 200, description = "The updated plan.", body = PlanResponse),
-        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The plan is not found.", body = crate::error::ProblemBody)
+        (status = 404, description = "The plan is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn update_plan(
@@ -613,12 +622,13 @@ pub async fn update_plan(
 #[utoipa::path(
     delete,
     path = "/api/v1/plans/{id}",
+    tags = ["plans"],
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the plan.")),
     responses(
         (status = 204, description = "The plan is removed."),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The plan is not found.", body = crate::error::ProblemBody)
+        (status = 404, description = "The plan is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn delete_plan(
@@ -659,22 +669,23 @@ pub async fn delete_plan(
 #[utoipa::path(
     get,
     path = "/api/v1/plans/{id}/next-runs",
+    tags = ["plans"],
     summary = "Previews the next fire times of a plan.",
     description = "The fire times are in UTC; the user interface renders them in the plan time zone.",
     security(("cookie" = []), ("bearer" = [])),
     params(("id" = String, Path, description = "The identifier of the plan."), NextRunsQuery),
     responses(
         (status = 200, description = "The next fire times.", body = NextRunsResponse),
-        (status = 400, description = "A query parameter is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "A query parameter is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
-        (status = 404, description = "The plan is not found.", body = crate::error::ProblemBody)
+        (status = 404, description = "The plan is not found.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn next_runs(
     State(state): State<AppState>,
     context: RequestContext,
     Path(id): Path<String>,
-    Query(query): Query<NextRunsQuery>,
+    ApiQuery(query): ApiQuery<NextRunsQuery>,
 ) -> Result<Json<NextRunsResponse>, ApiError> {
     context.authorize(Operation::PlansRead)?;
     let plan_id = parse_plan_id(&id)?;
@@ -700,7 +711,6 @@ pub async fn next_runs(
     }))
 }
 
-/// The request body of the schedule preview (FR-SC-01).
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PreviewScheduleRequest {
@@ -714,12 +724,13 @@ fn default_preview_count() -> usize {
     DEFAULT_PREVIEW_RUNS
 }
 
-/// The next fire times of an unsaved schedule, in UTC (FR-SC-01).
+/// The next fire times of an unsaved schedule, in UTC.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct SchedulePreviewResponse {
     /// The time zone that the user interface renders each run in.
     pub time_zone: String,
-    /// The fire times in UTC, formatted as RFC 3339.
+    /// Fire times after the current time, in UTC, oldest first.
+    #[schema(format = DateTime)]
     pub runs: Vec<String>,
 }
 
@@ -730,13 +741,14 @@ pub struct SchedulePreviewResponse {
 #[utoipa::path(
     post,
     path = "/api/v1/plans/preview",
+    tags = ["plans"],
     summary = "Previews the next fire times of a schedule.",
     description = "The fire times are in UTC; the user interface renders them in the given time zone.",
     security(("cookie" = []), ("bearer" = [])),
     request_body = PreviewScheduleRequest,
     responses(
         (status = 200, description = "The next fire times.", body = SchedulePreviewResponse),
-        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody),
+        (status = 400, description = "A field is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
         crate::error::ProtectedResponses,
     )
 )]

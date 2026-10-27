@@ -89,6 +89,7 @@ pub struct SetupStatusResponse {
 #[utoipa::path(
     get,
     path = "/api/v1/setup/status",
+    tags = ["auth"],
     responses((status = 200, description = "The setup status.", body = SetupStatusResponse))
 )]
 pub async fn status(State(state): State<AppState>) -> Result<Json<SetupStatusResponse>, ApiError> {
@@ -151,17 +152,18 @@ pub struct SetupRequest {
 #[utoipa::path(
     post,
     path = "/api/v1/setup",
+    tags = ["auth"],
     summary = "Creates the first administrator.",
     description = "The endpoint needs the one-time setup token, the CSRF header and the per-IP rate limit of sign-in. In multi mode it creates the first Platform Admin. In single mode it creates the tenant `default` and its first Admin.",
     request_body = SetupRequest,
     responses(
         (status = 201, description = "The administrator is created.", body = UserView),
-        (status = 400, description = "The password or a field is not valid.", body = crate::error::ProblemBody),
-        (status = 401, description = "The setup token is not valid.", body = crate::error::ProblemBody),
-        (status = 403, description = "The CSRF header is missing.", body = crate::error::ProblemBody),
-        (status = 409, description = "The setup is already done.", body = crate::error::ProblemBody),
-        (status = 429, description = "Too many setup attempts.", body = crate::error::ProblemBody),
-        (status = 503, description = "The password work is busy.", body = crate::error::ProblemBody)
+        (status = 400, description = "The password or a field is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 401, description = "The setup token is not valid.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 403, description = "The CSRF header is missing.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 409, description = "The setup is already done.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 429, description = "Too many setup attempts.", body = crate::error::ProblemBody, content_type = "application/problem+json"),
+        (status = 503, description = "The password work is busy.", body = crate::error::ProblemBody, content_type = "application/problem+json")
     )
 )]
 pub async fn setup(
