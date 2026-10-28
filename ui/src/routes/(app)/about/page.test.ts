@@ -109,7 +109,7 @@ describe('the About ResticHub screen', () => {
 		expect(screen.getByText('Not set')).toBeInTheDocument();
 	});
 
-	it('adr_0054_shows_the_tenancy_mode_as_not_set_before_the_instance_route_answers', () => {
+	it('adr_0055_shows_the_tenancy_mode_as_not_set_before_the_instance_route_answers', () => {
 		state.platformAdmin = true;
 		state.about = about({ schema_level: 60 });
 		state.modeKnown = false;

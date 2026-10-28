@@ -314,7 +314,7 @@ async fn adr_0054_about_is_readable_by_a_viewer_and_hides_the_schema_level() {
 /// A request authenticates against the database, so the test calls the route handler with the
 /// context of a Viewer. The handler is the part of the request that runs after the authentication.
 #[tokio::test]
-async fn the_about_answer_survives_a_database_that_takes_no_connection() {
+async fn adr_0055_the_about_answer_survives_a_database_that_takes_no_connection() {
     let Some(db) = common::test_db().await else {
         return;
     };
@@ -345,7 +345,8 @@ async fn the_about_answer_survives_a_database_that_takes_no_connection() {
 /// The schema level is the second fact of a broken installation, so the About answer of the
 /// Platform Admin arrives without it while the database answers no query (ADR-0054).
 #[tokio::test]
-async fn the_about_answer_of_a_platform_admin_survives_a_database_that_takes_no_connection() {
+async fn adr_0055_the_about_answer_of_a_platform_admin_survives_a_database_that_takes_no_connection()
+ {
     let Some(db) = common::test_db().await else {
         return;
     };
