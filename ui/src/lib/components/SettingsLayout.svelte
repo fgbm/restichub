@@ -19,6 +19,12 @@
 			.find((href) => pathname.startsWith(href))
 	);
 
+	// The page of a section is `page`; a page below it, for example a record, is `true`.
+	function currentOf(href: string | undefined): 'page' | 'true' | undefined {
+		if (!href || activeHref !== href) return undefined;
+		return pathname === href ? 'page' : 'true';
+	}
+
 	let subnav = $state<HTMLElement>();
 	let rowWidth = $state(0);
 
@@ -52,7 +58,7 @@
 						<a
 							class="subnav__link"
 							href={resolve(item.href)}
-							aria-current={activeHref === resolve(item.href) ? 'page' : undefined}
+							aria-current={currentOf(resolve(item.href))}
 						>
 							<Icon name={item.icon} />
 							{t(item.labelKey)}
@@ -116,7 +122,7 @@
 		text-decoration: none;
 	}
 
-	.subnav__link[aria-current='page'] {
+	.subnav__link[aria-current] {
 		background-color: var(--rh-color-hover);
 		color: var(--rh-color-text);
 		font-weight: var(--rh-font-weight-semibold);
