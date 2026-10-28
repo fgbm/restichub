@@ -14,6 +14,7 @@
 	} from '#lib/navigation.ts';
 	import { isSingleTenant } from '#lib/stores/instance.svelte.ts';
 	import { buildBreadcrumb, type Crumb } from '#lib/breadcrumb.ts';
+	import { revealFocused } from '#lib/scroll-into-view.ts';
 	import {
 		forgetListQueries,
 		getPageMeta,
@@ -255,7 +256,7 @@
 		</DropdownMenu>
 	</header>
 
-	<nav class="tabs" aria-label={t('nav.primary')}>
+	<nav class="tabs" aria-label={t('nav.primary')} {@attach revealFocused}>
 		{#each tabs as item (item.href)}
 			<a
 				class="tab"
@@ -311,6 +312,10 @@
 		gap: var(--rh-space-3);
 		height: var(--rh-layout-topbar-height);
 		padding: 0 var(--rh-space-4);
+		/* `100%` of the top bar ends at the window scrollbar, so `100vw - 100%` is the width that
+		   the scrollbar takes. The reserved width keeps the right group in place when a long page
+		   adds the scrollbar. */
+		padding-right: calc(var(--rh-space-4) + var(--rh-scrollbar-width) - (100vw - 100%));
 		background-color: var(--rh-color-canvas);
 		border-bottom: var(--rh-border-width) solid var(--rh-color-border);
 	}
@@ -471,12 +476,23 @@
 		border-bottom-color: var(--rh-color-accent);
 	}
 
+	/* The row hides the vertical overflow, so the ring is drawn inside the tab. */
+	.tab:focus-visible {
+		outline-offset: -2px;
+	}
+
 	.page {
 		flex: 1;
-		width: 100%;
+		--page-inset: max(0px, calc((100vw - var(--rh-layout-content-max-width)) / 2));
 		min-width: 0;
+		width: min(
+			var(--rh-layout-content-max-width),
+			calc(100vw - var(--rh-scrollbar-width) - var(--page-inset))
+		);
 		max-width: var(--rh-layout-content-max-width);
-		margin: 0 auto;
+		/* The column is centred on the window, and its right edge stays before the reserved strip
+		   of the window scrollbar. Thus both edges keep their place when the scrollbar appears. */
+		margin-left: var(--page-inset);
 		padding: var(--rh-space-6) var(--rh-space-4) var(--rh-page-padding-bottom);
 		--rh-page-padding-bottom: var(--rh-space-12);
 	}

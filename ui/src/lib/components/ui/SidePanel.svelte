@@ -53,6 +53,8 @@
 	:global(.rh-panel) {
 		position: fixed;
 		top: 0;
+		/* The scroll lock hides the window scrollbar while the panel is open, so the panel reaches
+		   the window edge. */
 		right: 0;
 		z-index: var(--rh-z-panel);
 		display: flex;

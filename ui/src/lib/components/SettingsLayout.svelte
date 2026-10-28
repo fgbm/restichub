@@ -4,6 +4,7 @@
 	import { page } from '$app/state';
 	import { t } from '#lib/i18n/index.ts';
 	import { settingsGroupsForRole } from '#lib/navigation.ts';
+	import { revealFocused } from '#lib/scroll-into-view.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { Icon } from './ui/index.ts';
 
@@ -11,26 +12,68 @@
 
 	const groups = $derived(settingsGroupsForRole(getSession()?.role ?? null));
 	const pathname = $derived(page.url.pathname);
+
+	const activeHref = $derived(
+		groups
+			.flatMap((group) => group.items)
+			.map((item) => resolve(item.href))
+			.find((href) => pathname.startsWith(href))
+	);
+
+	// The page of a section is `page`; a page below it, for example a record, is `true`.
+	function currentOf(href: string | undefined): 'page' | 'true' | undefined {
+		if (!href || activeHref !== href) return undefined;
+		return pathname === href ? 'page' : 'true';
+	}
+
+	let subnav = $state<HTMLElement>();
+	let rowWidth = $state(0);
+
+	// The window scrollbar changes the width of the row, and the current entry moves with it.
+	$effect(() => {
+		if (!subnav || typeof ResizeObserver === 'undefined') return;
+		const observer = new ResizeObserver(() => (rowWidth = subnav?.clientWidth ?? 0));
+		observer.observe(subnav);
+		return () => observer.disconnect();
+	});
+
+	// A narrow window shows the subnav as one row, and the current entry may be outside it.
+	$effect(() => {
+		const current =
+			activeHref && rowWidth ? subnav?.querySelector<HTMLElement>(`a[href="${activeHref}"]`) : null;
+		if (!subnav || !current || subnav.scrollWidth <= subnav.clientWidth) return;
+		subnav.scrollLeft +=
+			current.getBoundingClientRect().left -
+			subnav.getBoundingClientRect().left -
+			(subnav.clientWidth - current.offsetWidth) / 2;
+	});
 </script>
 
-<div class="settings">
-	<nav class="subnav" aria-label={t('settings.sections')}>
-		{#each groups as group (group.labelKey)}
-			<div class="subnav__group">
-				<p class="subnav__label">{t(group.labelKey)}</p>
-				{#each group.items as item (item.href)}
-					<a
-						class="subnav__link"
-						href={resolve(item.href)}
-						aria-current={pathname.startsWith(resolve(item.href)) ? 'page' : undefined}
-					>
-						<Icon name={item.icon} />
-						{t(item.labelKey)}
-					</a>
-				{/each}
-			</div>
-		{/each}
-	</nav>
+<div class="settings" class:settings--no-subnav={groups.length === 0}>
+	{#if groups.length > 0}
+		<nav
+			class="subnav"
+			aria-label={t('settings.sections')}
+			bind:this={subnav}
+			{@attach revealFocused}
+		>
+			{#each groups as group (group.labelKey)}
+				<div class="subnav__group">
+					<p class="subnav__label">{t(group.labelKey)}</p>
+					{#each group.items as item (item.href)}
+						<a
+							class="subnav__link"
+							href={resolve(item.href)}
+							aria-current={currentOf(resolve(item.href))}
+						>
+							<Icon name={item.icon} />
+							{t(item.labelKey)}
+						</a>
+					{/each}
+				</div>
+			{/each}
+		</nav>
+	{/if}
 	<div class="settings__content">
 		{@render children()}
 	</div>
@@ -42,6 +85,11 @@
 		grid-template-columns: 200px minmax(0, 1fr);
 		gap: var(--rh-space-8);
 		align-items: start;
+	}
+
+	/* A role without settings screens has no subnav, so the content gets the full width. */
+	.settings--no-subnav {
+		grid-template-columns: minmax(0, 1fr);
 	}
 
 	.subnav {
@@ -80,7 +128,7 @@
 		text-decoration: none;
 	}
 
-	.subnav__link[aria-current='page'] {
+	.subnav__link[aria-current] {
 		background-color: var(--rh-color-hover);
 		color: var(--rh-color-text);
 		font-weight: var(--rh-font-weight-semibold);
@@ -89,7 +137,6 @@
 	.settings__content {
 		display: flex;
 		flex-direction: column;
-		gap: var(--rh-space-4);
 		min-width: 0;
 		/* The column is the size that a screen inside it works with. A record page stacks its side
 		   panel when this column is narrow, also in a wide window. */
@@ -101,8 +148,58 @@
 			grid-template-columns: minmax(0, 1fr);
 		}
 
+		/* A narrow window shows the subnav as one row that scrolls sideways, with the look of the
+		   tabs of the top bar. Thus the heading stays at the top of the screen. */
 		.subnav {
 			position: static;
+			flex-direction: row;
+			gap: var(--rh-space-1);
+			overflow-x: auto;
+			overflow-y: hidden;
+			scrollbar-width: none;
+			box-shadow: inset 0 calc(-1 * var(--rh-border-width)) 0 var(--rh-color-border);
+		}
+
+		.subnav::-webkit-scrollbar {
+			display: none;
+		}
+
+		.subnav__group {
+			display: flex;
+			flex: none;
+			gap: var(--rh-space-1);
+		}
+
+		.subnav__group + .subnav__group {
+			margin-top: 0;
+		}
+
+		.subnav__label {
+			display: none;
+		}
+
+		.subnav__link {
+			flex: none;
+			height: 44px;
+			padding: 0 var(--rh-space-3);
+			border-bottom: 2px solid transparent;
+			border-radius: 0;
+			white-space: nowrap;
+		}
+
+		.subnav__link:hover {
+			background-color: transparent;
+			border-bottom-color: var(--rh-color-border-strong);
+		}
+
+		.subnav__link[aria-current] {
+			background-color: transparent;
+			border-bottom-color: var(--rh-color-accent);
+		}
+
+		/* The row hides the vertical overflow, so the ring is drawn inside the entry. */
+		.subnav__link:focus-visible {
+			outline-offset: -2px;
 		}
 	}
 </style>

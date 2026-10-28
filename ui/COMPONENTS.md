@@ -27,7 +27,7 @@ The top bar (`AppShell`) shows the section levels from the navigation, then the 
 
 ## RecordPage
 
-`RecordPage` is a `Page` for one record, with the route `/<list>/<id>`. It has the sections on the left and a sticky side panel on the right. Below 1024 px, the side panel moves above the sections and does not stick.
+`RecordPage` is a `Page` for one record, with the route `/<list>/<id>`. It has the sections on the left and a sticky side panel on the right. When the window is below 1024 px, or when the column of the record is at most 900 px wide in the settings section, the side panel moves above the sections and does not stick.
 
 | Property   | Function                                                                       |
 | ---------- | ------------------------------------------------------------------------------ |
@@ -42,7 +42,7 @@ The other properties are the same as in `Page`.
 
 `RecordPage` keeps the changes that are not saved. When the person leaves the page with a change of `save.dirty` or with `unsaved`, the page asks a question. A full page leave shows the dialog of the browser. A save in progress does not ask. Do not add a guard to an editor. `unsaved` holds a change of a section that saves on its own, for example the parameter values of a host.
 
-The save bar is a strip below the sections column. It is at the bottom edge of the window while the sections scroll under it, and then it has a light shadow at the top. At the end of the page, the bar is below the last section and does not cover it. The side panel stays fully visible above the level of the bar. Below 1024 px, the bar uses the full width. `SaveBar` (`$lib/components/layout`) has these properties:
+The save bar is a strip below the sections column. It is at the bottom edge of the window while the sections scroll under it, and then it has a light shadow at the top. At the end of the page, the bar is below the last section and does not cover it. The side panel stays fully visible above the level of the bar. When the side panel is above the sections, the bar uses the full width. `SaveBar` (`$lib/components/layout`) has these properties:
 
 - `dirty`: the form has changes. The bar shows a yellow dot, "The changes are not saved", "Cancel" and "Save".
 - Without changes, the bar shows "No changes" and "Save" is disabled. The text is the accessible description of "Save" (UI principles 5.5).
@@ -51,6 +51,15 @@ The save bar is a strip below the sections column. It is at the bottom edge of t
 - `blocked`: the reason why the server would refuse the form as it is now, for example a required parameter without a value. The bar shows the reason, and "Save" is disabled (UI principles 5.5).
 - `note`: a short fact after the state, for example the number of plans that use the profile.
 - `saving` and `oncancel`: the progress of the save and the action of "Cancel".
+
+## SettingsLayout
+
+`SettingsLayout` (`$lib/components/SettingsLayout.svelte`) is the frame of the settings section: the subnav of the section at the left and the pages of the section in a column at the right. The route layout `src/routes/(app)/settings/+layout.svelte` is its only place. The lint rule `no-restricted-imports` reports an import of the component in another file, because a page of the section that wraps itself shows a second subnav (UI principles 1.8).
+
+- The subnav is 200 px wide and it is sticky. At a window of at most 900 px wide it is one row that scrolls sideways, with the look of the tabs of the top bar, and it starts at the current entry. The row shows a focused entry in full.
+- A role without settings screens gets no subnav, and the page uses the full width.
+- The subnav link of the list is `aria-current="page"` on the list and `aria-current="true"` on a record page below it, because the breadcrumb holds the current page there.
+- The content column is a container named `settings-column`. A record page of the section stacks its side panel above the sections when this column is at most 900 px wide, also in a wide window, because the column is narrower than the window.
 
 ## SummaryPanel
 

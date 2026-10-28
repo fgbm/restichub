@@ -88,7 +88,9 @@
 	:global(.rh-dialog) {
 		position: fixed;
 		top: 50%;
-		left: 50%;
+		/* The middle of the screen. A mobile page that is wider than the screen makes the percentage
+		   boxes of a fixed layer wider than the screen, and `50%` then puts the dialog off it. */
+		left: 50vw;
 		z-index: var(--rh-z-panel);
 		display: flex;
 		flex-direction: column;

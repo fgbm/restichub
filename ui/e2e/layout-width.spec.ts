@@ -1,15 +1,17 @@
 import { expect, test, type Page } from '@playwright/test';
 
 // A section that shows a subnav keeps it on every page. Otherwise the content column moves when a
-// person opens a record that belongs to the list (design/style/ui-principles.md, 1.3). The column
-// keeps its place also when the window scrollbar of a long record appears.
+// person opens a record that belongs to the list (design/style/ui-principles.md, 1.8). No edge
+// moves when a long page adds the window scrollbar either, because the shell always reserves the
+// width that the scrollbar takes (AppShell, `--rh-scrollbar-width`).
 
-const WIDTHS = [1440, 1280, 1024];
+const WIDTHS = [1440, 1280, 1200, 1024];
 
 interface Place {
 	subnavX: number;
 	contentX: number;
 	contentWidth: number;
+	menuRight: number;
 }
 
 async function signIn(page: Page): Promise<void> {
@@ -36,18 +38,28 @@ async function openRecord(page: Page, path: string): Promise<void> {
 }
 
 async function place(page: Page): Promise<Place> {
-	for (const selector of ['.subnav', '.settings__content']) {
+	for (const selector of ['.subnav', '.settings__content', 'header .rh-menu__trigger']) {
 		expect(await page.locator(selector).count(), `the settings page has no ${selector}`).toBe(1);
 	}
 	const subnav = await page.locator('.subnav').boundingBox();
 	const content = await page.locator('.settings__content').boundingBox();
+	const menu = await page.locator('header .rh-menu__trigger').boundingBox();
 	expect(subnav, 'the settings subnav is not on the page').not.toBeNull();
 	expect(content, 'the settings content column is not on the page').not.toBeNull();
+	expect(menu, 'the account menu is not in the top bar').not.toBeNull();
 	return {
 		subnavX: Math.round(subnav?.x ?? 0),
 		contentX: Math.round(content?.x ?? 0),
-		contentWidth: Math.round(content?.width ?? 0)
+		contentWidth: Math.round(content?.width ?? 0),
+		menuRight: Math.round((menu?.x ?? 0) + (menu?.width ?? 0))
 	};
+}
+
+async function overflows(page: Page): Promise<boolean> {
+	return page.evaluate(() => {
+		const root = document.scrollingElement as Element;
+		return root.scrollHeight > root.clientHeight;
+	});
 }
 
 function expectSamePlace(list: Place, record: Place, where: string): void {
@@ -58,6 +70,13 @@ function expectSamePlace(list: Place, record: Place, where: string): void {
 		Math.abs(record.contentX - list.contentX),
 		`${where}: the content moved`
 	).toBeLessThanOrEqual(1);
+	expect(
+		Math.abs(record.menuRight - list.menuRight),
+		`${where}: the right group of the top bar moved`
+	).toBeLessThanOrEqual(1);
+}
+
+function expectSameWidth(list: Place, record: Place, where: string): void {
 	expect(
 		Math.abs(record.contentWidth - list.contentWidth),
 		`${where}: the content changed its width`
@@ -73,29 +92,140 @@ test('the_settings_subnav_and_the_content_stay_in_place_between_a_list_and_a_rec
 
 		for (const path of ['/settings/scripts/templates', '/settings/scripts/jobs']) {
 			await openList(page, path);
+			// The list fits the window, so it shows no window scrollbar.
+			expect(await overflows(page), `${path} at ${width} px: the list fills the window`).toBe(
+				false
+			);
 			const list = await place(page);
 
 			await openRecord(page, path);
-			expectSamePlace(list, await place(page), `${path} at ${width} px`);
+			const record = await place(page);
+			expectSamePlace(list, record, `${path} at ${width} px`);
+			expectSameWidth(list, record, `${path} at ${width} px`);
 			// The record fills more than the window, so it shows the window scrollbar.
-			expect(
-				await page.evaluate(() => {
-					const root = document.scrollingElement as Element;
-					return root.scrollHeight > root.clientHeight;
-				}),
-				`${path} at ${width} px: the record fits the window`
-			).toBe(true);
+			expect(await overflows(page), `${path} at ${width} px: the record fits the window`).toBe(
+				true
+			);
 
 			await page.locator(`a[href="${path}"]`).first().click();
 			await expect(page).toHaveURL(new RegExp(`${path}(\\?.*)?$`));
 			await expect(page.locator('li.item').first()).toBeVisible();
-			expectSamePlace(list, await place(page), `${path} back at ${width} px`);
+			const back = await place(page);
+			expectSamePlace(list, back, `${path} back at ${width} px`);
+			expectSameWidth(list, back, `${path} back at ${width} px`);
 		}
+	}
+});
 
+test('each_entry_of_the_narrow_settings_row_is_fully_visible_when_it_has_the_focus', async ({
+	page
+}) => {
+	await page.setViewportSize({ width: 390, height: 844 });
+	await signIn(page);
+	await openList(page, '/settings/scripts/jobs');
+
+	const links = page.locator('.subnav__link');
+	const count = await links.count();
+	expect(count, 'the settings subnav has too few entries for the test').toBeGreaterThan(4);
+
+	// The last tab comes before the subnav in the document, so the first Tab reaches its first entry
+	// with the keyboard, and a partly visible entry gets the same treatment as a real one. Firefox
+	// makes the row itself a tab stop, before its entries.
+	await page.getByRole('navigation', { name: 'Primary navigation' }).locator('.tab').last().focus();
+	for (let attempt = 0; attempt < 3; attempt += 1) {
+		await page.keyboard.press('Tab');
+		const isEntry = await page.evaluate(() =>
+			(document.activeElement?.className ?? '').includes('subnav__link')
+		);
+		if (isEntry) break;
+	}
+
+	for (let index = 0; index < count; index += 1) {
+		const entry = await page.evaluate(() => {
+			const row = document.querySelector('.subnav')?.getBoundingClientRect();
+			const focused = document.activeElement;
+			const box = focused?.getBoundingClientRect();
+			const style = focused ? getComputedStyle(focused) : null;
+			return {
+				label: focused?.textContent?.trim() ?? '',
+				className: focused?.className ?? '',
+				rowLeft: row?.left ?? 0,
+				rowRight: row?.right ?? 0,
+				left: box?.left ?? 0,
+				right: box?.right ?? 0,
+				outlineWidth: Number.parseFloat(style?.outlineWidth ?? '0'),
+				outlineOffset: Number.parseFloat(style?.outlineOffset ?? '0')
+			};
+		});
+		expect(entry.className, `the focus left the subnav at ${entry.label}`).toContain(
+			'subnav__link'
+		);
+		expect(entry.left, `${entry.label} starts left of the row`).toBeGreaterThanOrEqual(
+			entry.rowLeft - 0.5
+		);
+		expect(entry.right, `${entry.label} ends right of the row`).toBeLessThanOrEqual(
+			entry.rowRight + 0.5
+		);
+		// The row hides the vertical overflow, so the ring must not reach past the entry box.
 		expect(
-			await page.evaluate(() => getComputedStyle(document.documentElement).scrollbarGutter),
-			`the window scrollbar moves the column at ${width} px`
-		).toBe('stable');
+			entry.outlineOffset + entry.outlineWidth,
+			`the ring of ${entry.label} reaches outside the entry`
+		).toBeLessThanOrEqual(0);
+		if (index < count - 1) await page.keyboard.press('Tab');
+	}
+});
+
+test('the_subnav_of_a_narrow_window_is_one_row_above_the_heading', async ({ page }) => {
+	await page.setViewportSize({ width: 390, height: 844 });
+	await signIn(page);
+	await openList(page, '/settings/scripts/jobs');
+	await openRecord(page, '/settings/scripts/jobs');
+
+	const row = await page.evaluate(() => {
+		const nav = document.querySelector('.subnav')?.getBoundingClientRect();
+		const heading = document.querySelector('h1')?.getBoundingClientRect();
+		const current = document.querySelector('.subnav [aria-current]')?.getBoundingClientRect();
+		return {
+			navHeight: Math.round(nav?.height ?? 0),
+			navLeft: nav?.left ?? 0,
+			navRight: nav?.right ?? 0,
+			headingTop: Math.round(heading?.top ?? 0),
+			currentLeft: current?.left ?? 0,
+			currentRight: current?.right ?? 0
+		};
+	});
+	expect(row.navHeight, 'the subnav is not one row').toBeLessThanOrEqual(48);
+	expect(row.headingTop, 'the subnav pushes the heading down').toBeLessThan(250);
+	// The entry of the current page is inside the row, also when it is the last one.
+	expect(row.currentLeft, 'the current entry is left of the row').toBeGreaterThanOrEqual(
+		row.navLeft - 1
+	);
+	expect(row.currentRight, 'the current entry is right of the row').toBeLessThanOrEqual(
+		row.navRight + 1
+	);
+});
+
+test('the_content_column_keeps_its_width_when_both_pages_show_the_window_scrollbar', async ({
+	page
+}) => {
+	for (const width of WIDTHS) {
+		// A short window shows the window scrollbar on the list too.
+		await page.setViewportSize({ width, height: 480 });
+		await signIn(page);
+
+		for (const path of ['/settings/scripts/templates', '/settings/scripts/jobs']) {
+			await openList(page, path);
+			expect(await overflows(page), `${path} at ${width} px: the list fits the window`).toBe(true);
+			const list = await place(page);
+
+			await openRecord(page, path);
+			expect(await overflows(page), `${path} at ${width} px: the record fits the window`).toBe(
+				true
+			);
+			const record = await place(page);
+			expectSamePlace(list, record, `${path} at ${width} px`);
+			expectSameWidth(list, record, `${path} at ${width} px`);
+		}
 	}
 });
 

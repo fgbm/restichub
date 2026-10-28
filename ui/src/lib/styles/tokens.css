@@ -62,6 +62,10 @@
 	--rh-border-width: 1px;
 
 	/* Layout */
+	/* Measured at start (`ui/src/lib/scrollbar.ts`). The shell always reserves it, so the right
+	   edge of the top bar and of a toast does not move when a long page adds the window
+	   scrollbar. An overlay scrollbar takes no space, so the value stays zero. */
+	--rh-scrollbar-width: 0px;
 	--rh-layout-topbar-height: 56px;
 	--rh-layout-nav-width: 240px;
 	--rh-layout-content-max-width: 1280px;
@@ -354,9 +358,9 @@ html {
 	color: var(--rh-color-text);
 	background-color: var(--rh-color-canvas);
 	-webkit-text-size-adjust: 100%;
-	/* The gutter is always reserved: the window scrollbar of a long record must not move the
-	   centred content by half of its width. */
-	scrollbar-gutter: stable;
+	/* No `scrollbar-gutter: stable`: the reserved strip lies outside the box of a fixed layer, so a
+	   dialog and a side panel stop 15 px short of the window edge with classic scrollbars. The
+	   shell reserves the width of the scrollbar itself (AppShell, `--rh-scrollbar-width`). */
 }
 
 body {

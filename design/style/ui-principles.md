@@ -9,10 +9,11 @@ Use the shared components of [ui/COMPONENTS.md](../../ui/COMPONENTS.md). They ap
 1. The breadcrumb in the top bar (`AppShell`) is the only "back" navigation. A page does not have its own back link in the body.
 2. A page below a list adds its levels to the breadcrumb, for example `tenant / Restore / <repository> / Snapshot <id>`. A parent level keeps the list state. The filters stay in the query string.
 3. A record opens on its own page, with the route `/<list>/<id>`. Do not open a record in a large modal.
-4. A record page has the sections on the left and a sticky side panel on the right. The side panel shows a summary or the record parameters, with the label above the value (see `RepositoryEditor`, `ProfileEditor` and `HostPage`).
+4. A record page has the sections on the left and a sticky side panel on the right. The side panel shows a summary or the record parameters, with the label above the value (see `RepositoryEditor`, `ProfileEditor` and `HostPage`). One exception: a settings record puts the side panel above the sections when the content column is at most 900 px wide (owner decision, `RecordPage`).
 5. A small form or a confirmation stays in a centered modal.
 6. A record page shows one sentence that defines one record, for example "A host is a computer of the organization with the ResticHub agent." The list page of the record shows the same sentence. Thus the sentence says what one record is, and not what the collection is. Do not add a second sentence about the form. Put a fact that a person needs in the hint of the field or of the section.
 7. A record page shows the delete and other destructive actions only in the section «Dangerous actions» at the end of the page.
+8. A section keeps its subnav on each page of the section: on the list and on the record page. Thus the content column does not move between the pages.
 
 ## 2. Lists and tables
 

@@ -1,0 +1,193 @@
+import { devices, expect, test, type Page } from '@playwright/test';
+
+// With classic scrollbars the window scrollbar takes 15 px of the window. The fixed layers must
+// reach the window edge there too, and the middle of the window holds the middle of the dialog.
+// The project `chromium-classic-scrollbars` runs this file (playwright.config.ts).
+
+async function signIn(page: Page): Promise<void> {
+	await page.goto('/sign-in');
+	await page.locator('#signin-username').fill('admin');
+	await page.locator('#signin-password').fill('secret');
+	await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+	await expect(page.getByRole('navigation', { name: 'Primary navigation' })).toBeVisible();
+}
+
+// A reload drops the mock session, so the test follows the links of the shell.
+async function openSettings(page: Page, path: string): Promise<void> {
+	await page.locator('a[href="/settings"]').first().click();
+	await page.locator(`a[href="${path}"]`).first().click();
+	await expect(page.locator('li.item').first()).toBeVisible();
+}
+
+async function openPasswordDialog(page: Page): Promise<void> {
+	await page.locator('header .rh-menu__trigger').click();
+	await page.getByRole('menuitem', { name: 'Change password' }).click();
+	await expect(page.locator('.rh-dialog')).toBeVisible();
+}
+
+async function overflows(page: Page): Promise<boolean> {
+	return page.evaluate(() => {
+		const root = document.scrollingElement as Element;
+		return root.scrollHeight > root.clientHeight;
+	});
+}
+
+// A page that scrolls must also show the window scrollbar, or the layer tests prove nothing.
+async function expectScrollbar(page: Page, where: string): Promise<void> {
+	const width = await page.evaluate(() => window.innerWidth - document.documentElement.clientWidth);
+	expect(width, `${where}: the window scrollbar takes no space`).toBeGreaterThan(0);
+}
+
+interface WindowLayout {
+	innerWidth: number;
+	clientWidth: number;
+	overlayRight: number;
+	dialogCentre: number;
+}
+
+async function windowLayout(page: Page): Promise<WindowLayout> {
+	return page.evaluate(() => {
+		const overlay = document.querySelector('.rh-dialog-overlay')?.getBoundingClientRect();
+		const dialog = document.querySelector('.rh-dialog')?.getBoundingClientRect();
+		return {
+			innerWidth: window.innerWidth,
+			clientWidth: document.documentElement.clientWidth,
+			overlayRight: overlay?.right ?? 0,
+			dialogCentre: dialog ? dialog.x + dialog.width / 2 : 0
+		};
+	});
+}
+
+function expectWindowLayout(layout: WindowLayout, where: string): void {
+	expect(layout.overlayRight, `${where}: the dialog overlay stops before the window edge`).toBe(
+		layout.innerWidth
+	);
+	expect(
+		Math.abs(layout.dialogCentre - layout.innerWidth / 2),
+		`${where}: the dialog is not in the middle of the window`
+	).toBeLessThanOrEqual(1);
+}
+
+test('the_dialog_reaches_the_window_edge_on_a_page_that_does_not_scroll', async ({ page }) => {
+	await page.setViewportSize({ width: 1280, height: 1600 });
+	await signIn(page);
+	await openSettings(page, '/settings/scripts/templates');
+	await openPasswordDialog(page);
+
+	const layout = await windowLayout(page);
+	expect(layout.clientWidth, 'the short page keeps a strip for the window scrollbar').toBe(
+		layout.innerWidth
+	);
+	expectWindowLayout(layout, 'the short page');
+});
+
+test('the_dialog_reaches_the_window_edge_on_a_page_that_scrolls', async ({ page }) => {
+	await page.setViewportSize({ width: 1280, height: 480 });
+	await signIn(page);
+	await openSettings(page, '/settings/scripts/templates');
+	expect(await overflows(page), 'the page fits the window').toBe(true);
+	await expectScrollbar(page, 'the dialog on a scrolling page');
+	await openPasswordDialog(page);
+
+	expectWindowLayout(await windowLayout(page), 'the scrolling page');
+});
+
+test('the_side_panel_reaches_the_window_edge', async ({ page }) => {
+	await page.setViewportSize({ width: 1280, height: 320 });
+	await page.addInitScript(() => {
+		localStorage.setItem('restichub.mock.alerts', 'sample');
+	});
+	await signIn(page);
+	await page
+		.getByRole('navigation', { name: 'Primary navigation' })
+		.getByRole('link', { name: 'Alerts', exact: true })
+		.click();
+	await expect(page.locator('li.item').first()).toBeVisible();
+	expect(await overflows(page), 'the page fits the window').toBe(true);
+	await expectScrollbar(page, 'the side panel on a scrolling page');
+
+	await page.locator('li.item .item__title').first().click();
+	await expect(page.locator('.rh-panel')).toBeVisible();
+	const layout = await page.evaluate(() => {
+		const panel = document.querySelector('.rh-panel')?.getBoundingClientRect();
+		return { right: panel?.right ?? 0, innerWidth: window.innerWidth };
+	});
+	expect(layout.right, 'the side panel stops before the window edge').toBe(layout.innerWidth);
+});
+
+test('the_toasts_keep_their_right_edge_when_the_window_scrollbar_appears', async ({ page }) => {
+	// The alert rules screen shows a toast when the person saves the rules.
+	async function saveRules(height: number): Promise<{ scrollbar: number; right: number }> {
+		await page.setViewportSize({ width: 1280, height });
+		await signIn(page);
+		await page.locator('a[href="/settings"]').first().click();
+		await page.locator('a[href="/settings/notifications/rules"]').first().click();
+		await page.getByRole('button', { name: 'Save rules', exact: true }).click();
+		await expect(page.locator('.toast-region > *').first()).toBeVisible();
+		return page.evaluate(() => {
+			const region = document.querySelector('.toast-region')?.getBoundingClientRect();
+			return {
+				scrollbar: window.innerWidth - document.documentElement.clientWidth,
+				right: Math.round(region?.right ?? 0)
+			};
+		});
+	}
+
+	const scrolling = await saveRules(320);
+	const short = await saveRules(1400);
+
+	expect(scrolling.scrollbar, 'the short window shows a window scrollbar').toBeGreaterThan(0);
+	expect(short.scrollbar, 'the tall window shows no window scrollbar').toBe(0);
+	expect(
+		Math.abs(scrolling.right - short.right),
+		'the toasts moved with the scrollbar'
+	).toBeLessThanOrEqual(1);
+});
+
+test('the_dialog_stays_in_the_middle_of_the_screen_of_a_wide_mobile_page', async ({ browser }) => {
+	// A mobile browser makes the percentage boxes of a fixed layer as wide as the document, so a
+	// `50%` dialog leaves a page that is wider than the screen. The app has no such page; this test
+	// pins the defence that the `50vw` keeps.
+	const context = await browser.newContext({ ...devices['iPhone 13'], locale: 'en-US' });
+	const page = await context.newPage();
+	await signIn(page);
+	await page.evaluate(() => {
+		const wide = document.createElement('div');
+		wide.id = 'e2e-wide';
+		wide.style.setProperty('width', '900px');
+		wide.style.setProperty('height', '1px');
+		document.querySelector('.shell')?.append(wide);
+	});
+	const width = await page.evaluate(() => ({
+		scroll: document.documentElement.scrollWidth,
+		screen: document.documentElement.clientWidth
+	}));
+	expect(width.scroll, 'the page is not wider than the screen').toBeGreaterThan(width.screen);
+
+	await openPasswordDialog(page);
+
+	const layout = await page.evaluate(() => {
+		const dialog = document.querySelector('.rh-dialog')?.getBoundingClientRect();
+		return {
+			centre: dialog ? dialog.x + dialog.width / 2 : 0,
+			screen: document.documentElement.clientWidth
+		};
+	});
+	expect(
+		Math.abs(layout.centre - layout.screen / 2),
+		'the dialog is not in the middle of the screen'
+	).toBeLessThanOrEqual(1);
+	await context.close();
+});
+
+test('the_classic_project_shows_a_window_scrollbar_that_takes_space', async ({ page }) => {
+	// Without this, a change to the launch options would turn every test of this file into a test
+	// of overlay scrollbars, which they do not cover.
+	await page.setViewportSize({ width: 1280, height: 480 });
+	await signIn(page);
+	await page.locator('a[href="/settings"]').first().click();
+	await page.locator('a[href="/settings/scripts/templates"]').first().click();
+	await expect(page.locator('li.item').first()).toBeVisible();
+	expect(await overflows(page), 'the page fits the window').toBe(true);
+	await expectScrollbar(page, 'the classic project');
+});
