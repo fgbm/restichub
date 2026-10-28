@@ -34,7 +34,7 @@ The screen shows the environment of the server (ADR-0055):
 
 The distribution stays out when its name holds an unusual character, has the shape of a file path, or is very long. An example of a path shape is a name that starts with `/` or holds `//`.
 
-A fact that the process does not report shows the text "Not set". Thus the kernel and the distribution show "Not set" on Windows. The container shows "Not set" when the process cannot tell a container from a host. The PostgreSQL version shows "Not set" when the database answers no query.
+A fact that the process does not report shows the text "Not set". Thus the kernel and the distribution show "Not set" on Windows. The container shows "Not set" when the process cannot tell a container from a host, also on a host. The PostgreSQL version shows "Not set" when the database stops answering after you sign in. When the database is down, the sign-in check fails and the screen shows the load error, as every other screen does.
 
 ## Send the facts to support
 

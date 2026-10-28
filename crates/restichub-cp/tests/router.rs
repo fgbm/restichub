@@ -208,6 +208,25 @@ async fn adr_0054_about_answers_in_a_session_without_a_tenant() {
 }
 
 #[tokio::test]
+async fn adr_0055_the_about_route_answers_500_while_the_database_is_down()
+-> Result<(), Box<dyn std::error::Error>> {
+    let response = app()?
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/about")
+                .header(header::AUTHORIZATION, format!("Bearer {}", "0".repeat(64)))
+                .body(Body::empty())?,
+        )
+        .await?;
+    // The session check reads the pool before the handler, so the answer waits for
+    // `acquire_timeout` and reports the failure like every signed-in route (ADR-0055).
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let body = body_json(response).await?;
+    assert!(body.get("version").is_none(), "{body}");
+    Ok(())
+}
+
+#[tokio::test]
 async fn an_unknown_api_route_is_a_problem() -> Result<(), Box<dyn std::error::Error>> {
     let response = app()?
         .oneshot(Request::builder().uri("/api/v1/nope").body(Body::empty())?)

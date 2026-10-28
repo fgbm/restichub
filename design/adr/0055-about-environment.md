@@ -23,8 +23,9 @@ The tenancy mode stays out of the body (ADR-0054, decision 3). `GET /api/v1/inst
    - `container`: true when the process finds a container marker of Docker or Podman, or a container runtime in its cgroup path. The field is absent on another system. It is also absent on Linux when the process finds no marker and the cgroup path names no runtime. An example is the path `0::/` of a process in a private cgroup namespace. The process then cannot tell a container from a host, and the field reports no answer.
    - `database`: the server version of PostgreSQL, read with `SHOW server_version` without the suffix of the package builder. The route does not call `version()`, because that function adds the compiler and the build options. The field is absent while the control plane cannot query the database.
 2. Every signed-in role reads `environment`, also in the platform mode and in a session without an organization. The field does not depend on a role or on a tenant.
-3. The body holds no host name, no IP address, no file path, no environment variable, no database name, no user name and no connection string. The module that reads the environment keeps these values out of the object. A fact that the system does not expose stays absent. The route invents no value.
+3. The body holds no secret, no host name, no IP address, no file path and no environment variable. It holds no database name, no user name and no connection string. The module that reads the environment keeps these values out of the object. A fact that the system does not expose stays absent. The route invents no value.
 4. The support text of the screen holds the version, the revision, the protocol, the range of the agents and the environment in one copy. The page adds the tenancy mode from the existing instance store to the same text. The line with the mode stays out while that store has not loaded: the store holds the default mode `multi` until then. A line with that default would tell support a false "several". The installation panel shows the same mode, and shows "Not set" while the store has not loaded.
+5. `schema_level` is absent in one more case than ADR-0054 decision 4 lists: while the control plane cannot query the database. The route then answers without it, and the control plane writes the cause to its log.
 
 ## Consequences
 
@@ -32,7 +33,7 @@ The tenancy mode stays out of the body (ADR-0054, decision 3). `GET /api/v1/inst
 - The body adds no field for a role. The role matrix of AC-AU-02 does not change.
 - The database version costs one `SHOW server_version` on the pool for each read of the route. The other facts are read from files one time in the life of the process.
 - The answer tells a signed-in user the distribution, the kernel and the architecture of the server.
-- The route needs no database answer. A database that answers no query leaves `database` out, and the route still answers 200 with the version, the revision and the protocol versions. The control plane writes the cause to its log, because a support request names a broken installation.
+- The route survives a database that stops answering after the sign-in check. Such a database leaves `database` out, and the route still answers 200 with the version, the revision and the protocol versions. A database that is down stops the session check of every signed-in route before the handler, so the route waits for `acquire_timeout` and answers 500. The control plane writes the cause to its log, because a support request names a broken installation.
 
 ## Accepted risk
 
