@@ -54,4 +54,5 @@ A maintainer makes a release with these steps:
 1. Push a `v*` tag on a commit of `main` whose CI run succeeded. The release workflow builds, signs and drafts the release.
 2. Run the load test of NFR-PERF-04 on the release candidate. Check out the tagged commit and run bench S2 as [`bench/s2/README.md`](bench/s2/README.md) tells (AC-NFR-01 targets: 500 agents, 4 hours). The command exits with status 1 when a target fails.
 3. Attach `out/report.md` to the draft release as a file. The file is not in `SHA256SUMS`. Do not publish a release whose bench S2 report shows a failed target.
-4. Replace the `TODO` in the release notes with the real changes, and then publish the draft.
+4. Replace both `TODO` items in the release notes: the section "Upgrade notes" and the section "Changes". The section "Upgrade notes" tells each step that an upgrade from the previous release needs, or says that no step is necessary. The upgrade guide tells the operator to read this section. Then publish the draft.
+5. After you publish a release candidate, run its `install.sh` on a clean server, and run `install.sh --upgrade` on a server of the previous release. The CI smoke test cannot check the keyless signatures (ADR-0056).

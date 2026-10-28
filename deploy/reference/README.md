@@ -2,7 +2,7 @@
 
 This directory holds a neutral Compose stack for one host: PostgreSQL, the control plane and Caddy. It holds no host name, address or secret of any real environment.
 
-Each release publishes these files as the signed archive `restichub-deploy-<version>.tar.gz`, together with `install.sh`. The archive holds `bootstrap-roles.sql` as a file and the file `IMAGE` with the verified image reference. In the repository, `bootstrap-roles.sql` is a link to `crates/restichub-db/sql/bootstrap-roles.sql`. See [ADR-0056](../../design/adr/0056-install-from-a-release-archive.md).
+Each release publishes these files as the signed archive `restichub-deploy-<version>.tar.gz`, together with `install.sh`. The archive holds `bootstrap-roles.sql` as a file and the file `IMAGE` with the verified image reference. In the repository, `bootstrap-roles.sql` is a link to `crates/restichub-db/sql/bootstrap-roles.sql`. See [ADR-0056](https://github.com/fgbm/restichub/blob/main/design/adr/0056-install-from-a-release-archive.md).
 
 ## Install the stack
 
@@ -13,7 +13,7 @@ VERSION=<version>
 curl -fsSL "https://github.com/fgbm/restichub/releases/download/v${VERSION}/install.sh" | sudo bash -s -- --domain restichub.example.com --email admin@example.com
 ```
 
-The script verifies the release files and the image, writes the secrets and starts the stack. The guide [Install the control plane](../../docs/src/content/docs/getting-started/install-control-plane.md) gives all the steps and the verified download of the script.
+The script verifies the release files and the image, writes the secrets and starts the stack. The guide [Install the control plane](https://fgbm.github.io/restichub/getting-started/install-control-plane/) gives all the steps and the verified download of the script.
 
 ## The files on the server
 
@@ -30,6 +30,6 @@ To run the `db-bootstrap` service by hand, add `-T`: `docker compose run -T --rm
 
 ## An installation from git
 
-An installation made with `git clone` holds the repository in `/opt/restichub` and keeps the environment file and the key in `deploy/reference`. Move it to the new layout with `install.sh --migrate-from-git`. See the guide [Upgrade](../../docs/src/content/docs/guides/upgrade.md).
+An installation made with `git clone` holds the repository in `/opt/restichub` and keeps the environment file and the key in `deploy/reference`. Move it to the new layout with `install.sh --migrate-from-git`. See the guide [Upgrade](https://fgbm.github.io/restichub/guides/upgrade/).
 
 `init-env.sh` is removed. `install.sh` writes the environment file and the key.

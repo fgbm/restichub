@@ -423,10 +423,35 @@ jobs:
           path: ${{ runner.temp }}/image-out/*
           if-no-files-found: error
 
+  # The deploy archive names the image of the release by its digest, so `install.sh` takes
+  # the digest from a signed file and resolves no tag (ADR-0056).
+  deploy:
+    name: Deploy archive
+    needs: [version, manifest]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Write the deploy archive and install.sh
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          IMAGE_REF: ${{ needs.manifest.outputs.ref }}
+          SOURCE_DATE_EPOCH: ${{ needs.version.outputs.epoch }}
+        run: packaging/make-deploy-archive.sh "$VERSION" "$IMAGE_REF" "$RUNNER_TEMP/out"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-deploy
+          path: ${{ runner.temp }}/out/*
+          if-no-files-found: error
+
   # The only job with `id-token: write`. It runs no command from a documentation page.
   sign:
     name: Sign the artifacts
-    needs: [version, agent, inspect, manifest]
+    needs: [version, agent, inspect, manifest, deploy]
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     permissions:
@@ -453,6 +478,10 @@ jobs:
         with:
           name: release-image
           path: ${{ runner.temp }}/assets
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-deploy
+          path: ${{ runner.temp }}/assets
       - name: Install cosign
         run: packaging/install-tool.sh "$COSIGN_URL" "$COSIGN_SHA256" cosign binary
       - name: Check the file set
@@ -471,6 +500,8 @@ jobs:
             echo "restichub-agent-${VERSION}-windows-amd64.zip"
             echo "restichub-cp-${VERSION}-linux-amd64.cdx.json"
             echo "restichub-cp-${VERSION}-linux-arm64.cdx.json"
+            echo "restichub-deploy-${VERSION}.tar.gz"
+            echo "install.sh"
           } | sort > "$RUNNER_TEMP/expected.txt"
           ( cd "$ASSETS" && find . -mindepth 1 -printf '%P\n' | sort ) > "$RUNNER_TEMP/found.txt"
           cat "$RUNNER_TEMP/found.txt"
@@ -534,7 +565,7 @@ jobs:
 
   draft:
     name: Draft the release
-    needs: [version, manifest, sign, verify]
+    needs: [version, manifest, deploy, sign, verify]
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     permissions:
@@ -553,12 +584,17 @@ jobs:
           TAG: ${{ github.ref_name }}
           REPO: ${{ github.repository }}
           IMAGE_REF: ${{ needs.manifest.outputs.ref }}
+          ASSETS: ${{ runner.temp }}/assets
         run: |
           set -euo pipefail
+          INSTALL_SHA256="$(sha256sum "$ASSETS/install.sh" | cut -d' ' -f1)"
+          DEPLOY_SHA256="$(sha256sum "$ASSETS/restichub-deploy-${VERSION}.tar.gz" | cut -d' ' -f1)"
+          export INSTALL_SHA256 DEPLOY_SHA256
           # The values passed the checks of the earlier jobs: a strict version and a digest reference.
           awk '{
             gsub(/@VERSION@/, ENVIRON["VERSION"]); gsub(/@TAG@/, ENVIRON["TAG"])
             gsub(/@REPO@/, ENVIRON["REPO"]); gsub(/@IMAGE@/, ENVIRON["IMAGE_REF"])
+            gsub(/@INSTALL_SHA256@/, ENVIRON["INSTALL_SHA256"]); gsub(/@DEPLOY_SHA256@/, ENVIRON["DEPLOY_SHA256"])
             print
           }' .github/release-notes.md.tmpl > "$RUNNER_TEMP/notes.md"
       - name: Draft the release

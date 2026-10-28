@@ -3,10 +3,24 @@
 ### Contents
 
 - The control plane image `@IMAGE@` for linux/amd64 and linux/arm64.
+- `install.sh` and the deploy archive `restichub-deploy-@VERSION@.tar.gz`: the files of the control plane server.
 - The agent packages for Linux (amd64, arm64; static musl builds) and Windows (amd64).
 - One CycloneDX SBOM for each package and each image.
 - `SHA256SUMS` for every file of this release.
 - A `.sigstore.json` bundle for every file: the keyless cosign signature.
+
+### Install the control plane
+
+Run the script of this release as root on a new server:
+
+```sh
+curl -fsSL https://github.com/@REPO@/releases/download/@TAG@/install.sh | sudo bash -s -- --domain restichub.example.com --email admin@example.com
+```
+
+Upgrade an installed server with `install.sh --upgrade`. The script verifies the deploy archive and the image with the identity below. The SHA-256 of the files:
+
+- `install.sh`: `@INSTALL_SHA256@`
+- `restichub-deploy-@VERSION@.tar.gz`: `@DEPLOY_SHA256@`
 
 ### Verify
 
@@ -25,6 +39,10 @@ cosign verify \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   @IMAGE@
 ```
+
+### Upgrade notes
+
+- TODO: write the steps that an upgrade from the previous release needs before you publish this draft. Write "No step is necessary." when the upgrade needs no step.
 
 ### Changes
 
