@@ -101,10 +101,31 @@ fn distribution() -> Option<String> {
             _ => {}
         }
     }
-    pretty.or_else(|| match (name, version) {
+    let name = pretty.or_else(|| match (name, version) {
         (Some(name), Some(version)) => Some(format!("{name} {version}")),
         (name, _) => name,
-    })
+    })?;
+    distribution_name(&name)
+}
+
+/// The longest distribution name that the answer carries. A line of the file is not bounded.
+const MAX_DISTRIBUTION_LEN: usize = 64;
+
+/// The characters that a distribution name may hold.
+fn is_name_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || matches!(c, ' ' | '.' | '(' | ')' | '_' | '+' | '-')
+}
+
+/// Keeps a distribution name of the expected characters and length, and drops another value.
+///
+/// A name with another character stays out: the value goes to a support text, so a slash of a
+/// package path or a byte of a terminal escape must not arrive there.
+fn distribution_name(value: &str) -> Option<String> {
+    let value = value.trim();
+    if value.is_empty() || value.chars().count() > MAX_DISTRIBUTION_LEN {
+        return None;
+    }
+    value.chars().all(is_name_char).then(|| value.to_owned())
 }
 
 fn kernel_release() -> Option<String> {
@@ -148,7 +169,7 @@ fn container_state(marker: bool, cgroup: &str) -> Option<bool> {
 
 #[cfg(test)]
 mod tests {
-    use super::container_state;
+    use super::{container_state, distribution_name};
 
     #[test]
     fn adr_0055_a_cgroup_path_without_a_runtime_names_no_container() {
@@ -157,5 +178,24 @@ mod tests {
         assert_eq!(container_state(false, "12:devices:/user.slice\n"), None);
         assert_eq!(container_state(false, "0::/docker/8f2c\n"), Some(true));
         assert_eq!(container_state(true, "0::/\n"), Some(true));
+    }
+
+    #[test]
+    fn adr_0055_a_distribution_name_keeps_the_expected_characters() {
+        assert_eq!(
+            distribution_name("Ubuntu 24.04.1 LTS").as_deref(),
+            Some("Ubuntu 24.04.1 LTS")
+        );
+        assert_eq!(
+            distribution_name("Fedora Linux 40 (Workstation Edition)").as_deref(),
+            Some("Fedora Linux 40 (Workstation Edition)")
+        );
+        // The slash of `Debian GNU/Linux 12 (bookworm)`, a path and an escape sequence stay out.
+        assert_eq!(distribution_name("Debian GNU/Linux 12 (bookworm)"), None);
+        assert_eq!(distribution_name("/etc/os-release"), None);
+        assert_eq!(distribution_name("Arch \u{1b}[31mLinux"), None);
+        assert_eq!(distribution_name(""), None);
+        assert_eq!(distribution_name("   "), None);
+        assert_eq!(distribution_name(&"a".repeat(65)), None);
     }
 }

@@ -32,6 +32,8 @@ The screen shows the environment of the server (ADR-0055):
 | Container       | `Yes` when the control plane runs in a container, and `No` when it runs on a host.                              |
 | PostgreSQL      | The server version of the database, for example `16.4`.                                                         |
 
+The distribution stays out when its name holds an unusual character or is very long. Thus Debian shows "Not set" for its distribution, because the name holds a slash.
+
 A fact that the process does not report shows the text "Not set". Thus the kernel and the distribution show "Not set" on Windows. The container shows "Not set" when the process cannot tell a container from a host. The PostgreSQL version shows "Not set" when the database answers no query.
 
 ## Send the facts to support
