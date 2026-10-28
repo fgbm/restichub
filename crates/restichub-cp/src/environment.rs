@@ -87,7 +87,19 @@ fn distribution() -> Option<String> {
     if !cfg!(target_os = "linux") {
         return None;
     }
-    let text = std::fs::read_to_string("/etc/os-release").ok()?;
+    let name = os_release_name(&os_release_text()?)?;
+    distribution_name(&name)
+}
+
+/// Reads the file of the operating system. A system without `/etc/os-release` keeps its copy at
+/// `/usr/lib/os-release` (os-release(5)).
+fn os_release_text() -> Option<String> {
+    std::fs::read_to_string("/etc/os-release")
+        .or_else(|_| std::fs::read_to_string("/usr/lib/os-release"))
+        .ok()
+}
+
+fn os_release_name(text: &str) -> Option<String> {
     let mut name = None;
     let mut version = None;
     let mut pretty = None;
@@ -95,7 +107,7 @@ fn distribution() -> Option<String> {
         let Some((key, value)) = line.split_once('=') else {
             continue;
         };
-        let value = value.trim().trim_matches('"').to_owned();
+        let value = value.trim().trim_matches(['"', '\'']).to_owned();
         if value.is_empty() {
             continue;
         }
@@ -106,11 +118,10 @@ fn distribution() -> Option<String> {
             _ => {}
         }
     }
-    let name = pretty.or_else(|| match (name, version) {
+    pretty.or_else(|| match (name, version) {
         (Some(name), Some(version)) => Some(format!("{name} {version}")),
         (name, _) => name,
-    })?;
-    distribution_name(&name)
+    })
 }
 
 /// The longest distribution name that the answer carries. A line of the file is not bounded.
@@ -183,7 +194,7 @@ fn container_state(marker: bool, cgroup: &str) -> Option<bool> {
 
 #[cfg(test)]
 mod tests {
-    use super::{container_state, distribution_name};
+    use super::{container_state, distribution_name, os_release_name};
 
     #[test]
     fn adr_0055_a_cgroup_path_without_a_runtime_names_no_container() {
@@ -220,5 +231,36 @@ mod tests {
         assert_eq!(distribution_name("/etc/os-release"), None);
         // A terminal escape sequence must not reach the support text.
         assert_eq!(distribution_name("Arch \u{1b}[31mLinux"), None);
+    }
+
+    #[test]
+    fn adr_0055_a_distribution_name_comes_from_a_single_or_a_double_quotation() {
+        assert_eq!(
+            os_release_name("PRETTY_NAME='Ubuntu 24.04.1 LTS'\n").as_deref(),
+            Some("Ubuntu 24.04.1 LTS")
+        );
+        assert_eq!(
+            os_release_name("PRETTY_NAME=\"Debian GNU/Linux 12 (bookworm)\"\n").as_deref(),
+            Some("Debian GNU/Linux 12 (bookworm)")
+        );
+        assert_eq!(
+            os_release_name("PRETTY_NAME=Alpine Linux v3.20\n").as_deref(),
+            Some("Alpine Linux v3.20")
+        );
+    }
+
+    #[test]
+    fn adr_0055_a_distribution_name_without_pretty_name_holds_name_and_version() {
+        assert_eq!(
+            os_release_name("NAME=\"Fedora Linux\"\nVERSION=\"40 (Workstation Edition)\"\n")
+                .as_deref(),
+            Some("Fedora Linux 40 (Workstation Edition)")
+        );
+        assert_eq!(
+            os_release_name("NAME='Debian GNU/Linux'\n").as_deref(),
+            Some("Debian GNU/Linux")
+        );
+        assert_eq!(os_release_name("ID=debian\n").as_deref(), None);
+        assert_eq!(os_release_name("PRETTY_NAME=\"\"\n").as_deref(), None);
     }
 }
