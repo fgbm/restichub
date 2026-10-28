@@ -24,8 +24,10 @@ pub struct EnvironmentView {
     pub kernel: Option<String>,
     /// The architecture of the process, such as `x86_64`.
     pub arch: String,
-    /// True when the process runs in Docker, Podman or Kubernetes.
-    pub container: bool,
+    /// True when the process runs in Docker, Podman or Kubernetes. Absent while the process cannot
+    /// tell a container from a host.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub container: Option<bool>,
     /// The server version of PostgreSQL, such as `16.4`, without the builder suffix. Absent while
     /// the control plane cannot query the database.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -61,7 +63,7 @@ struct System {
     os_version: Option<String>,
     kernel: Option<String>,
     arch: &'static str,
-    container: bool,
+    container: Option<bool>,
 }
 
 /// The facts do not change while the process runs, so the files are read one time.
@@ -114,24 +116,46 @@ fn kernel_release() -> Option<String> {
     (!value.is_empty()).then_some(value)
 }
 
-fn in_container() -> bool {
+fn in_container() -> Option<bool> {
     if !cfg!(target_os = "linux") {
-        return false;
+        return None;
     }
-    // Docker and Podman write a marker file. Under cgroup v1, and on some Kubernetes nodes, the
-    // runtime name appears in the cgroup path of the process instead.
-    if Path::new("/.dockerenv").exists() || Path::new("/run/.containerenv").exists() {
-        return true;
-    }
+    let marker = Path::new("/.dockerenv").exists() || Path::new("/run/.containerenv").exists();
     let cgroup = std::fs::read_to_string("/proc/self/cgroup").unwrap_or_default();
-    [
-        "docker",
-        "kubepods",
-        "containerd",
-        "podman",
-        "libpod",
-        "lxc",
-    ]
-    .iter()
-    .any(|runtime| cgroup.contains(runtime))
+    container_state(marker, &cgroup)
+}
+
+/// The container runtimes that name themselves in the cgroup path of the process.
+const CONTAINER_RUNTIMES: [&str; 6] = [
+    "docker",
+    "kubepods",
+    "containerd",
+    "podman",
+    "libpod",
+    "lxc",
+];
+
+/// Reads the container state from the marker files and from the cgroup path of the process.
+///
+/// `None` when neither source names a container: a process in a private cgroup namespace shows
+/// the path `0::/` on a host and in a container of cgroup v2, so `false` would be a guess.
+fn container_state(marker: bool, cgroup: &str) -> Option<bool> {
+    let runtime = CONTAINER_RUNTIMES
+        .iter()
+        .any(|runtime| cgroup.contains(runtime));
+    (marker || runtime).then_some(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::container_state;
+
+    #[test]
+    fn adr_0055_a_cgroup_path_without_a_runtime_names_no_container() {
+        // A process in a private cgroup namespace reports `0::/` on a host and in a container.
+        assert_eq!(container_state(false, "0::/\n"), None);
+        assert_eq!(container_state(false, "12:devices:/user.slice\n"), None);
+        assert_eq!(container_state(false, "0::/docker/8f2c\n"), Some(true));
+        assert_eq!(container_state(true, "0::/\n"), Some(true));
+    }
 }

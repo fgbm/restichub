@@ -25,13 +25,14 @@ The screen shows the environment of the server (ADR-0055):
 
 | Fact            | Meaning                                                                                                         |
 | --------------- | --------------------------------------------------------------------------------------------------------------- |
-| Operating system | The operating system family of the process. On Linux the value also holds the distribution, for example `Ubuntu 24.04.1 LTS (linux)`. |
+| Operating system | The operating system family of the process, for example `linux`.                                              |
+| Distribution    | The distribution of the process, for example `Ubuntu 24.04.1 LTS`. Linux only.                                  |
 | Kernel          | The release of the running kernel. Linux only.                                                                  |
 | Architecture    | The architecture of the process, for example `x86_64`.                                                          |
-| Container       | `Yes` when the control plane runs in a container.                                                               |
+| Container       | `Yes` when the control plane runs in a container, and `No` when it runs on a host.                              |
 | PostgreSQL      | The server version of the database, for example `16.4`.                                                         |
 
-The screen shows no kernel and no distribution on Windows, because the system does not report them.
+A fact that the process does not report shows the text "Not set". Thus the kernel and the distribution show "Not set" on Windows. The container shows "Not set" when the process cannot tell a container from a host. The PostgreSQL version shows "Not set" when the database answers no query.
 
 ## Send the facts to support
 

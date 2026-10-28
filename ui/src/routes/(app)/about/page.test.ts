@@ -113,17 +113,57 @@ describe('the About ResticHub screen', () => {
 	});
 
 	it('adr_0055_shows_the_environment_of_the_server_to_every_role', () => {
-		state.about = about({ environment: { ...environment(), kernel: null, os_version: null } });
 		render(AboutPage);
-		// Another system has no distribution and no kernel, so the two rows are absent.
 		expect(screen.getByText('Operating system')).toBeInTheDocument();
 		expect(screen.getByText('linux')).toBeInTheDocument();
-		expect(screen.queryByText('Kernel')).not.toBeInTheDocument();
+		expect(screen.getByText('Distribution')).toBeInTheDocument();
+		expect(screen.getByText('Ubuntu 24.04.1 LTS')).toBeInTheDocument();
+		expect(screen.getByText('Kernel')).toBeInTheDocument();
+		expect(screen.getByText('6.8.0-45-generic')).toBeInTheDocument();
+		expect(screen.getByText('x86_64')).toBeInTheDocument();
+		expect(screen.getByText('No')).toBeInTheDocument();
+		expect(screen.getByText('16.4')).toBeInTheDocument();
+	});
+
+	it('adr_0055_shows_a_fact_that_the_process_does_not_know_as_not_set', () => {
+		state.about = about({
+			environment: {
+				os: 'linux',
+				os_version: null,
+				kernel: null,
+				arch: 'x86_64',
+				container: null,
+				database: null
+			}
+		});
+		render(AboutPage);
+		// A locked fact shows its value or "Not set"; the row never goes away (ui-principles 3.9).
+		expect(screen.getByText('Distribution')).toBeInTheDocument();
+		expect(screen.getByText('Kernel')).toBeInTheDocument();
+		expect(screen.getByText('Container')).toBeInTheDocument();
+		expect(screen.getByText('PostgreSQL')).toBeInTheDocument();
+		expect(screen.getAllByText('Not set')).toHaveLength(4);
+	});
+
+	it('adr_0055_the_support_text_names_a_container_that_the_process_cannot_name', () => {
+		state.about = about({
+			environment: { ...environment(), kernel: null, container: null }
+		});
+		render(AboutPage);
+		expect(screen.getByLabelText('Support text')).toHaveValue(
+			[
+				'ResticHub 0.2.0-rc.2+3b21922',
+				'protocol 1.1 · agents 1.0 and later within major 1',
+				'OS Ubuntu 24.04.1 LTS (linux) · x86_64 · container: not set',
+				'PostgreSQL 16.4',
+				'organizations: several'
+			].join('\n')
+		);
 	});
 
 	it('adr_0055_the_support_text_holds_the_environment_of_the_server', () => {
 		render(AboutPage);
-		expect(screen.getByText('Ubuntu 24.04.1 LTS (linux)')).toBeInTheDocument();
+		expect(screen.getByText('Ubuntu 24.04.1 LTS')).toBeInTheDocument();
 		expect(screen.getByText('6.8.0-45-generic')).toBeInTheDocument();
 		expect(screen.getByText('x86_64')).toBeInTheDocument();
 		expect(screen.getByText('16.4')).toBeInTheDocument();

@@ -82,39 +82,29 @@
 	const environment = $derived<KeyValueItem[]>(
 		about
 			? [
-					{ key: 'os', label: t('about.environment.os'), value: systemName(about.environment) },
-					...(about.environment.kernel
-						? [
-								{
-									key: 'kernel',
-									label: t('about.environment.kernel'),
-									value: about.environment.kernel,
-									mono: true
-								}
-							]
-						: []),
-					{
-						key: 'arch',
-						label: t('about.environment.arch'),
-						value: about.environment.arch,
-						mono: true
-					},
-					{
-						key: 'container',
-						label: t('about.environment.container'),
-						value: containerState(about.environment)
-					},
-					{
-						key: 'database',
-						label: t('about.environment.database'),
-						value: about.environment.database ?? t('common.notSet'),
-						mono: about.environment.database !== null && about.environment.database !== undefined
-					}
+					fact('os', t('about.environment.os'), about.environment.os),
+					fact('osVersion', t('about.environment.osVersion'), about.environment.os_version, true),
+					fact('kernel', t('about.environment.kernel'), about.environment.kernel, true),
+					fact('arch', t('about.environment.arch'), about.environment.arch, true),
+					fact('container', t('about.environment.container'), containerState(about.environment)),
+					fact('database', t('about.environment.database'), about.environment.database, true)
 				]
 			: []
 	);
 
 	const support = $derived(about ? supportText(about, agents, tenancy) : '');
+
+	// A locked fact shows its value, or "Not set" while the process has no answer (ui-principles 3.9).
+	function fact(
+		key: string,
+		label: string,
+		value: string | null | undefined,
+		mono = false
+	): KeyValueItem {
+		return value === null || value === undefined
+			? { key, label, value: t('common.notSet') }
+			: { key, label, value, mono };
+	}
 
 	function systemName(environment: AboutEnvironment): string {
 		return environment.os_version
@@ -125,11 +115,17 @@
 			: environment.os;
 	}
 
-	function containerState(environment: AboutEnvironment): string {
+	function containerState(environment: AboutEnvironment): string | null {
+		if (environment.container === null || environment.container === undefined) {
+			return null;
+		}
 		return environment.container ? t('common.yes') : t('common.no');
 	}
 
 	function containerName(environment: AboutEnvironment): string {
+		if (environment.container === null || environment.container === undefined) {
+			return t('about.support.container.notSet');
+		}
 		return environment.container
 			? t('about.support.container.yes')
 			: t('about.support.container.no');

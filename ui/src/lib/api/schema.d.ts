@@ -2446,8 +2446,11 @@ export interface components {
         EnvironmentView: {
             /** @description The architecture of the process, such as `x86_64`. */
             arch: string;
-            /** @description True when the process runs in Docker, Podman or Kubernetes. */
-            container: boolean;
+            /**
+             * @description True when the process runs in Docker, Podman or Kubernetes. Absent while the process cannot
+             *     tell a container from a host.
+             */
+            container?: boolean | null;
             /**
              * @description The server version of PostgreSQL, such as `16.4`, without the builder suffix. Absent while
              *     the control plane cannot query the database.
