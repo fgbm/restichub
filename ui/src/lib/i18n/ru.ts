@@ -71,7 +71,7 @@ export const ru: Record<MessageKey, string> = {
 	'about.tenancy.single': 'Одна организация',
 	'about.tenancy.multi': 'Несколько организаций',
 	'about.schemaLevel': 'Версия схемы базы данных',
-	'about.environment.title': 'Окружение',
+	'about.environment.title': 'Среда сервера',
 	'about.environment.os': 'Операционная система',
 	'about.environment.osVersion': 'Дистрибутив',
 	'about.environment.osVersioned': '{distribution} ({os})',

@@ -70,7 +70,7 @@ export const en = {
 	'about.tenancy.single': 'One organization',
 	'about.tenancy.multi': 'Several organizations',
 	'about.schemaLevel': 'Database schema level',
-	'about.environment.title': 'Environment',
+	'about.environment.title': 'Server environment',
 	'about.environment.os': 'Operating system',
 	'about.environment.osVersion': 'Distribution',
 	'about.environment.osVersioned': '{distribution} ({os})',

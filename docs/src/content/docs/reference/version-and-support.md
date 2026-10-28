@@ -19,7 +19,7 @@ The item in the account menu shows the short version below its label. The screen
 | Protocol | The version of the protocol between the control plane and the agents.                                   |
 | Agents   | The oldest agent version that the control plane accepts, and its major version. An agent of another major version is refused. |
 
-## The environment of the server
+## Server environment
 
 The screen shows the environment of the server (ADR-0055):
 
