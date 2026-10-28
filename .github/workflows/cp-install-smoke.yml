@@ -1,0 +1,101 @@
+name: Control plane install smoke
+
+# Runs deploy/reference/install.sh as root on a runner (ADR-0056, T38): a refused run without
+# a terminal, a cosign download with a wrong SHA-256, a changed release archive, an install,
+# an upgrade and the move of a git clone installation. The release files come from
+# packaging/make-deploy-archive.sh and the image from this commit, through the test seam of
+# the script. The seam replaces the keyless identity with a test key, so the keyless path is
+# covered only by the `verify` job of release.yml and a manual run (CONTRIBUTING.md).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - deploy/reference/**
+      - packaging/make-deploy-archive.sh
+      - packaging/install-tool.sh
+      - scripts/cp-install-smoke.sh
+      - crates/restichub-db/sql/**
+      - .github/workflows/cp-install-smoke.yml
+      - .github/workflows/release.yml
+  pull_request:
+    paths:
+      - deploy/reference/**
+      - packaging/make-deploy-archive.sh
+      - packaging/install-tool.sh
+      - scripts/cp-install-smoke.sh
+      - crates/restichub-db/sql/**
+      - .github/workflows/cp-install-smoke.yml
+      - .github/workflows/release.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # The same pins as release.yml. The smoke test checks that install.sh holds them too.
+  COSIGN_URL: https://github.com/sigstore/cosign/releases/download/v3.0.6/cosign-linux-amd64
+  COSIGN_SHA256: c956e5dfcac53d52bcf058360d579472f0c1d2d9b69f55209e256fe7783f4c74
+  REPO: localhost:5000/fgbm/restichub-cp
+  # The last release whose guide installed the control plane with git clone.
+  OLD_TAG: v0.1.0-rc.9
+
+jobs:
+  smoke:
+    name: Control plane install smoke (ADR-0056)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    services:
+      registry:
+        image: registry:2
+        ports:
+          - 5000:5000
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Fetch the tag of the git clone layout
+        run: git fetch --no-tags --depth=1 origin "+refs/tags/${OLD_TAG}:refs/tags/${OLD_TAG}"
+      - name: Install cosign
+        run: packaging/install-tool.sh "$COSIGN_URL" "$COSIGN_SHA256" cosign binary
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          driver-opts: network=host
+      - name: Build the control plane image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.REPO }}:smoke-a
+          cache-from: type=gha
+          provenance: false
+          sbom: false
+      - name: Push a second image with another digest
+        run: |
+          set -euo pipefail
+          digest() {
+            curl -fsSI "http://localhost:5000/v2/fgbm/restichub-cp/manifests/$1" \
+              -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json, application/vnd.docker.distribution.manifest.list.v2+json' \
+              | tr -d '\r' | awk -F': ' 'tolower($1) == "docker-content-digest" { print $2 }'
+          }
+          a="$REPO@$(digest smoke-a)"
+          docker pull --quiet "$a"
+          printf 'FROM %s\nLABEL org.restichub.smoke=b\n' "$a" | docker build --quiet -t "$REPO:smoke-b" -
+          docker push --quiet "$REPO:smoke-b"
+          b="$REPO@$(digest smoke-b)"
+          [ "$a" != "$b" ] || { echo "::error::the two images have one digest"; exit 1; }
+          { echo "IMAGE_A=$a"; echo "IMAGE_B=$b"; } >> "$GITHUB_ENV"
+      - name: Run the smoke test
+        run: COSIGN="$RUNNER_TEMP/tools/bin/cosign" scripts/cp-install-smoke.sh
+      - name: Diagnostics
+        if: failure()
+        run: |
+          sudo docker ps -a
+          for service in db-bootstrap migrate cp caddy; do
+            sudo docker logs "$(sudo docker ps -aq --filter label=com.docker.compose.project=restichub --filter "label=com.docker.compose.service=$service" | head -n 1)" 2>&1 | tail -n 50 || true
+          done

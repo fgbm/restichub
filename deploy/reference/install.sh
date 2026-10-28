@@ -432,8 +432,8 @@ EOF
 }
 
 run_install() {
-  check_ports
   check_install_target
+  check_ports
   get_cosign
   get_release
   verify_image
