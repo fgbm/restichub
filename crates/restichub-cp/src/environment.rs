@@ -113,19 +113,28 @@ const MAX_DISTRIBUTION_LEN: usize = 64;
 
 /// The characters that a distribution name may hold.
 fn is_name_char(c: char) -> bool {
-    c.is_ascii_alphanumeric() || matches!(c, ' ' | '.' | '(' | ')' | '_' | '+' | '-')
+    c.is_ascii_alphanumeric() || matches!(c, ' ' | '.' | '(' | ')' | '_' | '+' | '-' | '/')
+}
+
+/// True for a value that reads as a file path.
+fn is_path_shape(value: &str) -> bool {
+    value.starts_with('/') || value.contains("//")
 }
 
 /// Keeps a distribution name of the expected characters and length, and drops another value.
 ///
-/// A name with another character stays out: the value goes to a support text, so a slash of a
-/// package path or a byte of a terminal escape must not arrive there.
+/// A name with another character stays out: the value goes to a support text, so a path or a byte
+/// of a terminal escape must not arrive there. The slash stays in, because `Debian GNU/Linux 12
+/// (bookworm)` holds one, and a value of the path shape is still dropped.
 fn distribution_name(value: &str) -> Option<String> {
     let value = value.trim();
     if value.is_empty() || value.chars().count() > MAX_DISTRIBUTION_LEN {
         return None;
     }
-    value.chars().all(is_name_char).then(|| value.to_owned())
+    if is_path_shape(value) || !value.chars().all(is_name_char) {
+        return None;
+    }
+    Some(value.to_owned())
 }
 
 fn kernel_release() -> Option<String> {
@@ -190,12 +199,21 @@ mod tests {
             distribution_name("Fedora Linux 40 (Workstation Edition)").as_deref(),
             Some("Fedora Linux 40 (Workstation Edition)")
         );
-        // The slash of `Debian GNU/Linux 12 (bookworm)`, a path and an escape sequence stay out.
-        assert_eq!(distribution_name("Debian GNU/Linux 12 (bookworm)"), None);
-        assert_eq!(distribution_name("/etc/os-release"), None);
-        assert_eq!(distribution_name("Arch \u{1b}[31mLinux"), None);
+        assert_eq!(
+            distribution_name("Debian GNU/Linux 12 (bookworm)").as_deref(),
+            Some("Debian GNU/Linux 12 (bookworm)")
+        );
         assert_eq!(distribution_name(""), None);
         assert_eq!(distribution_name("   "), None);
         assert_eq!(distribution_name(&"a".repeat(65)), None);
+    }
+
+    #[test]
+    fn adr_0055_a_distribution_name_of_the_path_shape_stays_out() {
+        assert_eq!(distribution_name("/srv/x"), None);
+        assert_eq!(distribution_name("a//b"), None);
+        assert_eq!(distribution_name("/etc/os-release"), None);
+        // A terminal escape sequence must not reach the support text.
+        assert_eq!(distribution_name("Arch \u{1b}[31mLinux"), None);
     }
 }
