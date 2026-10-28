@@ -117,6 +117,64 @@ test('the_settings_subnav_and_the_content_stay_in_place_between_a_list_and_a_rec
 	}
 });
 
+test('each_entry_of_the_narrow_settings_row_is_fully_visible_when_it_has_the_focus', async ({
+	page
+}) => {
+	await page.setViewportSize({ width: 390, height: 844 });
+	await signIn(page);
+	await openList(page, '/settings/scripts/jobs');
+
+	const links = page.locator('.subnav__link');
+	const count = await links.count();
+	expect(count, 'the settings subnav has too few entries for the test').toBeGreaterThan(4);
+
+	// The last tab comes before the subnav in the document, so the first Tab reaches its first entry
+	// with the keyboard, and a partly visible entry gets the same treatment as a real one. Firefox
+	// makes the row itself a tab stop, before its entries.
+	await page.getByRole('navigation', { name: 'Primary navigation' }).locator('.tab').last().focus();
+	for (let attempt = 0; attempt < 3; attempt += 1) {
+		await page.keyboard.press('Tab');
+		const isEntry = await page.evaluate(() =>
+			(document.activeElement?.className ?? '').includes('subnav__link')
+		);
+		if (isEntry) break;
+	}
+
+	for (let index = 0; index < count; index += 1) {
+		const entry = await page.evaluate(() => {
+			const row = document.querySelector('.subnav')?.getBoundingClientRect();
+			const focused = document.activeElement;
+			const box = focused?.getBoundingClientRect();
+			const style = focused ? getComputedStyle(focused) : null;
+			return {
+				label: focused?.textContent?.trim() ?? '',
+				className: focused?.className ?? '',
+				rowLeft: row?.left ?? 0,
+				rowRight: row?.right ?? 0,
+				left: box?.left ?? 0,
+				right: box?.right ?? 0,
+				outlineWidth: Number.parseFloat(style?.outlineWidth ?? '0'),
+				outlineOffset: Number.parseFloat(style?.outlineOffset ?? '0')
+			};
+		});
+		expect(entry.className, `the focus left the subnav at ${entry.label}`).toContain(
+			'subnav__link'
+		);
+		expect(entry.left, `${entry.label} starts left of the row`).toBeGreaterThanOrEqual(
+			entry.rowLeft - 0.5
+		);
+		expect(entry.right, `${entry.label} ends right of the row`).toBeLessThanOrEqual(
+			entry.rowRight + 0.5
+		);
+		// The row hides the vertical overflow, so the ring must not reach past the entry box.
+		expect(
+			entry.outlineOffset + entry.outlineWidth,
+			`the ring of ${entry.label} reaches outside the entry`
+		).toBeLessThanOrEqual(0);
+		if (index < count - 1) await page.keyboard.press('Tab');
+	}
+});
+
 test('the_subnav_of_a_narrow_window_is_one_row_above_the_heading', async ({ page }) => {
 	await page.setViewportSize({ width: 390, height: 844 });
 	await signIn(page);

@@ -4,6 +4,7 @@
 	import { page } from '$app/state';
 	import { t } from '#lib/i18n/index.ts';
 	import { settingsGroupsForRole } from '#lib/navigation.ts';
+	import { revealFocused } from '#lib/scroll-into-view.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
 	import { Icon } from './ui/index.ts';
 
@@ -50,7 +51,12 @@
 
 <div class="settings" class:settings--no-subnav={groups.length === 0}>
 	{#if groups.length > 0}
-		<nav class="subnav" aria-label={t('settings.sections')} bind:this={subnav}>
+		<nav
+			class="subnav"
+			aria-label={t('settings.sections')}
+			bind:this={subnav}
+			{@attach revealFocused}
+		>
 			{#each groups as group (group.labelKey)}
 				<div class="subnav__group">
 					<p class="subnav__label">{t(group.labelKey)}</p>
@@ -189,6 +195,11 @@
 		.subnav__link[aria-current] {
 			background-color: transparent;
 			border-bottom-color: var(--rh-color-accent);
+		}
+
+		/* The row hides the vertical overflow, so the ring is drawn inside the entry. */
+		.subnav__link:focus-visible {
+			outline-offset: -2px;
 		}
 	}
 </style>

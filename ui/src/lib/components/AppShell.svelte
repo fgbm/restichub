@@ -14,6 +14,7 @@
 	} from '#lib/navigation.ts';
 	import { isSingleTenant } from '#lib/stores/instance.svelte.ts';
 	import { buildBreadcrumb, type Crumb } from '#lib/breadcrumb.ts';
+	import { revealFocused } from '#lib/scroll-into-view.ts';
 	import {
 		forgetListQueries,
 		getPageMeta,
@@ -255,7 +256,7 @@
 		</DropdownMenu>
 	</header>
 
-	<nav class="tabs" aria-label={t('nav.primary')}>
+	<nav class="tabs" aria-label={t('nav.primary')} {@attach revealFocused}>
 		{#each tabs as item (item.href)}
 			<a
 				class="tab"
@@ -473,6 +474,11 @@
 		color: var(--rh-color-text);
 		font-weight: var(--rh-font-weight-semibold);
 		border-bottom-color: var(--rh-color-accent);
+	}
+
+	/* The row hides the vertical overflow, so the ring is drawn inside the tab. */
+	.tab:focus-visible {
+		outline-offset: -2px;
 	}
 
 	.page {
