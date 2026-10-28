@@ -159,6 +159,7 @@ async fn adr_0054_about_answers_in_a_session_without_a_tenant() {
         body.get("schema_level").and_then(Value::as_u64).is_some(),
         "{body}"
     );
+    assert!(body.get("environment").is_some(), "{body}");
 
     // An account with no membership and no right reads the version and no schema level.
     let plain = common::seed_memberless_account(&db, "about-plain", "phc").await;
@@ -171,6 +172,7 @@ async fn adr_0054_about_answers_in_a_session_without_a_tenant() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert!(body.get("version").is_some(), "{body}");
     assert!(body.get("schema_level").is_none(), "{body}");
+    assert!(body.get("environment").is_some(), "{body}");
 
     // The document names the route, its security and its fields.
     let response = app
@@ -197,6 +199,7 @@ async fn adr_0054_about_answers_in_a_session_without_a_tenant() {
         "protocol",
         "agent_protocol",
         "schema_level",
+        "environment",
     ] {
         assert!(schema.get(field).is_some(), "the schema has no {field}");
     }

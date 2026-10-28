@@ -1,6 +1,7 @@
 /*
- * The About data of the control plane: the version, the revision, the protocol versions and, for
- * the Platform Admin, the database schema level (ADR-0054).
+ * The About data of the control plane: the version, the revision, the protocol versions, the
+ * environment of the server and, for the Platform Admin, the database schema level (ADR-0054,
+ * ADR-0055).
  *
  * The account menu shows the version below its label, so the application reads `/api/v1/about`
  * once per session without a block of the navigation. The About page waits for the same read. A

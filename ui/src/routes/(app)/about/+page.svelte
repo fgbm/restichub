@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import type { About, AboutEnvironment } from '#lib/api/index.ts';
 	import { Page } from '#lib/components/layout/index.ts';
 	import { Alert, Badge, Button, CopyField, KeyValue, Panel } from '#lib/components/ui/index.ts';
 	import type { KeyValueItem } from '#lib/components/ui/index.ts';
@@ -71,16 +72,96 @@
 			: []
 	);
 
-	const support = $derived(
-		about
-			? t('about.support.text', {
-					version: about.version,
-					revision: about.revision,
-					protocol: `${about.protocol.major}.${about.protocol.minor}`,
-					agents
-				})
-			: ''
+	// The tenancy mode is public on `/api/v1/instance`, so the support text holds it for every role.
+	const tenancy = $derived(
+		getTenancyMode() === 'single'
+			? t('about.support.tenancy.single')
+			: t('about.support.tenancy.multi')
 	);
+
+	const environment = $derived<KeyValueItem[]>(
+		about
+			? [
+					{ key: 'os', label: t('about.environment.os'), value: systemName(about.environment) },
+					...(about.environment.kernel
+						? [
+								{
+									key: 'kernel',
+									label: t('about.environment.kernel'),
+									value: about.environment.kernel,
+									mono: true
+								}
+							]
+						: []),
+					{
+						key: 'arch',
+						label: t('about.environment.arch'),
+						value: about.environment.arch,
+						mono: true
+					},
+					{
+						key: 'container',
+						label: t('about.environment.container'),
+						value: containerState(about.environment)
+					},
+					{
+						key: 'database',
+						label: t('about.environment.database'),
+						value: about.environment.database,
+						mono: true
+					}
+				]
+			: []
+	);
+
+	const support = $derived(about ? supportText(about, agents, tenancy) : '');
+
+	function systemName(environment: AboutEnvironment): string {
+		return environment.os_version
+			? t('about.environment.osVersioned', {
+					distribution: environment.os_version,
+					os: environment.os
+				})
+			: environment.os;
+	}
+
+	function containerState(environment: AboutEnvironment): string {
+		return environment.container ? t('common.yes') : t('common.no');
+	}
+
+	function containerName(environment: AboutEnvironment): string {
+		return environment.container
+			? t('about.support.container.yes')
+			: t('about.support.container.no');
+	}
+
+	// One copy of the text is enough for support, so every line holds the facts of one area.
+	function supportText(value: About, agentRange: string, mode: string): string {
+		const name = systemName(value.environment);
+		const container = containerName(value.environment);
+		const system = value.environment.kernel
+			? t('about.support.system', {
+					os: name,
+					kernel: value.environment.kernel,
+					arch: value.environment.arch,
+					container
+				})
+			: t('about.support.systemNoKernel', {
+					os: name,
+					arch: value.environment.arch,
+					container
+				});
+		return [
+			t('about.support.version', { version: value.version, revision: value.revision }),
+			t('about.support.protocol', {
+				protocol: `${value.protocol.major}.${value.protocol.minor}`,
+				agents: agentRange
+			}),
+			system,
+			t('about.support.database', { database: value.environment.database }),
+			t('about.support.tenancy', { tenancy: mode })
+		].join('\n');
+	}
 </script>
 
 <Page
@@ -105,6 +186,10 @@
 		<div class="about">
 			<Panel title={t('about.versionPanel')}>
 				<KeyValue items={facts} />
+			</Panel>
+
+			<Panel title={t('about.environment.title')}>
+				<KeyValue items={environment} />
 			</Panel>
 
 			<Panel title={t('about.support.title')} subtitle={t('about.support.hint')}>

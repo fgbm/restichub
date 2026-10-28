@@ -1,9 +1,10 @@
-//! The About ResticHub data (`GET /api/v1/about`, ADR-0054).
+//! The About ResticHub data (`GET /api/v1/about`, ADR-0054, ADR-0055).
 //!
-//! Every authenticated role reads the version, the revision and the protocol versions of the
-//! control plane, also in the platform mode and in a session without an organization. A person
-//! gives these facts to the support team. The database schema level goes to the Platform Admin
-//! only. The body holds no secret, no environment value and no path.
+//! Every authenticated role reads the version, the revision, the protocol versions and the
+//! environment of the control plane, also in the platform mode and in a session without an
+//! organization. A person gives these facts to the support team. The database schema level goes to
+//! the Platform Admin only. The body holds no secret, no value that identifies the host and no
+//! path.
 
 use axum::Json;
 use axum::extract::State;
@@ -12,6 +13,7 @@ use serde::Serialize;
 use utoipa::ToSchema;
 
 use crate::context::{Operation, RequestContext};
+use crate::environment::{self, EnvironmentView};
 use crate::error::ApiError;
 use crate::server::AppState;
 
@@ -49,6 +51,8 @@ pub struct AboutResponse {
     /// Absent for a role below the Platform Admin, and while the database holds no migration row.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub schema_level: Option<i64>,
+    /// Goes to every role (ADR-0055).
+    pub environment: EnvironmentView,
 }
 
 /// Splits the stamped version into the package version, the pre-release flag and the revision.
@@ -68,7 +72,7 @@ fn split_build_version(value: &str) -> (String, bool, String) {
     path = "/api/v1/about",
     security(("cookie" = []), ("bearer" = [])),
     responses(
-        (status = 200, description = "The version and the protocol versions of the control plane.", body = AboutResponse),
+        (status = 200, description = "The version, the protocol versions and the environment of the control plane.", body = AboutResponse),
         (status = 401, description = "The request is not authenticated.", body = crate::error::ProblemBody)
     )
 )]
@@ -84,6 +88,7 @@ pub async fn about(
     } else {
         None
     };
+    let environment = environment::read(state.db()).await?;
     Ok(Json(AboutResponse {
         version,
         prerelease,
@@ -97,6 +102,7 @@ pub async fn about(
             minimum_minor: protocol.minimum_minor(),
         },
         schema_level,
+        environment,
     }))
 }
 

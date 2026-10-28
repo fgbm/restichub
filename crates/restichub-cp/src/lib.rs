@@ -27,6 +27,7 @@ pub mod delete_check;
 pub mod delivery;
 pub mod enrollment;
 pub mod enrollment_tokens;
+pub mod environment;
 pub mod error;
 pub mod events;
 pub mod harden;

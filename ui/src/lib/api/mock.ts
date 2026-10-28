@@ -1195,7 +1195,15 @@ export class MockApiService {
 			revision: 'dev',
 			protocol: { major: 1, minor: 1 },
 			agent_protocol: { major: 1, minimum_minor: 0 },
-			schema_level: 60
+			schema_level: 60,
+			environment: {
+				os: 'linux',
+				os_version: 'Ubuntu 24.04.1 LTS',
+				kernel: '6.8.0-45-generic',
+				arch: 'x86_64',
+				container: false,
+				database: '16.4'
+			}
 		};
 	}
 

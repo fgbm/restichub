@@ -248,8 +248,8 @@ async fn ac_au_02_role_operation_matrix() {
 /// The About ResticHub data is for every role, and the schema level is for the Platform Admin only
 /// (AC-AU-02, ADR-0054).
 ///
-/// The version goes to support, so a Viewer reads it. The body holds no secret, no environment
-/// value and no path, so the field set is exactly the visible one.
+/// The version goes to support, so a Viewer reads it. The field set is exactly the visible one, and
+/// the environment holds no host fact (ADR-0055).
 #[tokio::test]
 async fn adr_0054_about_is_readable_by_a_viewer_and_hides_the_schema_level() {
     let Some(db) = common::test_db().await else {
@@ -272,6 +272,7 @@ async fn adr_0054_about_is_readable_by_a_viewer_and_hides_the_schema_level() {
         fields,
         [
             "agent_protocol",
+            "environment",
             "prerelease",
             "protocol",
             "revision",
@@ -297,6 +298,70 @@ async fn adr_0054_about_is_readable_by_a_viewer_and_hides_the_schema_level() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert!(body.get("version").is_some(), "{body}");
     assert!(body.get("schema_level").is_none(), "{body}");
+
+    db.cleanup().await;
+}
+
+/// A Viewer gives the environment of the server to support (ADR-0055).
+///
+/// The operating system, the architecture, the container state and the PostgreSQL version go to
+/// every role. The body holds no file path, no host name and no connection string.
+#[tokio::test]
+async fn adr_0055_a_viewer_reads_the_environment_of_the_server() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant_with_key(db.database(), "about-environment").await;
+    let app = app(db.database());
+
+    let viewer = seed_session(db.database(), tenant, "about-environment-viewer", "viewer").await;
+    let (status, _, body) = send(&app, request("GET", "/api/v1/about", Some(&viewer), None)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let environment = body
+        .get("environment")
+        .unwrap_or_else(|| panic!("the body holds no environment: {body}"));
+    let mut fields: Vec<&str> = environment
+        .as_object()
+        .unwrap_or_else(|| panic!("the environment is no object: {body}"))
+        .keys()
+        .map(String::as_str)
+        .collect();
+    fields.sort_unstable();
+    let mut expected = vec!["arch", "container", "database", "os"];
+    if cfg!(target_os = "linux") {
+        expected.extend(["kernel", "os_version"]);
+    }
+    expected.sort_unstable();
+    assert_eq!(fields, expected, "{body}");
+
+    assert_eq!(environment["os"].as_str(), Some(std::env::consts::OS));
+    assert_eq!(environment["arch"].as_str(), Some(std::env::consts::ARCH));
+    assert!(environment["container"].is_boolean(), "{body}");
+    let database = environment["database"]
+        .as_str()
+        .unwrap_or_else(|| panic!("no database version: {body}"));
+    assert!(
+        database.starts_with(|c: char| c.is_ascii_digit()),
+        "the short PostgreSQL version is {database:?}"
+    );
+    if cfg!(target_os = "linux") {
+        let kernel = environment["kernel"].as_str().unwrap_or_default();
+        assert!(!kernel.is_empty(), "{body}");
+        let distribution = environment["os_version"].as_str().unwrap_or_default();
+        assert!(!distribution.is_empty(), "{body}");
+    }
+
+    let text = body.to_string();
+    for needle in ["/etc/", "/proc/", "postgres://", "postgresql://"] {
+        assert!(!text.contains(needle), "{needle} in {text}");
+    }
+    let host = std::fs::read_to_string("/proc/sys/kernel/hostname").unwrap_or_default();
+    let host = host.trim();
+    assert!(
+        host.is_empty() || !text.contains(host),
+        "the host name {host} in {text}"
+    );
 
     db.cleanup().await;
 }

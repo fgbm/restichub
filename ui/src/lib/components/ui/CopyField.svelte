@@ -37,7 +37,16 @@
 		<label class="rh-field__label" for={inputId}>{label}</label>
 	{/if}
 	<div class="copy-field" class:copy-field--secret={secret}>
-		<input id={inputId} class="rh-input rh-input--mono" readonly {value} />
+		{#if value.includes('\n')}
+			<textarea
+				id={inputId}
+				class="rh-textarea rh-input--mono"
+				readonly
+				rows={value.split('\n').length}>{value}</textarea
+			>
+		{:else}
+			<input id={inputId} class="rh-input rh-input--mono" readonly {value} />
+		{/if}
 		<Button icon={copied ? 'check' : 'copy'} onclick={copy}>
 			{copied ? t('common.copied') : t('common.copy')}
 		</Button>
