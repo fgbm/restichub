@@ -41,6 +41,31 @@ describe('DropdownMenu', () => {
 		expect(hint.closest('[role="menuitem"]')).toHaveTextContent('About ResticHub');
 	});
 
+	it('shows_a_hint_below_the_label_and_a_trailing_value_in_its_row', async () => {
+		const user = userEvent.setup();
+		const items: MenuItem[] = [
+			{
+				label: 'About ResticHub',
+				hint: 'The version of the control plane',
+				trailing: '0.2.0-rc.2',
+				onSelect: () => {}
+			}
+		];
+		render(DropdownMenu, { props: { items, children: trigger('Account') } });
+
+		await user.click(screen.getByRole('button', { name: 'Account' }));
+		const label = await screen.findByText('About ResticHub');
+		const item = label.closest('[role="menuitem"]')!;
+		const trailing = screen.getByText('0.2.0-rc.2');
+		const hint = screen.getByText('The version of the control plane');
+
+		expect(item.contains(trailing)).toBe(true);
+		expect(item.contains(hint)).toBe(true);
+		// The value stays on the line of the label, and the hint takes the line below it.
+		expect(trailing.parentElement).toHaveClass('rh-menu__row');
+		expect(hint.parentElement).toHaveClass('rh-menu__text');
+	});
+
 	it('the_about_item_shows_the_version_in_the_label_row', async () => {
 		const user = userEvent.setup();
 		const items: MenuItem[] = [

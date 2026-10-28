@@ -47,12 +47,13 @@ export interface MenuItem {
 	label: string;
 	/**
 	 * A short fact below the label, for example the version of the build. A disabled menu item puts
-	 * its reason here.
+	 * its reason here. An item of a `group` does not show it, because the check mark takes its place.
 	 */
 	hint?: string;
 	/**
 	 * A short value at the right end of the label row, for example the version of the build. The
-	 * label and the value stay on one line.
+	 * label and the value stay on one line. An item of a `group` does not show it, because the check
+	 * mark takes its place.
 	 */
 	trailing?: string;
 	icon?: IconName;

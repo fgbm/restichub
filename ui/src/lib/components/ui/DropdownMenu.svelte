@@ -105,7 +105,10 @@
 							{#if item.icon}<Icon name={item.icon} />{/if}
 							{#if item.hint}
 								<span class="rh-menu__text">
-									{item.label}
+									<span class="rh-menu__row">
+										{item.label}
+										{#if item.trailing}<small class="rh-menu__trailing">{item.trailing}</small>{/if}
+									</span>
 									<small class="rh-menu__hint">{item.hint}</small>
 								</span>
 							{:else if item.trailing}
@@ -224,6 +227,7 @@
 
 	:global(.rh-menu__text) {
 		display: flex;
+		flex: 1;
 		flex-direction: column;
 		min-width: 0;
 	}
