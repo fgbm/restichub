@@ -7,7 +7,7 @@
 	import { getLocale, t } from '#lib/i18n/index.ts';
 	import { getAbout, isAboutFailed, loadAbout, retryAbout } from '#lib/stores/about.svelte.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
-	import { getTenancyMode, isInstanceLoaded } from '#lib/stores/instance.svelte.ts';
+	import { getTenancyMode, isTenancyModeKnown } from '#lib/stores/instance.svelte.ts';
 
 	onMount(() => {
 		void loadAbout();
@@ -52,8 +52,9 @@
 
 	// The tenancy mode is public on `/api/v1/instance`, so the support text and the installation
 	// panel hold it for every role. The store holds the default mode `multi` before the route
-	// answers, so the page reads the mode only when the store has loaded (ADR-0055, decision 4).
-	const tenancyMode = $derived(isInstanceLoaded() ? getTenancyMode() : null);
+	// answers and after a failed read, so the page shows the mode only when the route named it
+	// (ADR-0055, decision 4).
+	const tenancyMode = $derived(isTenancyModeKnown() ? getTenancyMode() : null);
 	const tenancy = $derived(
 		tenancyMode === null
 			? null

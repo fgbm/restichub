@@ -14,7 +14,7 @@ const state = vi.hoisted(() => ({
 	failed: false,
 	platformAdmin: false,
 	tenancy: 'multi' as 'single' | 'multi',
-	instanceLoaded: true
+	modeKnown: true
 }));
 
 vi.mock('#lib/stores/about.svelte.ts', () => ({
@@ -35,7 +35,7 @@ vi.mock('#lib/stores/session.svelte.ts', () => ({
 
 vi.mock('#lib/stores/instance.svelte.ts', () => ({
 	getTenancyMode: () => state.tenancy,
-	isInstanceLoaded: () => state.instanceLoaded
+	isTenancyModeKnown: () => state.modeKnown
 }));
 
 vi.mock('$app/paths', () => ({ resolve: (path: string) => path }));
@@ -70,7 +70,7 @@ beforeEach(() => {
 	state.failed = false;
 	state.platformAdmin = false;
 	state.tenancy = 'multi';
-	state.instanceLoaded = true;
+	state.modeKnown = true;
 	setLocale('en');
 });
 
@@ -112,7 +112,7 @@ describe('the About ResticHub screen', () => {
 	it('adr_0054_shows_the_tenancy_mode_as_not_set_before_the_instance_route_answers', () => {
 		state.platformAdmin = true;
 		state.about = about({ schema_level: 60 });
-		state.instanceLoaded = false;
+		state.modeKnown = false;
 		render(AboutPage);
 		// The store holds the default mode `multi` before the route answers, so the panel says nothing
 		// about the mode (ADR-0055, decision 4).
@@ -210,7 +210,7 @@ describe('the About ResticHub screen', () => {
 	});
 
 	it('adr_0055_the_support_text_waits_for_the_tenancy_mode', () => {
-		state.instanceLoaded = false;
+		state.modeKnown = false;
 		render(AboutPage);
 		// The store holds the default mode `multi` before the route answers, so the line is absent.
 		expect(screen.getByLabelText('Support text')).toHaveValue(
