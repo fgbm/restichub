@@ -32,6 +32,12 @@ async function overflows(page: Page): Promise<boolean> {
 	});
 }
 
+// A page that scrolls must also show the window scrollbar, or the layer tests prove nothing.
+async function expectScrollbar(page: Page, where: string): Promise<void> {
+	const width = await page.evaluate(() => window.innerWidth - document.documentElement.clientWidth);
+	expect(width, `${where}: the window scrollbar takes no space`).toBeGreaterThan(0);
+}
+
 interface WindowLayout {
 	innerWidth: number;
 	clientWidth: number;
@@ -80,6 +86,7 @@ test('the_dialog_reaches_the_window_edge_on_a_page_that_scrolls', async ({ page 
 	await signIn(page);
 	await openSettings(page, '/settings/scripts/templates');
 	expect(await overflows(page), 'the page fits the window').toBe(true);
+	await expectScrollbar(page, 'the dialog on a scrolling page');
 	await openPasswordDialog(page);
 
 	expectWindowLayout(await windowLayout(page), 'the scrolling page');
@@ -97,6 +104,7 @@ test('the_side_panel_reaches_the_window_edge', async ({ page }) => {
 		.click();
 	await expect(page.locator('li.item').first()).toBeVisible();
 	expect(await overflows(page), 'the page fits the window').toBe(true);
+	await expectScrollbar(page, 'the side panel on a scrolling page');
 
 	await page.locator('li.item .item__title').first().click();
 	await expect(page.locator('.rh-panel')).toBeVisible();
@@ -170,4 +178,16 @@ test('the_dialog_stays_in_the_middle_of_the_screen_of_a_wide_mobile_page', async
 		'the dialog is not in the middle of the screen'
 	).toBeLessThanOrEqual(1);
 	await context.close();
+});
+
+test('the_classic_project_shows_a_window_scrollbar_that_takes_space', async ({ page }) => {
+	// Without this, a change to the launch options would turn every test of this file into a test
+	// of overlay scrollbars, which they do not cover.
+	await page.setViewportSize({ width: 1280, height: 480 });
+	await signIn(page);
+	await page.locator('a[href="/settings"]').first().click();
+	await page.locator('a[href="/settings/scripts/templates"]').first().click();
+	await expect(page.locator('li.item').first()).toBeVisible();
+	expect(await overflows(page), 'the page fits the window').toBe(true);
+	await expectScrollbar(page, 'the classic project');
 });
