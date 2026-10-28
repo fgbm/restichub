@@ -87,7 +87,6 @@ export const en = {
 	'about.support.systemNoKernel': 'OS {os} · {arch} · container: {container}',
 	'about.support.database': 'PostgreSQL {database}',
 	'about.support.container.yes': 'yes',
-	'about.support.container.no': 'no',
 	'about.support.container.notSet': 'not set',
 	'about.support.tenancy': 'organizations: {tenancy}',
 	'about.support.tenancy.single': 'one',

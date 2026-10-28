@@ -127,20 +127,16 @@
 			: environment.os;
 	}
 
+	// The process reports a container or no answer, so `false` never reaches the screen
+	// (ADR-0055, decision 1).
 	function containerState(environment: AboutEnvironment): string | null {
-		if (environment.container === null || environment.container === undefined) {
-			return null;
-		}
-		return environment.container ? t('common.yes') : t('common.no');
+		return environment.container === true ? t('common.yes') : null;
 	}
 
 	function containerName(environment: AboutEnvironment): string {
-		if (environment.container === null || environment.container === undefined) {
-			return t('about.support.container.notSet');
-		}
-		return environment.container
+		return environment.container === true
 			? t('about.support.container.yes')
-			: t('about.support.container.no');
+			: t('about.support.container.notSet');
 	}
 
 	// One copy of the text is enough for support, so every line holds the facts of one area.

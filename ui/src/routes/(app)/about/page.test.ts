@@ -47,7 +47,7 @@ function environment(): About['environment'] {
 		os_version: 'Ubuntu 24.04.1 LTS',
 		kernel: '6.8.0-45-generic',
 		arch: 'x86_64',
-		container: false,
+		container: true,
 		database: '16.4'
 	};
 }
@@ -137,7 +137,7 @@ describe('the About ResticHub screen', () => {
 		expect(screen.getByText('Kernel')).toBeInTheDocument();
 		expect(screen.getByText('6.8.0-45-generic')).toBeInTheDocument();
 		expect(screen.getByText('x86_64')).toBeInTheDocument();
-		expect(screen.getByText('No')).toBeInTheDocument();
+		expect(screen.getByText('Yes')).toBeInTheDocument();
 		expect(screen.getByText('16.4')).toBeInTheDocument();
 	});
 
@@ -187,7 +187,7 @@ describe('the About ResticHub screen', () => {
 			[
 				'ResticHub 0.2.0-rc.2+3b21922',
 				'protocol 1.1 · agents 1.0 and later within major 1',
-				'OS Ubuntu 24.04.1 LTS (linux) · kernel 6.8.0-45-generic · x86_64 · container: no',
+				'OS Ubuntu 24.04.1 LTS (linux) · kernel 6.8.0-45-generic · x86_64 · container: yes',
 				'PostgreSQL 16.4',
 				'organizations: several'
 			].join('\n')
@@ -202,7 +202,7 @@ describe('the About ResticHub screen', () => {
 			[
 				'ResticHub 0.2.0-rc.2+3b21922',
 				'protocol 1.1 · agents 1.0 and later within major 1',
-				'OS linux · x86_64 · container: no',
+				'OS linux · x86_64 · container: yes',
 				'PostgreSQL 16.4',
 				'organizations: one'
 			].join('\n')
@@ -217,7 +217,7 @@ describe('the About ResticHub screen', () => {
 			[
 				'ResticHub 0.2.0-rc.2+3b21922',
 				'protocol 1.1 · agents 1.0 and later within major 1',
-				'OS Ubuntu 24.04.1 LTS (linux) · kernel 6.8.0-45-generic · x86_64 · container: no',
+				'OS Ubuntu 24.04.1 LTS (linux) · kernel 6.8.0-45-generic · x86_64 · container: yes',
 				'PostgreSQL 16.4'
 			].join('\n')
 		);

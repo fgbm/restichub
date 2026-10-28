@@ -1201,7 +1201,7 @@ export class MockApiService {
 				os_version: 'Ubuntu 24.04.1 LTS',
 				kernel: '6.8.0-45-generic',
 				arch: 'x86_64',
-				container: false,
+				container: true,
 				database: '16.4'
 			}
 		};

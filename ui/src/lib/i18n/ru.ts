@@ -88,7 +88,6 @@ export const ru: Record<MessageKey, string> = {
 	'about.support.systemNoKernel': 'ОС {os} · {arch} · контейнер: {container}',
 	'about.support.database': 'PostgreSQL {database}',
 	'about.support.container.yes': 'да',
-	'about.support.container.no': 'нет',
 	'about.support.container.notSet': 'неизвестно',
 	'about.support.tenancy': 'организации: {tenancy}',
 	'about.support.tenancy.single': 'одна',
