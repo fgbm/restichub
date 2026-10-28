@@ -7,7 +7,7 @@
 	import { getLocale, t } from '#lib/i18n/index.ts';
 	import { getAbout, isAboutFailed, loadAbout, retryAbout } from '#lib/stores/about.svelte.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
-	import { getTenancyMode } from '#lib/stores/instance.svelte.ts';
+	import { getTenancyMode, isInstanceLoaded } from '#lib/stores/instance.svelte.ts';
 
 	onMount(() => {
 		void loadAbout();
@@ -72,12 +72,7 @@
 			: []
 	);
 
-	// The tenancy mode is public on `/api/v1/instance`, so the support text holds it for every role.
-	const tenancy = $derived(
-		getTenancyMode() === 'single'
-			? t('about.support.tenancy.single')
-			: t('about.support.tenancy.multi')
-	);
+	const tenancy = $derived(tenancyLine());
 
 	const environment = $derived<KeyValueItem[]>(
 		about
@@ -93,6 +88,17 @@
 	);
 
 	const support = $derived(about ? supportText(about, agents, tenancy) : '');
+
+	// The tenancy mode is public on `/api/v1/instance`, so the support text holds it for every role.
+	// The store holds the default mode `multi` before the route answers, so the text waits for it.
+	function tenancyLine(): string | null {
+		if (!isInstanceLoaded()) {
+			return null;
+		}
+		return getTenancyMode() === 'single'
+			? t('about.support.tenancy.single')
+			: t('about.support.tenancy.multi');
+	}
 
 	// A locked fact shows its value, or "Not set" while the process has no answer (ui-principles 3.9).
 	function fact(
@@ -132,7 +138,7 @@
 	}
 
 	// One copy of the text is enough for support, so every line holds the facts of one area.
-	function supportText(value: About, agentRange: string, mode: string): string {
+	function supportText(value: About, agentRange: string, mode: string | null): string {
 		const name = systemName(value.environment);
 		const container = containerName(value.environment);
 		const system = value.environment.kernel
@@ -147,7 +153,7 @@
 					arch: value.environment.arch,
 					container
 				});
-		return [
+		const lines = [
 			t('about.support.version', { version: value.version, revision: value.revision }),
 			t('about.support.protocol', {
 				protocol: `${value.protocol.major}.${value.protocol.minor}`,
@@ -156,9 +162,12 @@
 			system,
 			t('about.support.database', {
 				database: value.environment.database ?? t('common.notSet')
-			}),
-			t('about.support.tenancy', { tenancy: mode })
-		].join('\n');
+			})
+		];
+		if (mode !== null) {
+			lines.push(t('about.support.tenancy', { tenancy: mode }));
+		}
+		return lines.join('\n');
 	}
 </script>
 

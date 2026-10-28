@@ -13,7 +13,8 @@ const state = vi.hoisted(() => ({
 	about: null as About | null,
 	failed: false,
 	platformAdmin: false,
-	tenancy: 'multi' as 'single' | 'multi'
+	tenancy: 'multi' as 'single' | 'multi',
+	instanceLoaded: true
 }));
 
 vi.mock('#lib/stores/about.svelte.ts', () => ({
@@ -33,7 +34,8 @@ vi.mock('#lib/stores/session.svelte.ts', () => ({
 }));
 
 vi.mock('#lib/stores/instance.svelte.ts', () => ({
-	getTenancyMode: () => state.tenancy
+	getTenancyMode: () => state.tenancy,
+	isInstanceLoaded: () => state.instanceLoaded
 }));
 
 vi.mock('$app/paths', () => ({ resolve: (path: string) => path }));
@@ -68,6 +70,7 @@ beforeEach(() => {
 	state.failed = false;
 	state.platformAdmin = false;
 	state.tenancy = 'multi';
+	state.instanceLoaded = true;
 	setLocale('en');
 });
 
@@ -189,6 +192,20 @@ describe('the About ResticHub screen', () => {
 				'OS linux · x86_64 · container: no',
 				'PostgreSQL 16.4',
 				'organizations: one'
+			].join('\n')
+		);
+	});
+
+	it('adr_0055_the_support_text_waits_for_the_tenancy_mode', () => {
+		state.instanceLoaded = false;
+		render(AboutPage);
+		// The store holds the default mode `multi` before the route answers, so the line is absent.
+		expect(screen.getByLabelText('Support text')).toHaveValue(
+			[
+				'ResticHub 0.2.0-rc.2+3b21922',
+				'protocol 1.1 · agents 1.0 and later within major 1',
+				'OS Ubuntu 24.04.1 LTS (linux) · kernel 6.8.0-45-generic · x86_64 · container: no',
+				'PostgreSQL 16.4'
 			].join('\n')
 		);
 	});
