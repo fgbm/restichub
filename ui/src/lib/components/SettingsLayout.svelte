@@ -118,7 +118,6 @@
 	.settings__content {
 		display: flex;
 		flex-direction: column;
-		gap: var(--rh-space-4);
 		min-width: 0;
 		/* The column is the size that a screen inside it works with. A record page stacks its side
 		   panel when this column is narrow, also in a wide window. */

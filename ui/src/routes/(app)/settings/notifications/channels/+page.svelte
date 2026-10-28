@@ -525,6 +525,7 @@
 
 	.manage-secrets {
 		align-self: flex-start;
+		margin-top: var(--rh-space-4);
 		font-size: var(--rh-font-size-sm);
 	}
 </style>
