@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
 // A section that shows a subnav keeps it on every page. Otherwise the content column moves when a
-// person opens a record that belongs to the list (design/style/ui-principles.md, 1.3). The column
+// person opens a record that belongs to the list (design/style/ui-principles.md, 1.8). The column
 // keeps its place also when the window scrollbar appears, because it is centred on the window and
 // not on the space that the scrollbar leaves.
 

@@ -13,6 +13,7 @@ Use the shared components of [ui/COMPONENTS.md](../../ui/COMPONENTS.md). They ap
 5. A small form or a confirmation stays in a centered modal.
 6. A record page shows one sentence that defines one record, for example "A host is a computer of the organization with the ResticHub agent." The list page of the record shows the same sentence. Thus the sentence says what one record is, and not what the collection is. Do not add a second sentence about the form. Put a fact that a person needs in the hint of the field or of the section.
 7. A record page shows the delete and other destructive actions only in the section «Dangerous actions» at the end of the page.
+8. A section keeps its subnav on each page of the section: on the list and on the record page. Thus the content column does not move between the pages.
 
 ## 2. Lists and tables
 
