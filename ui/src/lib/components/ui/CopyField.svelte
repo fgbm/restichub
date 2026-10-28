@@ -60,7 +60,8 @@
 		gap: var(--rh-space-2);
 	}
 
-	.copy-field--secret :global(.rh-input) {
+	.copy-field--secret :global(.rh-input),
+	.copy-field--secret :global(.rh-textarea) {
 		background-color: var(--rh-color-canvas-subtle);
 	}
 </style>

@@ -53,6 +53,13 @@ for (const scheme of ['light', 'dark'] as const) {
 			}
 		});
 
+		test('the About screen has no axe violation', async ({ page }) => {
+			await signIn(page);
+			await page.goto('/about');
+			await expect(page.getByRole('heading', { level: 1, name: 'About ResticHub' })).toBeVisible();
+			expect(await scan(page)).toEqual([]);
+		});
+
 		test('the open menu and dialog have no axe violation', async ({ page }) => {
 			await signIn(page);
 			await page.locator('.rh-menu__trigger').click();
