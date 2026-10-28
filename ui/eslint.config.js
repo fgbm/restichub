@@ -69,6 +69,25 @@ export default tseslint.config(
 		rules: { 'ui/no-load-more': 'off' }
 	},
 	{
+		// ui/COMPONENTS.md, SettingsLayout: the settings section has one subnav, and only the route
+		// layout of the section draws the frame.
+		files: ['src/**/*.svelte', 'src/**/*.ts'],
+		ignores: ['src/routes/(app)/settings/+layout.svelte', 'src/**/*.test.ts'],
+		rules: {
+			'no-restricted-imports': [
+				'error',
+				{
+					patterns: [
+						{
+							group: ['**/SettingsLayout.svelte'],
+							message: 'SettingsLayout belongs to src/routes/(app)/settings/+layout.svelte.'
+						}
+					]
+				}
+			]
+		}
+	},
+	{
 		// design/style/ui-principles.md, 3.11: a set of values is entered with the tag input.
 		files: ['src/lib/i18n/en.ts', 'src/lib/i18n/ru.ts'],
 		plugins: { ui: uiPrinciples },

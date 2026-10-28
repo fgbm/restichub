@@ -5,7 +5,7 @@ import { expect, test, type Page } from '@playwright/test';
 // moves when a long page adds the window scrollbar either, because the shell always reserves the
 // width that the scrollbar takes (AppShell, `--rh-scrollbar-width`).
 
-const WIDTHS = [1440, 1280, 1024];
+const WIDTHS = [1440, 1280, 1200, 1024];
 
 interface Place {
 	subnavX: number;

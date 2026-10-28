@@ -27,7 +27,7 @@ The top bar (`AppShell`) shows the section levels from the navigation, then the 
 
 ## RecordPage
 
-`RecordPage` is a `Page` for one record, with the route `/<list>/<id>`. It has the sections on the left and a sticky side panel on the right. When the window is below 1024 px, or when the column of the record is below 900 px in the settings section, the side panel moves above the sections and does not stick.
+`RecordPage` is a `Page` for one record, with the route `/<list>/<id>`. It has the sections on the left and a sticky side panel on the right. When the window is below 1024 px, or when the column of the record is at most 900 px wide in the settings section, the side panel moves above the sections and does not stick.
 
 | Property   | Function                                                                       |
 | ---------- | ------------------------------------------------------------------------------ |
@@ -54,12 +54,12 @@ The save bar is a strip below the sections column. It is at the bottom edge of t
 
 ## SettingsLayout
 
-`SettingsLayout` (`$lib/components`) is the frame of the settings section: the subnav of the section at the left and the pages of the section in a column at the right. The route layout `src/routes/(app)/settings/+layout.svelte` is its only place. A page of the section does not wrap itself, so it cannot show a second subnav (UI principles 1.8).
+`SettingsLayout` (`$lib/components/SettingsLayout.svelte`) is the frame of the settings section: the subnav of the section at the left and the pages of the section in a column at the right. The route layout `src/routes/(app)/settings/+layout.svelte` is its only place. The lint rule `no-restricted-imports` reports an import of the component in another file, because a page of the section that wraps itself shows a second subnav (UI principles 1.8).
 
-- The subnav is 200 px wide and it is sticky. Below 900 px it is one row that scrolls sideways, with the look of the tabs of the top bar, and it starts at the current entry.
+- The subnav is 200 px wide and it is sticky. At a window of at most 900 px wide it is one row that scrolls sideways, with the look of the tabs of the top bar, and it starts at the current entry. The row shows a focused entry in full.
 - A role without settings screens gets no subnav, and the page uses the full width.
 - The subnav link of the list is `aria-current="page"` on the list and `aria-current="true"` on a record page below it, because the breadcrumb holds the current page there.
-- The content column is a container named `settings-column`. A record page of the section stacks its side panel above the sections when this column is narrower than 900 px, also in a wide window, because the column is narrower than the window.
+- The content column is a container named `settings-column`. A record page of the section stacks its side panel above the sections when this column is at most 900 px wide, also in a wide window, because the column is narrower than the window.
 
 ## SummaryPanel
 
