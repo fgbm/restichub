@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { ApiError, fieldError, service } from '#lib/api/index.ts';
 	import type { AlertKind, AlertRule, ApiProblem } from '#lib/api/index.ts';
-	import { SettingsLayout } from '#lib/components/index.ts';
+	import { Page } from '#lib/components/layout/index.ts';
 	import { Alert, Button, Panel, Skeleton, Switch, TextField } from '#lib/components/ui/index.ts';
 	import { t, tErrorCode } from '#lib/i18n/index.ts';
 	import type { MessageKey } from '#lib/i18n/index.ts';
@@ -86,7 +86,7 @@
 	}
 </script>
 
-<SettingsLayout title={t('rules.title')} description={t('rules.description')}>
+<Page title={t('rules.title')} description={t('rules.description')}>
 	{#snippet actions()}
 		{#if canWrite}
 			<Button variant="primary" loading={saving} disabled={loading} onclick={save}>
@@ -135,7 +135,7 @@
 			{/if}
 		</Panel>
 	{/if}
-</SettingsLayout>
+</Page>
 
 <style>
 	.rules {

@@ -283,4 +283,22 @@
 			max-height: none;
 		}
 	}
+
+	/* A settings record lives in a column that is narrower than the window, so the sections get
+	   the space of the side panel there before the window gets narrow. */
+	@container settings-column (max-width: 900px) {
+		.record--side {
+			grid-template-columns: minmax(0, 1fr);
+			grid-template-areas:
+				'side'
+				'main'
+				'bar';
+		}
+
+		.record__side,
+		.record--save .record__side {
+			position: static;
+			max-height: none;
+		}
+	}
 </style>

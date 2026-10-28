@@ -10,7 +10,7 @@
 		NotificationChannel,
 		UpdateChannelRequest
 	} from '#lib/api/index.ts';
-	import { SettingsLayout } from '#lib/components/index.ts';
+	import { Page } from '#lib/components/layout/index.ts';
 	import {
 		Alert,
 		Button,
@@ -346,7 +346,7 @@
 	}
 </script>
 
-<SettingsLayout
+<Page
 	title={t('channels.title')}
 	description={t('channels.description')}
 	count={loading ? undefined : channels.length}
@@ -414,7 +414,7 @@
 			{t('secrets.manage')}
 		</a>
 	{/if}
-</SettingsLayout>
+</Page>
 
 <Dialog
 	bind:open={formOpen}

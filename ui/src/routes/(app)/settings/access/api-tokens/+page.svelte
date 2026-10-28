@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { ApiError, assignableRoles, fieldError, namesField, service } from '#lib/api/index.ts';
 	import type { ApiProblem, ApiToken, ApiTokenCreated, Role } from '#lib/api/index.ts';
-	import { SettingsLayout } from '#lib/components/index.ts';
+	import { Page } from '#lib/components/layout/index.ts';
 	import {
 		Alert,
 		Button,
@@ -318,7 +318,7 @@
 	}
 </script>
 
-<SettingsLayout
+<Page
 	title={t('tokens.title')}
 	description={t('tokens.description')}
 	count={loading ? undefined : tokens.length}
@@ -363,7 +363,7 @@
 	<SidePanel bind:open={detailOpen} title={detail?.name ?? ''}>
 		<KeyValue items={detailItems} stacked />
 	</SidePanel>
-</SettingsLayout>
+</Page>
 
 <Dialog
 	bind:open={createOpen}
