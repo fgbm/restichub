@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { devices, expect, test, type Page } from '@playwright/test';
 
 // With classic scrollbars the window scrollbar takes 15 px of the window. The fixed layers must
 // reach the window edge there too, and the middle of the window holds the middle of the dialog.
@@ -134,4 +134,40 @@ test('the_toasts_keep_their_right_edge_when_the_window_scrollbar_appears', async
 		Math.abs(scrolling.right - short.right),
 		'the toasts moved with the scrollbar'
 	).toBeLessThanOrEqual(1);
+});
+
+test('the_dialog_stays_in_the_middle_of_the_screen_of_a_wide_mobile_page', async ({ browser }) => {
+	// A mobile browser makes the percentage boxes of a fixed layer as wide as the document, so a
+	// `50%` dialog leaves a page that is wider than the screen. The app has no such page; this test
+	// pins the defence that the `50vw` keeps.
+	const context = await browser.newContext({ ...devices['iPhone 13'], locale: 'en-US' });
+	const page = await context.newPage();
+	await signIn(page);
+	await page.evaluate(() => {
+		const wide = document.createElement('div');
+		wide.id = 'e2e-wide';
+		wide.style.setProperty('width', '900px');
+		wide.style.setProperty('height', '1px');
+		document.querySelector('.shell')?.append(wide);
+	});
+	const width = await page.evaluate(() => ({
+		scroll: document.documentElement.scrollWidth,
+		screen: document.documentElement.clientWidth
+	}));
+	expect(width.scroll, 'the page is not wider than the screen').toBeGreaterThan(width.screen);
+
+	await openPasswordDialog(page);
+
+	const layout = await page.evaluate(() => {
+		const dialog = document.querySelector('.rh-dialog')?.getBoundingClientRect();
+		return {
+			centre: dialog ? dialog.x + dialog.width / 2 : 0,
+			screen: document.documentElement.clientWidth
+		};
+	});
+	expect(
+		Math.abs(layout.centre - layout.screen / 2),
+		'the dialog is not in the middle of the screen'
+	).toBeLessThanOrEqual(1);
+	await context.close();
 });

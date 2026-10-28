@@ -359,8 +359,8 @@ html {
 	background-color: var(--rh-color-canvas);
 	-webkit-text-size-adjust: 100%;
 	/* No `scrollbar-gutter: stable`: the reserved strip lies outside the box of a fixed layer, so a
-	   dialog overlay and a side panel stop 15 px short of the window edge with classic scrollbars.
-	   The page column keeps its place another way: it is centred on the window (AppShell). */
+	   dialog and a side panel stop 15 px short of the window edge with classic scrollbars. The
+	   shell reserves the width of the scrollbar itself (AppShell, `--rh-scrollbar-width`). */
 }
 
 body {
