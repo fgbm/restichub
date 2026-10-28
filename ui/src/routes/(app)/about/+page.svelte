@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import type { About, AboutEnvironment } from '#lib/api/index.ts';
 	import { Page } from '#lib/components/layout/index.ts';
-	import { Alert, Badge, Button, CopyField, KeyValue, Panel } from '#lib/components/ui/index.ts';
+	import { Alert, Badge, Button, KeyValue, Panel } from '#lib/components/ui/index.ts';
 	import type { KeyValueItem } from '#lib/components/ui/index.ts';
 	import { getLocale, t } from '#lib/i18n/index.ts';
 	import { getAbout, isAboutFailed, loadAbout, retryAbout } from '#lib/stores/about.svelte.ts';
@@ -106,6 +106,20 @@
 
 	const support = $derived(about ? supportText(about, agents, tenancy) : '');
 
+	let copied = $state(false);
+
+	async function copySupport(): Promise<void> {
+		try {
+			await navigator.clipboard.writeText(support);
+			copied = true;
+			setTimeout(() => {
+				copied = false;
+			}, 1500);
+		} catch {
+			copied = false;
+		}
+	}
+
 	// A locked fact shows its value, or "Not set" while the process has no answer (ui-principles 3.9).
 	function fact(
 		key: string,
@@ -194,7 +208,17 @@
 			</Panel>
 
 			<Panel title={t('about.support.title')} subtitle={t('about.support.hint')}>
-				<CopyField label={t('about.support.label')} value={support} />
+				{#snippet actions()}
+					<Button
+						size="sm"
+						icon={copied ? 'check' : 'copy'}
+						aria-label={copied ? t('common.copied') : t('about.support.copy')}
+						onclick={() => void copySupport()}
+					>
+						{copied ? t('common.copied') : t('common.copy')}
+					</Button>
+				{/snippet}
+				<pre class="about__support">{support}</pre>
 			</Panel>
 
 			{#if installation.length > 0}
@@ -246,6 +270,16 @@
 		flex-direction: column;
 		gap: var(--rh-space-4);
 		max-width: 720px;
+	}
+
+	/* A pre, not a textarea: it grows to its lines, so the text never scrolls in its own box. */
+	.about__support {
+		margin: 0;
+		padding: var(--rh-space-2);
+		border-radius: var(--rh-radius-sm);
+		background-color: var(--rh-color-surface-sunken);
+		white-space: pre-wrap;
+		overflow-wrap: anywhere;
 	}
 
 	.about__links {

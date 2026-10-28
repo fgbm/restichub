@@ -80,7 +80,7 @@ export const en = {
 	'about.environment.database': 'PostgreSQL',
 	'about.support.title': 'Support information',
 	'about.support.hint': 'Send this text to support with your question.',
-	'about.support.label': 'Support text',
+	'about.support.copy': 'Copy support text',
 	'about.support.version': 'ResticHub {version}+{revision}',
 	'about.support.protocol': 'protocol {protocol} · agents {agents}',
 	'about.support.system': 'OS {os} · kernel {kernel} · {arch} · container: {container}',
