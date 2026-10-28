@@ -172,7 +172,7 @@ check_ports() {
   fi
   local port
   for port in 80 443 8443; do
-    if ss -Hltn "sport = :$port" | grep -q .; then
+    if [ -n "$(ss -Hltn "sport = :$port")" ]; then
       die "another program listens on port $port; stop it and run the script again"
     fi
   done
@@ -261,7 +261,9 @@ get_release() {
       *) die "the archive holds an unexpected path: $entry" ;;
     esac
   done < <(tar -tzf "$archive")
-  if tar -tvzf "$archive" | cut -c1 | grep -qv '^[-d]$'; then
+  local types
+  types=$(tar -tvzf "$archive" | cut -c1 | tr -d '\n')
+  if [ -n "${types//[-d]/}" ]; then
     die "the archive holds a link or a special file"
   fi
   mkdir "$work/release"
