@@ -10,8 +10,10 @@ description: Резервная копия базы данных и ключа �
 | Объект | Где находится | Как хранить |
 |---|---|---|
 | Дамп базы данных | Его создаёт `pg_dump` | На другом хосте, например в хранилище резервных копий |
-| KEK | `deploy/reference/secrets/restichub_kek` | В менеджере паролей или в сейфе, отдельно от дампа |
-| Файл окружения | `deploy/reference/.env` | Вместе с KEK |
+| KEK | `/etc/restichub/secrets/restichub_kek` | В менеджере паролей или в сейфе, отдельно от дампа |
+| Файл окружения | `/etc/restichub/.env` | Вместе с KEK |
+
+На сервере, установленном через `git clone`, KEK и файл окружения лежат в `/opt/restichub/deploy/reference`. Перенесите такой сервер на новую раскладку командой `install.sh --migrate-from-git`. См. [Перенос сервера, установленного через git](/restichub/ru/guides/upgrade/#перенос-сервера-установленного-через-git).
 
 :::danger
 Храните KEK отдельно от дампа базы данных. Если злоумышленник получит дамп и KEK вместе, он узнает все пароли репозиториев. Если вы потеряете KEK, дамп будет бесполезен, а restic не откроет репозиторий без пароля.
@@ -21,10 +23,10 @@ description: Резервная копия базы данных и ключа �
 
 Таблицы сервера управления защищены политиками доступа к строкам. Делайте дамп от имени суперпользователя PostgreSQL в стеке. Его имя задаёт значение `POSTGRES_USER` в файле окружения, по умолчанию `restichub`. Дамп от имени `restichub_owner` завершится ошибкой.
 
-1. Перейдите в каталог эталонного стека:
+1. Откройте оболочку root (`sudo -i`) и перейдите в каталог стека:
 
    ```sh
-   cd /opt/restichub/deploy/reference
+   cd /opt/restichub
    ```
 
 2. Сделайте дамп:
@@ -36,53 +38,69 @@ description: Резервная копия базы данных и ключа �
 3. Убедитесь, что команда не вывела ошибок и файл не пустой.
 4. Скопируйте файл на другой хост.
 
-Делайте дамп перед каждым обновлением и регулярно, например раз в день через `cron`. Дамп не останавливает сервер управления.
+Делайте дамп перед каждым обновлением и регулярно, например раз в день через `cron`. Дамп не останавливает сервер управления. `install.sh --upgrade` сам делает дамп до изменений на сервере. Старые дампы он не удаляет. См. [Старые резервные копии](/restichub/ru/guides/upgrade/#старые-резервные-копии).
 
 ## Резервная копия KEK и файла окружения
 
-Сделайте эту копию один раз после установки. KEK не меняется.
-
-1. Скопируйте файл `secrets/restichub_kek` в менеджер паролей или в сейф.
-2. Скопируйте файл окружения `.env` туда же.
+Сделайте эту копию один раз после установки. KEK не меняется. Шаги описаны в разделе [Копия KEK вне сервера](/restichub/ru/getting-started/install-control-plane/#копия-kek-вне-сервера). Результат — архив `restichub-config.tar.gz` с каталогом `/etc/restichub`.
 
 ## Восстановление на новом хосте
 
 Используйте тот же выпуск, что и у дампа. Чтобы перейти на новый выпуск, сначала восстановите копию, затем обновите сервер управления.
 
-1. Установите Docker и получите тег выпуска, как в разделе [Установка сервера управления](/restichub/ru/getting-started/install-control-plane/).
-2. Скопируйте файл окружения в `deploy/reference/.env`.
-3. Скопируйте KEK в `deploy/reference/secrets/restichub_kek`.
-4. Передайте файл KEK пользователю сервера управления:
+1. Установите Docker Engine и плагин Compose, как в разделе [Установка сервера управления](/restichub/ru/getting-started/install-control-plane/#перед-началом).
+2. Скопируйте на новый хост архив `restichub-config.tar.gz` и дамп.
+3. Откройте оболочку root (`sudo -i`) в каталоге этих двух файлов.
+4. Верните каталог `/etc/restichub`. Команда сохраняет владельца и права каждого файла:
 
    ```sh
-   sudo chown 10001:10001 secrets/restichub_kek && sudo chmod 400 secrets/restichub_kek
+   tar -xzpf restichub-config.tar.gz -C /etc
    ```
 
-5. Запустите базу данных:
+5. Скачайте и проверьте архив установки `restichub-deploy-<version>.tar.gz` этого выпуска. См. [Проверка выпуска](/restichub/ru/operations/verify-a-release/).
+6. Распакуйте файлы выпуска в `/opt/restichub`:
+
+   ```sh
+   mkdir /opt/restichub && tar -xzf restichub-deploy-<version>.tar.gz -C /opt/restichub --strip-components=1 --no-same-owner
+   ```
+
+7. Создайте ссылку на файл окружения:
+
+   ```sh
+   ln -s /etc/restichub/.env /opt/restichub/.env
+   ```
+
+8. Перейдите в каталог стека:
+
+   ```sh
+   cd /opt/restichub
+   ```
+
+9. Запустите базу данных:
 
    ```sh
    docker compose up -d postgres
    ```
 
-6. Создайте роли сервера управления:
+10. Создайте роли сервера управления:
 
-   ```sh
-   docker compose run --rm -T db-bootstrap
-   ```
+    ```sh
+    docker compose run --rm -T db-bootstrap
+    ```
 
-7. Восстановите дамп:
+11. Восстановите дамп. Укажите путь к дампу:
 
-   ```sh
-   docker compose exec -T postgres pg_restore -U restichub -d restichub --exit-on-error < restichub.dump
-   ```
+    ```sh
+    docker compose exec -T postgres pg_restore -U restichub -d restichub --exit-on-error < /root/restichub.dump
+    ```
 
-8. Запустите стек:
+12. Запустите стек:
 
-   ```sh
-   docker compose up -d
-   ```
+    ```sh
+    docker compose up -d
+    ```
 
-9. Дождитесь, когда `docker compose ps cp` покажет `(healthy)`.
+13. Дождитесь, когда `docker compose ps cp` покажет `(healthy)`.
 
 Если у нового хоста другой адрес, направьте на него DNS-запись домена. Агенты подключаются к домену, поэтому найдут новый хост. Если домен меняется, зарегистрируйте каждый хост заново. См. [Повторная регистрация хоста](/restichub/ru/guides/agent-certificates/).
 

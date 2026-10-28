@@ -1,0 +1,35 @@
+name: Release notes check
+
+# A published release must not keep a TODO of the draft notes (CONTRIBUTING.md): the section
+# "Upgrade notes" tells the operator the steps of an upgrade. When the notes of a published
+# release hold TODO, the job sets the release back to a draft and fails.
+
+on:
+  release:
+    types: [published, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  todo:
+    name: No TODO in the notes of a published release
+    if: ${{ !github.event.release.draft }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Find TODO in the notes
+        env:
+          BODY: ${{ github.event.release.body }}
+          TAG: ${{ github.event.release.tag_name }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if printf '%s\n' "$BODY" | grep -n 'TODO'; then
+            gh release edit "$TAG" --draft=true
+            echo "::error::the notes of $TAG hold TODO, so the release is a draft again; write the notes and publish it again"
+            exit 1
+          fi
+          echo "The notes of $TAG hold no TODO."

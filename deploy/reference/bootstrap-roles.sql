@@ -1,0 +1,1 @@
+../../crates/restichub-db/sql/bootstrap-roles.sql

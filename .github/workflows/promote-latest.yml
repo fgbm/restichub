@@ -95,6 +95,12 @@ jobs:
             echo "move=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          # release-notes-check.yml can run after this job, and workflow_dispatch has no event body.
+          body="$(gh api "repos/$REPO/releases/tags/$tag" --jq .body)"
+          if printf '%s\n' "$body" | grep -n 'TODO'; then
+            echo "::error::the notes of the release $tag hold TODO; write the notes, then run this workflow again"
+            exit 1
+          fi
           highest="$(gh api --paginate "repos/$REPO/releases?per_page=100" \
             --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name' \
             | grep -E "$stable" | sort -V | tail -n 1)"

@@ -8,6 +8,7 @@ description: Проверка подписей, контрольных сумм 
 ## Что входит в выпуск
 
 - Пакеты агента `restichub-agent-<version>-<os>-<arch>`. В пакетах для Linux лежит статически собранный исполняемый файл.
+- `install.sh` и архив установки `restichub-deploy-<version>.tar.gz`. В архиве лежат файлы сервера управления и ссылка на образ выпуска.
 - Образ управляющего сервера `ghcr.io/fgbm/restichub-cp:<version>` для `linux/amd64` и `linux/arm64`.
 - `SHA256SUMS` — сумма SHA-256 каждого файла выпуска.
 - Пакет `<file>.sigstore.json` для каждого файла. В нём лежат подпись и сертификат.
@@ -15,7 +16,44 @@ description: Проверка подписей, контрольных сумм 
 
 ## Что нужно
 
-Установите [cosign](https://docs.sigstore.dev/cosign/system_config/installation/) версии 3.0 или новее. Версия 2 не находит подписи образа. Задайте ожидаемую идентичность. Это рабочий процесс выпуска на проверяемом теге:
+- `cosign` версии 3.0 или новее. Версия 2 не находит подписи образа. См. [Получение cosign](#получение-cosign).
+- `curl`, `tar` и `sha256sum`.
+- Только для раздела [Чтение SBOM](#чтение-sbom): `docker buildx` и `jq`.
+
+## Получение cosign
+
+Недокачанный файл `cosign` завершается аварийно, без понятной ошибки. Проверьте файл перед запуском. Команды получают `cosign` для Linux на `x86_64`. На хосте `arm64` используйте `cosign-linux-arm64`.
+
+1. Скачайте `cosign` и список его контрольных сумм:
+
+   <!-- ci-run -->
+   ```sh
+   COSIGN_VERSION=v3.0.6
+   curl -fsSLO "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64"
+   curl -fsSLO "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign_checksums.txt"
+   ```
+
+2. Проверьте файл:
+
+   <!-- ci-run -->
+   ```sh
+   sha256sum --check --ignore-missing cosign_checksums.txt
+   ```
+
+   Команда печатает `cosign-linux-amd64: OK`. Не используйте файл, если команда печатает `FAILED`.
+3. Установите файл и запустите его:
+
+   <!-- ci-run -->
+   ```sh
+   sudo install -m 0755 cosign-linux-amd64 /usr/local/bin/cosign
+   cosign version
+   ```
+
+   Команда печатает версию `v3.0.6`.
+
+## Ожидаемая идентичность
+
+Задайте ожидаемую идентичность. Это рабочий процесс выпуска на проверяемом теге:
 
 <!-- ci-run -->
 ```sh
@@ -57,23 +95,37 @@ ISSUER=https://token.actions.githubusercontent.com
      "restichub-agent-${VERSION}-linux-amd64.tar.gz"
    ```
 
+5. Проверьте скрипт и архив установки сервера управления:
+
+   <!-- ci-run -->
+   ```sh
+   for file in install.sh "restichub-deploy-${VERSION}.tar.gz"; do
+     cosign verify-blob \
+       --bundle "$file.sigstore.json" \
+       --certificate-identity "$IDENTITY" \
+       --certificate-oidc-issuer "$ISSUER" \
+       "$file"
+   done
+   ```
+
+   Команда печатает `Verified OK` два раза. Суммы SHA-256 этих двух файлов также приведены в разделе «Install the control plane» описания выпуска.
+
 Не устанавливайте файл, если команда завершилась ошибкой. Тег предварительного выпуска, например `v0.1.0-rc.1`, даёт свою идентичность: задайте `VERSION=0.1.0-rc.1`.
 
 ## Проверка образа
 
-Проверяйте образ по дайджесту: тег может сместиться, дайджест — нет:
+Проверяйте образ по дайджесту: тег может сместиться, дайджест — нет. Проверенный архив установки содержит ссылку на образ с дайджестом в файле `IMAGE`. Та же ссылка приведена в разделе «Contents» описания выпуска.
 
 <!-- ci-run -->
 ```sh
-IMAGE=ghcr.io/fgbm/restichub-cp
-DIGEST=$(docker buildx imagetools inspect "$IMAGE:${VERSION}" --format '{{json .Manifest}}' | jq -r .digest)
+IMAGE_REF=$(tar -xzOf "restichub-deploy-${VERSION}.tar.gz" "restichub-deploy-${VERSION}/IMAGE")
 cosign verify \
   --certificate-identity "$IDENTITY" \
   --certificate-oidc-issuer "$ISSUER" \
-  "$IMAGE@$DIGEST"
+  "$IMAGE_REF"
 ```
 
-Команда проверяет подпись дайджеста, на который указывает тег. Укажите в файле Compose `ghcr.io/fgbm/restichub-cp@sha256:<digest>` с этим дайджестом, а не тег. Эталонный стек берёт ссылку из `RESTICHUB_IMAGE`.
+Укажите в файле Compose эту ссылку, а не тег. Эталонный стек берёт ссылку из `RESTICHUB_IMAGE`. `install.sh` выполняет ту же проверку перед запуском стека.
 
 ## Чтение SBOM
 
@@ -81,6 +133,7 @@ cosign verify \
 
 <!-- ci-run -->
 ```sh
+IMAGE=ghcr.io/fgbm/restichub-cp
 PLATFORM_DIGEST=$(docker buildx imagetools inspect "$IMAGE:${VERSION}" --format '{{json .Manifest}}' \
   | jq -r '.manifests[] | select(.platform.architecture=="amd64") | .digest')
 cosign verify-attestation --type cyclonedx \

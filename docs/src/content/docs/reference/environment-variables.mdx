@@ -7,7 +7,7 @@ import Ui from '../../../components/Ui.astro';
 
 The control plane reads a configuration file (TOML) and the environment variables that start with `RESTICHUB_`. An environment variable overrides the same value in the file. The agent reads one `RESTICHUB_` variable. A value in seconds is a whole number of seconds.
 
-Set the variables in the environment of the control plane process. For the Docker Compose stack, add them to the `environment` section of the service `cp`, or pass them through the file `.env` (see [Install the control plane](/restichub/getting-started/install-control-plane/)).
+Set the variables in the environment of the control plane process. For the Docker Compose stack, add them to the `environment` section of the service `cp`, or pass them through the file `/etc/restichub/.env` (see [Install the control plane](/restichub/getting-started/install-control-plane/)).
 
 ## Control plane: base
 
@@ -109,7 +109,7 @@ See [Alerts and notification channels](/restichub/guides/alerts/#installation-se
 
 ## Docker Compose stack
 
-The file `.env` of the stack holds more values. The script `init-env.sh` writes most of them. See [Install the control plane](/restichub/getting-started/install-control-plane/#the-environment-file).
+The environment file `/etc/restichub/.env` of the stack holds more values. The script `install.sh` writes most of them. See [Install the control plane](/restichub/getting-started/install-control-plane/#the-environment-file).
 
 | Variable | Meaning |
 |---|---|

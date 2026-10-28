@@ -8,6 +8,7 @@ Each release of ResticHub carries a keyless signature for each file and for each
 ## What a release holds
 
 - The agent packages `restichub-agent-<version>-<os>-<arch>`. Linux packages hold a static binary.
+- `install.sh` and the deploy archive `restichub-deploy-<version>.tar.gz`. The archive holds the files of the control plane server and the image reference of the release.
 - The control plane image `ghcr.io/fgbm/restichub-cp:<version>` for `linux/amd64` and `linux/arm64`.
 - `SHA256SUMS`: the SHA-256 of each file of the release.
 - A `<file>.sigstore.json` bundle for each file. It holds the signature and the certificate.
@@ -15,7 +16,44 @@ Each release of ResticHub carries a keyless signature for each file and for each
 
 ## What you need
 
-Install [cosign](https://docs.sigstore.dev/cosign/system_config/installation/) version 3.0 or later. Version 2 does not find the signatures of the image. Set the identity that you expect. The identity is the release workflow at the tag that you verify:
+- `cosign` version 3.0 or later. Version 2 does not find the signatures of the image. See [Get cosign](#get-cosign).
+- `curl`, `tar` and `sha256sum`.
+- For the section [Read the SBOM](#read-the-sbom) only: `docker buildx` and `jq`.
+
+## Get cosign
+
+A partial download of `cosign` stops with a crash, not with a clear error. Check the file before you use it. The commands get `cosign` for Linux on `x86_64`. On an `arm64` host, use `cosign-linux-arm64`.
+
+1. Download `cosign` and the list of its checksums:
+
+   <!-- ci-run -->
+   ```sh
+   COSIGN_VERSION=v3.0.6
+   curl -fsSLO "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64"
+   curl -fsSLO "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign_checksums.txt"
+   ```
+
+2. Check the file:
+
+   <!-- ci-run -->
+   ```sh
+   sha256sum --check --ignore-missing cosign_checksums.txt
+   ```
+
+   The command prints `cosign-linux-amd64: OK`. Do not use the file when the command prints `FAILED`.
+3. Install the file and run it:
+
+   <!-- ci-run -->
+   ```sh
+   sudo install -m 0755 cosign-linux-amd64 /usr/local/bin/cosign
+   cosign version
+   ```
+
+   The command prints the version `v3.0.6`.
+
+## Set the identity
+
+Set the identity that you expect. The identity is the release workflow at the tag that you verify:
 
 <!-- ci-run -->
 ```sh
@@ -57,23 +95,37 @@ ISSUER=https://token.actions.githubusercontent.com
      "restichub-agent-${VERSION}-linux-amd64.tar.gz"
    ```
 
+5. Verify the script and the deploy archive of the control plane:
+
+   <!-- ci-run -->
+   ```sh
+   for file in install.sh "restichub-deploy-${VERSION}.tar.gz"; do
+     cosign verify-blob \
+       --bundle "$file.sigstore.json" \
+       --certificate-identity "$IDENTITY" \
+       --certificate-oidc-issuer "$ISSUER" \
+       "$file"
+   done
+   ```
+
+   The command prints `Verified OK` two times. The section "Install the control plane" of the release notes also gives the SHA-256 of the two files.
+
 Do not install a file when a command fails. A pre-release tag, for example `v0.1.0-rc.1`, uses its own identity: set `VERSION` to `0.1.0-rc.1`.
 
 ## Verify the image
 
-Verify the image by its digest. A tag can move, and a digest cannot:
+Verify the image by its digest. A tag can move, and a digest cannot. The verified deploy archive holds the image reference with the digest in the file `IMAGE`. The section "Contents" of the release notes gives the same reference.
 
 <!-- ci-run -->
 ```sh
-IMAGE=ghcr.io/fgbm/restichub-cp
-DIGEST=$(docker buildx imagetools inspect "$IMAGE:${VERSION}" --format '{{json .Manifest}}' | jq -r .digest)
+IMAGE_REF=$(tar -xzOf "restichub-deploy-${VERSION}.tar.gz" "restichub-deploy-${VERSION}/IMAGE")
 cosign verify \
   --certificate-identity "$IDENTITY" \
   --certificate-oidc-issuer "$ISSUER" \
-  "$IMAGE@$DIGEST"
+  "$IMAGE_REF"
 ```
 
-The command checks the signature of the digest that the tag points to. Use `ghcr.io/fgbm/restichub-cp@sha256:<digest>` with that digest, and not the tag, in your Compose file. The reference stack takes the reference in `RESTICHUB_IMAGE`.
+Use this reference, and not the tag, in your Compose file. The reference stack takes the reference in `RESTICHUB_IMAGE`. `install.sh` does the same check before it starts the stack.
 
 ## Read the SBOM
 
@@ -81,6 +133,7 @@ The SBOM files use the CycloneDX 1.5 JSON format. The SBOM of each platform imag
 
 <!-- ci-run -->
 ```sh
+IMAGE=ghcr.io/fgbm/restichub-cp
 PLATFORM_DIGEST=$(docker buildx imagetools inspect "$IMAGE:${VERSION}" --format '{{json .Manifest}}' \
   | jq -r '.manifests[] | select(.platform.architecture=="amd64") | .digest')
 cosign verify-attestation --type cyclonedx \
