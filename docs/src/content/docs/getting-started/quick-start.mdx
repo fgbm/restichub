@@ -19,32 +19,27 @@ The time budget does not include these preparations:
 
 ## Steps
 
-1. **Install Docker (4 min).** On the server, install Docker Engine, the Compose plugin and `git` with the [Docker guide](https://docs.docker.com/engine/install/).
+1. **Install Docker (4 min).** On the server, install Docker Engine and the Compose plugin with the [Docker guide](https://docs.docker.com/engine/install/).
 
    Result: `docker compose version` prints a version.
 
-2. **Get the release (3 min).** In a root shell (`sudo -i`), check out the release tag:
+2. **Install the control plane (6 min).** Find the version of the release on the [releases page](https://github.com/fgbm/restichub/releases). Run the script of the release with your domain and your email address:
 
    ```sh
-   git clone --depth 1 --branch v0.1.0-rc.4 https://github.com/fgbm/restichub.git /opt/restichub
+   VERSION=<version>
+   curl -fsSL "https://github.com/fgbm/restichub/releases/download/v${VERSION}/install.sh" | sudo bash -s -- --domain restichub.example.com --email admin@example.com
    ```
 
-   Result: the directory `/opt/restichub` holds the release. The section "Contents" of the [release page](https://github.com/fgbm/restichub/releases) shows the image reference `ghcr.io/fgbm/restichub-cp@sha256:<digest>`. See [Get the image digest](/restichub/getting-started/install-control-plane/#get-the-image-digest).
+   Result: the script prints `The control plane is healthy and runs the verified image`. Then it asks you to store the key encryption key (KEK). See [Install the control plane](/restichub/getting-started/install-control-plane/#install).
 
-3. **Start the control plane (5 min).** Use the image reference from step 2, and run these commands:
+3. **Store the KEK (2 min).** Copy the KEK and the environment file outside the server, and type `saved` in the terminal of the script. See [Store the KEK outside the server](/restichub/getting-started/install-control-plane/#store-the-kek-outside-the-server).
 
-   ```sh
-   cd /opt/restichub/deploy/reference
-   ./init-env.sh restichub.example.com admin@example.com ghcr.io/fgbm/restichub-cp@sha256:<digest>
-   docker compose up -d
-   ```
+   Result: `curl -fsS https://restichub.example.com/healthz` prints `ok`.
 
-   Result: `curl -fsS https://restichub.example.com/healthz` prints `ok`. See [Install the control plane](/restichub/getting-started/install-control-plane/#install).
-
-4. **Create the administrator (2 min).** Read the setup token, and use it on the screen "Initial setup" at `https://restichub.example.com`:
+4. **Create the administrator (2 min).** In a root shell (`sudo -i`), read the setup token. Use it on the screen "Initial setup" at `https://restichub.example.com`:
 
    ```sh
-   docker compose logs cp | grep setup_token
+   cd /opt/restichub && docker compose logs cp | grep setup_token
    ```
 
 
@@ -55,8 +50,9 @@ The time budget does not include these preparations:
 5. **Enroll the host (5 min).** On the host, run these commands as `root`. Copy the last command from the dialog "Add a host" ("Hosts" → "Add host" → "Create token"):
 
    ```sh
-   curl -LO https://github.com/fgbm/restichub/releases/download/v0.1.0-rc.4/restichub-agent-0.1.0-rc.4-linux-amd64.tar.gz
-   tar -xzf restichub-agent-0.1.0-rc.4-linux-amd64.tar.gz
+   VERSION=<version>
+   curl -fsSLO "https://github.com/fgbm/restichub/releases/download/v${VERSION}/restichub-agent-${VERSION}-linux-amd64.tar.gz"
+   tar -xzf "restichub-agent-${VERSION}-linux-amd64.tar.gz"
    sudo ./restichub-agent register --url https://restichub.example.com --token <token>
    ```
 

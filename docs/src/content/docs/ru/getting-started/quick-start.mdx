@@ -19,32 +19,27 @@ import Screen from '../../../../components/Screen.astro';
 
 ## Шаги
 
-1. **Установите Docker (4 мин).** Установите на сервер Docker Engine, плагин Compose и `git` по [руководству Docker](https://docs.docker.com/engine/install/).
+1. **Установите Docker (4 мин).** Установите на сервер Docker Engine и плагин Compose по [руководству Docker](https://docs.docker.com/engine/install/).
 
    Результат: `docker compose version` выводит версию.
 
-2. **Получите выпуск (3 мин).** В оболочке root (`sudo -i`) получите тег выпуска:
+2. **Установите сервер управления (6 мин).** Найдите версию выпуска на [странице выпусков](https://github.com/fgbm/restichub/releases). Запустите скрипт выпуска со своим доменом и своим адресом почты:
 
    ```sh
-   git clone --depth 1 --branch v0.1.0-rc.4 https://github.com/fgbm/restichub.git /opt/restichub
+   VERSION=<version>
+   curl -fsSL "https://github.com/fgbm/restichub/releases/download/v${VERSION}/install.sh" | sudo bash -s -- --domain restichub.example.com --email admin@example.com
    ```
 
-   Результат: каталог `/opt/restichub` содержит выпуск. Раздел «Contents» на [странице выпуска](https://github.com/fgbm/restichub/releases) показывает ссылку на образ `ghcr.io/fgbm/restichub-cp@sha256:<digest>`. См. [Получение дайджеста образа](/restichub/ru/getting-started/install-control-plane/#получение-дайджеста-образа).
+   Результат: скрипт печатает `The control plane is healthy and runs the verified image`. Затем он просит сохранить ключ шифрования ключей (KEK). См. [Установка сервера управления](/restichub/ru/getting-started/install-control-plane/#установка).
 
-3. **Запустите сервер управления (5 мин).** Возьмите ссылку на образ из шага 2 и выполните эти команды:
+3. **Сохраните KEK (2 мин).** Скопируйте KEK и файл окружения за пределы сервера и введите `saved` в терминале скрипта. См. [Копия KEK вне сервера](/restichub/ru/getting-started/install-control-plane/#копия-kek-вне-сервера).
 
-   ```sh
-   cd /opt/restichub/deploy/reference
-   ./init-env.sh restichub.example.com admin@example.com ghcr.io/fgbm/restichub-cp@sha256:<digest>
-   docker compose up -d
-   ```
+   Результат: `curl -fsS https://restichub.example.com/healthz` выводит `ok`.
 
-   Результат: `curl -fsS https://restichub.example.com/healthz` выводит `ok`. См. [Установка сервера управления](/restichub/ru/getting-started/install-control-plane/#установка).
-
-4. **Создайте администратора (2 мин).** Прочитайте токен настройки и введите его на экране «Первоначальная настройка» по адресу `https://restichub.example.com`:
+4. **Создайте администратора (2 мин).** В оболочке root (`sudo -i`) прочитайте токен настройки. Введите его на экране «Первоначальная настройка» по адресу `https://restichub.example.com`:
 
    ```sh
-   docker compose logs cp | grep setup_token
+   cd /opt/restichub && docker compose logs cp | grep setup_token
    ```
 
 
@@ -55,8 +50,9 @@ import Screen from '../../../../components/Screen.astro';
 5. **Зарегистрируйте хост (5 мин).** На хосте выполните эти команды от `root`. Последнюю команду скопируйте из диалога «Добавить хост» («Хосты» → «Добавить хост» → «Создать токен»):
 
    ```sh
-   curl -LO https://github.com/fgbm/restichub/releases/download/v0.1.0-rc.4/restichub-agent-0.1.0-rc.4-linux-amd64.tar.gz
-   tar -xzf restichub-agent-0.1.0-rc.4-linux-amd64.tar.gz
+   VERSION=<version>
+   curl -fsSLO "https://github.com/fgbm/restichub/releases/download/v${VERSION}/restichub-agent-${VERSION}-linux-amd64.tar.gz"
+   tar -xzf "restichub-agent-${VERSION}-linux-amd64.tar.gz"
    sudo ./restichub-agent register --url https://restichub.example.com --token <token>
    ```
 

@@ -25,7 +25,7 @@ Apply all controls that your storage supports.
 
 ## Other actions
 
-- Keep the key encryption key (KEK) outside the database backup. The KEK protects the repository passwords, the job signing keys and the keys of the certificate authority. Without it, a restored database holds no usable secret.
+- Keep the key encryption key (KEK) outside the database backup. The KEK protects the repository passwords, the job signing keys and the keys of the certificate authority. Without it, a restored database holds no usable secret. The reference installation keeps the KEK in `/etc/restichub/secrets/restichub_kek`. See [Store the KEK outside the server](/restichub/getting-started/install-control-plane/#store-the-kek-outside-the-server).
 - Copy the repository password outside ResticHub. If you lose the control plane, you cannot open the snapshots without the password.
 - Keep a credential out of a text parameter, a path and a tag. The control plane masks a text parameter value in a script variable, a preview and an audit record. A value in a path, an exclude or a tag is part of the restic command and of the snapshot. Each role that sees jobs and snapshots sees it. See [Profile parameters](/restichub/concepts/profile-parameters/).
 - Turn on the trust mode for server scripts only on a host that you accept to control from the control plane. See [Server scripts](/restichub/guides/scripts/).

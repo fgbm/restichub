@@ -7,7 +7,7 @@
 
 ## Context
 
-The installation guide of the release 0.1.0 clones the repository with `git` into `/opt/restichub`. The script `deploy/reference/init-env.sh` then writes the environment file `.env` and the KEK file `secrets/restichub_kek` into that working tree. Only `.gitignore` keeps the two files out of the history.
+The installation guide of the 0.1.0 release candidates clones the repository with `git` into `/opt/restichub`. The script `deploy/reference/init-env.sh` then writes the environment file `.env` and the KEK file `secrets/restichub_kek` into that working tree. Only `.gitignore` keeps the two files out of the history.
 
 These facts cause problems:
 

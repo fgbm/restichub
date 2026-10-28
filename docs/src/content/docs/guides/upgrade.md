@@ -8,57 +8,140 @@ Upgrade the control plane first. Then upgrade the agents. The control plane acce
 ## Before you start
 
 1. Read the section "Upgrade notes" of each release between your version and the new version on the [release page](https://github.com/fgbm/restichub/releases).
-2. Verify the new release and read its image digest. See [Verify a release](/restichub/operations/verify-a-release/).
-3. Make a backup of the control plane. See [Back up the control plane](/restichub/operations/back-up-the-control-plane/).
+2. Examine the directory `/opt/restichub`. If it holds the directory `.git`, the server was installed with `git clone`. Then do the steps in [Move a server that was installed with git](#move-a-server-that-was-installed-with-git) instead of the upgrade steps.
 
 ## Upgrade the control plane
 
+The script `install.sh` of the new release upgrades the server. It verifies the release with the same checks as the installation. Then it makes a backup, replaces the release files and starts the new image.
+
 :::caution
-Do not skip the backup. The migrations of a new release change the database. The backup is the only way back to the old release.
+Keep the backup of the script. The migrations of a new release change the database. The backup is the only way back to the old release.
 :::
 
-1. Go to the checkout:
+1. Set the version of the new release:
+
+   ```sh
+   VERSION=<version>
+   ```
+
+2. Run the script of the new release:
+
+   ```sh
+   curl -fsSL "https://github.com/fgbm/restichub/releases/download/v${VERSION}/install.sh" | sudo bash -s -- --upgrade
+   ```
+
+   The script prints `The upgrade to <version> is complete` and the backup directory. To verify the script before you run it, use the steps in [Install with a verified download](/restichub/getting-started/install-control-plane/#install-with-a-verified-download) with the option `--upgrade`.
+
+3. Copy the database dump from the backup directory to another host.
+
+The script does these steps:
+
+1. It verifies `cosign`, the release archive and the image of the new release.
+2. It makes the directory `/var/backups/restichub/<time>` with the mode `700`. The option `--backup-dir` sets another parent directory.
+3. It copies the environment file and the old release files to the backup directory.
+4. It makes a database dump in the backup directory and checks the dump with `pg_restore --list`.
+5. It replaces the files in `/opt/restichub` and sets the new image in `RESTICHUB_IMAGE`.
+6. It starts the stack. The `migrate` service applies the new migrations before the control plane starts.
+7. It waits until the control plane is healthy and compares the running image with the verified image.
+
+If a step after the backup fails, the script prints the commands that start the old release again. The agents connect again by themselves.
+
+### Upgrade by hand
+
+Use these steps only when you cannot run the script. They change only the image. If the upgrade notes name a change of the release files, use the script.
+
+1. Verify the new release and read its image reference with the steps in [Verify a release](/restichub/operations/verify-a-release/).
+2. Make a database dump. See [Back up the database](/restichub/operations/back-up-the-control-plane/#back-up-the-database).
+3. Open a root shell (`sudo -i`), and go to the directory of the stack:
 
    ```sh
    cd /opt/restichub
    ```
 
-2. Get the new release tag, for example `v0.1.0`:
+4. Copy the environment file:
 
    ```sh
-   git fetch --depth 1 origin tag v0.1.0
+   cp -p /etc/restichub/.env "/etc/restichub/.env.$(date -u +%Y%m%dT%H%M%SZ)"
    ```
 
-3. Check out the tag:
+5. Set the verified image reference in the shell:
 
    ```sh
-   git checkout v0.1.0
+   NEW_IMAGE=ghcr.io/fgbm/restichub-cp@sha256:<digest>
    ```
 
-4. In the file `deploy/reference/.env`, set `RESTICHUB_IMAGE` to the new image reference with the digest.
-5. Go to the directory of the reference stack:
+6. Write the reference to the environment file:
 
    ```sh
-   cd deploy/reference
+   sed -i "s|^RESTICHUB_IMAGE=.*|RESTICHUB_IMAGE=${NEW_IMAGE}|" /etc/restichub/.env
    ```
 
-6. Pull the image and restart the stack:
+7. Pull the image and restart the stack:
 
    ```sh
    docker compose pull
    docker compose up -d
    ```
 
-7. Wait until `docker compose ps cp` shows `(healthy)`.
+8. Wait until `docker compose ps cp` shows `(healthy)`.
 
-The `migrate` service applies the new migrations before the control plane starts. The agents connect again by themselves.
+### Check the new version
 
-Check the result:
+1. In a root shell in `/opt/restichub`, show the image of the running control plane:
 
-- `curl -fsS https://restichub.example.com/healthz` prints `ok`.
-- The screen "Hosts" shows the hosts "Online" again within a few minutes.
-- An agent with an older package shows the text `agent 0.1.0-rc.4, 0.1.0 is available` in its row.
+   ```sh
+   docker inspect --format '{{.Config.Image}}' "$(docker compose ps -q cp)"
+   ```
 
+   The command prints the image reference of the new release.
+
+2. Make sure that `curl -fsS https://restichub.example.com/healthz` prints `ok`.
+3. Sign in to the web interface. Open the account menu, and select "About ResticHub". The field "Version" shows the new version.
+4. For a check from a script, read `GET /api/v1/about` with an API token. The field `version` holds the new version.
+5. Within a few minutes, the screen "Hosts" shows the hosts "Online" again.
+6. An agent with an older package shows the text `agent 0.1.0-rc.4, 0.1.0 is available` in its row.
+
+## Move a server that was installed with git
+
+An earlier version of this guide installed the control plane with `git clone` into `/opt/restichub`. Such a server keeps the environment file and the KEK in `/opt/restichub/deploy/reference`. A `git clean` or a new clone in that directory deletes the KEK. The option `--migrate-from-git` of `install.sh` moves the server to the layout of the script and upgrades it to the version of the script.
+
+:::caution
+The script copies the KEK, and it never deletes the KEK of the clone. Delete the clone only after you put a copy of the KEK outside the server.
+:::
+
+1. Make sure that the stack of the clone runs. The script makes the database dump from the running PostgreSQL container.
+2. Set the version of the new release:
+
+   ```sh
+   VERSION=<version>
+   ```
+
+3. Run the script of the new release:
+
+   ```sh
+   curl -fsSL "https://github.com/fgbm/restichub/releases/download/v${VERSION}/install.sh" | sudo bash -s -- --migrate-from-git /opt/restichub
+   ```
+
+   The script prints `The server uses the files of this script now` and the first 8 characters of the SHA-256 of the KEK.
+
+4. Do the steps in [Store the KEK outside the server](/restichub/getting-started/install-control-plane/#store-the-kek-outside-the-server).
+5. Do the steps in [Check the new version](#check-the-new-version).
+6. Delete the old clone. The script prints the command with the directory, for example:
+
+   ```sh
+   sudo rm -rf /opt/restichub.git-backup-<time>
+   ```
+
+The script does these steps:
+
+1. It verifies `cosign`, the release archive and the image. Until then it changes nothing.
+2. It copies `deploy/reference/.env` and `deploy/reference/secrets/restichub_kek` of the clone to `/etc/restichub`. The copies keep the mode and the owner. The script compares the SHA-256, the mode and the owner of each copy with its source.
+3. It makes a database dump in `/var/backups/restichub/<time>` and checks it with `pg_restore --list`.
+4. It renames the clone to `/opt/restichub.git-backup-<time>`.
+5. It writes the release files to `/opt/restichub` and starts the stack with the same project name `restichub`. The stack uses the same volumes, so the data stays.
+6. It waits until the control plane is healthy and compares the running image with the verified image.
+
+If a step after the rename fails, the script prints the commands that start the stack of the clone again.
 ## Upgrade an agent on Linux
 
 You do not register the host again. The identity, the restic record and the trust mode stay.
@@ -115,24 +198,41 @@ The command removes each file that the agent does not know from an open folder, 
 
 ## Go back to the old release
 
-If the new control plane does not start, go back to the old release:
+If the new control plane does not start, go back to the old release. When `install.sh --upgrade` fails, it prints these commands with the directory of its backup.
 
 :::danger
-The step 4 deletes the database of the new release. The jobs and the changes after the backup are lost. A host that enrolled after the backup must enroll again.
+The step 6 deletes the database of the new release. The jobs and the changes after the backup are lost. A host that enrolled after the backup must enroll again.
 :::
 
-1. Make sure that the backup of the step "Before you start" is available.
-2. Stop the stack with `docker compose down`.
-3. Check out the old release tag, and set the old image reference in `.env`.
-4. Remove the volume of the database:
+1. Make sure that the backup directory `/var/backups/restichub/<time>` of the upgrade is available.
+2. Open a root shell (`sudo -i`), and stop the stack:
+
+   ```sh
+   cd /opt/restichub && docker compose down
+   ```
+
+3. Put back the environment file of the old release. It holds the old image reference:
+
+   ```sh
+   cp -p /var/backups/restichub/<time>/restichub.env /etc/restichub/.env
+   ```
+
+4. Put back the old release files:
+
+   ```sh
+   rm -rf /opt/restichub && cp -R /var/backups/restichub/<time>/release /opt/restichub
+   ```
+
+5. If the `migrate` service of the new release did not run, start the stack with `cd /opt/restichub && docker compose up -d`. Stop here.
+6. Remove the volume of the database:
 
    ```sh
    docker volume rm restichub_pgdata
    ```
 
    The project name is `restichub`, as the file `compose.yaml` gives it. A stack with another project name has another volume, `<project>_pgdata`. Do not run `docker compose down -v`: it also removes the volumes of Caddy.
-5. Restore the database from the backup. See [Restore on a new host](/restichub/operations/back-up-the-control-plane/#restore-on-a-new-host). The volume is empty now, so the restore runs as on a new host.
-6. Start the stack with `docker compose up -d`.
+7. Restore the database from the dump in the backup directory. See [Restore on a new host](/restichub/operations/back-up-the-control-plane/#restore-on-a-new-host). The volume is empty now, so the restore runs as on a new host.
+8. Start the stack with `docker compose up -d`.
 
 Upgrade the agents only after the new control plane works.
 
