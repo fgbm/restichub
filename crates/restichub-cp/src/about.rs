@@ -88,7 +88,7 @@ pub async fn about(
     } else {
         None
     };
-    let environment = environment::read(state.db()).await?;
+    let environment = environment::read(state.db()).await;
     Ok(Json(AboutResponse {
         version,
         prerelease,

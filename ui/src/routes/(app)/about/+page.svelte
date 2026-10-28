@@ -107,8 +107,8 @@
 					{
 						key: 'database',
 						label: t('about.environment.database'),
-						value: about.environment.database,
-						mono: true
+						value: about.environment.database ?? t('common.notSet'),
+						mono: about.environment.database !== null && about.environment.database !== undefined
 					}
 				]
 			: []
@@ -158,7 +158,9 @@
 				agents: agentRange
 			}),
 			system,
-			t('about.support.database', { database: value.environment.database }),
+			t('about.support.database', {
+				database: value.environment.database ?? t('common.notSet')
+			}),
 			t('about.support.tenancy', { tenancy: mode })
 		].join('\n');
 	}

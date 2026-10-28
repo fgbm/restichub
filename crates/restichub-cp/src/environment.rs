@@ -6,7 +6,7 @@
 use std::path::Path;
 use std::sync::OnceLock;
 
-use restichub_db::{Database, DbError};
+use restichub_db::Database;
 use serde::Serialize;
 use utoipa::ToSchema;
 
@@ -26,21 +26,34 @@ pub struct EnvironmentView {
     pub arch: String,
     /// True when the process runs in Docker, Podman or Kubernetes.
     pub container: bool,
-    /// The server version of PostgreSQL, such as `16.4`, without the builder suffix.
-    pub database: String,
+    /// The server version of PostgreSQL, such as `16.4`, without the builder suffix. Absent while
+    /// the control plane cannot query the database.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub database: Option<String>,
 }
 
 /// Reads the environment facts and the PostgreSQL version for the About screen.
-pub async fn read(db: &Database) -> Result<EnvironmentView, DbError> {
+///
+/// The screen reports a broken installation, so a database that answers no query leaves the
+/// version of the server out and the route still answers.
+pub async fn read(db: &Database) -> EnvironmentView {
     let system = system();
-    Ok(EnvironmentView {
+    let database = match db.server_version().await {
+        Ok(version) => Some(version),
+        Err(error) => {
+            // The error text holds no connection string, so the log does not leak one (ADR-0055).
+            tracing::warn!(%error, "the About answer holds no database version");
+            None
+        }
+    };
+    EnvironmentView {
         os: system.os.to_owned(),
         os_version: system.os_version.clone(),
         kernel: system.kernel.clone(),
         arch: system.arch.to_owned(),
         container: system.container,
-        database: db.server_version().await?,
-    })
+        database,
+    }
 }
 
 struct System {

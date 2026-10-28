@@ -2448,8 +2448,11 @@ export interface components {
             arch: string;
             /** @description True when the process runs in Docker, Podman or Kubernetes. */
             container: boolean;
-            /** @description The server version of PostgreSQL, such as `16.4`, without the builder suffix. */
-            database: string;
+            /**
+             * @description The server version of PostgreSQL, such as `16.4`, without the builder suffix. Absent while
+             *     the control plane cannot query the database.
+             */
+            database?: string | null;
             /**
              * @description The release string of the running Linux system, for example `6.8.0-45-generic`. Absent on
              *     another system.

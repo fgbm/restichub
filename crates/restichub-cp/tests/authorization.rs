@@ -3,9 +3,14 @@
 
 mod common;
 
+use axum::Json;
+use axum::extract::State;
 use axum::http::StatusCode;
-use restichub_cp::context::{Access, Operation, minimum_role};
+use restichub_cp::about::about;
+use restichub_cp::context::{Access, Operation, RequestContext, minimum_role};
 use restichub_cp::routes::ROUTES;
+use restichub_cp::server::AppState;
+use restichub_db::audit::Actor;
 use restichub_db::{PLATFORM_TENANT_ID, Role, api_tokens};
 use serde_json::Value;
 
@@ -298,6 +303,40 @@ async fn adr_0054_about_is_readable_by_a_viewer_and_hides_the_schema_level() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert!(body.get("version").is_some(), "{body}");
     assert!(body.get("schema_level").is_none(), "{body}");
+
+    db.cleanup().await;
+}
+
+/// The About answer reports a broken installation, so it arrives without the database version while
+/// the database answers no query (ADR-0055).
+///
+/// A request authenticates against the database, so the test calls the route handler with the
+/// context of a Viewer. The handler is the part of the request that runs after the authentication.
+#[tokio::test]
+async fn the_about_answer_survives_a_database_that_takes_no_connection() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant_with_key(db.database(), "about-without-database").await;
+    let viewer = create_user(
+        db.database(),
+        tenant,
+        "about-without-database-user",
+        "phc",
+        "viewer",
+    )
+    .await;
+    let state = AppState::new(db.database().clone());
+    let context = RequestContext::new(tenant, Actor::User(viewer), Role::Viewer);
+    db.database().clone().close().await;
+
+    let Json(answer) = about(State(state), context)
+        .await
+        .expect("the About answer needs no database");
+    let environment =
+        serde_json::to_value(&answer.environment).expect("the environment serialises");
+    assert!(environment.get("database").is_none(), "{environment}");
+    assert_eq!(environment["os"].as_str(), Some(std::env::consts::OS));
 
     db.cleanup().await;
 }
