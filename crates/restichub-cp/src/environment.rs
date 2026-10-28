@@ -137,20 +137,21 @@ fn is_path_shape(value: &str) -> bool {
     value.starts_with('/') || value.contains("//")
 }
 
-/// Keeps a distribution name of the expected characters and length, and drops another value.
+/// True for a value that the answer may carry.
 ///
-/// A name with another character stays out: the value goes to a support text, so a path or a byte
-/// of a terminal escape must not arrive there. The slash stays in, because `Debian GNU/Linux 12
-/// (bookworm)` holds one, and a value of the path shape is still dropped.
-fn distribution_name(value: &str) -> Option<String> {
+/// The value goes to a support text, so a path or a byte of a terminal escape must not arrive
+/// there. The slash stays in, because `Debian GNU/Linux 12 (bookworm)` holds one, and a value of
+/// the path shape is still dropped.
+pub fn is_safe_fact(value: &str) -> bool {
     let value = value.trim();
-    if value.is_empty() || value.chars().count() > MAX_DISTRIBUTION_LEN {
-        return None;
-    }
-    if is_path_shape(value) || !value.chars().all(is_name_char) {
-        return None;
-    }
-    Some(value.to_owned())
+    !value.is_empty()
+        && value.chars().count() <= MAX_DISTRIBUTION_LEN
+        && !is_path_shape(value)
+        && value.chars().all(is_name_char)
+}
+
+fn distribution_name(value: &str) -> Option<String> {
+    is_safe_fact(value).then(|| value.trim().to_owned())
 }
 
 fn kernel_release() -> Option<String> {
@@ -194,7 +195,7 @@ fn container_state(marker: bool, cgroup: &str) -> Option<bool> {
 
 #[cfg(test)]
 mod tests {
-    use super::{container_state, distribution_name, os_release_name};
+    use super::{container_state, distribution_name, is_safe_fact, os_release_name};
 
     #[test]
     fn adr_0055_a_cgroup_path_without_a_runtime_names_no_container() {
@@ -219,6 +220,7 @@ mod tests {
             distribution_name("Debian GNU/Linux 12 (bookworm)").as_deref(),
             Some("Debian GNU/Linux 12 (bookworm)")
         );
+        assert!(is_safe_fact("Debian GNU/Linux 12 (bookworm)"));
         assert_eq!(distribution_name(""), None);
         assert_eq!(distribution_name("   "), None);
         assert_eq!(distribution_name(&"a".repeat(65)), None);

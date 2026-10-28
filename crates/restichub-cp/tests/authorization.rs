@@ -8,6 +8,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use restichub_cp::about::about;
 use restichub_cp::context::{Access, Operation, RequestContext, minimum_role};
+use restichub_cp::environment::is_safe_fact;
 use restichub_cp::routes::ROUTES;
 use restichub_cp::server::AppState;
 use restichub_db::audit::Actor;
@@ -413,7 +414,7 @@ async fn adr_0055_a_viewer_reads_the_environment_of_the_server() {
         let value = value
             .as_str()
             .unwrap_or_else(|| panic!("{key} is no string: {body}"));
-        assert!(is_plain_fact(value), "{key} is {value:?}: {body}");
+        assert!(is_safe_fact(value), "{key} is {value:?}: {body}");
     }
     if let Some(container) = environment.get("container") {
         assert!(container.is_boolean(), "{body}");
@@ -429,15 +430,6 @@ async fn adr_0055_a_viewer_reads_the_environment_of_the_server() {
     );
 
     db.cleanup().await;
-}
-
-/// A short value of letters, digits, spaces and `.()_+-`, which no path, address or escape holds.
-fn is_plain_fact(value: &str) -> bool {
-    !value.is_empty()
-        && value.chars().count() <= 64
-        && value.chars().all(|c| {
-            c.is_ascii_alphanumeric() || matches!(c, ' ' | '.' | '(' | ')' | '_' | '+' | '-')
-        })
 }
 
 #[tokio::test]
