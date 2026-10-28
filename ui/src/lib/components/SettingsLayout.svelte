@@ -11,10 +11,39 @@
 
 	const groups = $derived(settingsGroupsForRole(getSession()?.role ?? null));
 	const pathname = $derived(page.url.pathname);
+
+	const activeHref = $derived(
+		groups
+			.flatMap((group) => group.items)
+			.map((item) => resolve(item.href))
+			.find((href) => pathname.startsWith(href))
+	);
+
+	let subnav = $state<HTMLElement>();
+	let rowWidth = $state(0);
+
+	// The window scrollbar changes the width of the row, and the current entry moves with it.
+	$effect(() => {
+		if (!subnav || typeof ResizeObserver === 'undefined') return;
+		const observer = new ResizeObserver(() => (rowWidth = subnav?.clientWidth ?? 0));
+		observer.observe(subnav);
+		return () => observer.disconnect();
+	});
+
+	// A narrow window shows the subnav as one row, and the current entry may be outside it.
+	$effect(() => {
+		const current =
+			activeHref && rowWidth ? subnav?.querySelector<HTMLElement>(`a[href="${activeHref}"]`) : null;
+		if (!subnav || !current || subnav.scrollWidth <= subnav.clientWidth) return;
+		subnav.scrollLeft +=
+			current.getBoundingClientRect().left -
+			subnav.getBoundingClientRect().left -
+			(subnav.clientWidth - current.offsetWidth) / 2;
+	});
 </script>
 
 <div class="settings">
-	<nav class="subnav" aria-label={t('settings.sections')}>
+	<nav class="subnav" aria-label={t('settings.sections')} bind:this={subnav}>
 		{#each groups as group (group.labelKey)}
 			<div class="subnav__group">
 				<p class="subnav__label">{t(group.labelKey)}</p>
@@ -22,7 +51,7 @@
 					<a
 						class="subnav__link"
 						href={resolve(item.href)}
-						aria-current={pathname.startsWith(resolve(item.href)) ? 'page' : undefined}
+						aria-current={activeHref === resolve(item.href) ? 'page' : undefined}
 					>
 						<Icon name={item.icon} />
 						{t(item.labelKey)}
@@ -101,8 +130,53 @@
 			grid-template-columns: minmax(0, 1fr);
 		}
 
+		/* A narrow window shows the subnav as one row that scrolls sideways, with the look of the
+		   tabs of the top bar. Thus the heading stays at the top of the screen. */
 		.subnav {
 			position: static;
+			flex-direction: row;
+			gap: var(--rh-space-1);
+			overflow-x: auto;
+			overflow-y: hidden;
+			scrollbar-width: none;
+			box-shadow: inset 0 calc(-1 * var(--rh-border-width)) 0 var(--rh-color-border);
+		}
+
+		.subnav::-webkit-scrollbar {
+			display: none;
+		}
+
+		.subnav__group {
+			display: flex;
+			flex: none;
+			gap: var(--rh-space-1);
+		}
+
+		.subnav__group + .subnav__group {
+			margin-top: 0;
+		}
+
+		.subnav__label {
+			display: none;
+		}
+
+		.subnav__link {
+			flex: none;
+			height: 44px;
+			padding: 0 var(--rh-space-3);
+			border-bottom: 2px solid transparent;
+			border-radius: 0;
+			white-space: nowrap;
+		}
+
+		.subnav__link:hover {
+			background-color: transparent;
+			border-bottom-color: var(--rh-color-border-strong);
+		}
+
+		.subnav__link[aria-current] {
+			background-color: transparent;
+			border-bottom-color: var(--rh-color-accent);
 		}
 	}
 </style>

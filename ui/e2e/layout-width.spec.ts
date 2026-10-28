@@ -105,6 +105,36 @@ test('the_settings_subnav_and_the_content_stay_in_place_between_a_list_and_a_rec
 	}
 });
 
+test('the_subnav_of_a_narrow_window_is_one_row_above_the_heading', async ({ page }) => {
+	await page.setViewportSize({ width: 390, height: 844 });
+	await signIn(page);
+	await openList(page, '/settings/scripts/jobs');
+	await openRecord(page, '/settings/scripts/jobs');
+
+	const row = await page.evaluate(() => {
+		const nav = document.querySelector('.subnav')?.getBoundingClientRect();
+		const heading = document.querySelector('h1')?.getBoundingClientRect();
+		const current = document.querySelector('.subnav [aria-current]')?.getBoundingClientRect();
+		return {
+			navHeight: Math.round(nav?.height ?? 0),
+			navLeft: nav?.left ?? 0,
+			navRight: nav?.right ?? 0,
+			headingTop: Math.round(heading?.top ?? 0),
+			currentLeft: current?.left ?? 0,
+			currentRight: current?.right ?? 0
+		};
+	});
+	expect(row.navHeight, 'the subnav is not one row').toBeLessThanOrEqual(48);
+	expect(row.headingTop, 'the subnav pushes the heading down').toBeLessThan(250);
+	// The entry of the current page is inside the row, also when it is the last one.
+	expect(row.currentLeft, 'the current entry is left of the row').toBeGreaterThanOrEqual(
+		row.navLeft - 1
+	);
+	expect(row.currentRight, 'the current entry is right of the row').toBeLessThanOrEqual(
+		row.navRight + 1
+	);
+});
+
 test('the_content_column_keeps_its_width_when_both_pages_show_the_window_scrollbar', async ({
 	page
 }) => {
