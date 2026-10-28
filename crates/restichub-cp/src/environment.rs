@@ -10,6 +10,8 @@ use restichub_db::Database;
 use serde::Serialize;
 use utoipa::ToSchema;
 
+use crate::error::cause_chain;
+
 /// The system of the server and the version of its PostgreSQL server.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct EnvironmentView {
@@ -44,7 +46,10 @@ pub async fn read(db: &Database) -> EnvironmentView {
         Ok(version) => Some(version),
         Err(error) => {
             // The error text holds no connection string, so the log does not leak one (ADR-0055).
-            tracing::warn!(%error, "the About answer holds no database version");
+            tracing::warn!(
+                cause = %cause_chain(&error),
+                "the About answer holds no database version"
+            );
             None
         }
     };

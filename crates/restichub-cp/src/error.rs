@@ -519,7 +519,7 @@ const MAX_RETRY_AFTER: u64 = 3600;
 /// Returns the full cause chain of an error as one message.
 ///
 /// The function keeps every source, so a wrapped database error is not lost.
-fn cause_chain(error: &dyn StdError) -> String {
+pub(crate) fn cause_chain(error: &dyn StdError) -> String {
     let mut message = error.to_string();
     let mut source = error.source();
     while let Some(error) = source {

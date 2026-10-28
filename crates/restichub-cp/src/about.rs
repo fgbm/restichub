@@ -14,7 +14,7 @@ use utoipa::ToSchema;
 
 use crate::context::{Operation, RequestContext};
 use crate::environment::{self, EnvironmentView};
-use crate::error::ApiError;
+use crate::error::{ApiError, cause_chain};
 use crate::server::AppState;
 
 /// The wire protocol version that the control plane speaks (FR-PR-09).
@@ -89,7 +89,10 @@ pub async fn about(
             Ok(level) => level,
             Err(error) => {
                 // The screen reports a broken installation, so the route still answers.
-                tracing::warn!(%error, "the About answer holds no schema level");
+                tracing::warn!(
+                    cause = %cause_chain(&error),
+                    "the About answer holds no schema level"
+                );
                 None
             }
         }
