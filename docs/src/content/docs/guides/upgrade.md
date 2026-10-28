@@ -8,7 +8,7 @@ Upgrade the control plane first. Then upgrade the agents. The control plane acce
 ## Before you start
 
 1. Read the section "Upgrade notes" of each release between your version and the new version on the [release page](https://github.com/fgbm/restichub/releases).
-2. Examine the directory `/opt/restichub`. If it holds the directory `.git`, the server was installed with `git clone`. Then do the steps in [Move a server that was installed with git](#move-a-server-that-was-installed-with-git) instead of the upgrade steps.
+2. Examine the directory `/opt/restichub`. If it holds the directory `.git`, the server was installed with `git clone`. Then do the steps in [Move a server that was installed with git](#move-a-server-that-was-installed-with-git) instead of the upgrade steps. Do not run `git checkout` of a new tag in the clone. Move the server only with `--migrate-from-git`.
 
 ## Upgrade the control plane
 
@@ -37,26 +37,30 @@ Keep the backup of the script. The migrations of a new release change the databa
 
 The script does these steps:
 
-1. It verifies `cosign`, the release archive and the image of the new release.
+1. It verifies `cosign` and the release archive of the new release.
 2. It stops when another run of `install.sh` holds the lock `/run/restichub-install.lock`. It also stops when an earlier run failed and left the file `/etc/restichub/INSTALL-FAILED`.
-3. It stops when `/opt/restichub` holds an override file, for example `compose.override.yaml`, or when the environment file sets a `COMPOSE_` variable. With such a file or variable, the new stack can start on another database.
+3. It stops when `/opt/restichub` holds an override file, for example `compose.override.yaml`, or when the environment file sets a `COMPOSE_` variable. With such a file or variable, the new stack can start on another database. The script ignores a `COMPOSE_`, `POSTGRES_` or `RESTICHUB_` variable of the shell. The values come only from the environment file.
 4. It records the database of the running stack. It records the volume `restichub_pgdata`, the PostgreSQL system identifier, the schema version and the number of users.
 5. It compares the KEK file that the running control plane uses with `/etc/restichub/secrets/restichub_kek`. It compares only the SHA-256 values.
 6. It makes the new directory `/var/backups/restichub/<time>` with the mode `700`. The option `--backup-dir` sets another parent directory. The parent must be an absolute path outside `/opt/restichub` and `/etc/restichub`. The script does not change the mode of a parent directory that exists.
-7. It checks the free space. The backup directory and the Docker data directory must each have two times the size of the database.
-8. It copies the environment file and the old release files to the backup directory. It makes a database dump there and reads all the data of the dump with `pg_restore -f /dev/null`.
-9. It writes the commands that go back to the file `ROLLBACK.txt` in the backup directory. Then it replaces the files in `/opt/restichub` and sets the new image in `RESTICHUB_IMAGE`.
-10. It starts PostgreSQL alone and compares the volume and the system identifier with the recorded values. If they differ, it stops the new stack before a migration runs.
-11. It starts the stack. The `migrate` service applies the new migrations before the control plane starts.
-12. It waits until the control plane is healthy and compares the running image with the verified image. If the database had users and the control plane prints a new setup token, the script stops. Such a control plane does not use the old database.
-13. If the `Caddyfile` changed, it starts a new `caddy` container. A running container keeps the old file.
+7. It checks the free space. The backup directory and the Docker data directory must each have two times the size of the database. If the two directories are on one file system, it must have four times the size. The Docker data directory also needs 1 GiB for the images.
+8. It verifies the image of the new release. Then it pulls the images of the new release. If a pull fails, the old stack continues to run.
+9. It copies the environment file and the old release files to the backup directory. It makes a database dump there and reads all the data of the dump with `pg_restore -f /dev/null`.
+10. It writes the file `/etc/restichub/INSTALL-FAILED` and the commands that go back to the file `ROLLBACK.txt` in the backup directory. Then it replaces the files in `/opt/restichub` and sets the new image in `RESTICHUB_IMAGE`.
+11. It starts a new PostgreSQL container alone. It compares the volume, the system identifier, the schema version and the number of users with the recorded values. If they differ, it stops the new stack before a migration runs.
+12. It starts the stack. The `migrate` service applies the new migrations before the control plane starts.
+13. It waits until the control plane is healthy and compares the running image with the verified image. Then it reads the system identifier and the number of users again. If the identifier differs or the number of users is smaller, the script stops.
+14. If the `Caddyfile` changed, it starts a new `caddy` container. A running container keeps the old file.
+15. It removes the file `/etc/restichub/INSTALL-FAILED`.
 
 If a step after the backup fails, the script prints the commands that start the old release again. It also writes them to `ROLLBACK.txt`. The text tells if a migration ran:
 
 - `No migration ran`: the commands do not restore the dump.
 - `The schema moved <old> -> <new>`: the commands restore the dump first. The old release cannot use the new schema.
 
-The script also writes the file `/etc/restichub/INSTALL-FAILED`. A new run stops until you go back and remove the file. The option `--force-after-failure` starts a new run with the file. Use the option only when you know the cause of the failure. The new run makes its backup from the state that the failed run left.
+After a successful run, `ROLLBACK.txt` also holds the commands that go back. If the schema moved, the file says that a restore loses each change after the time of the run.
+
+The file `/etc/restichub/INSTALL-FAILED` stays after a failed run, also when the SSH connection stopped the script. It names the backup of each run that did not finish. A new run stops until you go back and remove the file. The option `--force-after-failure` starts a new run with the file. Use the option only when you know the cause of the failure. The new run makes its backup from the state that the failed run left.
 
 The agents connect again by themselves. See [Go back to the old release](#go-back-to-the-old-release).
 
@@ -160,12 +164,14 @@ Do these checks before you move a production server:
    The output has the line `restichub_pgdata /var/lib/postgresql/data`.
 
 4. Copy the KEK and the environment file of the clone to a place outside the server.
-5. Make sure that `/var/backups` has free space for two times the size of the database.
+5. Make sure that `/var/backups` has free space for two times the size of the database. If `/var/backups` and `/var/lib/docker` are on one file system, it must have four times the size of the database. The Docker data directory also needs 1 GiB for the images.
 6. Make sure that `/var/tmp` does not have the mount option `noexec`. The command `findmnt -T /var/tmp` shows the options. The script runs `cosign` from this directory.
 7. Make sure that `git` is on the server. The script compares the files of `deploy/reference` with the commit of the clone.
-8. Show the tag of the clone with `git -C /opt/restichub describe --tags`. Use a release with the same version or a later version.
-9. Use the steps in [Install with a verified download](/restichub/getting-started/install-control-plane/#install-with-a-verified-download), not `curl … | sudo bash`.
-10. Open a `tmux` or `screen` session on the server.
+8. Make sure that root owns the clone and its directory `.git`. Another account can change the files after the check of the script, so the script stops.
+9. Make sure that the path of the clone holds only letters, digits and the characters `.`, `_`, `-` and `/`.
+10. Show the tag of the clone with `git -C /opt/restichub describe --tags`. Use a release with the same version or a later version. Do not run `git checkout` of the new tag in the clone.
+11. Use the steps in [Install with a verified download](/restichub/getting-started/install-control-plane/#install-with-a-verified-download), not `curl … | sudo bash`.
+12. Open a `tmux` or `screen` session on the server.
 
 ### Move the server
 
@@ -194,13 +200,14 @@ Do these checks before you move a production server:
 
 The script does these steps:
 
-1. It verifies `cosign`, the release archive and the image. Until then it changes nothing.
-2. It stops when the clone has an override file or a `COMPOSE_` variable in its environment file. It also stops on a change of a file of `deploy/reference` that `git` tracks. It also stops when the KEK file or the environment file of the clone is a symbolic link.
+1. It verifies `cosign` and the release archive.
+2. It stops when the clone has an override file or a `COMPOSE_` variable in its environment file. It also stops on a change of a file of `deploy/reference` that `git` tracks. It also stops when the KEK file or the environment file of the clone is a symbolic link. It also stops when root does not own the clone or its directory `.git`.
 3. It records the database of the running stack, as the upgrade does. The running stack must come from `deploy/reference/compose.yaml` of the clone, and the database must be in the volume `restichub_pgdata`.
-4. It copies `deploy/reference/.env` and `deploy/reference/secrets/restichub_kek` of the clone to `/etc/restichub`. The environment file gets the mode `600` and the owner root. The KEK gets the mode `400` and the owner uid 10001. It compares the SHA-256 of each copy with its source.
-5. It makes a database dump in `/var/backups/restichub/<time>` and reads all the data of the dump with `pg_restore -f /dev/null`.
-6. It writes `ROLLBACK.txt` to the backup directory and renames the clone to `/opt/restichub.git-backup-<time>`.
-7. It writes the release files to `/opt/restichub`. Then it starts the stack with the same project name `restichub`, as the upgrade does. The stack uses the same volumes, so the data stays.
+4. It checks the free space, verifies the image and pulls the images of the new release, as the upgrade does. Until then it changes nothing.
+5. It copies `deploy/reference/.env` and `deploy/reference/secrets/restichub_kek` of the clone to `/etc/restichub`. The environment file gets the mode `600` and the owner root. The KEK gets the mode `400` and the owner uid 10001. It compares the SHA-256 of each copy with its source.
+6. It makes a database dump in `/var/backups/restichub/<time>` and reads all the data of the dump with `pg_restore -f /dev/null`.
+7. It writes `/etc/restichub/INSTALL-FAILED` and `ROLLBACK.txt`, and renames the clone to `/opt/restichub.git-backup-<time>`.
+8. It writes the release files to `/opt/restichub`. Then it starts the stack with the same project name `restichub`, as the upgrade does. The stack uses the same volumes, so the data stays. The new PostgreSQL container comes from `/opt/restichub`, so the next `--upgrade` accepts the stack.
 
 If a step after the rename fails, the script prints the commands that start the stack of the clone again, and writes them to `ROLLBACK.txt`. See [Go back after a move from git](#go-back-after-a-move-from-git).
 
@@ -286,14 +293,10 @@ The restore of the dump deletes the database of the new release. The jobs and th
    ```
 
 5. If the text says `No migration ran`, go to step 7.
-6. Restore the dump. Do not run `docker compose down -v`: it also removes the volumes of Caddy.
+6. Restore the dump. Do not run `docker compose down -v`: it also removes the volumes of Caddy. The command is one line, so it stops when a container still uses the volume:
 
    ```sh
-   cd /opt/restichub
-   docker volume rm restichub_pgdata
-   docker compose up -d --wait postgres
-   docker compose run --rm -T db-bootstrap
-   docker compose exec -T postgres pg_restore -U restichub -d restichub --exit-on-error < /var/backups/restichub/<time>/restichub-<time>.dump
+   cd /opt/restichub && docker volume rm restichub_pgdata && docker compose up -d --wait postgres && docker compose run --rm -T db-bootstrap && docker compose exec -T postgres pg_restore -U restichub -d restichub --exit-on-error < /var/backups/restichub/<time>/restichub-<time>.dump
    ```
 
 7. Start the stack:
@@ -310,46 +313,49 @@ The restore of the dump deletes the database of the new release. The jobs and th
 
 ## Go back after a move from git
 
-When `install.sh --migrate-from-git` fails after it renamed the clone, it prints these commands and writes them to `ROLLBACK.txt` in the backup directory. The backup directory holds the dump. The clone is in `/opt/restichub.git-backup-<time>`.
+When `install.sh --migrate-from-git` fails after it renamed the clone, it prints these commands and writes them to `ROLLBACK.txt` in the backup directory. The backup directory holds the dump. The clone is in `/opt/restichub.git-backup-<time>` and keeps its KEK. The script also put a copy of the KEK in `/etc/restichub/secrets/restichub_kek` and compared its SHA-256 with the KEK of the clone.
+
+Each command examines the state first. If you run the commands two times, the clone and its KEK stay. The commands do not delete files.
 
 1. Read `/var/backups/restichub/<time>/ROLLBACK.txt`. It tells if a migration ran.
-2. Open a root shell (`sudo -i`), and stop the new stack:
+2. Open a root shell (`sudo -i`), and stop the stack of the project `restichub`:
 
    ```sh
-   cd /opt/restichub && docker compose down
+   cd / && docker compose -p restichub down
    ```
 
-3. Remove the release files and put back the clone:
+3. Move the release files away. The command moves `/opt/restichub` only when it holds no directory `.git`:
 
    ```sh
-   cd / && rm -rf /opt/restichub
-   mv /opt/restichub.git-backup-<time> /opt/restichub
+   if [ -e /opt/restichub ] && [ ! -e /opt/restichub/.git ]; then mv /opt/restichub /opt/restichub.failed-<time>; fi
    ```
 
-4. If the text says `No migration ran`, go to step 6.
-5. Restore the dump in the stack of the clone:
+4. Put back the clone:
 
    ```sh
-   cd /opt/restichub/deploy/reference
-   docker volume rm restichub_pgdata
-   docker compose up -d --wait postgres
-   docker compose run --rm -T db-bootstrap
-   docker compose exec -T postgres pg_restore -U restichub -d restichub --exit-on-error < /var/backups/restichub/<time>/restichub-<time>.dump
+   if [ ! -e /opt/restichub ] && [ -d /opt/restichub.git-backup-<time> ]; then mv /opt/restichub.git-backup-<time> /opt/restichub; fi
    ```
 
-6. Start the stack of the clone:
+5. If the text says `No migration ran`, go to step 7.
+6. Restore the dump in the stack of the clone. The command is one line, so it stops when a container still uses the volume:
+
+   ```sh
+   cd /opt/restichub/deploy/reference && docker volume rm restichub_pgdata && docker compose up -d --wait postgres && docker compose run --rm -T db-bootstrap && docker compose exec -T postgres pg_restore -U restichub -d restichub --exit-on-error < /var/backups/restichub/<time>/restichub-<time>.dump
+   ```
+
+7. Start the stack of the clone:
 
    ```sh
    cd /opt/restichub/deploy/reference && docker compose up -d
    ```
 
-7. Remove the marker of the failed run:
+8. Remove the marker of the failed run:
 
    ```sh
    rm -f /etc/restichub/INSTALL-FAILED
    ```
 
-To move the server later, run the script again. The script accepts the copies in `/etc/restichub` of the failed run. It compares them with the files of the clone, without the line `RESTICHUB_IMAGE`.
+When the stack of the clone works, you can delete `/opt/restichub.failed-<time>`. To move the server later, run the script again. The script accepts the copies in `/etc/restichub` of the failed run. It compares them with the files of the clone, without the line `RESTICHUB_IMAGE`.
 
 Upgrade the agents only after the new control plane works.
 
