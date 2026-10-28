@@ -2446,11 +2446,14 @@ export interface components {
         EnvironmentView: {
             /** @description The architecture of the process, such as `x86_64`. */
             arch: string;
-            /** @description True when the process runs in a container. */
+            /** @description True when the process runs in Docker, Podman or Kubernetes. */
             container: boolean;
             /** @description The server version of PostgreSQL, such as `16.4`, without the builder suffix. */
             database: string;
-            /** @description The release of the running kernel on Linux. Absent on another system. */
+            /**
+             * @description The release string of the running Linux system, for example `6.8.0-45-generic`. Absent on
+             *     another system.
+             */
             kernel?: string | null;
             /** @description The operating system family, such as `linux` or `windows`. */
             os: string;
