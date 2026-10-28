@@ -311,6 +311,10 @@
 		gap: var(--rh-space-3);
 		height: var(--rh-layout-topbar-height);
 		padding: 0 var(--rh-space-4);
+		/* `100%` of the top bar ends at the window scrollbar, so `100vw - 100%` is the width that
+		   the scrollbar takes. The reserved width keeps the right group in place when a long page
+		   adds the scrollbar. */
+		padding-right: calc(var(--rh-space-4) + var(--rh-scrollbar-width) - (100vw - 100%));
 		background-color: var(--rh-color-canvas);
 		border-bottom: var(--rh-border-width) solid var(--rh-color-border);
 	}
@@ -473,11 +477,16 @@
 
 	.page {
 		flex: 1;
+		--page-inset: max(0px, calc((100vw - var(--rh-layout-content-max-width)) / 2));
 		min-width: 0;
+		width: min(
+			var(--rh-layout-content-max-width),
+			calc(100vw - var(--rh-scrollbar-width) - var(--page-inset))
+		);
 		max-width: var(--rh-layout-content-max-width);
-		/* The column is centred on the window and not on the width that the window scrollbar
-		   leaves, so its left edge keeps its place when the scrollbar appears. */
-		margin-left: max(0px, calc((100vw - var(--rh-layout-content-max-width)) / 2));
+		/* The column is centred on the window, and its right edge stays before the reserved strip
+		   of the window scrollbar. Thus both edges keep their place when the scrollbar appears. */
+		margin-left: var(--page-inset);
 		padding: var(--rh-space-6) var(--rh-space-4) var(--rh-page-padding-bottom);
 		--rh-page-padding-bottom: var(--rh-space-12);
 	}

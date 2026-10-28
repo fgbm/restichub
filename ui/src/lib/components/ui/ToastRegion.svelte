@@ -14,7 +14,9 @@
 <style>
 	.toast-region {
 		position: fixed;
-		right: var(--rh-space-6);
+		/* As in the top bar: `100%` ends at the window scrollbar, and the reserved width keeps the
+		   right edge of the toasts in place when a long page adds the scrollbar. */
+		right: calc(var(--rh-space-6) + var(--rh-scrollbar-width) - (100vw - 100%));
 		bottom: var(--rh-space-6);
 		z-index: var(--rh-z-toast);
 		display: flex;

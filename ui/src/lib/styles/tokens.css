@@ -62,6 +62,10 @@
 	--rh-border-width: 1px;
 
 	/* Layout */
+	/* Measured at start (`ui/src/lib/scrollbar.ts`). The shell always reserves it, so the right
+	   edge of the top bar and of a toast does not move when a long page adds the window
+	   scrollbar. An overlay scrollbar takes no space, so the value stays zero. */
+	--rh-scrollbar-width: 0px;
 	--rh-layout-topbar-height: 56px;
 	--rh-layout-nav-width: 240px;
 	--rh-layout-content-max-width: 1280px;

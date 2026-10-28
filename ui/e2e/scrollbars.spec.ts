@@ -106,3 +106,32 @@ test('the_side_panel_reaches_the_window_edge', async ({ page }) => {
 	});
 	expect(layout.right, 'the side panel stops before the window edge').toBe(layout.innerWidth);
 });
+
+test('the_toasts_keep_their_right_edge_when_the_window_scrollbar_appears', async ({ page }) => {
+	// The alert rules screen shows a toast when the person saves the rules.
+	async function saveRules(height: number): Promise<{ scrollbar: number; right: number }> {
+		await page.setViewportSize({ width: 1280, height });
+		await signIn(page);
+		await page.locator('a[href="/settings"]').first().click();
+		await page.locator('a[href="/settings/notifications/rules"]').first().click();
+		await page.getByRole('button', { name: 'Save rules', exact: true }).click();
+		await expect(page.locator('.toast-region > *').first()).toBeVisible();
+		return page.evaluate(() => {
+			const region = document.querySelector('.toast-region')?.getBoundingClientRect();
+			return {
+				scrollbar: window.innerWidth - document.documentElement.clientWidth,
+				right: Math.round(region?.right ?? 0)
+			};
+		});
+	}
+
+	const scrolling = await saveRules(320);
+	const short = await saveRules(1400);
+
+	expect(scrolling.scrollbar, 'the short window shows a window scrollbar').toBeGreaterThan(0);
+	expect(short.scrollbar, 'the tall window shows no window scrollbar').toBe(0);
+	expect(
+		Math.abs(scrolling.right - short.right),
+		'the toasts moved with the scrollbar'
+	).toBeLessThanOrEqual(1);
+});

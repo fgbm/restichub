@@ -1,9 +1,9 @@
 import { expect, test, type Page } from '@playwright/test';
 
 // A section that shows a subnav keeps it on every page. Otherwise the content column moves when a
-// person opens a record that belongs to the list (design/style/ui-principles.md, 1.8). The column
-// keeps its place also when the window scrollbar appears, because it is centred on the window and
-// not on the space that the scrollbar leaves.
+// person opens a record that belongs to the list (design/style/ui-principles.md, 1.8). No edge
+// moves when a long page adds the window scrollbar either, because the shell always reserves the
+// width that the scrollbar takes (AppShell, `--rh-scrollbar-width`).
 
 const WIDTHS = [1440, 1280, 1024];
 
@@ -11,6 +11,7 @@ interface Place {
 	subnavX: number;
 	contentX: number;
 	contentWidth: number;
+	menuRight: number;
 }
 
 async function signIn(page: Page): Promise<void> {
@@ -37,17 +38,20 @@ async function openRecord(page: Page, path: string): Promise<void> {
 }
 
 async function place(page: Page): Promise<Place> {
-	for (const selector of ['.subnav', '.settings__content']) {
+	for (const selector of ['.subnav', '.settings__content', 'header .rh-menu__trigger']) {
 		expect(await page.locator(selector).count(), `the settings page has no ${selector}`).toBe(1);
 	}
 	const subnav = await page.locator('.subnav').boundingBox();
 	const content = await page.locator('.settings__content').boundingBox();
+	const menu = await page.locator('header .rh-menu__trigger').boundingBox();
 	expect(subnav, 'the settings subnav is not on the page').not.toBeNull();
 	expect(content, 'the settings content column is not on the page').not.toBeNull();
+	expect(menu, 'the account menu is not in the top bar').not.toBeNull();
 	return {
 		subnavX: Math.round(subnav?.x ?? 0),
 		contentX: Math.round(content?.x ?? 0),
-		contentWidth: Math.round(content?.width ?? 0)
+		contentWidth: Math.round(content?.width ?? 0),
+		menuRight: Math.round((menu?.x ?? 0) + (menu?.width ?? 0))
 	};
 }
 
@@ -65,6 +69,10 @@ function expectSamePlace(list: Place, record: Place, where: string): void {
 	expect(
 		Math.abs(record.contentX - list.contentX),
 		`${where}: the content moved`
+	).toBeLessThanOrEqual(1);
+	expect(
+		Math.abs(record.menuRight - list.menuRight),
+		`${where}: the right group of the top bar moved`
 	).toBeLessThanOrEqual(1);
 }
 
@@ -91,7 +99,9 @@ test('the_settings_subnav_and_the_content_stay_in_place_between_a_list_and_a_rec
 			const list = await place(page);
 
 			await openRecord(page, path);
-			expectSamePlace(list, await place(page), `${path} at ${width} px`);
+			const record = await place(page);
+			expectSamePlace(list, record, `${path} at ${width} px`);
+			expectSameWidth(list, record, `${path} at ${width} px`);
 			// The record fills more than the window, so it shows the window scrollbar.
 			expect(await overflows(page), `${path} at ${width} px: the record fits the window`).toBe(
 				true
@@ -100,7 +110,9 @@ test('the_settings_subnav_and_the_content_stay_in_place_between_a_list_and_a_rec
 			await page.locator(`a[href="${path}"]`).first().click();
 			await expect(page).toHaveURL(new RegExp(`${path}(\\?.*)?$`));
 			await expect(page.locator('li.item').first()).toBeVisible();
-			expectSamePlace(list, await place(page), `${path} back at ${width} px`);
+			const back = await place(page);
+			expectSamePlace(list, back, `${path} back at ${width} px`);
+			expectSameWidth(list, back, `${path} back at ${width} px`);
 		}
 	}
 });
