@@ -3,7 +3,8 @@
  * environment of the server to every role, and the database schema level to the Platform Admin
  * only (AC-AU-02, ADR-0054, ADR-0055).
  */
-import { render, screen } from '@testing-library/svelte';
+import { render, screen, within } from '@testing-library/svelte';
+import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { About } from '#lib/api/index.ts';
 import { setLocale } from '#lib/i18n/index.ts';
@@ -63,6 +64,10 @@ function about(overrides: Partial<About> = {}): About {
 		environment: environment(),
 		...overrides
 	};
+}
+
+function supportText(): string | null | undefined {
+	return document.querySelector('.about__support')?.textContent;
 }
 
 beforeEach(() => {
@@ -166,7 +171,7 @@ describe('the About ResticHub screen', () => {
 			environment: { ...environment(), kernel: null, container: null }
 		});
 		render(AboutPage);
-		expect(screen.getByLabelText('Support text')).toHaveValue(
+		expect(supportText()).toBe(
 			[
 				'ResticHub 0.2.0-rc.2+3b21922',
 				'protocol 1.1 · agents 1.0 and later within major 1',
@@ -180,7 +185,7 @@ describe('the About ResticHub screen', () => {
 	it('adr_0055_the_support_text_names_a_missing_database_in_lower_case', () => {
 		state.about = about({ environment: { ...environment(), database: null } });
 		render(AboutPage);
-		expect(screen.getByLabelText('Support text')).toHaveValue(
+		expect(supportText()).toBe(
 			[
 				'ResticHub 0.2.0-rc.2+3b21922',
 				'protocol 1.1 · agents 1.0 and later within major 1',
@@ -197,7 +202,7 @@ describe('the About ResticHub screen', () => {
 		expect(screen.getByText('6.8.0-45-generic')).toBeInTheDocument();
 		expect(screen.getByText('x86_64')).toBeInTheDocument();
 		expect(screen.getByText('16.4')).toBeInTheDocument();
-		expect(screen.getByLabelText('Support text')).toHaveValue(
+		expect(supportText()).toBe(
 			[
 				'ResticHub 0.2.0-rc.2+3b21922',
 				'protocol 1.1 · agents 1.0 and later within major 1',
@@ -212,7 +217,7 @@ describe('the About ResticHub screen', () => {
 		state.tenancy = 'single';
 		state.about = about({ environment: { ...environment(), kernel: null, os_version: null } });
 		render(AboutPage);
-		expect(screen.getByLabelText('Support text')).toHaveValue(
+		expect(supportText()).toBe(
 			[
 				'ResticHub 0.2.0-rc.2+3b21922',
 				'protocol 1.1 · agents 1.0 and later within major 1',
@@ -227,7 +232,7 @@ describe('the About ResticHub screen', () => {
 		state.modeKnown = false;
 		render(AboutPage);
 		// The store holds the default mode `multi` before the route answers, so the line is absent.
-		expect(screen.getByLabelText('Support text')).toHaveValue(
+		expect(supportText()).toBe(
 			[
 				'ResticHub 0.2.0-rc.2+3b21922',
 				'protocol 1.1 · agents 1.0 and later within major 1',
@@ -235,6 +240,29 @@ describe('the About ResticHub screen', () => {
 				'PostgreSQL 16.4'
 			].join('\n')
 		);
+	});
+
+	it('adr_0055_copies_the_support_text_from_the_header_of_its_panel', async () => {
+		const user = userEvent.setup();
+		const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
+		render(AboutPage);
+		const panel = screen.getByRole('heading', { name: 'Support information' }).closest('section');
+		const head = panel?.querySelector<HTMLElement>('.panel__head');
+		expect(head).toBeTruthy();
+		await user.click(within(head!).getByRole('button', { name: 'Copy support text' }));
+		expect(writeText).toHaveBeenCalledWith(supportText());
+		expect(writeText.mock.calls[0][0].split('\n')).toHaveLength(5);
+		expect(within(head!).getByRole('button', { name: 'Copied' })).toBeInTheDocument();
+	});
+
+	it('adr_0055_shows_the_support_text_in_a_block_that_grows_to_its_lines', () => {
+		render(AboutPage);
+		// A textarea keeps a fixed height and scrolls a wrapped line; a pre grows with its text.
+		const text = document.querySelector('.about__support');
+		expect(text?.tagName).toBe('PRE');
+		expect(text).not.toHaveAttribute('style');
+		expect(text?.textContent?.split('\n')).toHaveLength(5);
+		expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
 	});
 
 	it('adr_0054_links_the_documentation_of_the_current_language', () => {

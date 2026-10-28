@@ -81,7 +81,7 @@ export const ru: Record<MessageKey, string> = {
 	'about.environment.database': 'PostgreSQL',
 	'about.support.title': 'Данные для поддержки',
 	'about.support.hint': 'Отправьте этот текст в поддержку вместе с вопросом.',
-	'about.support.label': 'Текст для поддержки',
+	'about.support.copy': 'Копировать текст для поддержки',
 	'about.support.version': 'ResticHub {version}+{revision}',
 	'about.support.protocol': 'протокол {protocol} · агенты {agents}',
 	'about.support.system': 'ОС {os} · ядро {kernel} · {arch} · контейнер: {container}',
