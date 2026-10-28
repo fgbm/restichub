@@ -341,6 +341,37 @@ async fn the_about_answer_survives_a_database_that_takes_no_connection() {
     db.cleanup().await;
 }
 
+/// The schema level is the second fact of a broken installation, so the About answer of the
+/// Platform Admin arrives without it while the database answers no query (ADR-0054).
+#[tokio::test]
+async fn the_about_answer_of_a_platform_admin_survives_a_database_that_takes_no_connection() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant_with_key(db.database(), "about-schema-without-database").await;
+    let admin = create_user(
+        db.database(),
+        tenant,
+        "about-schema-without-database-user",
+        "phc",
+        "platform_admin",
+    )
+    .await;
+    let state = AppState::new(db.database().clone());
+    let mut context =
+        RequestContext::new(PLATFORM_TENANT_ID, Actor::User(admin), Role::PlatformAdmin);
+    context.platform_admin = true;
+    db.database().clone().close().await;
+
+    let Json(answer) = about(State(state), context)
+        .await
+        .expect("the About answer needs no database");
+    let body = serde_json::to_value(&answer).expect("the answer serialises");
+    assert!(body.get("schema_level").is_none(), "{body}");
+
+    db.cleanup().await;
+}
+
 /// A Viewer gives the environment of the server to support (ADR-0055).
 ///
 /// The test does not search the body for a value: it compares the set of the fields and the shape

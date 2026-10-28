@@ -48,7 +48,8 @@ pub struct AboutResponse {
     pub revision: String,
     pub protocol: ProtocolView,
     pub agent_protocol: AgentProtocolView,
-    /// Absent for a role below the Platform Admin, and while the database holds no migration row.
+    /// Absent for a role below the Platform Admin. Absent too while the database holds no migration
+    /// row, and while the control plane cannot query the database.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub schema_level: Option<i64>,
     /// Goes to every role (ADR-0055).
@@ -84,7 +85,14 @@ pub async fn about(
     let (version, prerelease, revision) = split_build_version(restichub_common::BUILD_VERSION);
     let protocol = Version::CURRENT;
     let schema_level = if context.platform_admin {
-        state.db().schema_level().await?
+        match state.db().schema_level().await {
+            Ok(level) => level,
+            Err(error) => {
+                // The screen reports a broken installation, so the route still answers.
+                tracing::warn!(%error, "the About answer holds no schema level");
+                None
+            }
+        }
     } else {
         None
     };

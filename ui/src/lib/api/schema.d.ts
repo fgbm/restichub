@@ -1591,7 +1591,8 @@ export interface components {
             revision: string;
             /**
              * Format: int64
-             * @description Absent for a role below the Platform Admin, and while the database holds no migration row.
+             * @description Absent for a role below the Platform Admin. Absent too while the database holds no migration
+             *     row, and while the control plane cannot query the database.
              */
             schema_level?: number | null;
             /** @description The package version with the pre-release part, without the build revision. */
