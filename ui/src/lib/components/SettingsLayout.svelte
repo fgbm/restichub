@@ -42,24 +42,26 @@
 	});
 </script>
 
-<div class="settings">
-	<nav class="subnav" aria-label={t('settings.sections')} bind:this={subnav}>
-		{#each groups as group (group.labelKey)}
-			<div class="subnav__group">
-				<p class="subnav__label">{t(group.labelKey)}</p>
-				{#each group.items as item (item.href)}
-					<a
-						class="subnav__link"
-						href={resolve(item.href)}
-						aria-current={activeHref === resolve(item.href) ? 'page' : undefined}
-					>
-						<Icon name={item.icon} />
-						{t(item.labelKey)}
-					</a>
-				{/each}
-			</div>
-		{/each}
-	</nav>
+<div class="settings" class:settings--no-subnav={groups.length === 0}>
+	{#if groups.length > 0}
+		<nav class="subnav" aria-label={t('settings.sections')} bind:this={subnav}>
+			{#each groups as group (group.labelKey)}
+				<div class="subnav__group">
+					<p class="subnav__label">{t(group.labelKey)}</p>
+					{#each group.items as item (item.href)}
+						<a
+							class="subnav__link"
+							href={resolve(item.href)}
+							aria-current={activeHref === resolve(item.href) ? 'page' : undefined}
+						>
+							<Icon name={item.icon} />
+							{t(item.labelKey)}
+						</a>
+					{/each}
+				</div>
+			{/each}
+		</nav>
+	{/if}
 	<div class="settings__content">
 		{@render children()}
 	</div>
@@ -71,6 +73,11 @@
 		grid-template-columns: 200px minmax(0, 1fr);
 		gap: var(--rh-space-8);
 		align-items: start;
+	}
+
+	/* A role without settings screens has no subnav, so the content gets the full width. */
+	.settings--no-subnav {
+		grid-template-columns: minmax(0, 1fr);
 	}
 
 	.subnav {
