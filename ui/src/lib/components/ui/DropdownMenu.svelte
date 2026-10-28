@@ -108,6 +108,11 @@
 									{item.label}
 									<small class="rh-menu__hint">{item.hint}</small>
 								</span>
+							{:else if item.trailing}
+								<span class="rh-menu__row">
+									{item.label}
+									<small class="rh-menu__trailing">{item.trailing}</small>
+								</span>
 							{:else}
 								{item.label}
 							{/if}
@@ -226,6 +231,22 @@
 	:global(.rh-menu__hint) {
 		color: var(--rh-color-text-subtle);
 		font-size: var(--rh-font-size-xs);
+	}
+
+	/* The label and its trailing value share one row; the value goes to the right end. */
+	:global(.rh-menu__row) {
+		display: flex;
+		align-items: center;
+		gap: var(--rh-space-3);
+		flex: 1;
+		min-width: 0;
+	}
+
+	:global(.rh-menu__trailing) {
+		margin-left: auto;
+		color: var(--rh-color-text-subtle);
+		font-size: var(--rh-font-size-xs);
+		white-space: nowrap;
 	}
 
 	:global(.rh-menu__check) {
