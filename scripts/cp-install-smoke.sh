@@ -9,10 +9,16 @@
 #   IMAGE_B   a second image with another digest in the same repository
 #   IMAGE_C   an image of the same repository whose `migrate` works and whose `serve` fails
 #   OLD_TAG   the tag whose deploy/reference is the fake git clone (default v0.1.0-rc.9)
+#   RESTICHUB_SMOKE_DISPOSABLE_HOST=yes  required outside CI: the test deletes /etc/restichub,
+#             /opt/restichub and the volumes of the project restichub
 #
 # The seam cannot check the keyless signature of the release workflow. The `verify` job of
 # release.yml runs packaging/verify-install-script.sh on the published files.
 set -euo pipefail
+
+fail() { echo "FAIL: $*" >&2; exit 1; }
+[ "${CI:-}" = true ] || [ "${RESTICHUB_SMOKE_DISPOSABLE_HOST:-}" = yes ] ||
+  fail "the smoke test deletes /etc/restichub, /opt/restichub and the volumes of the project restichub; run it only on a disposable host with RESTICHUB_SMOKE_DISPOSABLE_HOST=yes"
 
 : "${COSIGN:?}" "${IMAGE_A:?}" "${IMAGE_B:?}" "${IMAGE_C:?}"
 OLD_TAG=${OLD_TAG:-v0.1.0-rc.9}
@@ -27,9 +33,19 @@ lock=/run/restichub-install.lock
 sudo=()
 [ "$(id -u)" -eq 0 ] || sudo=(sudo)
 
-fail() { echo "FAIL: $*" >&2; exit 1; }
 step() { echo; echo "=== $*"; }
 as_root() { "${sudo[@]}" "$@"; }
+
+# The test never deletes a state that it did not make.
+found=()
+as_root test ! -e "$config" || found+=("$config")
+as_root test ! -e /opt/restichub || found+=(/opt/restichub)
+[ -z "$(as_root docker volume ls -q --filter name=^restichub_pgdata$)" ] || found+=("the volume restichub_pgdata")
+[ -z "$(as_root docker volume ls -q --filter label=com.docker.compose.project=restichub)" ] ||
+  found+=("the volumes of the project restichub")
+[ -z "$(as_root docker ps -aq --filter label=com.docker.compose.project=restichub)" ] ||
+  found+=("the containers of the project restichub")
+[ "${#found[@]}" -eq 0 ] || fail "the host is not clean: ${found[*]}"
 
 server_pid=''
 tiny=''
