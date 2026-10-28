@@ -109,6 +109,19 @@ describe('the About ResticHub screen', () => {
 		expect(screen.getByText('Not set')).toBeInTheDocument();
 	});
 
+	it('adr_0054_shows_the_tenancy_mode_as_not_set_before_the_instance_route_answers', () => {
+		state.platformAdmin = true;
+		state.about = about({ schema_level: 60 });
+		state.instanceLoaded = false;
+		render(AboutPage);
+		// The store holds the default mode `multi` before the route answers, so the panel says nothing
+		// about the mode (ADR-0055, decision 4).
+		expect(screen.getByText('Organizations')).toBeInTheDocument();
+		expect(screen.queryByText('Several organizations')).not.toBeInTheDocument();
+		expect(screen.getByText('Not set')).toBeInTheDocument();
+		expect(screen.getByText('60')).toBeInTheDocument();
+	});
+
 	it('adr_0054_shows_no_installation_facts_to_another_role', () => {
 		render(AboutPage);
 		expect(screen.queryByText('Database schema level')).not.toBeInTheDocument();

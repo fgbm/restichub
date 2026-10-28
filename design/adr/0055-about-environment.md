@@ -24,7 +24,7 @@ The tenancy mode stays out of the body (ADR-0054, decision 3). `GET /api/v1/inst
    - `database`: the server version of PostgreSQL, read with `SHOW server_version` without the suffix of the package builder. The route does not call `version()`, because that function adds the compiler and the build options. The field is absent while the control plane cannot query the database.
 2. Every signed-in role reads `environment`, also in the platform mode and in a session without an organization. The field does not depend on a role or on a tenant.
 3. The body holds no host name, no IP address, no file path, no environment variable, no database name, no user name and no connection string. The module that reads the environment keeps these values out of the object. A fact that the system does not expose stays absent. The route invents no value.
-4. The support text of the screen holds the version, the revision, the protocol, the range of the agents and the environment in one copy. The page adds the tenancy mode from the existing instance store to the same text. The line with the mode stays out while that store has not loaded: the store holds the default mode `multi` until then. A line with that default would tell support a false "several".
+4. The support text of the screen holds the version, the revision, the protocol, the range of the agents and the environment in one copy. The page adds the tenancy mode from the existing instance store to the same text. The line with the mode stays out while that store has not loaded: the store holds the default mode `multi` until then. A line with that default would tell support a false "several". The installation panel shows the same mode, and shows "Not set" while the store has not loaded.
 
 ## Consequences
 

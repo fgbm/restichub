@@ -50,14 +50,32 @@
 			: []
 	);
 
+	// The tenancy mode is public on `/api/v1/instance`, so the support text and the installation
+	// panel hold it for every role. The store holds the default mode `multi` before the route
+	// answers, so the page reads the mode only when the store has loaded (ADR-0055, decision 4).
+	const tenancyMode = $derived(isInstanceLoaded() ? getTenancyMode() : null);
+	const tenancy = $derived(
+		tenancyMode === null
+			? null
+			: tenancyMode === 'single'
+				? t('about.support.tenancy.single')
+				: t('about.support.tenancy.multi')
+	);
+	const tenancyLabel = $derived(
+		tenancyMode === null
+			? t('common.notSet')
+			: tenancyMode === 'single'
+				? t('about.tenancy.single')
+				: t('about.tenancy.multi')
+	);
+
 	const installation = $derived<KeyValueItem[]>(
 		about && platformAdmin
 			? [
 					{
 						key: 'tenancy',
 						label: t('about.tenancyMode'),
-						value:
-							getTenancyMode() === 'single' ? t('about.tenancy.single') : t('about.tenancy.multi')
+						value: tenancyLabel
 					},
 					{
 						key: 'schema',
@@ -71,8 +89,6 @@
 				]
 			: []
 	);
-
-	const tenancy = $derived(tenancyLine());
 
 	const environment = $derived<KeyValueItem[]>(
 		about
@@ -88,17 +104,6 @@
 	);
 
 	const support = $derived(about ? supportText(about, agents, tenancy) : '');
-
-	// The tenancy mode is public on `/api/v1/instance`, so the support text holds it for every role.
-	// The store holds the default mode `multi` before the route answers, so the text waits for it.
-	function tenancyLine(): string | null {
-		if (!isInstanceLoaded()) {
-			return null;
-		}
-		return getTenancyMode() === 'single'
-			? t('about.support.tenancy.single')
-			: t('about.support.tenancy.multi');
-	}
 
 	// A locked fact shows its value, or "Not set" while the process has no answer (ui-principles 3.9).
 	function fact(
