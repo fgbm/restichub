@@ -2,7 +2,8 @@ import { expect, test, type Page } from '@playwright/test';
 
 // A section that shows a subnav keeps it on every page. Otherwise the content column moves when a
 // person opens a record that belongs to the list (design/style/ui-principles.md, 1.3). The column
-// keeps its place also when the window scrollbar of a long record appears.
+// keeps its place also when the window scrollbar appears, because it is centred on the window and
+// not on the space that the scrollbar leaves.
 
 const WIDTHS = [1440, 1280, 1024];
 
@@ -50,6 +51,13 @@ async function place(page: Page): Promise<Place> {
 	};
 }
 
+async function overflows(page: Page): Promise<boolean> {
+	return page.evaluate(() => {
+		const root = document.scrollingElement as Element;
+		return root.scrollHeight > root.clientHeight;
+	});
+}
+
 function expectSamePlace(list: Place, record: Place, where: string): void {
 	expect(Math.abs(record.subnavX - list.subnavX), `${where}: the subnav moved`).toBeLessThanOrEqual(
 		1
@@ -58,6 +66,9 @@ function expectSamePlace(list: Place, record: Place, where: string): void {
 		Math.abs(record.contentX - list.contentX),
 		`${where}: the content moved`
 	).toBeLessThanOrEqual(1);
+}
+
+function expectSameWidth(list: Place, record: Place, where: string): void {
 	expect(
 		Math.abs(record.contentWidth - list.contentWidth),
 		`${where}: the content changed its width`
@@ -73,29 +84,48 @@ test('the_settings_subnav_and_the_content_stay_in_place_between_a_list_and_a_rec
 
 		for (const path of ['/settings/scripts/templates', '/settings/scripts/jobs']) {
 			await openList(page, path);
+			// The list fits the window, so it shows no window scrollbar.
+			expect(await overflows(page), `${path} at ${width} px: the list fills the window`).toBe(
+				false
+			);
 			const list = await place(page);
 
 			await openRecord(page, path);
 			expectSamePlace(list, await place(page), `${path} at ${width} px`);
 			// The record fills more than the window, so it shows the window scrollbar.
-			expect(
-				await page.evaluate(() => {
-					const root = document.scrollingElement as Element;
-					return root.scrollHeight > root.clientHeight;
-				}),
-				`${path} at ${width} px: the record fits the window`
-			).toBe(true);
+			expect(await overflows(page), `${path} at ${width} px: the record fits the window`).toBe(
+				true
+			);
 
 			await page.locator(`a[href="${path}"]`).first().click();
 			await expect(page).toHaveURL(new RegExp(`${path}(\\?.*)?$`));
 			await expect(page.locator('li.item').first()).toBeVisible();
 			expectSamePlace(list, await place(page), `${path} back at ${width} px`);
 		}
+	}
+});
 
-		expect(
-			await page.evaluate(() => getComputedStyle(document.documentElement).scrollbarGutter),
-			`the window scrollbar moves the column at ${width} px`
-		).toBe('stable');
+test('the_content_column_keeps_its_width_when_both_pages_show_the_window_scrollbar', async ({
+	page
+}) => {
+	for (const width of WIDTHS) {
+		// A short window shows the window scrollbar on the list too.
+		await page.setViewportSize({ width, height: 480 });
+		await signIn(page);
+
+		for (const path of ['/settings/scripts/templates', '/settings/scripts/jobs']) {
+			await openList(page, path);
+			expect(await overflows(page), `${path} at ${width} px: the list fits the window`).toBe(true);
+			const list = await place(page);
+
+			await openRecord(page, path);
+			expect(await overflows(page), `${path} at ${width} px: the record fits the window`).toBe(
+				true
+			);
+			const record = await place(page);
+			expectSamePlace(list, record, `${path} at ${width} px`);
+			expectSameWidth(list, record, `${path} at ${width} px`);
+		}
 	}
 });
 

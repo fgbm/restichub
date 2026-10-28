@@ -81,6 +81,9 @@
 	:global(.rh-dialog-overlay) {
 		position: fixed;
 		inset: 0;
+		/* The box of a fixed layer ends at the window scrollbar with classic scrollbars, and the
+		   overlay covers the window. */
+		width: 100vw;
 		z-index: var(--rh-z-overlay);
 		background-color: var(--rh-color-overlay);
 	}
@@ -88,7 +91,9 @@
 	:global(.rh-dialog) {
 		position: fixed;
 		top: 50%;
-		left: 50%;
+		/* The middle of the window. The fixed box ends at the window scrollbar, so `100vw - 100%`
+		   is the width that the scrollbar takes there. */
+		left: calc(50% + (100vw - 100%) / 2);
 		z-index: var(--rh-z-panel);
 		display: flex;
 		flex-direction: column;

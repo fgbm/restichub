@@ -354,9 +354,9 @@ html {
 	color: var(--rh-color-text);
 	background-color: var(--rh-color-canvas);
 	-webkit-text-size-adjust: 100%;
-	/* The gutter is always reserved: the window scrollbar of a long record must not move the
-	   centred content by half of its width. */
-	scrollbar-gutter: stable;
+	/* No `scrollbar-gutter: stable`: the reserved strip lies outside the box of a fixed layer, so a
+	   dialog overlay and a side panel stop 15 px short of the window edge with classic scrollbars.
+	   The page column keeps its place another way: it is centred on the window (AppShell). */
 }
 
 body {

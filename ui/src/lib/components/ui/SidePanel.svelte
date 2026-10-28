@@ -53,7 +53,9 @@
 	:global(.rh-panel) {
 		position: fixed;
 		top: 0;
-		right: 0;
+		/* The box of a fixed layer ends at the window scrollbar with classic scrollbars, so the
+		   panel reaches the window edge and not 15 px before it. */
+		right: calc(-1 * (100vw - 100%));
 		z-index: var(--rh-z-panel);
 		display: flex;
 		flex-direction: column;

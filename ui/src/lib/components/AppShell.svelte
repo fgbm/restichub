@@ -473,10 +473,11 @@
 
 	.page {
 		flex: 1;
-		width: 100%;
 		min-width: 0;
 		max-width: var(--rh-layout-content-max-width);
-		margin: 0 auto;
+		/* The column is centred on the window and not on the width that the window scrollbar
+		   leaves, so its left edge keeps its place when the scrollbar appears. */
+		margin-left: max(0px, calc((100vw - var(--rh-layout-content-max-width)) / 2));
 		padding: var(--rh-space-6) var(--rh-space-4) var(--rh-page-padding-bottom);
 		--rh-page-padding-bottom: var(--rh-space-12);
 	}
