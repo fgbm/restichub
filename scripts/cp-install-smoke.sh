@@ -441,6 +441,34 @@ as_root test -d "$clone/.git" || fail "the second paste of the rollback commands
 expect_running "$IMAGE_A"
 [ "$(sql 'SELECT count(*) FROM users')" -gt 0 ] || fail "the database has no user after the second paste"
 [ "$(as_root sh -c 'ls -d /opt/restichub.failed-*' | wc -l)" = 1 ] || fail "the release files of the failed move were not kept once"
+
+step "A move interrupted at the start of PostgreSQL: the hint says interrupted and works from any directory"
+args=(--migrate-from-git "$clone" --version 0.0.2-smoke.2)
+# A background job starts with SIGINT ignored, and bash cannot trap an ignored signal. setsid
+# gives the run its own process group, so the signal reaches it as a Ctrl-C does.
+run "$work/migrate-int.log" env --default-signal=INT setsid -w &
+runner=$!
+pgid=''
+for _ in $(seq 1 3000); do
+  pid=$(pgrep -f -- 'up -d --force-recreate --no-deps postgres' | head -n 1) || pid=''
+  if [ -n "$pid" ]; then
+    pgid=$(ps -o pgid= -p "$pid" | tr -d ' ') || pgid=''
+    [ -z "$pgid" ] || break
+  fi
+  sleep 0.1
+done
+[ -n "$pgid" ] || { wait "$runner" || true; cat "$work/migrate-int.log"; fail "the move did not start PostgreSQL"; }
+as_root kill -INT -- "-$pgid"
+if wait "$runner"; then cat "$work/migrate-int.log"; fail "the interrupted move did not fail"; fi
+cat "$work/migrate-int.log"
+grep -q '^error: .*interrupted' "$work/migrate-int.log" || fail "the error does not say that the run was interrupted"
+! grep -qF 'did not start' "$work/migrate-int.log" || fail "the error says that PostgreSQL did not start"
+! grep -qF 'cd /opt/restichub && docker compose logs' "$work/migrate-int.log" ||
+  fail "the log hint needs a directory that the rollback removes"
+grep -qF 'No migration ran: the schema version is still 58' "$work/migrate-int.log" || fail "the hint does not say that no migration ran"
+run_rollback /var/backups/restichub
+expect_running "$IMAGE_A"
+as_root test -d "$clone/.git" || fail "the rollback did not put back the clone"
 volume_created=$(as_root docker volume inspect --format '{{.CreatedAt}}' restichub_pgdata)
 
 step "Move the git clone installation to 0.0.2-smoke.2 after the rollback"
