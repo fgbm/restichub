@@ -40,7 +40,7 @@ The script does these steps:
 1. It verifies `cosign`, the release archive and the image of the new release.
 2. It stops when another run of `install.sh` holds the lock `/run/restichub-install.lock`. It also stops when an earlier run failed and left the file `/etc/restichub/INSTALL-FAILED`.
 3. It stops when `/opt/restichub` holds an override file, for example `compose.override.yaml`, or when the environment file sets a `COMPOSE_` variable. With such a file or variable, the new stack can start on another database.
-4. It records the database of the running stack: the volume `restichub_pgdata`, the system identifier of PostgreSQL, the schema version and the number of users.
+4. It records the database of the running stack. It records the volume `restichub_pgdata`, the PostgreSQL system identifier, the schema version and the number of users.
 5. It compares the KEK file that the running control plane uses with `/etc/restichub/secrets/restichub_kek`. It compares only the SHA-256 values.
 6. It makes the new directory `/var/backups/restichub/<time>` with the mode `700`. The option `--backup-dir` sets another parent directory. The parent must be an absolute path outside `/opt/restichub` and `/etc/restichub`. The script does not change the mode of a parent directory that exists.
 7. It checks the free space. The backup directory and the Docker data directory must each have two times the size of the database.
@@ -195,12 +195,12 @@ Do these checks before you move a production server:
 The script does these steps:
 
 1. It verifies `cosign`, the release archive and the image. Until then it changes nothing.
-2. It stops when the clone has an override file, a `COMPOSE_` variable in its environment file, or a change of a file of `deploy/reference` that `git` tracks. It also stops when the KEK file or the environment file of the clone is a symbolic link.
+2. It stops when the clone has an override file or a `COMPOSE_` variable in its environment file. It also stops on a change of a file of `deploy/reference` that `git` tracks. It also stops when the KEK file or the environment file of the clone is a symbolic link.
 3. It records the database of the running stack, as the upgrade does. The running stack must come from `deploy/reference/compose.yaml` of the clone, and the database must be in the volume `restichub_pgdata`.
-4. It copies `deploy/reference/.env` and `deploy/reference/secrets/restichub_kek` of the clone to `/etc/restichub`. It gives the environment file the mode `600` and the owner root, and the KEK the mode `400` and the owner uid 10001. It compares the SHA-256 of each copy with its source.
+4. It copies `deploy/reference/.env` and `deploy/reference/secrets/restichub_kek` of the clone to `/etc/restichub`. The environment file gets the mode `600` and the owner root. The KEK gets the mode `400` and the owner uid 10001. It compares the SHA-256 of each copy with its source.
 5. It makes a database dump in `/var/backups/restichub/<time>` and reads all the data of the dump with `pg_restore -f /dev/null`.
 6. It writes `ROLLBACK.txt` to the backup directory and renames the clone to `/opt/restichub.git-backup-<time>`.
-7. It writes the release files to `/opt/restichub` and starts the stack with the same project name `restichub`, as the upgrade does. The stack uses the same volumes, so the data stays.
+7. It writes the release files to `/opt/restichub`. Then it starts the stack with the same project name `restichub`, as the upgrade does. The stack uses the same volumes, so the data stays.
 
 If a step after the rename fails, the script prints the commands that start the stack of the clone again, and writes them to `ROLLBACK.txt`. See [Go back after a move from git](#go-back-after-a-move-from-git).
 

@@ -61,7 +61,7 @@ The reverse proxy gets a public certificate for the domain at its first start. I
 The script does these steps:
 
 1. It checks that it runs as root and that Docker Engine and Docker Compose 2 or later answer. It also checks that the ports 80, 443 and 8443 are free. Only one run of the script at a time can hold the lock `/run/restichub-install.lock`.
-2. It stops when the server is not empty. It looks for the KEK file, the environment file, the volume `restichub_pgdata`, and each volume and container of the project `restichub`. The message names what it found. For an installed server, use `--upgrade`. For a server that was installed with `git clone`, use `--migrate-from-git`.
+2. It stops when the server is not empty. It looks for the KEK file, the environment file and the volume `restichub_pgdata`. It also looks for each volume and container of the project `restichub`. The message names what it found. For an installed server, use `--upgrade`. For a server that was installed with `git clone`, use `--migrate-from-git`.
 3. It downloads `cosign` and compares its SHA-256 with a fixed value.
 4. It downloads the archive `restichub-deploy-<version>.tar.gz` and verifies its signature. The signature must come from the release workflow at the tag of the version.
 5. It reads the image reference from the archive and verifies the signature of the image with the same identity.
@@ -151,7 +151,7 @@ Copy the KEK and the environment file to a place outside the server now. Without
 5. Make sure that the value is the same as the value that the script printed.
 6. Put the archive in a password manager or a safe. Keep it apart from the backups of the database.
 7. Delete the archive from your workstation.
-8. In the terminal of the script, type `saved`. After `install.sh --migrate-from-git`, skip this step: the script does not wait for the word, because it uses the KEK of the clone.
+8. In the terminal of the script, type `saved`. After `install.sh --migrate-from-git`, skip this step. The script does not wait for the word, because it uses the KEK of the clone.
 
 ## Check the installation
 
