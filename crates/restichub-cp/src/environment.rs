@@ -38,8 +38,8 @@ pub struct EnvironmentView {
 
 /// Reads the environment facts and the PostgreSQL version for the About screen.
 ///
-/// The screen reports a broken installation, so a database that answers no query leaves the
-/// version of the server out and the route still answers.
+/// The screen reports a broken installation, so a database that fails the query leaves the
+/// version of the server out and the answer still arrives.
 pub async fn read(db: &Database) -> EnvironmentView {
     let system = system();
     let database = match db.server_version().await {
