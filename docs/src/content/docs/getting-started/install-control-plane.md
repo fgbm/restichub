@@ -18,7 +18,9 @@ The control plane runs on one Linux server. This page installs the control plane
 
 - Get a Linux server with at least 2 GB of memory and access to the internet. The server must have the architecture `x86_64` or `arm64`.
 - Install Docker Engine and the Compose plugin on the server. Use the [Docker guide](https://docs.docker.com/engine/install/). The server needs no `git`.
-- Make sure that `curl` and `sudo` are on the server.
+- Make sure that `curl`, `sudo`, GNU coreutils and GNU tar are on the server. The script does not run with the BusyBox tools.
+- Make sure that `/var/tmp` does not have the mount option `noexec`. The script runs `cosign` from this directory. To use another directory, set `TMPDIR` for the script.
+- Open a `tmux` or `screen` session on the server. If the SSH connection stops, the session keeps the script running.
 - Get a domain name for the control plane, for example `restichub.example.com`.
 - Create a DNS record for the domain. Use the type A and the public address of the server:
 
@@ -58,14 +60,15 @@ The reverse proxy gets a public certificate for the domain at its first start. I
 
 The script does these steps:
 
-1. It checks that it runs as root and that Docker Engine and Docker Compose 2 or later answer. It also checks that the ports 80, 443 and 8443 are free.
-2. It downloads `cosign` and compares its SHA-256 with a fixed value.
-3. It downloads the archive `restichub-deploy-<version>.tar.gz` and verifies its signature. The signature must come from the release workflow at the tag of the version.
-4. It reads the image reference from the archive and verifies the signature of the image with the same identity.
-5. It writes the environment file and the KEK to `/etc/restichub`, and the release files to `/opt/restichub`.
-6. It starts the stack, waits until the control plane is healthy, and compares the running image with the verified image.
+1. It checks that it runs as root and that Docker Engine and Docker Compose 2 or later answer. It also checks that the ports 80, 443 and 8443 are free. Only one run of the script at a time can hold the lock `/run/restichub-install.lock`.
+2. It stops when the server is not empty. It looks for the KEK file, the environment file, the volume `restichub_pgdata`, and each volume and container of the project `restichub`. The message names what it found. For an installed server, use `--upgrade`. For a server that was installed with `git clone`, use `--migrate-from-git`.
+3. It downloads `cosign` and compares its SHA-256 with a fixed value.
+4. It downloads the archive `restichub-deploy-<version>.tar.gz` and verifies its signature. The signature must come from the release workflow at the tag of the version.
+5. It reads the image reference from the archive and verifies the signature of the image with the same identity.
+6. It writes the environment file and the KEK to `/etc/restichub`, and the release files to `/opt/restichub`.
+7. It starts the stack, waits until the control plane is healthy, and compares the running image with the verified image.
 
-If a check fails, the script stops before it changes the server. No option of the script skips a check.
+If a check fails, the script stops before it changes the server. No option of the script skips a check. If the installation fails after the script wrote files, the script prints the commands that remove only the files and the volumes of this run.
 
 ## Install with a verified download
 
@@ -121,8 +124,11 @@ Copy the KEK and the environment file to a place outside the server now. Without
 1. In a second terminal on the server, write the directory `/etc/restichub` to an archive that only you can read:
 
    ```sh
+   rm -f ~/restichub-config.tar.gz
    (umask 077 && sudo tar -czf - -C /etc restichub > ~/restichub-config.tar.gz)
    ```
+
+   The first command removes an old archive, because `umask` does not change the mode of a file that exists.
 
 2. On your workstation, copy the archive from the server:
 
@@ -145,7 +151,7 @@ Copy the KEK and the environment file to a place outside the server now. Without
 5. Make sure that the value is the same as the value that the script printed.
 6. Put the archive in a password manager or a safe. Keep it apart from the backups of the database.
 7. Delete the archive from your workstation.
-8. In the terminal of the script, type `saved`.
+8. In the terminal of the script, type `saved`. After `install.sh --migrate-from-git`, skip this step: the script does not wait for the word, because it uses the KEK of the clone.
 
 ## Check the installation
 
@@ -205,7 +211,7 @@ The setup token is a secret. Do not send it to a shared terminal or a chat. The 
 
 ## The environment file
 
-The stack reads one file, `/etc/restichub/.env`. Compose finds it through the link `/opt/restichub/.env`. The script `install.sh` writes the file with random secrets. The file mode is `600`. The script does not overwrite an existing file.
+The stack reads one file, `/etc/restichub/.env`. Compose finds it through the link `/opt/restichub/.env`. The script `install.sh` writes the file with random secrets. The file mode is `600`. The script does not overwrite an existing file. It writes each value in single quotes, so Compose does not expand a `$` in a value.
 
 | Value | Content |
 |---|---|

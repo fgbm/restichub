@@ -38,7 +38,7 @@ The tables of the control plane have row-level security. Make the dump as the Po
 3. Make sure that the command printed no error and that the file is not empty.
 4. Copy the file to another host.
 
-Make a dump before each upgrade, and at a regular interval, for example once a day with `cron`. The dump does not stop the control plane. `install.sh --upgrade` makes a dump by itself before it changes the server.
+Make a dump before each upgrade, and at a regular interval, for example once a day with `cron`. The dump does not stop the control plane. `install.sh --upgrade` makes a dump by itself before it changes the server. It does not delete old dumps. See [Old backups](/restichub/guides/upgrade/#old-backups).
 
 ## Back up the KEK and the environment file
 
