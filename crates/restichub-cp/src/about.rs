@@ -8,6 +8,7 @@
 
 use axum::Json;
 use axum::extract::State;
+use restichub_db::Database;
 use restichub_proto::version::Version;
 use serde::Serialize;
 use utoipa::ToSchema;
@@ -84,22 +85,12 @@ pub async fn about(
     context.authorize(Operation::AboutRead)?;
     let (version, prerelease, revision) = split_build_version(restichub_common::BUILD_VERSION);
     let protocol = Version::CURRENT;
-    let schema_level = if context.platform_admin {
-        match state.db().schema_level().await {
-            Ok(level) => level,
-            Err(error) => {
-                // The screen reports a broken installation, so the route still answers.
-                tracing::warn!(
-                    cause = %cause_chain(&error),
-                    "the About answer holds no schema level"
-                );
-                None
-            }
-        }
-    } else {
-        None
-    };
-    let environment = environment::read(state.db()).await;
+    // Both reads go to the pool, so the Platform Admin waits for one acquire timeout and not two
+    // while the database is down.
+    let (environment, schema_level) = tokio::join!(
+        environment::read(state.db()),
+        schema_level(state.db(), context.platform_admin)
+    );
     Ok(Json(AboutResponse {
         version,
         prerelease,
@@ -115,6 +106,23 @@ pub async fn about(
         schema_level,
         environment,
     }))
+}
+
+async fn schema_level(db: &Database, platform_admin: bool) -> Option<i64> {
+    if !platform_admin {
+        return None;
+    }
+    match db.schema_level().await {
+        Ok(level) => level,
+        Err(error) => {
+            // The screen reports a broken installation, so the route still answers.
+            tracing::warn!(
+                cause = %cause_chain(&error),
+                "the About answer holds no schema level"
+            );
+            None
+        }
+    }
 }
 
 #[cfg(test)]
