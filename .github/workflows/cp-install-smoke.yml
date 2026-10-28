@@ -1,11 +1,11 @@
 name: Control plane install smoke
 
-# Runs deploy/reference/install.sh as root on a runner (ADR-0056, T38): a refused run without
-# a terminal, a cosign download with a wrong SHA-256, a changed release archive, an install,
-# an upgrade and the move of a git clone installation. The release files come from
-# packaging/make-deploy-archive.sh and the image from this commit, through the test seam of
-# the script. The seam replaces the keyless identity with a test key, so the keyless path is
-# covered only by the `verify` job of release.yml and a manual run (CONTRIBUTING.md).
+# Runs deploy/reference/install.sh as root on a runner (ADR-0056, T38): the refused runs, an
+# install, failed and good upgrades with their rollback, and failed and good moves of a git
+# clone installation. The release files come from packaging/make-deploy-archive.sh and the
+# image from this commit, through the test seam of the script. The seam replaces the keyless
+# identity with a test key, so the keyless path is covered by the `verify` job of
+# release.yml (packaging/verify-install-script.sh).
 
 on:
   push:
@@ -13,6 +13,7 @@ on:
     paths:
       - deploy/reference/**
       - packaging/make-deploy-archive.sh
+      - packaging/verify-install-script.sh
       - packaging/install-tool.sh
       - scripts/cp-install-smoke.sh
       - crates/restichub-db/sql/**
@@ -22,6 +23,7 @@ on:
     paths:
       - deploy/reference/**
       - packaging/make-deploy-archive.sh
+      - packaging/verify-install-script.sh
       - packaging/install-tool.sh
       - scripts/cp-install-smoke.sh
       - crates/restichub-db/sql/**
@@ -75,7 +77,7 @@ jobs:
           cache-from: type=gha
           provenance: false
           sbom: false
-      - name: Push a second image with another digest
+      - name: Push the images B and C with other digests
         run: |
           set -euo pipefail
           digest() {
@@ -89,7 +91,21 @@ jobs:
           docker push --quiet "$REPO:smoke-b"
           b="$REPO@$(digest smoke-b)"
           [ "$a" != "$b" ] || { echo "::error::the two images have one digest"; exit 1; }
-          { echo "IMAGE_A=$a"; echo "IMAGE_B=$b"; } >> "$GITHUB_ENV"
+          # Image C runs the migrations and then fails at start, as a broken release would.
+          mkdir "$RUNNER_TEMP/image-c"
+          cat > "$RUNNER_TEMP/image-c/entry" <<'SH'
+          #!/bin/sh
+          if [ "$1" = migrate ]; then exec restichub-cp "$@"; fi
+          echo "smoke image C: the control plane fails on purpose" >&2
+          exit 1
+          SH
+          sed -i 's/^          //' "$RUNNER_TEMP/image-c/entry"
+          chmod 0755 "$RUNNER_TEMP/image-c/entry"
+          printf 'FROM %s\nCOPY entry /usr/local/bin/smoke-entry\nENTRYPOINT ["/usr/local/bin/smoke-entry"]\nCMD ["serve"]\n' "$a" > "$RUNNER_TEMP/image-c/Dockerfile"
+          docker build --quiet -t "$REPO:smoke-c" "$RUNNER_TEMP/image-c"
+          docker push --quiet "$REPO:smoke-c"
+          c="$REPO@$(digest smoke-c)"
+          { echo "IMAGE_A=$a"; echo "IMAGE_B=$b"; echo "IMAGE_C=$c"; } >> "$GITHUB_ENV"
       - name: Run the smoke test
         run: COSIGN="$RUNNER_TEMP/tools/bin/cosign" scripts/cp-install-smoke.sh
       - name: Diagnostics
