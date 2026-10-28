@@ -49,8 +49,9 @@ if [ -n "${RESTICHUB_TEST_RELEASES_URL:-}" ]; then
   cosign_base_url=${RESTICHUB_TEST_COSIGN_BASE_URL:?}
   image_repo=${RESTICHUB_TEST_IMAGE_REPO:?}
   fetch_proto='=http,https'
+  test_cosign_key=${RESTICHUB_TEST_COSIGN_KEY:?}
   set_check_args() {
-    check_args=(--key "${RESTICHUB_TEST_COSIGN_KEY:?}" --insecure-ignore-tlog=true)
+    check_args=(--key "$test_cosign_key" --insecure-ignore-tlog=true)
   }
 fi
 # END TEST SEAM
@@ -125,6 +126,9 @@ changing=false
 finished=false
 placed=false
 db_mismatch=false
+migrate_running=false
+# The images of the new release need this much space in the Docker data directory.
+readonly image_margin=$((1024 * 1024 * 1024))
 
 need_value() {
   if [ -z "${2:-}" ] || [ "${2#--}" != "$2" ]; then
@@ -158,6 +162,8 @@ parse_args() {
         mode=migrate
         if [ -n "${2:-}" ] && [ "${2#--}" = "$2" ]; then git_dir=${2%/}; shift; fi
         [ "${git_dir#/}" != "$git_dir" ] || die "give the directory of the git clone as an absolute path"
+        [[ "$git_dir" =~ ^/[A-Za-z0-9._/-]+$ ]] ||
+          die "the directory $git_dir of the git clone holds a space or another character that the rollback commands cannot use; rename the clone and run the script again"
         shift ;;
       -h | --help) usage; exit 0 ;;
       *) die "unknown option: $1 (see --help)" ;;
@@ -204,6 +210,9 @@ failure_text() {
         say "The move to $version did not finish."
       fi
       say "The backup of the run is in $backup_dir, with the dump $dump_file."
+      if [ "$mode" = migrate ]; then
+        say "The clone keeps its KEK. The script also put a copy in $kek_file and compared its SHA-256 with the KEK of the clone."
+      fi
       local restore=true
       if $db_mismatch; then
         say "The new stack found another database, and the script stopped it before a migration."
@@ -217,7 +226,11 @@ failure_text() {
         restore=false
       elif [ -n "$schema_now" ]; then
         say "The schema moved $schema_before -> $schema_now. The old release cannot use the new schema: the commands below restore the dump first."
+        if $finished; then say "The restore loses every change after $stamp (UTC)."; fi
       else
+        if $migrate_running; then
+          say "The migrate service still runs, so the schema state is unknown. Check it before the rollback."
+        fi
         say "The script cannot read the schema version now (before the run: $schema_before)."
         say "Read it with the first command below. If it is $schema_before, skip the commands marked (restore)."
         say "  docker exec \$(docker ps -q --filter label=com.docker.compose.project=$project --filter label=com.docker.compose.service=postgres) psql -U $pg_user -d $pg_db -Atc 'SELECT max(version) FROM _sqlx_migrations WHERE success'"
@@ -240,14 +253,13 @@ install_failure_text() {
   say "Then run this script again."
 }
 
-# $1 is the directory of the stack, $2 is true when the dump must be restored.
+q() { printf '%q' "$1"; }
+
+# $1 is the directory of the stack, $2 is true when the dump must be restored. One line, so
+# the restore never runs on a volume that a running container still holds.
 restore_commands() {
   $2 || return 0
-  say "  cd $1"
-  say "  docker volume rm $pg_volume  # (restore)"
-  say "  docker compose up -d --wait postgres  # (restore)"
-  say "  docker compose run --rm -T db-bootstrap  # (restore)"
-  say "  docker compose exec -T postgres pg_restore -U $pg_user -d $pg_db --exit-on-error < $dump_file  # (restore)"
+  say "  cd $(q "$1") && docker volume rm $pg_volume && docker compose up -d --wait postgres && docker compose run --rm -T db-bootstrap && docker compose exec -T postgres pg_restore -U $pg_user -d $pg_db --exit-on-error < $(q "$dump_file")  # (restore)"
 }
 
 upgrade_commands() {
@@ -259,14 +271,17 @@ upgrade_commands() {
   say "  rm -f $failed_marker"
 }
 
+# Each line checks the state first, so a second paste of the block keeps the clone and its KEK.
 migrate_commands() {
-  if $placed; then
-    say "  cd $install_dir && docker compose down"
-    say "  cd / && rm -rf $install_dir"
-  fi
-  say "  mv $git_backup $git_dir"
+  local install git backup
+  install=$(q "$install_dir")
+  git=$(q "$git_dir")
+  backup=$(q "$git_backup")
+  say "  cd / && docker compose -p $project down"
+  say "  if [ -e $install ] && [ ! -e $install/.git ]; then mv $install $(q "$install_dir.failed-$stamp"); fi"
+  say "  if [ ! -e $git ] && [ -d $backup ]; then mv $backup $git; fi"
   restore_commands "$git_dir/deploy/reference" "$1"
-  say "  cd $git_dir/deploy/reference && docker compose up -d"
+  say "  cd $git/deploy/reference && docker compose up -d"
   say "  rm -f $failed_marker"
 }
 
@@ -281,12 +296,12 @@ on_exit() {
   trap - EXIT
   if [ "$status" -ne 0 ]; then
     local schema_now=''
-    if $changing && ! $db_mismatch; then schema_now=$(schema_version 2>/dev/null); fi
+    if $changing && ! $db_mismatch; then
+      wait_migrate
+      $migrate_running || schema_now=$(schema_version 2>/dev/null)
+    fi
     # The file comes first: after a lost SSH connection the terminal is gone.
     write_rollback_file "$schema_now"
-    if $changing && [ -d "$config_dir" ]; then
-      printf 'The run of %s at %s failed. Its backup: %s\n' "$mode" "$stamp" "$backup_dir" >"$failed_marker"
-    fi
     local text
     text=$(failure_text "$schema_now")
     if [ -n "$text" ]; then printf '\n%s\n' "$text" >&2; fi
@@ -302,7 +317,7 @@ check_host() {
   [ "$(id -u)" -eq 0 ] || die "run the script as root, for example with sudo"
   local tool
   for tool in curl tar gzip sha256sum awk sed grep mktemp install stat seq base64 flock head cut tr \
-    date uname df cmp ls cp mv ln rm mkdir chmod chown dirname; do
+    date uname df cmp ls cp mv ln rm mkdir chmod chown dirname timeout; do
     command -v "$tool" >/dev/null || die "the command $tool is missing; install it and run the script again"
   done
   # The script uses options of GNU coreutils and GNU tar that BusyBox does not have. With
@@ -326,12 +341,13 @@ check_host() {
     *) die "the architecture $(uname -m) has no control plane image" ;;
   esac
   # A COMPOSE_* variable of the shell can select other compose files or another project,
-  # and so another database volume.
+  # and so another database volume. In the interpolation of compose.yaml a variable of the
+  # shell also wins over the same name in the environment file.
   local name
   while IFS= read -r name; do
     warn "the script ignores the variable $name of the shell"
     unset "$name"
-  done < <(compgen -e | grep '^COMPOSE_' || true)
+  done < <(compgen -e | grep -E '^(COMPOSE_|POSTGRES_|RESTICHUB_)' || true)
 }
 
 take_lock() {
@@ -440,8 +456,13 @@ check_migrate_target() {
   # another volume, and the new stack then starts on an empty database.
   command -v git >/dev/null ||
     die "the command git is missing. Only git can compare deploy/reference of the clone with its commit; install git and run the script again"
-  local changes
-  changes=$(git -c "safe.directory=$git_dir" -C "$git_dir" status --porcelain --untracked-files=no -- deploy/reference) ||
+  local changes owner
+  for path in "$git_dir" "$git_dir/.git"; do
+    owner=$(stat -c %u "$path" 2>/dev/null) || die "$path is missing; give the directory of the git clone"
+    [ "$owner" = 0 ] ||
+      die "$path belongs to uid $owner, not root. That account can change deploy/reference after the check of the script, and git refuses the clone of another owner; run chown -R root:root $git_dir and run the script again"
+  done
+  changes=$(git -C "$git_dir" status --porcelain --untracked-files=no -- deploy/reference) ||
     die "git cannot read the clone $git_dir"
   [ -z "$changes" ] ||
     die "deploy/reference of the clone has changes to the files of its commit: $(printf '%s' "$changes" | tr '\n' ' '). The new stack does not keep them; put the files back with git or move the changes by hand"
@@ -532,6 +553,14 @@ verify_image() {
     die "the signature of the image $image_ref is not valid for the release v$version"
   }
   docker pull --quiet "$image_ref" >/dev/null
+}
+
+# A failed pull before the change leaves the old stack as it is. $1 is the environment file
+# of the running stack; the verified image replaces its RESTICHUB_IMAGE.
+pull_images() {
+  say "Pulling the images of the release $version"
+  RESTICHUB_IMAGE=$image_ref docker compose -p "$project" -f "$work/release/compose.yaml" --env-file "$1" pull --quiet ||
+    die "the pull of the images of the release $version failed; the old stack still runs"
 }
 
 random_secret() {
@@ -677,23 +706,29 @@ record_database() {
 }
 
 check_same_database() {
-  local cid mount id
+  local cid mount id schema users
   cid=$(container_of postgres)
   mount=$(data_mount "$cid")
   id=$(psql_value 'SELECT system_identifier FROM pg_control_system()' || true)
-  if [ "$mount" != "$db_mount_before" ] || [ "$id" != "$db_id_before" ]; then
+  schema=$(schema_version || true)
+  users=$(psql_value 'SELECT count(*) FROM users' || true)
+  if [ "$mount" != "$db_mount_before" ] || [ "$id" != "$db_id_before" ] || [ "$schema" != "$schema_before" ] ||
+    ! [[ "$users" =~ ^[0-9]+$ ]] || [ "$users" -lt "$users_before" ]; then
     db_mismatch=true
     compose down || true
-    die "the new stack uses another database (\"$mount\", identifier $id), not \"$db_mount_before\", identifier $db_id_before; the script stopped it"
+    die "the new stack uses another database (\"$mount\", identifier $id, schema version $schema, $users users), not \"$db_mount_before\", identifier $db_id_before, schema version $schema_before, $users_before users; the script stopped it"
   fi
+  local label
+  label=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' "$cid")
+  [ "$label" = "$install_dir" ] || die "the new PostgreSQL container comes from $label, not from $install_dir"
 }
 
-# Only the hashes leave the container. $1 is the KEK file that the new stack mounts.
+# Only the hash leaves the container. $1 is the KEK file that the new stack mounts.
 check_kek_of_running_cp() {
   local cid running expected
   cid=$(container_of cp)
   [ -n "$cid" ] || die "the control plane container does not run, so the script cannot compare its KEK; start the stack first"
-  running=$(docker exec "$cid" cat /run/secrets/restichub_kek | sha256sum | cut -d' ' -f1) ||
+  running=$(docker exec "$cid" sha256sum /run/secrets/restichub_kek | cut -d' ' -f1) ||
     die "the script cannot read the KEK of the running control plane"
   expected=$(sha256sum <"$1" | cut -d' ' -f1)
   [ "$running" = "$expected" ] ||
@@ -704,16 +739,19 @@ check_free_space() {
   local size need dir avail docker_root
   size=$(psql_value 'SELECT pg_database_size(current_database())') || die "the script cannot read the size of the database"
   docker_root=$(docker info --format '{{.DockerRootDir}}')
-  local dirs=("$backup_root")
-  need=$((size * 2))
+  local dirs=("$backup_root") needs=($((size * 2)))
   if [ ! -d "$docker_root" ]; then
     warn "the Docker data directory $docker_root is not on this host; the script checks only $backup_root"
   elif [ "$(stat -c %d "$backup_root")" = "$(stat -c %d "$docker_root")" ]; then
-    need=$((size * 4))
+    needs=($((size * 4 + image_margin)))
   else
     dirs+=("$docker_root")
+    needs+=($((size * 2 + image_margin)))
   fi
-  for dir in "${dirs[@]}"; do
+  local i
+  for i in "${!dirs[@]}"; do
+    dir=${dirs[$i]}
+    need=${needs[$i]}
     avail=$(($(df -Pk "$dir" | awk 'NR == 2 { print $4 }') * 1024))
     [ "$avail" -ge "$need" ] ||
       die "$dir has $((avail / 1048576)) MiB free; the database has $((size / 1048576)) MiB, and the run needs $((need / 1048576)) MiB"
@@ -781,11 +819,11 @@ wait_healthy() {
 start_stack() {
   say "Starting the stack"
   compose pull --quiet
-  local started
-  started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   if [ "$mode" != install ]; then
-    # Only PostgreSQL starts first, so no migration runs before the database is proven.
-    compose up -d postgres ||
+    # Only PostgreSQL starts first, so no migration runs before the database is proven. Compose
+    # keeps a container with the same configuration hash, and the hash does not hold the
+    # project directory: only a new container proves the database of the new stack.
+    compose up -d --force-recreate --no-deps postgres ||
       die "PostgreSQL did not start; read the log with: cd $install_dir && docker compose logs postgres"
     wait_healthy postgres 24
     check_same_database
@@ -800,9 +838,13 @@ start_stack() {
   running=$(docker inspect --format '{{.Image}}' "$cid")
   expected=$(docker image inspect --format '{{.Id}}' "$image_ref")
   [ "$running" = "$expected" ] || die "the image of the running control plane is not the verified image"
-  if [ "$mode" != install ] && [ "$users_before" -gt 0 ] &&
-    compose logs --no-color --since "$started" cp 2>&1 | grep setup_token >/dev/null; then
-    die "the control plane printed a new setup token, so its database has no administrator; it does not use the database of the old stack"
+  if [ "$mode" != install ]; then
+    local id users
+    id=$(psql_value 'SELECT system_identifier FROM pg_control_system()' || true)
+    users=$(psql_value 'SELECT count(*) FROM users' || true)
+    if [ "$id" != "$db_id_before" ] || ! [[ "$users" =~ ^[0-9]+$ ]] || [ "$users" -lt "$users_before" ]; then
+      die "after the start the database has the identifier $id and $users users, not $db_id_before and at least $users_before users"
+    fi
   fi
   say "The control plane is healthy and runs the verified image $image_ref"
 }
@@ -836,6 +878,23 @@ prepare_switch() {
   check_kek_of_running_cp "$2"
   make_backup_dir
   check_free_space
+}
+
+# The marker is written before the first change, so it stays when the run is killed. A run
+# with --force-after-failure adds its line to the lines of the earlier runs.
+start_change() {
+  changing=true
+  printf 'The run of %s at %s did not finish. Its backup: %s\n' "$mode" "$stamp" "$backup_dir" >>"$failed_marker"
+  write_rollback_file ''
+}
+
+wait_migrate() {
+  local cid
+  cid=$(docker ps -q --filter "label=com.docker.compose.project=$project" \
+    --filter label=com.docker.compose.service=migrate --filter status=running | head -n 1)
+  [ -n "$cid" ] || return 0
+  printf 'The migrate service still runs; waiting up to 120 seconds for it to end.\n' >&2
+  timeout 120 docker wait "$cid" >/dev/null 2>&1 || migrate_running=true
 }
 
 finish_switch() {
@@ -873,16 +932,16 @@ run_upgrade() {
   check_upgrade_target
   get_cosign
   get_release
-  verify_image
   prepare_switch "$install_dir" "$kek_file"
+  verify_image
+  pull_images "$env_file"
   cp -p "$env_file" "$backup_dir/restichub.env"
   cp -a "$install_dir" "$backup_dir/release"
   say "Saved the environment file and the release files to $backup_dir"
   dump_database
   local caddy_changed=false
   cmp -s "$install_dir/Caddyfile" "$work/release/Caddyfile" || caddy_changed=true
-  changing=true
-  write_rollback_file ''
+  start_change
   place_release
   set_env_image
   start_stack
@@ -900,13 +959,13 @@ run_migrate() {
   check_migrate_target
   get_cosign
   get_release
-  verify_image
   prepare_switch "$src_dir" "$src_kek"
+  verify_image
+  pull_images "$src_env"
   copy_config
   dump_database
   git_backup=$git_dir.git-backup-$stamp
-  changing=true
-  write_rollback_file ''
+  start_change
   mv "$git_dir" "$git_backup"
   say "Moved the git clone to $git_backup"
   place_release

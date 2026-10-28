@@ -48,9 +48,11 @@ as_root test ! -e /opt/restichub || found+=(/opt/restichub)
 [ "${#found[@]}" -eq 0 ] || fail "the host is not clean: ${found[*]}"
 
 server_pid=''
+traffic_pid=''
 tiny=''
 cleanup() {
   if [ -n "$server_pid" ]; then kill "$server_pid" 2>/dev/null || true; fi
+  if [ -n "$traffic_pid" ]; then kill "$traffic_pid" 2>/dev/null || true; fi
   if [ -n "$tiny" ]; then as_root umount "$tiny" 2>/dev/null || true; fi
 }
 trap cleanup EXIT
@@ -78,17 +80,27 @@ release() {
   "$COSIGN" sign-blob --yes --key "$work/test.key" --use-signing-config=false --tlog-upload=false \
     --bundle "$dir/restichub-deploy-$version.tar.gz.sigstore.json" "$dir/restichub-deploy-$version.tar.gz" 2>/dev/null
 }
+tree() {
+  mkdir -p "$1/deploy" "$1/crates/restichub-db" "$1/packaging"
+  cp -R "$root/deploy/reference" "$1/deploy/"
+  cp -R "$root/crates/restichub-db/sql" "$1/crates/restichub-db/"
+  cp "$root/packaging/make-deploy-archive.sh" "$1/packaging/"
+}
 # The release B changes the Caddyfile, so the upgrade to it must recreate Caddy.
 tree_b=$work/tree-b
-mkdir -p "$tree_b/deploy" "$tree_b/crates/restichub-db" "$tree_b/packaging"
-cp -R "$root/deploy/reference" "$tree_b/deploy/"
-cp -R "$root/crates/restichub-db/sql" "$tree_b/crates/restichub-db/"
-cp "$root/packaging/make-deploy-archive.sh" "$tree_b/packaging/"
+tree "$tree_b"
 echo '# smoke release B' >>"$tree_b/deploy/reference/Caddyfile"
+# The release F names a Caddy image that the registry does not have.
+tree_f=$work/tree-f
+tree "$tree_f"
+sed -i 's|image: caddy:.*|image: localhost:5000/fgbm/restichub-missing:smoke|' "$tree_f/deploy/reference/compose.yaml"
+grep -qF 'restichub-missing:smoke' "$tree_f/deploy/reference/compose.yaml" || fail "the release F names no missing image"
 release 0.0.1-smoke.1 "$IMAGE_A"
 release 0.0.2-smoke.2 "$IMAGE_B" "$tree_b"
 release 0.0.3-smoke.3 "$IMAGE_A"
 release 0.0.4-smoke.4 "$IMAGE_C"
+release 0.0.5-smoke.5 "$IMAGE_A"
+release 0.0.6-smoke.6 "$IMAGE_A" "$tree_f"
 # The tampered release keeps the bundle of the original archive.
 (
   cd "$work" && mkdir tamper && tar -xzf "$srv/v0.0.3-smoke.3/restichub-deploy-0.0.3-smoke.3.tar.gz" -C tamper
@@ -139,10 +151,28 @@ expect_refusal() {
 }
 container() { as_root docker ps -q --filter label=com.docker.compose.project=restichub --filter "label=com.docker.compose.service=$1"; }
 expect_running() {
-  local cid
-  cid=$(container cp)
+  local cid health=''
+  for _ in $(seq 1 60); do
+    cid=$(container cp)
+    [ -z "$cid" ] || health=$(as_root docker inspect --format '{{.State.Health.Status}}' "$cid")
+    [ "$health" != healthy ] || break
+    sleep 2
+  done
+  [ "$health" = healthy ] || fail "cp is not healthy"
   [ "$(as_root docker inspect --format '{{.Config.Image}}' "$cid")" = "$1" ] || fail "cp does not run $1"
-  [ "$(as_root docker inspect --format '{{.State.Health.Status}}' "$cid")" = healthy ] || fail "cp is not healthy"
+}
+pg_dir() {
+  as_root docker inspect --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' "$(container postgres)"
+}
+# Requests that put setup_token in the logged URI of the running control plane.
+traffic() {
+  local ip
+  while :; do
+    ip=$(as_root docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$(container cp | head -n 1)" 2>/dev/null) || ip=''
+    [ -z "$ip" ] || curl -s -o /dev/null -H 'x-restichub-csrf: 1' -H 'content-type: application/json' \
+      -d '{"username":"nobody","password":"not-a-password"}' "http://$ip:8080/api/v1/auth/sign-in?setup_token=x" || true
+    sleep 0.5
+  done
 }
 mode_of() { as_root stat -c '%a %u' "$1"; }
 sha_of() { as_root sha256sum "$1" | cut -d' ' -f1; }
@@ -170,6 +200,11 @@ run_rollback() {
   as_root cat "$file"
   as_root sed -n 's/^  //p' "$file" | grep -v '^docker exec' >"$work/rollback.sh"
   as_root bash -euxo pipefail "$work/rollback.sh"
+}
+# A second paste of the same commands, as an operator in an interactive shell would do it.
+run_rollback_again() {
+  as_root bash "$work/rollback.sh" >"$work/rollback-again.log" 2>&1 || true
+  cat "$work/rollback-again.log"
 }
 latest_backup() { as_root sh -c "ls -d $1/*/ | sort | tail -n 1"; }
 
@@ -268,13 +303,31 @@ tiny=$work/tiny
 as_root mount -t tmpfs -o size=1m tmpfs "$tiny"
 args=(--upgrade --version 0.0.2-smoke.2 --backup-dir "$tiny")
 expect_refusal no-space 'MiB free'
+! grep -qF 'Verifying the image' "$work/no-space.log" || fail "the run pulled the image before the free space check"
 as_root umount "$tiny"
 tiny=''
 
+step "The upgrade refuses a release whose images cannot be pulled, before a change"
+args=(--upgrade --version 0.0.6-smoke.6)
+expect_refusal no-pull 'the pull of the images of the release 0.0.6-smoke.6 failed'
+as_root test ! -e "$config/INSTALL-FAILED" || fail "the refused run left the marker"
+
 step "A failed upgrade with no migration: the hint, ROLLBACK.txt and the marker"
 args=(--upgrade --version 0.0.4-smoke.4)
-if run "$work/upgrade-c.log"; then cat "$work/upgrade-c.log"; fail "the upgrade to the failing image did not fail"; fi
+run "$work/upgrade-c.log" &
+runner=$!
+# The marker must exist before the release files change, so a killed run leaves it too.
+marked=no
+for _ in $(seq 1 1500); do
+  if as_root grep -qF "${IMAGE_C#*@}" /opt/restichub/IMAGE 2>/dev/null; then
+    if as_root grep -qF 'did not finish. Its backup: /var/backups/restichub/' "$config/INSTALL-FAILED" 2>/dev/null; then marked=yes; fi
+    break
+  fi
+  sleep 0.2
+done
+if wait "$runner"; then cat "$work/upgrade-c.log"; fail "the upgrade to the failing image did not fail"; fi
 cat "$work/upgrade-c.log"
+[ "$marked" = yes ] || fail "the release files changed before the marker named the backup"
 grep -qF 'No migration ran: the schema version is still 58' "$work/upgrade-c.log" || fail "the hint does not say that no migration ran"
 grep -qF 'ROLLBACK.txt' "$work/upgrade-c.log" || fail "the hint does not name ROLLBACK.txt"
 as_root test -f "$config/INSTALL-FAILED" || fail "the failed run left no marker"
@@ -289,9 +342,21 @@ step "Upgrade to 0.0.2-smoke.2 into an existing backup parent"
 backups=$work/backups
 mkdir -m 0755 "$backups"
 args=(--upgrade --version 0.0.2-smoke.2 --backup-dir "$backups")
-run "$work/upgrade.log" || { cat "$work/upgrade.log"; fail "the upgrade failed"; }
+# A shell variable must not win over the environment file, and a client request with
+# setup_token in its URI must not stop the upgrade.
+traffic &
+traffic_pid=$!
+if ! run "$work/upgrade.log" RESTICHUB_IMAGE="$IMAGE_A" POSTGRES_PASSWORD=not-the-password; then
+  cat "$work/upgrade.log"
+  fail "the upgrade failed"
+fi
+kill "$traffic_pid"
+traffic_pid=''
 cat "$work/upgrade.log"
 expect_running "$IMAGE_B"
+grep -qF 'ignores the variable RESTICHUB_IMAGE' "$work/upgrade.log" || fail "the upgrade does not report the shell variable"
+as_root docker logs "$(container cp)" 2>&1 | grep -F 'setup_token=x' >/dev/null ||
+  fail "the new control plane did not log a request with setup_token=x"
 [ "$(stat -c %a "$backups")" = 755 ] || fail "the upgrade changed the mode of the backup parent"
 grep -qF 'The schema version: 58 -> 58.' "$work/upgrade.log" || fail "the upgrade does not report the schema version"
 [ "$(sha_of "$kek")" = "$kek_sha" ] || fail "the upgrade changed the KEK"
@@ -354,6 +419,11 @@ as_root ln -s "$clone/kek.real" "$old_kek"
 expect_refusal migrate-kek-link 'is a symbolic link'
 as_root rm "$old_kek"
 as_root mv "$clone/kek.real" "$old_kek"
+as_root chown 1000 "$clone/.git"
+expect_refusal migrate-owner 'belongs to uid 1000, not root'
+as_root chown 0 "$clone/.git"
+args=(--migrate-from-git "/opt/rest ichub" --version 0.0.2-smoke.2)
+expect_refusal migrate-space 'holds a space or another character'
 
 step "A failed move after a migration: the hint restores the clone and the dump"
 undo_last_migration
@@ -365,9 +435,17 @@ run_rollback /var/backups/restichub
 expect_running "$IMAGE_A"
 as_root test -d "$clone/.git" || fail "the rollback did not put back the clone"
 [ "$(sql 'SELECT count(*) FROM users')" -gt 0 ] || fail "the restored database has no user"
+run_rollback_again
+as_root test -d "$clone/.git" || fail "the second paste of the rollback commands removed the clone"
+[ "$(sha_of "$old_kek")" = "$old_kek_sha" ] || fail "the second paste of the rollback commands changed the KEK of the clone"
+expect_running "$IMAGE_A"
+[ "$(sql 'SELECT count(*) FROM users')" -gt 0 ] || fail "the database has no user after the second paste"
+[ "$(as_root sh -c 'ls -d /opt/restichub.failed-*' | wc -l)" = 1 ] || fail "the release files of the failed move were not kept once"
 volume_created=$(as_root docker volume inspect --format '{{.CreatedAt}}' restichub_pgdata)
 
 step "Move the git clone installation to 0.0.2-smoke.2 after the rollback"
+# The stack of the clone applied 0058 again; the move must apply a migration.
+undo_last_migration
 args=(--migrate-from-git "$clone" --version 0.0.2-smoke.2)
 run "$work/migrate.log" || { cat "$work/migrate.log"; fail "the move failed"; }
 cat "$work/migrate.log"
@@ -382,6 +460,17 @@ as_root test -f "$kept/deploy/reference/secrets/restichub_kek" || fail "the KEK 
 [ "$(as_root docker volume inspect --format '{{.CreatedAt}}' restichub_pgdata)" = "$volume_created" ] ||
   fail "the database volume is not the volume of the clone"
 [ "$(sql 'SELECT count(*) FROM users')" -gt 0 ] || fail "the database of the move has no user"
+grep -qF 'The schema version: 57 -> 58.' "$work/migrate.log" || fail "the move does not report the schema version"
+as_root grep -qF 'The restore loses every change after' "$(latest_backup /var/backups/restichub)ROLLBACK.txt" ||
+  fail "ROLLBACK.txt does not say that a restore loses the changes after the move"
+[ "$(pg_dir)" = /opt/restichub ] || fail "PostgreSQL still comes from $(pg_dir)"
+
+step "Upgrade the moved server to 0.0.5-smoke.5"
+args=(--upgrade --version 0.0.5-smoke.5)
+run "$work/upgrade-moved-server.log" || { cat "$work/upgrade-moved-server.log"; fail "the upgrade after the move failed"; }
+cat "$work/upgrade-moved-server.log"
+expect_running "$IMAGE_A"
+[ "$(pg_dir)" = /opt/restichub ] || fail "PostgreSQL comes from $(pg_dir) after the upgrade"
 
 echo
 echo "The control plane install smoke test passed."
