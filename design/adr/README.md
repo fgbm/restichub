@@ -59,5 +59,5 @@ To write a new record, copy [0000-template.md](0000-template.md) and use the nex
 | [0051](0051-a-restic-retry-is-not-progress.md) | A retry of restic is not progress | accepted |
 | [0052](0052-reconnect-grace-of-the-absence-tests.md) | The reconnect grace of the absence tests | accepted |
 | [0053](0053-server-scripts-outside-the-agent-sandbox.md) | A server script runs in a transient systemd unit | accepted |
-| [0054](0054-about-restichub-endpoint.md) | The About ResticHub endpoint and its role boundary | accepted, decision 5 superseded by ADR-0055 |
+| [0054](0054-about-restichub-endpoint.md) | The About ResticHub endpoint and its role boundary | accepted, decision 5 superseded by ADR-0055 (the environment of the server and the disclosure of the answer) |
 | [0055](0055-about-environment.md) | The environment of the server in the About ResticHub answer | accepted, supersedes decision 5 of ADR-0054 |

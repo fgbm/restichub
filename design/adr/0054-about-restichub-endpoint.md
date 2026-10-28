@@ -1,6 +1,6 @@
 # ADR-0054: The About ResticHub endpoint and its role boundary
 
-- Status: accepted, decision 5 superseded by ADR-0055 (the environment of the server)
+- Status: accepted, decision 5 superseded by ADR-0055 (the environment of the server and the disclosure of the answer)
 - Date: 2026-10-27
 - Requirements: none. The owner set the screen in issue #417.
 
