@@ -96,7 +96,7 @@ expect_refusal() {
   shift 2
   if run "$log" "$@"; then cat "$log"; fail "the run $name did not refuse"; fi
   grep -qF "$text" "$log" || { cat "$log"; fail "the refusal does not say: $text"; }
-  [ ! -e "$config" ] && [ ! -e /opt/restichub ] || fail "a refused run changed $config or /opt/restichub"
+  if [ -e "$config" ] || [ -e /opt/restichub ]; then fail "a refused run changed $config or /opt/restichub"; fi
   echo "refused as expected: $(grep '^error:' "$log" | tail -n 1)"
 }
 cp_container() { "${sudo[@]}" docker ps -q --filter label=com.docker.compose.project=restichub --filter label=com.docker.compose.service=cp; }

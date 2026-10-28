@@ -99,7 +99,9 @@ work=''
 rollback_hint=''
 
 need_value() {
-  [ -n "${2:-}" ] && [ "${2#--}" = "$2" ] || die "the option $1 needs a value (see --help)"
+  if [ -z "${2:-}" ] || [ "${2#--}" != "$2" ]; then
+    die "the option $1 needs a value (see --help)"
+  fi
 }
 
 parse_args() {
@@ -125,7 +127,7 @@ parse_args() {
   local semver='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$'
   [[ "$version" =~ $semver ]] || die "the version $version is not a release version, for example 1.2.0"
   if [ "$mode" = install ]; then
-    [ -n "$domain" ] && [ -n "$email" ] || die "give --domain and --email (see --help)"
+    if [ -z "$domain" ] || [ -z "$email" ]; then die "give --domain and --email (see --help)"; fi
     [[ "$domain" =~ ^[A-Za-z0-9.-]+$ ]] || die "the domain $domain is not a host name"
     [[ "$email" =~ ^[^[:space:]@]+@[^[:space:]@]+$ ]] || die "the email address $email is not valid"
   elif [ -n "$domain" ] || [ -n "$email" ] || $kek_saved; then
@@ -190,10 +192,12 @@ check_install_target() {
 }
 
 check_upgrade_target() {
-  [ -f "$env_file" ] && [ -f "$kek_file" ] ||
+  if [ ! -f "$env_file" ] || [ ! -f "$kek_file" ]; then
     die "$env_file or $kek_file is missing; install the server first"
-  [ -f "$install_dir/compose.yaml" ] && [ -L "$install_dir/.env" ] ||
+  fi
+  if [ ! -f "$install_dir/compose.yaml" ] || [ ! -L "$install_dir/.env" ]; then
     die "$install_dir does not hold the files of this script; for a git clone, use --migrate-from-git"
+  fi
 }
 
 check_migrate_target() {
@@ -268,8 +272,9 @@ get_release() {
   done
   image_ref=$(head -n 1 "$work/release/IMAGE")
   local digest=${image_ref#"$image_repo"@sha256:}
-  [ "$digest" != "$image_ref" ] && [[ "$digest" =~ ^[0-9a-f]{64}$ ]] ||
+  if [ "$digest" = "$image_ref" ] || ! [[ "$digest" =~ ^[0-9a-f]{64}$ ]]; then
     die "the archive names the image $image_ref, not $image_repo with a digest"
+  fi
 }
 
 verify_image() {
