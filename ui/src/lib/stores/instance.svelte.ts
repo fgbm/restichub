@@ -10,6 +10,7 @@ import type { TenancyMode } from '#lib/api/index.ts';
 
 // The default keeps the multi-tenant surface when the control plane does not answer.
 let mode = $state<TenancyMode>('multi');
+let modeKnown = $state(false);
 let setupRequired = $state<boolean | null>(null);
 let loaded = $state(false);
 
@@ -19,6 +20,11 @@ export function getTenancyMode(): TenancyMode {
 
 export function isSingleTenant(): boolean {
 	return mode === 'single';
+}
+
+/** True after `/api/v1/instance` reported the mode. A failed read leaves the default mode. */
+export function isTenancyModeKnown(): boolean {
+	return modeKnown;
 }
 
 export function getSetupRequired(): boolean | null {
@@ -34,6 +40,9 @@ export async function loadInstance(): Promise<void> {
 		const instance = await service.instance();
 		mode = instance.tenancy_mode;
 		setupRequired = instance.setup_required;
+		// A default of `multi` is a guess, so the screens show the mode only after the answer
+		// (ADR-0055, decision 4).
+		modeKnown = true;
 	} catch {
 		// Keep the default mode when the control plane does not answer.
 	} finally {

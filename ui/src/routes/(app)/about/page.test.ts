@@ -1,6 +1,7 @@
 /*
- * The About ResticHub screen shows the version, the revision and the protocol versions to every
- * role, and the database schema level to the Platform Admin only (AC-AU-02, ADR-0054).
+ * The About ResticHub screen shows the version, the revision, the protocol versions and the
+ * environment of the server to every role, and the database schema level to the Platform Admin
+ * only (AC-AU-02, ADR-0054, ADR-0055).
  */
 import { render, screen } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -12,7 +13,8 @@ const state = vi.hoisted(() => ({
 	about: null as About | null,
 	failed: false,
 	platformAdmin: false,
-	tenancy: 'multi' as 'single' | 'multi'
+	tenancy: 'multi' as 'single' | 'multi',
+	modeKnown: true
 }));
 
 vi.mock('#lib/stores/about.svelte.ts', () => ({
@@ -32,10 +34,23 @@ vi.mock('#lib/stores/session.svelte.ts', () => ({
 }));
 
 vi.mock('#lib/stores/instance.svelte.ts', () => ({
-	getTenancyMode: () => state.tenancy
+	getTenancyMode: () => state.tenancy,
+	isTenancyModeKnown: () => state.modeKnown
 }));
 
 vi.mock('$app/paths', () => ({ resolve: (path: string) => path }));
+
+/** The environment of a Linux server that holds the control plane. */
+function environment(): About['environment'] {
+	return {
+		os: 'linux',
+		os_version: 'Ubuntu 24.04.1 LTS',
+		kernel: '6.8.0-45-generic',
+		arch: 'x86_64',
+		container: true,
+		database: '16.4'
+	};
+}
 
 /** A body that the control plane can send for the version `0.2.0-rc.2`. */
 function about(overrides: Partial<About> = {}): About {
@@ -45,6 +60,7 @@ function about(overrides: Partial<About> = {}): About {
 		revision: '3b21922',
 		protocol: { major: 1, minor: 1 },
 		agent_protocol: { major: 1, minimum_minor: 0 },
+		environment: environment(),
 		...overrides
 	};
 }
@@ -54,6 +70,7 @@ beforeEach(() => {
 	state.failed = false;
 	state.platformAdmin = false;
 	state.tenancy = 'multi';
+	state.modeKnown = true;
 	setLocale('en');
 });
 
@@ -67,9 +84,6 @@ describe('the About ResticHub screen', () => {
 		expect(screen.getByText('3b21922')).toBeInTheDocument();
 		expect(screen.getByText('1.1')).toBeInTheDocument();
 		expect(screen.getByText('1.0 and later within major 1')).toBeInTheDocument();
-		expect(screen.getByLabelText('Support text')).toHaveValue(
-			'ResticHub 0.2.0-rc.2+3b21922 · protocol 1.1 · agents 1.0 and later within major 1'
-		);
 	});
 
 	it('adr_0054_marks_a_release_build_without_the_badge', () => {
@@ -95,10 +109,132 @@ describe('the About ResticHub screen', () => {
 		expect(screen.getByText('Not set')).toBeInTheDocument();
 	});
 
+	it('adr_0055_shows_the_tenancy_mode_as_not_set_before_the_instance_route_answers', () => {
+		state.platformAdmin = true;
+		state.about = about({ schema_level: 60 });
+		state.modeKnown = false;
+		render(AboutPage);
+		// The store holds the default mode `multi` before the route answers, so the panel says nothing
+		// about the mode (ADR-0055, decision 4).
+		expect(screen.getByText('Organizations')).toBeInTheDocument();
+		expect(screen.queryByText('Several organizations')).not.toBeInTheDocument();
+		expect(screen.getByText('Not set')).toBeInTheDocument();
+		expect(screen.getByText('60')).toBeInTheDocument();
+	});
+
 	it('adr_0054_shows_no_installation_facts_to_another_role', () => {
 		render(AboutPage);
 		expect(screen.queryByText('Database schema level')).not.toBeInTheDocument();
 		expect(screen.queryByText('Several organizations')).not.toBeInTheDocument();
+	});
+
+	it('adr_0055_shows_the_environment_of_the_server_to_every_role', () => {
+		render(AboutPage);
+		expect(screen.getByText('Operating system')).toBeInTheDocument();
+		expect(screen.getByText('linux')).toBeInTheDocument();
+		expect(screen.getByText('Distribution')).toBeInTheDocument();
+		expect(screen.getByText('Ubuntu 24.04.1 LTS')).toBeInTheDocument();
+		expect(screen.getByText('Kernel')).toBeInTheDocument();
+		expect(screen.getByText('6.8.0-45-generic')).toBeInTheDocument();
+		expect(screen.getByText('x86_64')).toBeInTheDocument();
+		expect(screen.getByText('Yes')).toBeInTheDocument();
+		expect(screen.getByText('16.4')).toBeInTheDocument();
+	});
+
+	it('adr_0055_shows_a_fact_that_the_process_does_not_know_as_not_set', () => {
+		state.about = about({
+			environment: {
+				os: 'linux',
+				os_version: null,
+				kernel: null,
+				arch: 'x86_64',
+				container: null,
+				database: null
+			}
+		});
+		render(AboutPage);
+		// A locked fact shows its value or "Not set"; the row never goes away (ui-principles 3.9).
+		expect(screen.getByText('Distribution')).toBeInTheDocument();
+		expect(screen.getByText('Kernel')).toBeInTheDocument();
+		expect(screen.getByText('Container')).toBeInTheDocument();
+		expect(screen.getByText('PostgreSQL')).toBeInTheDocument();
+		expect(screen.getAllByText('Not set')).toHaveLength(4);
+	});
+
+	it('adr_0055_the_support_text_names_a_container_that_the_process_cannot_name', () => {
+		state.about = about({
+			environment: { ...environment(), kernel: null, container: null }
+		});
+		render(AboutPage);
+		expect(screen.getByLabelText('Support text')).toHaveValue(
+			[
+				'ResticHub 0.2.0-rc.2+3b21922',
+				'protocol 1.1 · agents 1.0 and later within major 1',
+				'OS Ubuntu 24.04.1 LTS (linux) · kernel not set · x86_64 · container: not set',
+				'PostgreSQL 16.4',
+				'organizations: several'
+			].join('\n')
+		);
+	});
+
+	it('adr_0055_the_support_text_names_a_missing_database_in_lower_case', () => {
+		state.about = about({ environment: { ...environment(), database: null } });
+		render(AboutPage);
+		expect(screen.getByLabelText('Support text')).toHaveValue(
+			[
+				'ResticHub 0.2.0-rc.2+3b21922',
+				'protocol 1.1 · agents 1.0 and later within major 1',
+				'OS Ubuntu 24.04.1 LTS (linux) · kernel 6.8.0-45-generic · x86_64 · container: yes',
+				'PostgreSQL not set',
+				'organizations: several'
+			].join('\n')
+		);
+	});
+
+	it('adr_0055_the_support_text_holds_the_environment_of_the_server', () => {
+		render(AboutPage);
+		expect(screen.getByText('Ubuntu 24.04.1 LTS')).toBeInTheDocument();
+		expect(screen.getByText('6.8.0-45-generic')).toBeInTheDocument();
+		expect(screen.getByText('x86_64')).toBeInTheDocument();
+		expect(screen.getByText('16.4')).toBeInTheDocument();
+		expect(screen.getByLabelText('Support text')).toHaveValue(
+			[
+				'ResticHub 0.2.0-rc.2+3b21922',
+				'protocol 1.1 · agents 1.0 and later within major 1',
+				'OS Ubuntu 24.04.1 LTS (linux) · kernel 6.8.0-45-generic · x86_64 · container: yes',
+				'PostgreSQL 16.4',
+				'organizations: several'
+			].join('\n')
+		);
+	});
+
+	it('adr_0055_the_support_text_names_a_missing_kernel_and_the_single_mode', () => {
+		state.tenancy = 'single';
+		state.about = about({ environment: { ...environment(), kernel: null, os_version: null } });
+		render(AboutPage);
+		expect(screen.getByLabelText('Support text')).toHaveValue(
+			[
+				'ResticHub 0.2.0-rc.2+3b21922',
+				'protocol 1.1 · agents 1.0 and later within major 1',
+				'OS linux · kernel not set · x86_64 · container: yes',
+				'PostgreSQL 16.4',
+				'organizations: one'
+			].join('\n')
+		);
+	});
+
+	it('adr_0055_the_support_text_waits_for_the_tenancy_mode', () => {
+		state.modeKnown = false;
+		render(AboutPage);
+		// The store holds the default mode `multi` before the route answers, so the line is absent.
+		expect(screen.getByLabelText('Support text')).toHaveValue(
+			[
+				'ResticHub 0.2.0-rc.2+3b21922',
+				'protocol 1.1 · agents 1.0 and later within major 1',
+				'OS Ubuntu 24.04.1 LTS (linux) · kernel 6.8.0-45-generic · x86_64 · container: yes',
+				'PostgreSQL 16.4'
+			].join('\n')
+		);
 	});
 
 	it('adr_0054_links_the_documentation_of_the_current_language', () => {

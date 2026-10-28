@@ -3,9 +3,15 @@
 
 mod common;
 
+use axum::Json;
+use axum::extract::State;
 use axum::http::StatusCode;
-use restichub_cp::context::{Access, Operation, minimum_role};
+use restichub_cp::about::about;
+use restichub_cp::context::{Access, Operation, RequestContext, minimum_role};
+use restichub_cp::environment::is_safe_fact;
 use restichub_cp::routes::ROUTES;
+use restichub_cp::server::AppState;
+use restichub_db::audit::Actor;
 use restichub_db::{PLATFORM_TENANT_ID, Role, api_tokens};
 use serde_json::Value;
 
@@ -248,8 +254,8 @@ async fn ac_au_02_role_operation_matrix() {
 /// The About ResticHub data is for every role, and the schema level is for the Platform Admin only
 /// (AC-AU-02, ADR-0054).
 ///
-/// The version goes to support, so a Viewer reads it. The body holds no secret, no environment
-/// value and no path, so the field set is exactly the visible one.
+/// The version goes to support, so a Viewer reads it. The field set is exactly the visible one, and
+/// the environment holds no host fact (ADR-0055).
 #[tokio::test]
 async fn adr_0054_about_is_readable_by_a_viewer_and_hides_the_schema_level() {
     let Some(db) = common::test_db().await else {
@@ -272,6 +278,7 @@ async fn adr_0054_about_is_readable_by_a_viewer_and_hides_the_schema_level() {
         fields,
         [
             "agent_protocol",
+            "environment",
             "prerelease",
             "protocol",
             "revision",
@@ -297,6 +304,131 @@ async fn adr_0054_about_is_readable_by_a_viewer_and_hides_the_schema_level() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert!(body.get("version").is_some(), "{body}");
     assert!(body.get("schema_level").is_none(), "{body}");
+
+    db.cleanup().await;
+}
+
+/// The About answer reports a broken installation, so it arrives without the database version while
+/// the database answers no query (ADR-0055).
+///
+/// A request authenticates against the database, so the test calls the route handler with the
+/// context of a Viewer. The handler is the part of the request that runs after the authentication.
+#[tokio::test]
+async fn adr_0055_the_about_answer_survives_a_database_that_takes_no_connection() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant_with_key(db.database(), "about-without-database").await;
+    let viewer = create_user(
+        db.database(),
+        tenant,
+        "about-without-database-user",
+        "phc",
+        "viewer",
+    )
+    .await;
+    let state = AppState::new(db.database().clone());
+    let context = RequestContext::new(tenant, Actor::User(viewer), Role::Viewer);
+    db.database().clone().close().await;
+
+    let Json(answer) = about(State(state), context)
+        .await
+        .expect("the About answer needs no database");
+    let environment =
+        serde_json::to_value(&answer.environment).expect("the environment serialises");
+    assert!(environment.get("database").is_none(), "{environment}");
+    assert_eq!(environment["os"].as_str(), Some(std::env::consts::OS));
+
+    db.cleanup().await;
+}
+
+/// The schema level is the second fact of a broken installation, so the About answer of the
+/// Platform Admin arrives without it while the database answers no query (ADR-0054).
+#[tokio::test]
+async fn adr_0055_the_about_answer_of_a_platform_admin_survives_a_database_that_takes_no_connection()
+ {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant_with_key(db.database(), "about-schema-without-database").await;
+    let admin = create_user(
+        db.database(),
+        tenant,
+        "about-schema-without-database-user",
+        "phc",
+        "platform_admin",
+    )
+    .await;
+    let state = AppState::new(db.database().clone());
+    let mut context =
+        RequestContext::new(PLATFORM_TENANT_ID, Actor::User(admin), Role::PlatformAdmin);
+    context.platform_admin = true;
+    db.database().clone().close().await;
+
+    let Json(answer) = about(State(state), context)
+        .await
+        .expect("the About answer needs no database");
+    let body = serde_json::to_value(&answer).expect("the answer serialises");
+    assert!(body.get("schema_level").is_none(), "{body}");
+
+    db.cleanup().await;
+}
+
+/// A Viewer gives the environment of the server to support (ADR-0055).
+///
+/// The test does not search the body for a value: it compares the set of the fields and the shape
+/// of each value. A shape holds no path, no address, no host name and no connection string.
+/// A distroless image reports neither the distribution nor the kernel, so the test does not
+/// demand them.
+#[tokio::test]
+async fn adr_0055_a_viewer_reads_the_environment_of_the_server() {
+    let Some(db) = common::test_db().await else {
+        return;
+    };
+    let tenant = create_tenant_with_key(db.database(), "about-environment").await;
+    let app = app(db.database());
+
+    let viewer = seed_session(db.database(), tenant, "about-environment-viewer", "viewer").await;
+    let (status, _, body) = send(&app, request("GET", "/api/v1/about", Some(&viewer), None)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let environment = body
+        .get("environment")
+        .and_then(Value::as_object)
+        .unwrap_or_else(|| panic!("the body holds no environment object: {body}"));
+
+    let mut fields: Vec<&str> = environment.keys().map(String::as_str).collect();
+    fields.sort_unstable();
+    let mut expected = vec!["arch", "database", "os"];
+    for optional in ["container", "kernel", "os_version"] {
+        if environment.contains_key(optional) {
+            expected.push(optional);
+        }
+    }
+    expected.sort_unstable();
+    assert_eq!(fields, expected, "{body}");
+
+    for key in ["os", "os_version", "kernel", "arch", "database"] {
+        let Some(value) = environment.get(key) else {
+            continue;
+        };
+        let value = value
+            .as_str()
+            .unwrap_or_else(|| panic!("{key} is no string: {body}"));
+        assert!(is_safe_fact(value), "{key} is {value:?}: {body}");
+    }
+    if let Some(container) = environment.get("container") {
+        assert!(container.is_boolean(), "{body}");
+    }
+
+    let database = environment["database"]
+        .as_str()
+        .unwrap_or_else(|| panic!("no database version: {body}"));
+    assert!(
+        database.chars().all(|c| c.is_ascii_digit() || c == '.')
+            && database.starts_with(|c: char| c.is_ascii_digit()),
+        "the PostgreSQL version is {database:?}"
+    );
 
     db.cleanup().await;
 }

@@ -229,8 +229,8 @@ impl Database {
     }
 
     /// The method is not public. A caller uses [`Database::begin_tenant`] or
-    /// [`Database::begin_platform`]. Only the migrations, the readiness check and the role check
-    /// use the pool directly.
+    /// [`Database::begin_platform`]. Only the migrations, the readiness check, the role check
+    /// and the server version use the pool directly.
     pub(crate) fn pool(&self) -> &PgPool {
         &self.pool
     }
@@ -425,6 +425,19 @@ impl Database {
         } else {
             Ok(())
         }
+    }
+
+    /// The server version of PostgreSQL, without the suffix of the package builder.
+    ///
+    /// `SHOW server_version` reports the version of the server, where `version()` adds the compiler
+    /// and the build options. The About screen shows the value (ADR-0055).
+    pub async fn server_version(&self) -> Result<String, DbError> {
+        let row: (String,) = sqlx::query_as("SHOW server_version")
+            .fetch_one(&self.pool)
+            .await
+            .map_err(DbError::Query)?;
+        let version = row.0.split_whitespace().next().unwrap_or_default();
+        Ok(version.to_owned())
     }
 
     /// The version of the last successful migration. `None` while the table or the row is absent.

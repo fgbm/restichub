@@ -1582,6 +1582,8 @@ export interface components {
         /** @description The version of the control plane and the compatibility facts of the installation. */
         AboutResponse: {
             agent_protocol: components["schemas"]["AgentProtocolView"];
+            /** @description Goes to every role (ADR-0055). */
+            environment: components["schemas"]["EnvironmentView"];
             /** @description True when the version carries a pre-release part, for example `-rc.2`. */
             prerelease: boolean;
             protocol: components["schemas"]["ProtocolView"];
@@ -1589,7 +1591,8 @@ export interface components {
             revision: string;
             /**
              * Format: int64
-             * @description Absent for a role below the Platform Admin, and while the database holds no migration row.
+             * @description Absent for a role below the Platform Admin. Absent too while the database holds no migration
+             *     row, and while the control plane cannot query the database.
              */
             schema_level?: number | null;
             /** @description The package version with the pre-release part, without the build revision. */
@@ -2440,6 +2443,30 @@ export interface components {
         };
         /** @enum {string} */
         EnvKind: "string" | "secret_ref" | "parameter";
+        /** @description The system of the server and the version of its PostgreSQL server. */
+        EnvironmentView: {
+            /** @description The architecture of the process, such as `x86_64`. */
+            arch: string;
+            /**
+             * @description True when the process runs in Docker, Podman or Kubernetes. Absent while the process cannot
+             *     tell a container from a host.
+             */
+            container?: boolean | null;
+            /**
+             * @description The server version of PostgreSQL, such as `16.4`, without the builder suffix. Absent while
+             *     the control plane cannot query the database.
+             */
+            database?: string | null;
+            /**
+             * @description The release string of the running Linux system, for example `6.8.0-45-generic`. Absent on
+             *     another system.
+             */
+            kernel?: string | null;
+            /** @description The operating system family, such as `linux` or `windows`. */
+            os: string;
+            /** @description The distribution on Linux, such as `Ubuntu 24.04.1 LTS`. Absent on another system. */
+            os_version?: string | null;
+        };
         /** @enum {string} */
         ErrorCode: "not_found" | "service_unavailable" | "internal_error" | "unauthenticated" | "invalid_credentials" | "forbidden" | "csrf_required" | "conflict" | "invalid_argument" | "payload_too_large" | "tenant_key_missing" | "ambiguous_credentials" | "method_not_allowed" | "rate_limited" | "busy" | "shared_account" | "username_taken" | "email_taken" | "agent_offline" | "already_queued" | "agent_capability_missing" | "restore_target_denied" | "token_used" | "token_already_revoked" | "token_expired" | "agent_recently_online" | "setup_already_done" | "invalid_setup_token" | "repository_host_locked" | "not_repository_host" | "repository_in_use" | "repository_has_active_job" | "profile_in_use" | "secret_in_use" | "last_admin" | "own_account_protected" | "platform_tenant_protected" | "repository_location_taken";
         /** @description One value of a filter with the number of rows that hold it. */
@@ -4045,7 +4072,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The version and the protocol versions of the control plane. */
+            /** @description The version, the protocol versions and the environment of the control plane. */
             200: {
                 headers: {
                     [name: string]: unknown;

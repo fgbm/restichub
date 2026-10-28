@@ -1,12 +1,13 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import type { About, AboutEnvironment } from '#lib/api/index.ts';
 	import { Page } from '#lib/components/layout/index.ts';
 	import { Alert, Badge, Button, CopyField, KeyValue, Panel } from '#lib/components/ui/index.ts';
 	import type { KeyValueItem } from '#lib/components/ui/index.ts';
 	import { getLocale, t } from '#lib/i18n/index.ts';
 	import { getAbout, isAboutFailed, loadAbout, retryAbout } from '#lib/stores/about.svelte.ts';
 	import { getSession } from '#lib/stores/session.svelte.ts';
-	import { getTenancyMode } from '#lib/stores/instance.svelte.ts';
+	import { getTenancyMode, isTenancyModeKnown } from '#lib/stores/instance.svelte.ts';
 
 	onMount(() => {
 		void loadAbout();
@@ -49,14 +50,33 @@
 			: []
 	);
 
+	// The tenancy mode is public on `/api/v1/instance`, so the support text and the installation
+	// panel hold it for every role. The store holds the default mode `multi` before the route
+	// answers and after a failed read, so the page shows the mode only when the route named it
+	// (ADR-0055, decision 4).
+	const tenancyMode = $derived(isTenancyModeKnown() ? getTenancyMode() : null);
+	const tenancy = $derived(
+		tenancyMode === null
+			? null
+			: tenancyMode === 'single'
+				? t('about.support.tenancy.single')
+				: t('about.support.tenancy.multi')
+	);
+	const tenancyLabel = $derived(
+		tenancyMode === null
+			? t('common.notSet')
+			: tenancyMode === 'single'
+				? t('about.tenancy.single')
+				: t('about.tenancy.multi')
+	);
+
 	const installation = $derived<KeyValueItem[]>(
 		about && platformAdmin
 			? [
 					{
 						key: 'tenancy',
 						label: t('about.tenancyMode'),
-						value:
-							getTenancyMode() === 'single' ? t('about.tenancy.single') : t('about.tenancy.multi')
+						value: tenancyLabel
 					},
 					{
 						key: 'schema',
@@ -71,16 +91,78 @@
 			: []
 	);
 
-	const support = $derived(
+	const environment = $derived<KeyValueItem[]>(
 		about
-			? t('about.support.text', {
-					version: about.version,
-					revision: about.revision,
-					protocol: `${about.protocol.major}.${about.protocol.minor}`,
-					agents
-				})
-			: ''
+			? [
+					fact('os', t('about.environment.os'), about.environment.os),
+					fact('osVersion', t('about.environment.osVersion'), about.environment.os_version, true),
+					fact('kernel', t('about.environment.kernel'), about.environment.kernel, true),
+					fact('arch', t('about.environment.arch'), about.environment.arch, true),
+					fact('container', t('about.environment.container'), containerState(about.environment)),
+					fact('database', t('about.environment.database'), about.environment.database, true)
+				]
+			: []
 	);
+
+	const support = $derived(about ? supportText(about, agents, tenancy) : '');
+
+	// A locked fact shows its value, or "Not set" while the process has no answer (ui-principles 3.9).
+	function fact(
+		key: string,
+		label: string,
+		value: string | null | undefined,
+		mono = false
+	): KeyValueItem {
+		return value === null || value === undefined
+			? { key, label, value: t('common.notSet') }
+			: { key, label, value, mono };
+	}
+
+	function systemName(environment: AboutEnvironment): string {
+		return environment.os_version
+			? t('about.environment.osVersioned', {
+					distribution: environment.os_version,
+					os: environment.os
+				})
+			: environment.os;
+	}
+
+	// The process reports a container or no answer, so `false` never reaches the screen
+	// (ADR-0055, decision 1).
+	function containerState(environment: AboutEnvironment): string | null {
+		return environment.container === true ? t('common.yes') : null;
+	}
+
+	function containerName(environment: AboutEnvironment): string {
+		return environment.container === true
+			? t('about.support.container.yes')
+			: t('about.support.notSet');
+	}
+
+	// One copy of the text is enough for support, so every line holds the facts of one area.
+	function supportText(value: About, agentRange: string, mode: string | null): string {
+		const system = t('about.support.system', {
+			os: systemName(value.environment),
+			kernel: value.environment.kernel ?? t('about.support.notSet'),
+			arch: value.environment.arch,
+			container: containerName(value.environment)
+		});
+		const lines = [
+			t('about.support.version', { version: value.version, revision: value.revision }),
+			t('about.support.protocol', {
+				protocol: `${value.protocol.major}.${value.protocol.minor}`,
+				agents: agentRange
+			}),
+			system,
+			t('about.support.database', {
+				database: value.environment.database ?? t('about.support.notSet')
+			})
+		];
+		if (mode !== null) {
+			lines.push(t('about.support.tenancy', { tenancy: mode }));
+		}
+		return lines.join('\n');
+	}
 </script>
 
 <Page
@@ -105,6 +187,10 @@
 		<div class="about">
 			<Panel title={t('about.versionPanel')}>
 				<KeyValue items={facts} />
+			</Panel>
+
+			<Panel title={t('about.environment.title')}>
+				<KeyValue items={environment} />
 			</Panel>
 
 			<Panel title={t('about.support.title')} subtitle={t('about.support.hint')}>
