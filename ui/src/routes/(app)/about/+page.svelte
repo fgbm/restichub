@@ -136,25 +136,17 @@
 	function containerName(environment: AboutEnvironment): string {
 		return environment.container === true
 			? t('about.support.container.yes')
-			: t('about.support.container.notSet');
+			: t('about.support.notSet');
 	}
 
 	// One copy of the text is enough for support, so every line holds the facts of one area.
 	function supportText(value: About, agentRange: string, mode: string | null): string {
-		const name = systemName(value.environment);
-		const container = containerName(value.environment);
-		const system = value.environment.kernel
-			? t('about.support.system', {
-					os: name,
-					kernel: value.environment.kernel,
-					arch: value.environment.arch,
-					container
-				})
-			: t('about.support.systemNoKernel', {
-					os: name,
-					arch: value.environment.arch,
-					container
-				});
+		const system = t('about.support.system', {
+			os: systemName(value.environment),
+			kernel: value.environment.kernel ?? t('about.support.notSet'),
+			arch: value.environment.arch,
+			container: containerName(value.environment)
+		});
 		const lines = [
 			t('about.support.version', { version: value.version, revision: value.revision }),
 			t('about.support.protocol', {
@@ -163,7 +155,7 @@
 			}),
 			system,
 			t('about.support.database', {
-				database: value.environment.database ?? t('common.notSet')
+				database: value.environment.database ?? t('about.support.notSet')
 			})
 		];
 		if (mode !== null) {
