@@ -3,7 +3,7 @@
 	import { resolve } from '$app/paths';
 	import { ApiError, assignableRoles, fieldError, namesField, service } from '#lib/api/index.ts';
 	import type { ApiProblem, Role, User } from '#lib/api/index.ts';
-	import { SettingsLayout } from '#lib/components/index.ts';
+	import { Page } from '#lib/components/layout/index.ts';
 	import OrgUserDialogs from '#lib/components/OrgUserDialogs.svelte';
 	import {
 		Alert,
@@ -278,7 +278,7 @@
 	}
 </script>
 
-<SettingsLayout
+<Page
 	title={t('users.title')}
 	description={t('users.description', { name: tenantName })}
 	count={loading ? undefined : users.length}
@@ -320,7 +320,7 @@
 			/>
 		{/snippet}
 	</ListView>
-</SettingsLayout>
+</Page>
 
 <Dialog bind:open={createOpen} title={t('users.createTitle')} onsubmit={createUser}>
 	{#if createError}

@@ -93,10 +93,9 @@ test('a running job shows its progress and the log follows the new lines', async
 	const dialog = page.getByRole('dialog', { name: 'Cancel the job?' });
 	await expect(dialog).toBeVisible();
 	const box = await dialog.boundingBox();
-	const viewport = page.viewportSize();
-	expect(Math.abs((box?.x ?? 0) + (box?.width ?? 0) / 2 - (viewport?.width ?? 0) / 2)).toBeLessThan(
-		2
-	);
+	// The middle of the visible area: the window scrollbar gutter is not part of it.
+	const area = await page.evaluate(() => document.body.clientWidth);
+	expect(Math.abs((box?.x ?? 0) + (box?.width ?? 0) / 2 - area / 2)).toBeLessThan(2);
 	await dialog.getByRole('button', { name: 'Keep the job' }).click();
 	await expect(dialog).toBeHidden();
 

@@ -3,9 +3,9 @@
  * environment of the server and, for the Platform Admin, the database schema level (ADR-0054,
  * ADR-0055).
  *
- * The account menu shows the version below its label, so the application reads `/api/v1/about`
- * once per session without a block of the navigation. The About page waits for the same read. A
- * failed read stays failed until the page asks again.
+ * The account menu shows the version at the right end of its label row, so the application reads
+ * `/api/v1/about` once per session without a block of the navigation. The About page waits for the
+ * same read. A failed read stays failed until the page asks again.
  */
 import { service } from '#lib/api/index.ts';
 import type { About } from '#lib/api/index.ts';

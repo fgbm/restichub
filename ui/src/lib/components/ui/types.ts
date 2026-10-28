@@ -50,6 +50,11 @@ export interface MenuItem {
 	 * its reason here.
 	 */
 	hint?: string;
+	/**
+	 * A short value at the right end of the label row, for example the version of the build. The
+	 * label and the value stay on one line.
+	 */
+	trailing?: string;
 	icon?: IconName;
 	/** A menu item without an action is a heading, not a command. */
 	onSelect?: () => void;

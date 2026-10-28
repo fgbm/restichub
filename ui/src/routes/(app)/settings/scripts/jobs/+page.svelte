@@ -4,7 +4,7 @@
 	import { resolve } from '$app/paths';
 	import { ApiError, service } from '#lib/api/index.ts';
 	import type { HookPhase, JobTemplate, ScriptInterpreter } from '#lib/api/index.ts';
-	import { SettingsLayout } from '#lib/components/index.ts';
+	import { Page } from '#lib/components/layout/index.ts';
 	import { Button, ConfirmDialog, FilterBar, ListView } from '#lib/components/ui/index.ts';
 	import type { FilterFacet, RowAction } from '#lib/components/ui/index.ts';
 	import { facetCounts, matchesSearch, splitList } from '#lib/filters.ts';
@@ -177,7 +177,7 @@
 	}
 </script>
 
-<SettingsLayout
+<Page
 	title={t('jobTemplates.title')}
 	description={t('jobTemplates.description')}
 	count={loading ? undefined : templates.length}
@@ -229,7 +229,7 @@
 			/>
 		{/snippet}
 	</ListView>
-</SettingsLayout>
+</Page>
 
 <ConfirmDialog
 	bind:open={deleteOpen}

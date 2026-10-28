@@ -3,7 +3,7 @@
 	import { resolve } from '$app/paths';
 	import { ApiError, fieldError, namesField, service } from '#lib/api/index.ts';
 	import type { ApiProblem, Secret } from '#lib/api/index.ts';
-	import { SettingsLayout } from '#lib/components/index.ts';
+	import { Page } from '#lib/components/layout/index.ts';
 	import {
 		Alert,
 		Button,
@@ -358,7 +358,7 @@
 	{/if}
 {/snippet}
 
-<SettingsLayout
+<Page
 	title={t('secrets.title')}
 	description={t('secrets.description')}
 	count={loading ? undefined : secrets.length}
@@ -404,7 +404,7 @@
 	<SidePanel bind:open={detailOpen} title={detail?.name ?? ''}>
 		<KeyValue items={detailItems} stacked />
 	</SidePanel>
-</SettingsLayout>
+</Page>
 
 <Dialog bind:open={createOpen} size="md" title={t('secrets.createTitle')} onsubmit={createSecret}>
 	{#if createError}
