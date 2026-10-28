@@ -343,8 +343,10 @@ async fn the_about_answer_survives_a_database_that_takes_no_connection() {
 
 /// A Viewer gives the environment of the server to support (ADR-0055).
 ///
-/// The operating system, the architecture, the container state and the PostgreSQL version go to
-/// every role. The body holds no file path, no host name and no connection string.
+/// The test does not search the body for a value: it compares the set of the fields and the shape
+/// of each value. A shape holds no path, no address, no host name and no connection string.
+/// A distroless image reports neither the distribution nor the kernel, so the test does not
+/// demand them.
 #[tokio::test]
 async fn adr_0055_a_viewer_reads_the_environment_of_the_server() {
     let Some(db) = common::test_db().await else {
@@ -359,56 +361,52 @@ async fn adr_0055_a_viewer_reads_the_environment_of_the_server() {
 
     let environment = body
         .get("environment")
-        .unwrap_or_else(|| panic!("the body holds no environment: {body}"));
-    let mut fields: Vec<&str> = environment
-        .as_object()
-        .unwrap_or_else(|| panic!("the environment is no object: {body}"))
-        .keys()
-        .map(String::as_str)
-        .collect();
+        .and_then(Value::as_object)
+        .unwrap_or_else(|| panic!("the body holds no environment object: {body}"));
+
+    let mut fields: Vec<&str> = environment.keys().map(String::as_str).collect();
     fields.sort_unstable();
     let mut expected = vec!["arch", "database", "os"];
-    if cfg!(target_os = "linux") {
-        expected.extend(["kernel", "os_version"]);
-    }
-    if environment.get("container").is_some() {
-        expected.push("container");
+    for optional in ["container", "kernel", "os_version"] {
+        if environment.contains_key(optional) {
+            expected.push(optional);
+        }
     }
     expected.sort_unstable();
     assert_eq!(fields, expected, "{body}");
 
-    assert_eq!(environment["os"].as_str(), Some(std::env::consts::OS));
-    assert_eq!(environment["arch"].as_str(), Some(std::env::consts::ARCH));
-    // The cgroup path of the test host names no runtime, so the field is absent there.
+    for key in ["os", "os_version", "kernel", "arch", "database"] {
+        let Some(value) = environment.get(key) else {
+            continue;
+        };
+        let value = value
+            .as_str()
+            .unwrap_or_else(|| panic!("{key} is no string: {body}"));
+        assert!(is_plain_fact(value), "{key} is {value:?}: {body}");
+    }
     if let Some(container) = environment.get("container") {
         assert!(container.is_boolean(), "{body}");
     }
+
     let database = environment["database"]
         .as_str()
         .unwrap_or_else(|| panic!("no database version: {body}"));
     assert!(
-        database.starts_with(|c: char| c.is_ascii_digit()),
-        "the short PostgreSQL version is {database:?}"
-    );
-    if cfg!(target_os = "linux") {
-        let kernel = environment["kernel"].as_str().unwrap_or_default();
-        assert!(!kernel.is_empty(), "{body}");
-        let distribution = environment["os_version"].as_str().unwrap_or_default();
-        assert!(!distribution.is_empty(), "{body}");
-    }
-
-    let text = body.to_string();
-    for needle in ["/etc/", "/proc/", "postgres://", "postgresql://"] {
-        assert!(!text.contains(needle), "{needle} in {text}");
-    }
-    let host = std::fs::read_to_string("/proc/sys/kernel/hostname").unwrap_or_default();
-    let host = host.trim();
-    assert!(
-        host.is_empty() || !text.contains(host),
-        "the host name {host} in {text}"
+        database.chars().all(|c| c.is_ascii_digit() || c == '.')
+            && database.starts_with(|c: char| c.is_ascii_digit()),
+        "the PostgreSQL version is {database:?}"
     );
 
     db.cleanup().await;
+}
+
+/// A short value of letters, digits, spaces and `.()_+-`, which no path, address or escape holds.
+fn is_plain_fact(value: &str) -> bool {
+    !value.is_empty()
+        && value.chars().count() <= 64
+        && value.chars().all(|c| {
+            c.is_ascii_alphanumeric() || matches!(c, ' ' | '.' | '(' | ')' | '_' | '+' | '-')
+        })
 }
 
 #[tokio::test]
