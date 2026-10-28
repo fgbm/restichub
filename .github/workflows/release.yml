@@ -562,6 +562,11 @@ jobs:
           for page in docs/src/content/docs/operations/verify-a-release.md docs/src/content/docs/ru/operations/verify-a-release.md; do
             packaging/run-doc-verify.sh "$page" "$VERSION" "$ASSETS"
           done
+      - name: Run the checks of the published install.sh
+        env:
+          ASSETS: ${{ runner.temp }}/assets
+          VERSION: ${{ needs.version.outputs.version }}
+        run: packaging/verify-install-script.sh "$ASSETS" "$VERSION"
 
   draft:
     name: Draft the release

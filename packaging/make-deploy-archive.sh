@@ -38,6 +38,15 @@ printf '%s\n' "$image" >"$dir/IMAGE"
 chmod 0644 "$dir/IMAGE"
 
 # The published script holds its version and no test seam, so a real run cannot reach the seam.
+# A second marker pair or a lost last line would let sed cut the wrong lines or publish a
+# script that never runs main.
+seam_lines=$(grep -nx '# BEGIN TEST SEAM\|# END TEST SEAM' "$src/install.sh" | cut -d: -f2 | tr '\n' ' ')
+[ "$seam_lines" = '# BEGIN TEST SEAM # END TEST SEAM ' ] ||
+  { echo "error: install.sh must hold exactly one BEGIN and then one END marker of the test seam" >&2; exit 1; }
+# shellcheck disable=SC2016
+main_line='main "$@"'
+[ "$(tail -n 1 "$src/install.sh")" = "$main_line" ] ||
+  { echo "error: the last line of install.sh is not: $main_line" >&2; exit 1; }
 sed -e '/^# BEGIN TEST SEAM$/,/^# END TEST SEAM$/d' \
   -e "s/^release_version=''\$/release_version='$version'/" \
   "$src/install.sh" >"$dir/install.sh"
@@ -48,6 +57,8 @@ if grep -q 'RESTICHUB_TEST_\|TEST SEAM' "$dir/install.sh"; then
   echo "error: the published install.sh still holds the test seam" >&2
   exit 1
 fi
+[ "$(tail -n 1 "$dir/install.sh")" = "$main_line" ] ||
+  { echo "error: the last line of the published install.sh is not: $main_line" >&2; exit 1; }
 bash -n "$dir/install.sh"
 
 mkdir -p "$out"
