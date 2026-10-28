@@ -55,7 +55,9 @@ for (const scheme of ['light', 'dark'] as const) {
 
 		test('the About screen has no axe violation', async ({ page }) => {
 			await signIn(page);
-			await page.goto('/about');
+			// The mock build keeps the session in memory, so the screen opens from the account menu.
+			await page.locator('.rh-menu__trigger').click();
+			await page.getByRole('menuitem', { name: 'About ResticHub' }).click();
 			await expect(page.getByRole('heading', { level: 1, name: 'About ResticHub' })).toBeVisible();
 			expect(await scan(page)).toEqual([]);
 		});
