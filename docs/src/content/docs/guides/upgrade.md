@@ -163,7 +163,45 @@ Do these checks before you move a production server:
 
    The output has the line `restichub_pgdata /var/lib/postgresql/data`.
 
-4. Copy the KEK and the environment file of the clone to a place outside the server.
+4. Copy the KEK and the environment file of the clone to a place outside the server:
+
+   1. On the server, write the two files to an archive that only you can read:
+
+      ```sh
+      rm -f ~/restichub-clone-config.tar.gz
+      (umask 077 && sudo tar -czf - -C /opt/restichub/deploy/reference .env secrets/restichub_kek > ~/restichub-clone-config.tar.gz)
+      ```
+
+      The first command removes an old archive, because `umask` does not change the mode of a file that exists.
+
+   2. On your workstation, copy the archive from the server:
+
+      ```sh
+      scp admin@restichub.example.com:restichub-clone-config.tar.gz .
+      ```
+
+   3. On the server, delete the archive:
+
+      ```sh
+      rm ~/restichub-clone-config.tar.gz
+      ```
+
+   4. On the server, show the first 8 characters of the SHA-256 of the KEK of the clone:
+
+      ```sh
+      sudo sha256sum /opt/restichub/deploy/reference/secrets/restichub_kek | cut -c1-8
+      ```
+
+   5. On your workstation, show the first 8 characters of the SHA-256 of the KEK in the archive:
+
+      ```sh
+      tar -xzOf restichub-clone-config.tar.gz secrets/restichub_kek | sha256sum | cut -c1-8
+      ```
+
+   6. Make sure that the two values are the same. Do not show the KEK. Show only these 8 characters.
+   7. Put the archive in a password manager or a safe. Keep it apart from the backups of the database.
+   8. Delete the archive from your workstation.
+
 5. Make sure that `/var/backups` has free space for two times the size of the database. If `/var/backups` and `/var/lib/docker` are on one file system, it must have four times the size of the database. The Docker data directory also needs 1 GiB for the images.
 6. Make sure that `/var/tmp` does not have the mount option `noexec`. The command `findmnt -T /var/tmp` shows the options. The script runs `cosign` from this directory.
 7. Make sure that `git` is on the server. The script compares the files of `deploy/reference` with the commit of the clone.
@@ -174,6 +212,12 @@ Do these checks before you move a production server:
 12. Open a `tmux` or `screen` session on the server.
 
 ### Move the server
+
+:::note
+The move replaces all the containers of the stack. The web interface and the API are not available for approximately one minute. The agents connect again by themselves. A job that runs on an agent during the move does not stop. The agent sends the result of the job after it connects again.
+
+The domain and the TLS certificate do not change. The volume `caddy_data` keeps the certificate, so Caddy does not request a new certificate from the ACME server.
+:::
 
 1. Make sure that the stack of the clone runs. The script makes the database dump from the running PostgreSQL container and compares the KEK of the running control plane.
 2. Set the version of the new release:

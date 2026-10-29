@@ -100,6 +100,11 @@ EOF
 say() { printf '%s\n' "$*"; }
 warn() { printf 'warning: %s\n' "$*" >&2; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+# $1 is the name of the signal, $2 its number.
+on_signal() {
+  printf 'error: the run was interrupted by SIG%s\n' "$1" >&2
+  exit $((128 + $2))
+}
 
 mode=install
 domain=''
@@ -294,6 +299,8 @@ on_exit() {
   local status=$?
   set +e
   trap - EXIT
+  # A second Ctrl-C must not stop the write of ROLLBACK.txt.
+  trap '' INT TERM
   if [ "$status" -ne 0 ]; then
     local schema_now=''
     if $changing && ! $db_mismatch; then
@@ -799,6 +806,19 @@ compose() {
   (cd "$install_dir" && docker compose "$@")
 }
 
+# -p works from any directory: the rollback commands move the release files away.
+log_hint() {
+  printf 'read the log with: docker compose -p %s logs %s' "$project" "$*"
+}
+
+# $1 is the exit status of compose, $2 the part of the stack, the rest the services of the log.
+start_failed() {
+  local status=$1 part=$2
+  shift 2
+  [ "$status" -le 128 ] || die "the start of $part was interrupted; $(log_hint "$@")"
+  die "$part did not start; $(log_hint "$@")"
+}
+
 # $1 is the service, $2 the number of 5-second waits.
 wait_healthy() {
   local cid='' status='' restarts i
@@ -809,9 +829,9 @@ wait_healthy() {
       [ "$status" = healthy ] && return 0
       restarts=$(docker inspect --format '{{.RestartCount}}' "$cid")
       [ "$restarts" -lt 3 ] ||
-        die "the service $1 stopped $restarts times; read the log with: cd $install_dir && docker compose logs migrate $1"
+        die "the service $1 stopped $restarts times; $(log_hint migrate "$1")"
     fi
-    [ "$i" -lt "$2" ] || die "the service $1 is not healthy after $(($2 * 5)) seconds; read the log with: cd $install_dir && docker compose logs migrate $1"
+    [ "$i" -lt "$2" ] || die "the service $1 is not healthy after $(($2 * 5)) seconds; $(log_hint migrate "$1")"
     sleep 5
   done
 }
@@ -823,13 +843,11 @@ start_stack() {
     # Only PostgreSQL starts first, so no migration runs before the database is proven. Compose
     # keeps a container with the same configuration hash, and the hash does not hold the
     # project directory: only a new container proves the database of the new stack.
-    compose up -d --force-recreate --no-deps postgres ||
-      die "PostgreSQL did not start; read the log with: cd $install_dir && docker compose logs postgres"
+    compose up -d --force-recreate --no-deps postgres || start_failed $? PostgreSQL postgres
     wait_healthy postgres 24
     check_same_database
   fi
-  compose up -d ||
-    die "the stack did not start; read the log with: cd $install_dir && docker compose logs migrate cp"
+  compose up -d || start_failed $? 'the stack' migrate cp
   wait_healthy cp 60
   local cid running expected
   cid=$(compose ps -q cp)
@@ -985,6 +1003,8 @@ EOF
 main() {
   parse_args "$@"
   trap on_exit EXIT
+  trap 'on_signal INT 2' INT
+  trap 'on_signal TERM 15' TERM
   check_host
   take_lock
   stamp=$(date -u +%Y%m%dT%H%M%SZ)
