@@ -14,9 +14,10 @@
 use time::OffsetDateTime;
 
 use crate::DbError;
-use crate::enums::{AgentStatus, MissedRunPolicy};
+use crate::enums::{AgentStatus, MissedRunPolicy, ScheduleFailureReason};
 use crate::ids::{AgentId, PlanId, ProfileId, RepositoryId, UserId};
 use crate::referrers::Referrers;
+use crate::schedule_failure::ScheduleFailure;
 use crate::tx::TenantTx;
 
 pub const DEFAULT_PAGE_LIMIT: i64 = 50;
@@ -30,6 +31,7 @@ macro_rules! plan_select {
                 p.missed_run_policy, p.enabled, p.next_run_at, p.last_fire_time, p.created_at, \
                 p.updated_at, p.created_by, pr.name AS profile_name, \
                 a.hostname AS agent_hostname, a.status AS agent_status, p.rpo_seconds, \
+                p.schedule_failure, p.failed_since, p.retry_after, p.failure_attempts, \
                 s.finished_at AS last_success_at \
          FROM plans p \
          JOIN profiles pr ON pr.tenant_id = p.tenant_id AND pr.id = p.profile_id \
@@ -71,6 +73,8 @@ pub struct Plan {
     pub rpo_seconds: Option<i32>,
     /// The finish time of the latest succeeded backup job of the plan.
     pub last_success_at: Option<OffsetDateTime>,
+    /// The failure of the last scheduler pass. `None` for a healthy plan.
+    pub schedule_failure: Option<ScheduleFailure>,
 }
 
 /// The keyset cursor of the plan list. It orders by `(created_at, id)`.
@@ -148,6 +152,8 @@ pub struct DuePlan {
     pub agent_status: AgentStatus,
     /// The repository of the plan. A scheduled job names it (FR-SC-04).
     pub repository_id: RepositoryId,
+    /// The failure of the earlier pass, when the plan is claimed again after a pause.
+    pub failure: Option<ScheduleFailure>,
 }
 
 pub async fn create(tx: &mut TenantTx<'_>, new: &NewPlan<'_>) -> Result<PlanId, DbError> {
@@ -426,18 +432,22 @@ pub async fn update(
     Ok(result.rows_affected() == 1)
 }
 
-/// Sets the next fire time of a plan. `None` clears it, for a disabled plan.
-pub async fn set_next_run_at(
+/// Starts the edited schedule of a plan from `next_run_at` and clears the failure state
+/// (FR-SC-12). `None` clears the fire time, for a disabled plan.
+pub async fn restart_schedule(
     tx: &mut TenantTx<'_>,
     id: PlanId,
     next_run_at: Option<OffsetDateTime>,
 ) -> Result<bool, DbError> {
-    let result = sqlx::query("UPDATE plans SET next_run_at = $2, updated_at = now() WHERE id = $1")
-        .bind(id)
-        .bind(next_run_at)
-        .execute(tx.as_conn())
-        .await
-        .map_err(DbError::Query)?;
+    let result = sqlx::query(
+        "UPDATE plans SET next_run_at = $2, schedule_failure = NULL, failed_since = NULL, \
+                retry_after = NULL, failure_attempts = 0, updated_at = now() WHERE id = $1",
+    )
+    .bind(id)
+    .bind(next_run_at)
+    .execute(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
     Ok(result.rows_affected() == 1)
 }
 
@@ -455,7 +465,10 @@ pub async fn delete(tx: &mut TenantTx<'_>, id: PlanId) -> Result<bool, DbError> 
 ///
 /// The select locks each row with `SKIP LOCKED`, so a second control plane instance skips a plan
 /// that this transaction holds and exactly one instance creates the jobs of one fire time
-/// (AC-SC-02, ADR-0010). The caller advances `next_run_at` in the same transaction.
+/// (AC-SC-02, ADR-0010). The caller advances `next_run_at` in the same transaction. A plan that
+/// waits for the pause of a failed pass is not due until `retry_after` (FR-SC-12). Rows that
+/// failed before come after the other due rows, then by the time they became claimable again, so
+/// many failing rows never delay a healthy plan beyond the pass that finds it due.
 pub async fn claim_due(
     tx: &mut TenantTx<'_>,
     now: OffsetDateTime,
@@ -463,11 +476,13 @@ pub async fn claim_due(
 ) -> Result<Vec<DuePlan>, DbError> {
     let rows = sqlx::query_as::<_, DuePlanRow>(
         "SELECT p.id, p.agent_id, p.repository_id, p.cron, p.time_zone, p.missed_run_policy, \
-                p.next_run_at, a.status \
+                p.next_run_at, a.status, \
+                p.schedule_failure, p.failed_since, p.retry_after, p.failure_attempts \
          FROM plans p \
          JOIN agents a ON a.tenant_id = p.tenant_id AND a.id = p.agent_id \
          WHERE p.enabled AND p.next_run_at IS NOT NULL AND p.next_run_at <= $1 \
-         ORDER BY p.next_run_at \
+           AND (p.retry_after IS NULL OR p.retry_after <= $1) \
+         ORDER BY p.failure_attempts > 0, GREATEST(p.next_run_at, p.retry_after), p.next_run_at \
          LIMIT $2 \
          FOR UPDATE OF p SKIP LOCKED",
     )
@@ -488,12 +503,19 @@ pub async fn claim_due(
                 next_run_at: row.next_run_at?,
                 agent_status: row.status,
                 repository_id: row.repository_id,
+                failure: ScheduleFailure::from_columns(
+                    row.schedule_failure,
+                    row.failed_since,
+                    row.retry_after,
+                    row.failure_attempts,
+                ),
             })
         })
         .collect())
 }
 
-/// Advances the fire time of a plan after the scheduler processed it (FR-SC-02).
+/// Advances the fire time of a plan after the scheduler processed it (FR-SC-02) and clears the
+/// failure state (FR-SC-12).
 ///
 /// `last_fire_time` is the last fire time that the control plane wrote a job for, or the last
 /// missed fire time when the policy created no job.
@@ -504,11 +526,61 @@ pub async fn advance(
     last_fire_time: OffsetDateTime,
 ) -> Result<bool, DbError> {
     let result = sqlx::query(
-        "UPDATE plans SET next_run_at = $2, last_fire_time = $3, updated_at = now() WHERE id = $1",
+        "UPDATE plans SET next_run_at = $2, last_fire_time = $3, schedule_failure = NULL, \
+                failed_since = NULL, retry_after = NULL, failure_attempts = 0, \
+                updated_at = now() WHERE id = $1",
     )
     .bind(id)
     .bind(next_run_at)
     .bind(last_fire_time)
+    .execute(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(result.rows_affected() == 1)
+}
+
+/// Records a failed pass that a retry can fix and sets the pause (FR-SC-12).
+///
+/// The plan keeps its fire time, so the missed run policy decides after the recovery (FR-SC-07).
+/// The claim skips the plan until `retry_after`.
+pub async fn defer_failed(
+    tx: &mut TenantTx<'_>,
+    id: PlanId,
+    reason: ScheduleFailureReason,
+    now: OffsetDateTime,
+    retry_after: OffsetDateTime,
+) -> Result<bool, DbError> {
+    let result = sqlx::query(
+        "UPDATE plans SET schedule_failure = $2, failed_since = COALESCE(failed_since, $3), \
+                retry_after = $4, failure_attempts = failure_attempts + 1, updated_at = now() \
+         WHERE id = $1",
+    )
+    .bind(id)
+    .bind(reason.as_str())
+    .bind(now)
+    .bind(retry_after)
+    .execute(tx.as_conn())
+    .await
+    .map_err(DbError::Query)?;
+    Ok(result.rows_affected() == 1)
+}
+
+/// Records a failure that only an edit of the schedule fixes and clears the fire time
+/// (FR-SC-12). The plan stays enabled.
+pub async fn halt_failed(
+    tx: &mut TenantTx<'_>,
+    id: PlanId,
+    reason: ScheduleFailureReason,
+    now: OffsetDateTime,
+) -> Result<bool, DbError> {
+    let result = sqlx::query(
+        "UPDATE plans SET schedule_failure = $2, failed_since = COALESCE(failed_since, $3), \
+                retry_after = NULL, next_run_at = NULL, failure_attempts = failure_attempts + 1, \
+                updated_at = now() WHERE id = $1",
+    )
+    .bind(id)
+    .bind(reason.as_str())
+    .bind(now)
     .execute(tx.as_conn())
     .await
     .map_err(DbError::Query)?;
@@ -537,6 +609,10 @@ struct PlanRow {
     agent_status: AgentStatus,
     rpo_seconds: Option<i32>,
     last_success_at: Option<OffsetDateTime>,
+    schedule_failure: Option<ScheduleFailureReason>,
+    failed_since: Option<OffsetDateTime>,
+    retry_after: Option<OffsetDateTime>,
+    failure_attempts: i32,
 }
 
 impl From<PlanRow> for Plan {
@@ -561,6 +637,12 @@ impl From<PlanRow> for Plan {
             repository_id: row.repository_id,
             rpo_seconds: row.rpo_seconds,
             last_success_at: row.last_success_at,
+            schedule_failure: ScheduleFailure::from_columns(
+                row.schedule_failure,
+                row.failed_since,
+                row.retry_after,
+                row.failure_attempts,
+            ),
         }
     }
 }
@@ -575,4 +657,8 @@ struct DuePlanRow {
     next_run_at: Option<OffsetDateTime>,
     status: AgentStatus,
     repository_id: RepositoryId,
+    schedule_failure: Option<ScheduleFailureReason>,
+    failed_since: Option<OffsetDateTime>,
+    retry_after: Option<OffsetDateTime>,
+    failure_attempts: i32,
 }

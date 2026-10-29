@@ -1887,6 +1887,8 @@ export interface components {
          * @example job_rejected
          * @example agent_message_refused
          * @example agent_parameters_update
+         * @example schedule_failed
+         * @example schedule_recovered
          */
         AuditAction: string;
         AuditItem: {
@@ -2819,6 +2821,7 @@ export interface components {
             last_fire_time?: string | null;
             /** @description In UTC, in RFC 3339. Null when the schedule is disabled or the scheduler has not set it yet. */
             next_run_at?: string | null;
+            schedule_failure?: components["schemas"]["ScheduleFailureView"] | null;
             /** @description IANA name, for example `Europe/Berlin`. */
             time_zone: string;
         };
@@ -3021,6 +3024,7 @@ export interface components {
             rpo_seconds?: number | null;
             /** @description The state of the dashboard (ADR-0036). `unknown` when the host of the plan is revoked. */
             rpo_state: components["schemas"]["PlanRpoState"];
+            schedule_failure?: components["schemas"]["ScheduleFailureView"] | null;
             time_zone: string;
             updated_at: string;
         };
@@ -3491,6 +3495,22 @@ export interface components {
         RpoState: "ok" | "at_risk" | "violated";
         RunMaintenanceRequest: {
             task: components["schemas"]["MaintenanceTask"];
+        };
+        /**
+         * @description Why the scheduler could not process a plan or a maintenance schedule (FR-SC-12).
+         *
+         *     The string value of each variant is the stored value of the `schedule_failure` column. It is
+         *     stable: do not change a string. The user interface shows a text for each variant.
+         * @enum {string}
+         */
+        ScheduleFailureReason: "database_error" | "invalid_cron" | "unknown_time_zone" | "no_fire_time";
+        /** @description The failure state of a plan or a maintenance schedule in the API (FR-SC-12). */
+        ScheduleFailureView: {
+            reason: components["schemas"]["ScheduleFailureReason"];
+            /** @description The time of the next try, in RFC 3339. Null when only an edit of the schedule helps. */
+            retry_after?: string | null;
+            /** @description The time of the first failed pass of this failure, in RFC 3339. */
+            since: string;
         };
         /** @description The next fire times of an unsaved schedule, in UTC (FR-SC-01). */
         SchedulePreviewResponse: {

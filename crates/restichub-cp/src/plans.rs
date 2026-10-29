@@ -33,6 +33,7 @@ use crate::json::ApiJson;
 use crate::list_query::ApiQuery;
 use crate::parameters::{self, ParameterValueDef, PlanParameterValueView};
 use crate::schedule::{Schedule, ScheduleError};
+use crate::schedule_failure::ScheduleFailureView;
 use crate::server::AppState;
 use crate::validation::Reason;
 
@@ -147,6 +148,8 @@ pub struct PlanView {
     pub last_success_at: Option<String>,
     /// The state of the dashboard (ADR-0036). `unknown` when the host of the plan is revoked.
     pub rpo_state: PlanRpoState,
+    /// Set while the scheduler cannot run the plan (FR-SC-12). Null for a healthy plan.
+    pub schedule_failure: Option<ScheduleFailureView>,
     /// The values that the plan sets instead of the values of the host (FR-PF-10). For a Viewer, a
     /// text value is empty with the flag `hidden` (FR-PF-12).
     pub parameter_values: Vec<PlanParameterValueView>,
@@ -185,7 +188,10 @@ impl PlanView {
         // The dashboard leaves out a plan whose host cannot run a backup any more.
         let rpo_state = if plan.agent_status == AgentStatus::Active {
             let age = (now - plan.last_success_at.unwrap_or(plan.created_at)).max(Duration::ZERO);
-            PlanRpoState::from(rpo::state_of(age, rpo))
+            PlanRpoState::from(rpo::with_schedule_failure(
+                rpo::state_of(age, rpo),
+                plan.schedule_failure.is_some(),
+            ))
         } else {
             PlanRpoState::Unknown
         };
@@ -207,6 +213,7 @@ impl PlanView {
             last_fire_time: plan.last_fire_time.map(format_time),
             last_success_at: plan.last_success_at.map(format_time),
             rpo_state,
+            schedule_failure: plan.schedule_failure.as_ref().map(ScheduleFailureView::of),
             parameter_values,
             created_at: format_time(plan.created_at),
             updated_at: format_time(plan.updated_at),
@@ -574,7 +581,7 @@ pub async fn update_plan(
     .await?;
     if schedule_changed {
         // The edited schedule starts from the next fire time after now.
-        repo::set_next_run_at(
+        repo::restart_schedule(
             &mut tx,
             plan_id,
             next_run_at(&schedule, input.enabled, now)?,

@@ -65,6 +65,7 @@ pub mod restore;
 pub mod rotation;
 pub mod routes;
 pub mod schedule;
+pub mod schedule_failure;
 pub mod scheduler;
 pub mod scripts;
 pub mod secrets;

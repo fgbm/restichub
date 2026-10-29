@@ -370,6 +370,76 @@ describe('the plan page', () => {
 		expect(screen.getByText(/Select the repository host/)).toBeInTheDocument();
 	});
 
+	it('ac_sc_12 shows a temporary failure of the schedule with the time of the next try', async () => {
+		mocks.listPlans.mockResolvedValue([
+			plan({
+				schedule_failure: {
+					reason: 'database_error',
+					since: '2026-10-20T02:00:00Z',
+					retry_after: '2026-10-20T02:05:00Z'
+				}
+			})
+		]);
+		render(PlanEditor, { planId: 'pl_1' });
+
+		expect(await screen.findByText('The schedule of this plan failed')).toBeInTheDocument();
+		expect(
+			screen.getByText('The database refused a write. The next run is kept.')
+		).toBeInTheDocument();
+		expect(screen.getByText(/^Failed since /)).toBeInTheDocument();
+		expect(screen.getByText(/^The system retries at /)).toBeInTheDocument();
+		expect(screen.queryByText(/does not retry/)).not.toBeInTheDocument();
+		expect(
+			screen.getByText('The schedule of this plan failed').closest('.alert--danger')
+		).not.toBeNull();
+	});
+
+	it('ac_sc_12 says that only an edit fixes a permanent failure of the schedule', async () => {
+		mocks.listPlans.mockResolvedValue([
+			plan({
+				schedule_failure: {
+					reason: 'invalid_cron',
+					since: '2026-10-20T02:00:00Z',
+					retry_after: null
+				}
+			})
+		]);
+		render(PlanEditor, { planId: 'pl_1' });
+
+		expect(await screen.findByText('The cron expression is not valid.')).toBeInTheDocument();
+		expect(
+			screen.getByText('The system does not retry. Edit the schedule to fix it.')
+		).toBeInTheDocument();
+		expect(screen.queryByText(/^The system retries at /)).not.toBeInTheDocument();
+	});
+
+	it('ac_sc_12 shows the failure of the schedule in Russian', async () => {
+		setLocale('ru');
+		mocks.listPlans.mockResolvedValue([
+			plan({
+				schedule_failure: {
+					reason: 'unknown_time_zone',
+					since: '2026-10-20T02:00:00Z',
+					retry_after: null
+				}
+			})
+		]);
+		render(PlanEditor, { planId: 'pl_1' });
+
+		expect(await screen.findByText('Ошибка расписания плана')).toBeInTheDocument();
+		expect(screen.getByText('Часовой пояс неизвестен.')).toBeInTheDocument();
+		expect(
+			screen.getByText('Система не повторяет попытку. Исправьте расписание.')
+		).toBeInTheDocument();
+	});
+
+	it('ac_sc_12 shows no failure message for a plan without a failure', async () => {
+		render(PlanEditor, { planId: 'pl_1' });
+
+		await screen.findByRole('heading', { level: 1, name: 'nightly-web' });
+		expect(screen.queryByText('The schedule of this plan failed')).not.toBeInTheDocument();
+	});
+
 	it('fr_sc_01 edits a stored plan', async () => {
 		const user = userEvent.setup();
 		mocks.updatePlan.mockResolvedValue({ plan: plan() });

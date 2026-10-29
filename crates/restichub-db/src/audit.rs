@@ -168,6 +168,11 @@ pub enum AuditAction {
     AgentMessageRefused,
     /// The parameter values of a host changed (FR-PF-10, FR-PF-12).
     AgentParametersUpdate,
+    /// The scheduler failed to process a plan or a maintenance schedule. The record holds the
+    /// typed reason (FR-SC-12).
+    ScheduleFailed,
+    /// A plan or a maintenance schedule left the failure state after a successful pass (FR-SC-12).
+    ScheduleRecovered,
     /// An action from a newer version; the list keeps the row instead of failing.
     Unknown(String),
 }
@@ -242,6 +247,8 @@ impl AuditAction {
             Self::JobRejected => "job_rejected",
             Self::AgentMessageRefused => "agent_message_refused",
             Self::AgentParametersUpdate => "agent_parameters_update",
+            Self::ScheduleFailed => "schedule_failed",
+            Self::ScheduleRecovered => "schedule_recovered",
             Self::Unknown(value) => value,
         }
     }
@@ -316,6 +323,8 @@ impl AuditAction {
             "job_rejected" => Self::JobRejected,
             "agent_message_refused" => Self::AgentMessageRefused,
             "agent_parameters_update" => Self::AgentParametersUpdate,
+            "schedule_failed" => Self::ScheduleFailed,
+            "schedule_recovered" => Self::ScheduleRecovered,
             _ => return None,
         };
         Some(action)
@@ -394,6 +403,8 @@ impl AuditAction {
             Self::JobRejected,
             Self::AgentMessageRefused,
             Self::AgentParametersUpdate,
+            Self::ScheduleFailed,
+            Self::ScheduleRecovered,
         ]
     }
 }

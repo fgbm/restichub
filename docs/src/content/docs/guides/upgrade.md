@@ -403,6 +403,14 @@ When the stack of the clone works, you can delete `/opt/restichub.failed-<time>`
 
 Upgrade the agents only after the new control plane works.
 
+## Upgrade notes since 0.1.0 (unreleased)
+
+### Control plane
+
+- Three database migrations (0059 to 0061) run at the first start. The migration 0059 adds the field for the cause of a failed scheduler pass. The migration 0060 replaces that field with the failure state of a plan or of a maintenance schedule. The migration 0061 limits the check of the creator membership to an insert and to a change of the creator.
+- A plan or a maintenance schedule whose pass fails is not processed again at once. If the database fails, the control plane keeps the fire time and tries again after a pause. The pause is 5 seconds and doubles up to 10 minutes. If the control plane cannot compute the schedule, it records the failure and stops the schedule until a user edits it. The plan stays enabled, and its RPO alert stays active. The plan page and the repository page show the failure. See [Prometheus metrics](/restichub/reference/metrics/).
+- The migration 0061 changes the check for every record that holds a creator. These records are API tokens, secrets, repositories, profiles, jobs, plans, alert channels, and script and job templates. An update of such a record no longer checks the membership of the creator. An API token whose creator a Platform Admin removed from the organization authenticates again, with the same role. A token belongs to the organization, not to its creator. Check the list of API tokens and revoke the API tokens of removed members.
+
 ## Upgrade notes since 0.1.0-rc.4
 
 ### Control plane

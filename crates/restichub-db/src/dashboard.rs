@@ -5,7 +5,7 @@
 use time::OffsetDateTime;
 
 use crate::DbError;
-use crate::enums::{AgentStatus, JobKind, JobStatus};
+use crate::enums::{AgentStatus, JobKind, JobStatus, ScheduleFailureReason};
 use crate::ids::{AgentId, JobId, PlanId, RepositoryId};
 use crate::tx::TenantTx;
 
@@ -31,6 +31,8 @@ pub struct RpoPlan {
     /// The finish time of the latest succeeded backup job of the plan.
     pub last_success_at: Option<OffsetDateTime>,
     pub last_success_job_id: Option<JobId>,
+    /// The reason of the failed scheduler pass. `None` for a healthy plan (FR-SC-12).
+    pub schedule_failure: Option<ScheduleFailureReason>,
 }
 
 /// Lists the plans of the tenant with the time of the last successful backup.
@@ -55,7 +57,7 @@ async fn rpo_plans_page(
         "SELECT p.id, p.name, p.cron, p.time_zone, p.enabled, p.rpo_seconds, p.created_at, \
                 p.agent_id, a.hostname AS agent_hostname, a.status AS agent_status, \
                 p.repository_id, r.name AS repository_name, s.finished_at AS last_success_at, \
-                s.id AS last_success_job_id \
+                s.id AS last_success_job_id, p.schedule_failure \
          FROM plans p \
          JOIN agents a ON a.tenant_id = p.tenant_id AND a.id = p.agent_id \
          JOIN repositories r ON r.tenant_id = p.tenant_id AND r.id = p.repository_id \

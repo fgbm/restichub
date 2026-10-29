@@ -18,6 +18,7 @@
 	} from '#lib/api/index.ts';
 	import HostPicker from './HostPicker.svelte';
 	import ProfileSection from './ProfileSection.svelte';
+	import ScheduleFailureAlert from './ScheduleFailureAlert.svelte';
 	import { RecordPage, SummaryPanel } from './layout/index.ts';
 	import { Alert, Button, PasswordField, Select, StatusPill, TextField } from './ui/index.ts';
 	import type { KeyValueItem, SelectOption } from './ui/index.ts';
@@ -164,10 +165,13 @@
 		};
 	}
 
-	function scheduleSummary(cron: string, enabled: boolean): { text: string; state: SummaryState } {
-		return enabled
-			? { text: `${cron} · ${maintenanceTimeZone}`, state: 'on' }
-			: { text: t('rp.summary.off'), state: 'off' };
+	function scheduleSummary(
+		cron: string,
+		enabled: boolean,
+		failed: boolean
+	): { text: string; state: SummaryState } {
+		if (!enabled) return { text: t('rp.summary.off'), state: 'off' };
+		return { text: `${cron} · ${maintenanceTimeZone}`, state: failed ? 'warn' : 'on' };
 	}
 
 	const summaries = $derived<Record<SectionKey, { text: string; state: SummaryState }>>({
@@ -179,8 +183,12 @@
 				}
 			: { text: t('rp.summary.noLocation'), state: 'warn' },
 		access: accessSummary(),
-		retention: scheduleSummary(retentionCron, retentionEnabled),
-		check: scheduleSummary(checkCron, checkEnabled),
+		retention: scheduleSummary(
+			retentionCron,
+			retentionEnabled,
+			Boolean(maintenance?.retention.schedule_failure)
+		),
+		check: scheduleSummary(checkCron, checkEnabled, Boolean(maintenance?.check.schedule_failure)),
 		host: hostName
 			? { text: hostName, state: 'on' }
 			: { text: t('repositories.maintenanceHostNone'), state: 'warn' }
@@ -660,10 +668,18 @@
 			title={t(titles.retention)}
 			summary={summaries.retention.text}
 			state={summaries.retention.state}
+			badge={maintenance?.retention.schedule_failure ? t('schedule.failure.badge') : undefined}
+			badgeDanger
 			switchable
 			bind:enabled={retentionEnabled}
 			bind:open={open.retention}
 		>
+			{#if maintenance?.retention.schedule_failure}
+				<ScheduleFailureAlert
+					failure={maintenance.retention.schedule_failure}
+					subject="maintenance"
+				/>
+			{/if}
 			<p class="lead">{t('repositories.maintenance.description')}</p>
 			<TextField
 				id="maintenance-time-zone"
@@ -713,10 +729,15 @@
 			title={t(titles.check)}
 			summary={summaries.check.text}
 			state={summaries.check.state}
+			badge={maintenance?.check.schedule_failure ? t('schedule.failure.badge') : undefined}
+			badgeDanger
 			switchable
 			bind:enabled={checkEnabled}
 			bind:open={open.check}
 		>
+			{#if maintenance?.check.schedule_failure}
+				<ScheduleFailureAlert failure={maintenance.check.schedule_failure} subject="maintenance" />
+			{/if}
 			<p class="lead">{t('repositories.maintenance.checkHint')}</p>
 			<TextField
 				id="maintenance-check-cron"
