@@ -66,6 +66,7 @@ mod phases;
 mod runner;
 mod spooling;
 mod supervisor;
+mod vss;
 mod watchdog;
 
 use log::JobLog;

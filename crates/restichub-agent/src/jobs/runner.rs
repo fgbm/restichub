@@ -23,6 +23,7 @@ use tokio::sync::mpsc;
 
 use super::command_text::command_line_text;
 use super::log::JobLog;
+use super::vss::VssReport;
 use super::watchdog::{StepLimits, Watchdog};
 use super::{Jobs, lock};
 use crate::exec::JobChild;
@@ -384,6 +385,7 @@ struct StepOutput {
     /// The local repository locations of the job, to recognize a write that the sandbox refused.
     local_repositories: Vec<String>,
     read_only: bool,
+    vss: Option<VssReport>,
 }
 
 impl StepOutput {
@@ -414,12 +416,23 @@ impl StepOutput {
                     self.watchdog.output(now);
                 }
                 self.read_only |= names_read_only_repository(&text, &self.local_repositories);
+                let failure = self
+                    .vss
+                    .as_mut()
+                    .and_then(|vss| vss.observe(&text, line.truncated));
                 let text = crate::output::stderr_text(&text, line.truncated);
                 log.push(
                     &self.step_id,
                     LogStream::Stderr,
                     &self.scrubber.scrub_line(&text, line.truncated),
                 );
+                if let Some(failure) = failure {
+                    log.push(
+                        &self.step_id,
+                        LogStream::Agent,
+                        &self.scrubber.scrub(&failure),
+                    );
+                }
             }
         }
     }
@@ -523,6 +536,7 @@ impl Jobs {
                 .map(clean_path)
                 .collect(),
             read_only: false,
+            vss: VssReport::for_step(step),
         };
 
         let started = tokio::time::Instant::now();
@@ -641,6 +655,14 @@ impl Jobs {
             outcome.error = Some(StepError::ReadOnly);
         }
         outcome.output = output.collector.finish();
+        if let (Some(vss), Some(step_result::Output::BackupSummary(_))) =
+            (&output.vss, &outcome.output)
+        {
+            for made in vss.made() {
+                log.push(step_id, LogStream::Agent, &made);
+            }
+            self.send_log(log).await;
+        }
         // A step that stopped by its limit or a cancel keeps its links without a target, and the
         // second process never gets a budget of its own (FR-RS-02, ADR-0039).
         if let Some(step::Kind::Ls(ls)) = step.kind.as_ref()
