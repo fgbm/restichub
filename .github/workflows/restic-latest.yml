@@ -2,8 +2,7 @@ name: Latest restic
 
 # The agent downloads the latest restic release (ADR-0038). A new release can
 # change the JSON output that the agent parses. This weekly run executes the
-# real-restic tests against the latest release, so a change shows up before an
-# operator installs it.
+# real-restic tests against the latest release and the older supported releases.
 
 on:
   schedule:
@@ -60,11 +59,24 @@ jobs:
           --os linux --arch amd64
           --version "$VERSION"
           --output "$RUNNER_TEMP/restic"
+      - name: Verify the Linux arm64 archive
+        env:
+          VERSION: ${{ steps.latest.outputs.version }}
+        run: >-
+          packaging/fetch-restic.sh
+          --os linux --arch arm64
+          --version "$VERSION"
+          --output "$RUNNER_TEMP/restic-arm64"
       - name: Use the verified restic
+        env:
+          VERSION: ${{ steps.latest.outputs.version }}
         run: |
           set -euo pipefail
-          "$RUNNER_TEMP/restic/restic" version
-          echo "RESTICHUB_TEST_RESTIC=$RUNNER_TEMP/restic/restic" >> "$GITHUB_ENV"
+          binary="$RUNNER_TEMP/restic/restic"
+          reported="$("$binary" version)"
+          echo "$reported"
+          [[ "$reported" == "restic $VERSION "* ]]
+          echo "RESTICHUB_TEST_RESTIC=$binary" >> "$GITHUB_ENV"
           echo "RESTICHUB_REQUIRE_RESTIC=1" >> "$GITHUB_ENV"
       # The action reads rust-toolchain.toml.
       - uses: actions-rust-lang/setup-rust-toolchain@v2
@@ -75,4 +87,22 @@ jobs:
       # The agent downloads the latest release itself. This run checks the whole
       # download chain against the real GitHub release.
       - name: Test the agent download of the latest restic
-        run: cargo test -p restichub-agent --test restic_fetch -- --ignored
+        env:
+          VERSION: ${{ steps.latest.outputs.version }}
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/restic-installer.log"
+          cargo test -p restichub-agent --test restic_fetch -- --ignored --nocapture | tee "$log"
+          grep -Fq "installed restic $VERSION sha256 " "$log"
+      - name: Test the agent against older restic releases
+        run: |
+          set -euo pipefail
+          for version in 0.18.1 0.19.1; do
+            output="$RUNNER_TEMP/restic-$version"
+            packaging/fetch-restic.sh --os linux --arch amd64 --version "$version" --output "$output"
+            binary="$output/restic"
+            reported="$("$binary" version)"
+            echo "$reported"
+            [[ "$reported" == "restic $version "* ]]
+            RESTICHUB_TEST_RESTIC="$binary" cargo test -p restichub-agent --test restic_steps --test restore_real
+          done
