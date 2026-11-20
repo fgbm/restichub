@@ -50,6 +50,9 @@ class Classify(unittest.TestCase):
         self.assertEqual(picked(".github/workflows/ci.yml"), everything)
         self.assertEqual(picked("Cargo.lock"), everything)
 
+    def test_restic_pin_runs_compatibility_jobs(self) -> None:
+        self.assertEqual(picked("packaging/restic.env"), {"rust", "windows", "backends"})
+
     def test_unrelated_file_runs_nothing(self):
         self.assertEqual(picked("bench/run.sh"), set())
 
