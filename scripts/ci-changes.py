@@ -61,6 +61,7 @@ def starts(path, prefixes):
 def classify(files, agent):
     if any(starts(f, EVERYTHING) for f in files):
         return {group: True for group in GROUPS}
+    restic_pin_changed = "packaging/restic.env" in files
     agent_dirs = tuple(f"crates/{name}/" for name in sorted(agent))
     # A test in the database crate compares the job lifecycle diagram with the job statuses.
     rust = (
@@ -76,10 +77,10 @@ def classify(files, agent):
         "crates/restichub-agent/tests/",
     )
     return {
-        "rust": any(starts(f, rust) for f in files),
+        "rust": restic_pin_changed or any(starts(f, rust) for f in files),
         # The tests of the backends create repositories through the control plane API.
-        "backends": any(starts(f, backends) for f in files),
-        "windows": any(starts(f, agent_dirs) for f in files),
+        "backends": restic_pin_changed or any(starts(f, backends) for f in files),
+        "windows": restic_pin_changed or any(starts(f, agent_dirs) for f in files),
         "ui": any(starts(f, ("ui/",)) for f in files),
         # The document comes from the control plane; the types are in the UI.
         "openapi": any(starts(f, ("crates/", "ui/", "proto/")) for f in files),

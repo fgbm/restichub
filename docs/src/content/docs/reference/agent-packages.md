@@ -32,9 +32,9 @@ The fingerprint is `CF8F 18F2 8445 7597 3F79 D4E1 91A6 868B D3F7 A907`. The rest
 
 ## The restic of the tests
 
-The CI tests that need a real restic use the script `packaging/fetch-restic.sh`. The file `packaging/restic.env` holds the pinned version and the fingerprint. The project sets the target version. The pin is restic 0.19.1. The script runs the same chain with `gpg`. It does not touch the agent package.
+The CI tests that need a real restic use the script `packaging/fetch-restic.sh`. The file `packaging/restic.env` holds the pinned version and the fingerprint. The project sets the target version. The pin is restic 0.20.0. The script runs the same chain with `gpg`. It does not touch the agent package.
 
-A weekly workflow (`.github/workflows/restic-latest.yml`) runs the real-restic tests with the latest restic release. A change in the JSON output of restic shows up there before an operator updates.
+A weekly workflow (`.github/workflows/restic-latest.yml`) runs the real-restic tests with the latest release. It also runs the backup, maintenance and restore tests with restic 0.18.1 and 0.19.1. These tests can find changes in the JSON output before an operator updates.
 
 ## Change the pin
 
@@ -61,6 +61,8 @@ The protected configuration directory holds the file `restic.json` with the vers
 
 ### Update restic
 
+Update the hosts that run restore jobs first. Restic 0.20.0 fixes two security issues in `restore`. See the [restic 0.20.0 release notes](https://github.com/restic/restic/releases/tag/v0.20.0).
+
 Run the command as `root` on Linux or in an elevated PowerShell on Windows. The installer adds no link on `PATH`, so use the full path of the agent:
 
 ```sh
@@ -70,6 +72,8 @@ sudo /opt/restichub-agent/bin/restichub-agent restic update
 ```powershell
 & "$env:ProgramFiles\ResticHub\Agent\restichub-agent.exe" restic update
 ```
+
+Check the installed version in the output. For restore jobs, use restic 0.20.0 or a later supported version. To check the version later, run `status` with the full agent path. Read the `restic` line.
 
 The command downloads the latest release and verifies it. It runs the new binary with `version`. Only then does it replace the old binary with one rename. The old binary stays in the same directory as `restic-previous`. If a step fails, the old binary and the old record stay as they were. The service reads the record before each restic process, so the next job uses the new binary. If a service is installed, the command restarts it. Use `--no-restart` to restart it yourself later. On Windows the replacement fails while the service runs the binary. Then stop the service, run the command again and start the service.
 
@@ -89,7 +93,7 @@ Do not rename the archive, because its name gives the version. Then run any of t
 
 ```sh
 ./restichub-agent restic update \
-  --restic-archive ./restic_0.19.1_linux_amd64.bz2 \
+  --restic-archive ./restic_0.20.0_linux_amd64.bz2 \
   --restic-sums ./SHA256SUMS \
   --restic-sums-sig ./SHA256SUMS.asc
 ```

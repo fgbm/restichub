@@ -300,7 +300,7 @@ FR-IN-03, FR-IN-04 and FR-IN-05 are out of the MVP. The MVP installs an agent by
 |---|---|
 | NFR-CMP-01 | CP: Linux x86_64 and arm64. Container image and Docker Compose file. |
 | NFR-CMP-02 | Agent in the MVP: Windows 10, 11 and Server 2016 or later (x86_64 only); Linux x86_64 and arm64 (static musl build, with or without systemd). Agent in 1.0: macOS 12 or later. |
-| NFR-CMP-03 | restic 0.18.1 or later. Target version 0.19.x. A compatibility test suite checks each supported version. |
+| NFR-CMP-03 | restic 0.18.1 or later. Target version 0.20.x (ADR-0057). A compatibility test suite checks each supported version. |
 | NFR-CMP-04 | PostgreSQL 16 or later. |
 | NFR-CMP-05 | Agent in 1.0: Windows arm64. |
 

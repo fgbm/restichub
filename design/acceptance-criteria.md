@@ -34,7 +34,7 @@ Each automated test refers to its criterion ID in its name or in a comment.
 - CP: Docker Compose, PostgreSQL 16.
 - Agents: Windows Server 2022 x64, Windows 11 x64, Ubuntu 24.04 x64, Debian 12 arm64.
 - Repositories: MinIO (S3), rest-server 0.14, local directory (SFTP from 1.0).
-- restic versions: 0.18.1 and 0.19.1.
+- restic versions: 0.18.1, 0.19.1 and 0.20.0.
 
 **Load bench S2:**
 
@@ -249,7 +249,7 @@ Each automated test refers to its criterion ID in its name or in a comment.
 | AC-NFR-06 | NFR-OPS-03 | Capture the network traffic of the CP and an agent for 24 h. **Expected:** no connections other than the configured ones. | S |
 | AC-NFR-07 | NFR-CMP-01 | Make a release. **Expected:** the control plane image has the platforms `linux/amd64` and `linux/arm64`. The image starts with `compose.yaml`. | R |
 | AC-NFR-08 | NFR-CMP-02 | Make a release. **Expected:** the agent packages exist for Linux (x86_64, arm64; static musl build) and for Windows (x86_64 only). The install smoke workflow registers the agent as a service on Linux with systemd and on Windows. Windows 10, Windows Server 2016 and Linux without systemd stay manual checks. | A, M |
-| AC-NFR-09 | NFR-CMP-03 | Run the agent with restic 0.18.1 and with 0.19.1 on bench S1. **Expected:** backup, restore and the output parser work with both versions. An agent with an older restic gets no job (AC-AG-09). | R |
+| AC-NFR-09 | NFR-CMP-03 | Run the agent with restic 0.18.1, 0.19.1 and 0.20.0 on bench S1. **Expected:** backup, restore and the output parser work with each version. An agent with restic earlier than 0.18.1 gets no job (AC-AG-09). | R |
 | AC-NFR-10 | NFR-CMP-04 | Run the database tests of CI. **Expected:** they use PostgreSQL 16 and pass. | A |
 | AC-NFR-11 | NFR-OPS-02 | Start the control plane with `RESTICHUB_LOG_FORMAT=json`. **Expected:** each log line is a JSON object. `/healthz` answers `200`. `/readyz` answers `200` with a database. `/readyz` answers `503` while a background task of the CP is failing. | A |
 | AC-NFR-12 | NFR-OSS-01 | List the root of the repository. Open the milestones of the repository on GitHub. **Expected:** the root holds LICENSE, CONTRIBUTING.md, CODE_OF_CONDUCT.md, SECURITY.md and `design/adr/`. The open milestones name their scope, for example MVP and 1.0. The README or CONTRIBUTING.md links to the milestones. | R |
