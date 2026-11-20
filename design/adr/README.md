@@ -16,7 +16,7 @@ To write a new record, copy [0000-template.md](0000-template.md) and use the nex
 | [0008](0008-agent-protocol.md) | Agent protocol: Protocol Buffers, gRPC, mTLS, own CA | accepted |
 | [0009](0009-public-api-rest-openapi-sse.md) | Public API: REST, OpenAPI and Server-Sent Events | accepted |
 | [0010](0010-queue-and-scheduler-on-postgresql.md) | Job queue and scheduler on PostgreSQL | accepted |
-| [0011](0011-restic-cli-integration.md) | restic integration through the CLI and JSON output | accepted |
+| [0011](0011-restic-cli-integration.md) | restic integration through the CLI and JSON output | accepted, target version superseded by ADR-0057 |
 | [0012](0012-web-ui-svelte.md) | Web UI: Svelte 5 single-page application in the control plane binary | accepted |
 | [0013](0013-documentation-starlight-ste.md) | Documentation: Starlight, STE, Vale | accepted |
 | [0014](0014-license-and-hosting.md) | Apache License 2.0 and GitHub | accepted |
@@ -62,3 +62,4 @@ To write a new record, copy [0000-template.md](0000-template.md) and use the nex
 | [0054](0054-about-restichub-endpoint.md) | The About ResticHub endpoint and its role boundary | accepted, decision 5 superseded by ADR-0055 (the environment of the server and the disclosure of the answer) |
 | [0055](0055-about-environment.md) | The environment of the server in the About ResticHub answer | accepted, supersedes decision 5 of ADR-0054 |
 | [0056](0056-install-from-a-release-archive.md) | The control plane installs from a release archive with one script | accepted |
+| [0057](0057-restic-0-20-target.md) | restic 0.20.x is the target version | accepted |
